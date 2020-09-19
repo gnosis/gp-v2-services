@@ -9,11 +9,12 @@ extern crate web3;
 use anyhow::Result;
 use ethabi::encode;
 use ethsign::Signature;
+use serde::{Deserialize, Serialize};
 use web3::contract::tokens::Tokenizable;
 use web3::signing::keccak256;
 use web3::types::{Address, H160, H256, U256};
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 pub struct Order {
     pub sell_amount: U256,
     pub buy_amount: U256,
@@ -21,7 +22,9 @@ pub struct Order {
     pub sell_token: Address,
     pub owner: Address,
     pub nonce: u8,
-    pub signature: Signature,
+    pub signature_v: u8,
+    pub signature_r: H256,
+    pub signature_s: H256,
     pub valid_until: U256,
 }
 
@@ -43,8 +46,19 @@ impl Order {
     }
 
     pub fn validate_order(&self) -> Result<bool> {
-        let message = self.get_digest()?.to_vec();
-        let owner = self.signature.recover(&message)?;
+        // let msg_prefix = "\x19Ethereum Signed Message:\n32".as_bytes().to_vec();
+        // let message = keccak256(&encode(&[
+        //     msg_prefix.into_token(),
+        //     (32 as u32).into_token(),
+        //     self.get_digest()?.into_token(),
+        // ]));
+        let message = self.get_digest()?;
+        let signature = Signature {
+            v: self.signature_v,
+            r: *self.signature_r.as_fixed_bytes(),
+            s: *self.signature_s.as_fixed_bytes(),
+        };
+        let owner = signature.recover(&message)?;
         return Ok(H160::from(owner.address()).eq(&self.owner));
     }
 }
@@ -55,46 +69,8 @@ pub mod test_util {
     use rustc_hex::FromHex;
     use serde_json;
 
-    // #[test]
-    // fn validates_valid_order() {
-    //     let r: H256 = serde_json::from_str(
-    //         r#""0x07cf23fa6f588cc3a91de8444b589e5afbf91c5d486c512a353d45d02fa58700""#,
-    //     )
-    //     .unwrap();
-    //     let s: H256 = serde_json::from_str(
-    //         r#""0x53671e75b62b5bd64f91c80430aafb002040c35d1fcf25d0dc55d978946d5c11""#,
-    //     )
-    //     .unwrap();
-    //     let order = Order {
-    //         sell_amount: U256::from_dec_str("1000000000000000000").unwrap(),
-    //         buy_amount: U256::from_dec_str("900000000000000000").unwrap(),
-    //         sell_token: serde_json::from_str(r#""0xA193E42526F1FEA8C99AF609dcEabf30C1c29fAA""#)
-    //             .unwrap(),
-    //         buy_token: serde_json::from_str(r#""0xFDFEF9D10d929cB3905C71400ce6be1990EA0F34""#)
-    //             .unwrap(),
-    //         owner: serde_json::from_str(r#""0x63FC2aD3d021a4D7e64323529a55a9442C444dA0""#).unwrap(),
-    //         nonce: 1,
-    //         signature: Signature {
-    //             v: 27 as u8,
-    //             r: *r.as_fixed_bytes(),
-    //             s: *s.as_fixed_bytes(),
-    //         },
-    //         valid_until: U256::from("0"),
-    //     };
-
-    //     let result = order.validate_order().unwrap();
-    //     assert_eq!(result, true);
-    // }
     #[test]
-    fn test_get_digest() {
-        let r: H256 = serde_json::from_str(
-            r#""0x07cf23fa6f588cc3a91de8444b589e5afbf91c5d486c512a353d45d02fa58700""#,
-        )
-        .unwrap();
-        let s: H256 = serde_json::from_str(
-            r#""0x53671e75b62b5bd64f91c80430aafb002040c35d1fcf25d0dc55d978946d5c11""#,
-        )
-        .unwrap();
+    fn validates_valid_order() {
         let order = Order {
             sell_amount: U256::from_dec_str("1000000000000000000").unwrap(),
             buy_amount: U256::from_dec_str("900000000000000000").unwrap(),
@@ -104,11 +80,41 @@ pub mod test_util {
                 .unwrap(),
             owner: serde_json::from_str(r#""0x63FC2aD3d021a4D7e64323529a55a9442C444dA0""#).unwrap(),
             nonce: 1,
-            signature: Signature {
-                v: 27 as u8,
-                r: *r.as_fixed_bytes(),
-                s: *s.as_fixed_bytes(),
-            },
+            signature_v: 27 as u8,
+            signature_r: serde_json::from_str(
+                r#""0x07cf23fa6f588cc3a91de8444b589e5afbf91c5d486c512a353d45d02fa58700""#,
+            )
+            .unwrap(),
+            signature_s: serde_json::from_str(
+                r#""0x53671e75b62b5bd64f91c80430aafb002040c35d1fcf25d0dc55d978946d5c11""#,
+            )
+            .unwrap(),
+            valid_until: U256::from("0"),
+        };
+
+        let result = order.validate_order().unwrap();
+        assert_eq!(result, true);
+    }
+    #[test]
+    fn test_get_digest() {
+        let order = Order {
+            sell_amount: U256::from_dec_str("1000000000000000000").unwrap(),
+            buy_amount: U256::from_dec_str("900000000000000000").unwrap(),
+            sell_token: serde_json::from_str(r#""0xA193E42526F1FEA8C99AF609dcEabf30C1c29fAA""#)
+                .unwrap(),
+            buy_token: serde_json::from_str(r#""0xFDFEF9D10d929cB3905C71400ce6be1990EA0F34""#)
+                .unwrap(),
+            owner: serde_json::from_str(r#""0x63FC2aD3d021a4D7e64323529a55a9442C444dA0""#).unwrap(),
+            nonce: 1,
+            signature_v: 27 as u8,
+            signature_r: serde_json::from_str(
+                r#""0x07cf23fa6f588cc3a91de8444b589e5afbf91c5d486c512a353d45d02fa58700""#,
+            )
+            .unwrap(),
+            signature_s: serde_json::from_str(
+                r#""0x53671e75b62b5bd64f91c80430aafb002040c35d1fcf25d0dc55d978946d5c11""#,
+            )
+            .unwrap(),
             valid_until: U256::from("0"),
         };
 

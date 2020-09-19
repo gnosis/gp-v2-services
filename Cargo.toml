@@ -16,6 +16,9 @@ anyhow = "1.0.32"
 web3 = "0.13.0"
 serde_json = "1.0.57"
 ethsign = "0.7.3"
+warp = "0.2"
+parking_lot = "0.10.0"
+tokio = { version = "0.2", features = ["macros"] }
 
 
 
