@@ -1,20 +1,24 @@
 use crate::models::order::Order;
 use crate::models::orderbook::OrderBook;
+use crate::models::tokenlist::TokenList;
 use std::collections::HashMap;
 use warp::{http, Filter};
 
 async fn add_order(
     order: Order,
-    orderbook: OrderBook,
+    state: (OrderBook, TokenList),
 ) -> Result<impl warp::Reply, warp::Rejection> {
-    let current_orderbook = orderbook.orderbook.read();
+    state.1.add_token(order.sell_token).await;
+    state.1.add_token(order.buy_token).await;
+    let current_orderbook = state.0.orderbook.read();
     let empty_hash_map = HashMap::new();
     let mut new_mash_map = current_orderbook
         .get(&order.sell_token)
         .unwrap_or(&empty_hash_map)
         .clone();
     new_mash_map.insert(order.buy_token, order.clone());
-    orderbook
+    state
+        .0
         .orderbook
         .write()
         .insert(order.sell_token, new_mash_map.clone());
@@ -24,9 +28,9 @@ async fn add_order(
         http::StatusCode::CREATED,
     ))
 }
-async fn get_orders(orderbook: OrderBook) -> Result<impl warp::Reply, warp::Rejection> {
+async fn get_orders(state: (OrderBook, TokenList)) -> Result<impl warp::Reply, warp::Rejection> {
     let mut result = HashMap::new();
-    let r = orderbook.orderbook.read();
+    let r = state.0.orderbook.read();
 
     for (key, value) in r.iter() {
         result.insert(key, value);
@@ -42,8 +46,8 @@ fn json_body() -> impl Filter<Extract = (Order,), Error = warp::Rejection> + Clo
 }
 
 #[tokio::main]
-pub async fn api_start(orderbook: OrderBook) {
-    let orderbook_filter = warp::any().map(move || orderbook.clone());
+pub async fn api_start(orderbook: OrderBook, token_list: TokenList) {
+    let orderbook_filter = warp::any().map(move || (orderbook.clone(), token_list.clone()));
     let get_items = warp::get()
         .and(warp::path("v1"))
         .and(warp::path("orders"))
