@@ -1701,6 +1701,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio 0.2.22",
+ "tokio-macros",
  "warp",
  "web3 0.13.0",
 ]

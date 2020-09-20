@@ -1,36 +1,48 @@
 use crate::models::order::Order;
 use crate::models::orderbook::OrderBook;
-use crate::models::tokenlist::TokenList;
+use crate::models::token_list::TokenList;
+use anyhow::Result;
 use std::collections::HashMap;
 use warp::{http, Filter};
 
-async fn add_order(
-    order: Order,
-    state: (OrderBook, TokenList),
-) -> Result<impl warp::Reply, warp::Rejection> {
-    state.1.add_token(order.sell_token).await;
-    state.1.add_token(order.buy_token).await;
-    let current_orderbook = state.0.orderbook.read();
+pub struct State {
+    orderbook: OrderBook,
+    token_list: TokenList,
+}
+
+async fn add_order(order: Order, state: State) -> Result<impl warp::Reply, warp::Rejection> {
+    state.token_list.add_token(order.sell_token).await;
+    state.token_list.add_token(order.buy_token).await;
+    let current_orderbook = state.orderbook.orderbook.read();
     let empty_hash_map = HashMap::new();
-    let mut new_mash_map = current_orderbook
-        .get(&order.sell_token)
-        .unwrap_or(&empty_hash_map)
+    let empty_hash_vec: Vec<Order> = Vec::new();
+    let new_hash_map = current_orderbook
+        .get(&order.sell_token.clone())
+        .unwrap_or(&empty_hash_map);
+    let mut new_vec = new_hash_map
+        .get(&order.buy_token)
+        .unwrap_or(&empty_hash_vec)
         .clone();
-    new_mash_map.insert(order.buy_token, order.clone());
+    new_vec.push(order.clone());
+    let mut hash_map = new_hash_map.clone();
+    let pos = new_vec.binary_search(&order.clone()).unwrap_or_else(|e| e);
+    new_vec.insert(pos, order.clone());
+    hash_map.insert(order.buy_token, new_vec);
     state
-        .0
+        .orderbook
         .orderbook
         .write()
-        .insert(order.sell_token, new_mash_map.clone());
+        .insert(order.sell_token, hash_map.clone());
 
     Ok(warp::reply::with_status(
         "Added order to the orderbook",
         http::StatusCode::CREATED,
     ))
 }
-async fn get_orders(state: (OrderBook, TokenList)) -> Result<impl warp::Reply, warp::Rejection> {
+
+async fn get_orders(state: State) -> Result<impl warp::Reply, warp::Rejection> {
     let mut result = HashMap::new();
-    let r = state.0.orderbook.read();
+    let r = state.orderbook.orderbook.read();
 
     for (key, value) in r.iter() {
         result.insert(key, value);
@@ -47,7 +59,10 @@ fn json_body() -> impl Filter<Extract = (Order,), Error = warp::Rejection> + Clo
 
 #[tokio::main]
 pub async fn api_start(orderbook: OrderBook, token_list: TokenList) {
-    let orderbook_filter = warp::any().map(move || (orderbook.clone(), token_list.clone()));
+    let orderbook_filter = warp::any().map(move || State {
+        orderbook: orderbook.clone(),
+        token_list: token_list.clone(),
+    });
     let get_items = warp::get()
         .and(warp::path("v1"))
         .and(warp::path("orders"))
@@ -63,6 +78,5 @@ pub async fn api_start(orderbook: OrderBook, token_list: TokenList) {
         .and_then(add_order);
 
     let routes = add_items.or(get_items);
-
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 }

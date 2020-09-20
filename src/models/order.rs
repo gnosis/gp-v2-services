@@ -10,11 +10,15 @@ use anyhow::Result;
 use ethabi::encode;
 use ethsign::Signature;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ord;
+use std::cmp::Ordering;
+use std::cmp::PartialOrd;
+use std::ops::Mul;
 use web3::contract::tokens::Tokenizable;
 use web3::signing::keccak256;
 use web3::types::{Address, H160, H256, U256};
 
-#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize, Default)]
 pub struct Order {
     pub sell_amount: U256,
     pub buy_amount: U256,
@@ -60,6 +64,19 @@ impl Order {
         };
         let owner = signature.recover(&message)?;
         return Ok(H160::from(owner.address()).eq(&self.owner));
+    }
+}
+
+impl Ord for Order {
+    fn cmp(&self, other: &Self) -> Ordering {
+        (self.sell_amount.mul(other.buy_amount)).cmp(&self.buy_amount.mul(other.sell_amount))
+    }
+}
+
+impl PartialOrd for Order {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        (self.sell_amount.mul(other.buy_amount))
+            .partial_cmp(&self.buy_amount.mul(other.sell_amount))
     }
 }
 

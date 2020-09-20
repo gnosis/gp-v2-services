@@ -1,0 +1,15 @@
+curl --location --request POST 'localhost:3030/v1/orders' \
+--header 'Content-Type: application/json' \
+--header 'Content-Type: text/plain' \
+--data-raw '{
+    "sell_amount": "0x10",
+    "buy_amount": "0x10",
+    "buy_token": "0xA193E42526F1FEA8C99AF609dcEabf30C1c29fAA",
+    "sell_token": "0xFDFEF9D10d929cB3905C71400ce6be1990EA0F34",
+    "owner": "0x63FC2aD3d021a4D7e64323529a55a9442C444dA0",
+    "nonce": 1,
+    "signature_v": 27,
+    "signature_r": "0x07cf23fa6f588cc3a91de8444b589e5afbf91c5d486c512a353d45d02fa58700",
+    "signature_s": "0x53671e75b62b5bd64f91c80430aafb002040c35d1fcf25d0dc55d978946d5c11",
+    "valid_until": "0x0"
+}'

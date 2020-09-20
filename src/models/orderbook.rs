@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use web3::types::Address;
 
-pub type OrderBookHashMap = HashMap<Address, HashMap<Address, Order>>;
+// consider using a binary heap instead of vec for faster inserting
+pub type OrderBookHashMap = HashMap<Address, HashMap<Address, Vec<Order>>>;
 
 #[derive(Clone, Deserialize)]
 pub struct OrderBook {
@@ -34,4 +35,7 @@ impl OrderBook {
             orderbook: Arc::new(RwLock::new(HashMap::new())),
         }
     }
+    // pub fn get(&self, element: Address) -> Option<HashMap<Address, Vec<Order>>> {
+    //     return self.get(element);
+    // }
 }
