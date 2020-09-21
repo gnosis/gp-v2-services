@@ -12,14 +12,14 @@ pub fn batch_process(orderbook: OrderBook, token_list: TokenList) -> Result<()> 
     for token_pair in token_pairs {
         let best_match = solve_pair(
             orderbook
-                .orderbook
+                .orders
                 .read()
                 .get(&token_pair.0)
                 .unwrap_or(&HashMap::new())
                 .get(&token_pair.1)
                 .unwrap_or(&Vec::new()),
             orderbook
-                .orderbook
+                .orders
                 .read()
                 .get(&token_pair.1)
                 .unwrap_or(&HashMap::new())

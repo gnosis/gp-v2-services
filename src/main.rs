@@ -15,7 +15,11 @@ pub async fn main() {
     let token_list = TokenList::new();
     let orderbook_for_api = orderbook.clone();
     let token_list_for_api = token_list.clone();
-    thread::spawn(move || async { api_start(orderbook_for_api, token_list_for_api) });
+    thread::spawn(move || async {
+        let promise = api_start(orderbook_for_api, token_list_for_api);
+        let future = promise.await;
+        future.await;
+    });
     loop {
         let orderbook_for_iteration = orderbook.clone();
         let token_list_for_iteration = token_list.clone();

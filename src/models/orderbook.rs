@@ -11,7 +11,7 @@ pub type OrderBookHashMap = HashMap<Address, HashMap<Address, Vec<Order>>>;
 #[derive(Clone, Deserialize)]
 pub struct OrderBook {
     #[serde(with = "arc_rwlock_serde")]
-    pub orderbook: Arc<RwLock<OrderBookHashMap>>,
+    pub orders: Arc<RwLock<OrderBookHashMap>>,
 }
 
 mod arc_rwlock_serde {
@@ -32,10 +32,7 @@ mod arc_rwlock_serde {
 impl OrderBook {
     pub fn new() -> Self {
         OrderBook {
-            orderbook: Arc::new(RwLock::new(HashMap::new())),
+            orders: Arc::new(RwLock::new(HashMap::new())),
         }
     }
-    // pub fn get(&self, element: Address) -> Option<HashMap<Address, Vec<Order>>> {
-    //     return self.get(element);
-    // }
 }

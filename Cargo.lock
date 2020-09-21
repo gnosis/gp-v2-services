@@ -1695,6 +1695,7 @@ dependencies = [
  "ethabi 12.0.0",
  "ethcontract",
  "ethsign",
+ "futures 0.3.5",
  "multihash",
  "parking_lot 0.10.2",
  "rustc-hex",
