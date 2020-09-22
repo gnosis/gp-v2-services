@@ -3,11 +3,9 @@ use crate::batcher::submit_solution::submit_solution;
 use crate::models::orderbook::OrderBook;
 use crate::models::token_list::TokenList;
 use std::collections::HashMap;
-
-use anyhow::Result;
 use web3::types::Address;
 
-pub fn batch_process(orderbook: OrderBook, token_list: TokenList) -> Result<()> {
+pub async fn batch_process(orderbook: OrderBook, token_list: TokenList) {
     let token_pairs = get_token_pairs(token_list);
     for token_pair in token_pairs {
         let best_match = solve_pair(
@@ -25,10 +23,10 @@ pub fn batch_process(orderbook: OrderBook, token_list: TokenList) -> Result<()> 
                 .unwrap_or(&HashMap::new())
                 .get(&token_pair.0)
                 .unwrap_or(&Vec::new()),
-        )?;
-        submit_solution(best_match)?;
+        )
+        .unwrap();
+        submit_solution(best_match).unwrap();
     }
-    Ok(())
 }
 
 fn get_token_pairs(token_list: TokenList) -> Vec<(Address, Address)> {

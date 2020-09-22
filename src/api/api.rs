@@ -59,7 +59,7 @@ fn json_body() -> impl Filter<Extract = (Order,), Error = warp::Rejection> + Clo
     warp::body::content_length_limit(1024 * 16).and(warp::body::json())
 }
 
-pub async fn api_start(
+pub fn api_start(
     orderbook: OrderBook,
     token_list: TokenList,
 ) -> impl Future<Output = ()> + 'static {

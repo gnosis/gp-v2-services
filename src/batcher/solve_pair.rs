@@ -9,8 +9,8 @@ pub fn solve_pair(
 ) -> Result<Solution> {
     return Ok(Solution {
         sell_orders_token0: sell_orders_token0.clone(),
-        sell_volumes_token0: vec![U256::zero()],
+        sell_volumes_token0: vec![U256::one()],
         sell_orders_token1: sell_orders_token1.clone(),
-        sell_volumes_token1: vec![U256::zero()],
+        sell_volumes_token1: vec![U256::one()],
     });
 }
