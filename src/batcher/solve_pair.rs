@@ -79,8 +79,8 @@ pub fn solve_pair(
     let nr_orders_token1 = sell_orders_token1.len();
 
     // Init vectors of sell amounts.
-    let mut sell_volumes_token0 = vec![U256::zero(); nr_orders_token0];
-    let mut sell_volumes_token1 = vec![U256::zero(); nr_orders_token1];
+    let mut executed_sell_orders_token0: Vec<Order> = vec![];
+    let mut executed_sell_orders_token1: Vec<Order> = vec![];
 
     // Match orders with best limit prices, if possible.
     if !(sell_orders_token0.is_empty() || sell_orders_token1.is_empty()) {
@@ -98,16 +98,14 @@ pub fn solve_pair(
                     orders: [best_sell_order_token0, best_sell_order_token1],
                 }
             );
-            sell_volumes_token0[nr_orders_token0 - 1] = matched_amounts[0];
-            sell_volumes_token1[nr_orders_token1 - 1] = matched_amounts[1];
+            executed_sell_orders_token0.push(best_sell_order_token0.clone());
+            executed_sell_orders_token1.push(best_sell_order_token1.clone());
         };
     };
 
     return Ok(Solution {
-        sell_orders_token0: sell_orders_token0.clone(),
-        sell_volumes_token0: sell_volumes_token0,
-        sell_orders_token1: sell_orders_token1.clone(),
-        sell_volumes_token1: sell_volumes_token1,
+        sell_orders_token0: executed_sell_orders_token0,
+        sell_orders_token1: executed_sell_orders_token1,
     });
 }
 
@@ -162,8 +160,8 @@ pub mod test_util {
         let orders0: Vec<Order> = vec![];
         let orders1: Vec<Order> = vec![];
         let solution = solve_pair(&orders0, &orders1).unwrap();
-        assert_eq!(solution.sell_volumes_token0, vec![]);
-        assert_eq!(solution.sell_volumes_token1, vec![]);
+        assert_eq!(solution.sell_orders_token0, vec![]);
+        assert_eq!(solution.sell_orders_token1, vec![]);
     }
 
 
@@ -207,8 +205,8 @@ pub mod test_util {
             }
         ];
         let solution = solve_pair(&orders0, &orders1).unwrap();
-        assert_eq!(solution.sell_volumes_token0, vec![U256::zero()]);
-        assert_eq!(solution.sell_volumes_token1, vec![U256::zero()]);
+        assert_eq!(solution.sell_orders_token0, vec![]);
+        assert_eq!(solution.sell_orders_token1, vec![]);
     }
 
     #[test]
@@ -242,8 +240,8 @@ pub mod test_util {
             }
         ];
         let solution = solve_pair(&orders0, &orders1).unwrap();
-        assert_eq!(solution.sell_volumes_token0, vec![U256::from_dec_str("100").unwrap()]);
-        assert_eq!(solution.sell_volumes_token1, vec![U256::from_dec_str("80").unwrap()]);
+        assert_eq!(solution.sell_orders_token0, orders0);
+        assert_eq!(solution.sell_orders_token1, orders1);
     }
 
     #[test]
@@ -277,8 +275,8 @@ pub mod test_util {
             }
         ];
         let solution = solve_pair(&orders0, &orders1).unwrap();
-        assert_eq!(solution.sell_volumes_token0, vec![U256::from_dec_str("80").unwrap()]);
-        assert_eq!(solution.sell_volumes_token1, vec![U256::from_dec_str("100").unwrap()]);
+        assert_eq!(solution.sell_orders_token0, orders0);
+        assert_eq!(solution.sell_orders_token1, orders1);
     }
 
     #[test]
@@ -312,8 +310,8 @@ pub mod test_util {
             }
         ];
         let solution = solve_pair(&orders0, &orders1).unwrap();
-        assert_eq!(solution.sell_volumes_token0, vec![U256::from_dec_str("100").unwrap()]);
-        assert_eq!(solution.sell_volumes_token1, vec![U256::from_dec_str("100").unwrap()]);
+        assert_eq!(solution.sell_orders_token0, orders0);
+        assert_eq!(solution.sell_orders_token1, orders1);
     }
 
     #[test]
@@ -371,8 +369,8 @@ pub mod test_util {
             }
         ];
         let solution = solve_pair(&orders0, &orders1).unwrap();
-        assert_eq!(solution.sell_volumes_token0, vec![U256::zero(), U256::from_dec_str("100").unwrap()]);
-        assert_eq!(solution.sell_volumes_token1, vec![U256::zero(), U256::from_dec_str("80").unwrap()]);
+        assert_eq!(solution.sell_orders_token0, vec![orders0[1].clone()]);
+        assert_eq!(solution.sell_orders_token1, vec![orders1[1].clone()]);
     }
 
 
