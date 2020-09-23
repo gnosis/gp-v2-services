@@ -14,7 +14,7 @@ async fn add_order(order: Order, state: State) -> Result<impl warp::Reply, warp:
     state.token_list.add_token(order.sell_token).await;
     state.token_list.add_token(order.buy_token).await;
     let empty_hash_map = HashMap::new();
-    // if we aer not cloning here, the write operation is blocked
+    // if we are not cloning here, the write operation is blocked
     // todo: find better solution
     let current_orderbook = state.orderbook.orders.read().clone();
     let empty_hash_vec: Vec<Order> = Vec::new();
@@ -49,7 +49,6 @@ async fn get_orders(state: State) -> Result<impl warp::Reply, warp::Rejection> {
     for (key, value) in r.iter() {
         result.insert(key, value);
     }
-
     Ok(warp::reply::json(&result))
 }
 
@@ -59,10 +58,7 @@ fn json_body() -> impl Filter<Extract = (Order,), Error = warp::Rejection> + Clo
     warp::body::content_length_limit(1024 * 16).and(warp::body::json())
 }
 
-pub fn api_start(
-    orderbook: OrderBook,
-    token_list: TokenList,
-) -> impl Future<Output = ()> + 'static {
+pub fn run_api(orderbook: OrderBook, token_list: TokenList) -> impl Future<Output = ()> + 'static {
     let orderbook_filter = warp::any().map(move || State {
         orderbook: orderbook.clone(),
         token_list: token_list.clone(),
