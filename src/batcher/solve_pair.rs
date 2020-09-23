@@ -25,14 +25,10 @@ pub fn solve_pair(
 ) -> Result<Solution> {
     assert!(check_orders_sorted_by_limit_price(&sell_orders_token0));
     assert!(check_orders_sorted_by_limit_price(&sell_orders_token1));
-    
+
     // Get number of orders in each direction.
     let nr_orders_token0 = sell_orders_token0.len();
     let nr_orders_token1 = sell_orders_token1.len();
-
-    // Init vectors of sell amounts.
-    let mut executed_sell_orders_token0: Vec<Order> = vec![];
-    let mut executed_sell_orders_token1: Vec<Order> = vec![];
 
     // Match orders with best limit prices, if possible.
     if !(sell_orders_token0.is_empty() || sell_orders_token1.is_empty()) {
@@ -42,14 +38,16 @@ pub fn solve_pair(
         let best_sell_order_token1 = &sell_orders_token1[nr_orders_token1 - 1];
 
         if best_sell_order_token0.have_price_overlap(&best_sell_order_token1) {
-            executed_sell_orders_token0.push(best_sell_order_token0.clone());
-            executed_sell_orders_token1.push(best_sell_order_token1.clone());
+            return Ok(Solution {
+                sell_orders_token0: vec![best_sell_order_token0.clone()],
+                sell_orders_token1: vec![best_sell_order_token1.clone()],
+            });
         };
     };
 
     return Ok(Solution {
-        sell_orders_token0: executed_sell_orders_token0,
-        sell_orders_token1: executed_sell_orders_token1,
+        sell_orders_token0: vec![],
+        sell_orders_token1: vec![],
     });
 }
 
