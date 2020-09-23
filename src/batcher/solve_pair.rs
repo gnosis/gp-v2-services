@@ -4,67 +4,19 @@ use anyhow::Result;
 use web3::types::{U256, H256, Address};
 
 
-pub enum OrderPairType {
-    LhsFullyFilled,
-    RhsFullyFilled,
-    BothFullyFilled,
-}
-
-
 trait Matchable {
-    /// Returns which of the two orders can be fully matched, or both, or none.
-    fn match_compare(&self, other: &Order) -> Option<OrderPairType>;
-    /// Returns whether the orders can be matched. For this the tokens need
-    /// to match, there must be a price that satisfies both orders.
-    fn attracts(&self, other: &Order) -> bool;
-    /// Returns whether this order's sell token is the other order's buy token
-    /// and vice versa.
-    fn opposite_tokens(&self, other: &Order) -> bool;
     /// Returns whether there is a price that satisfies both orders.
     fn have_price_overlap(&self, other: &Order) -> bool;
 }
 
 
 impl Matchable for Order {
-    fn match_compare(&self, other: &Order) -> Option<OrderPairType> {
-        if !self.attracts(other) {
-            return None;
-        }
-
-        if self.buy_amount <= other.sell_amount && self.sell_amount <= other.buy_amount {
-            Some(OrderPairType::LhsFullyFilled)
-        } else if self.buy_amount >= other.sell_amount && self.sell_amount >= other.buy_amount {
-            Some(OrderPairType::RhsFullyFilled)
-        } else {
-            Some(OrderPairType::BothFullyFilled)
-        }
-    }
-
-    fn attracts(&self, other: &Order) -> bool {
-        self.opposite_tokens(other) && self.have_price_overlap(other)
-    }
-
-    fn opposite_tokens(&self, other: &Order) -> bool {
-        self.buy_token == other.sell_token && self.sell_token == other.buy_token
-    }
-
     fn have_price_overlap(&self, other: &Order) -> bool {
         self.sell_amount > U256::zero()
             && other.sell_amount > U256::zero()
             && self.buy_amount * other.buy_amount <= self.sell_amount * other.sell_amount
     }
 }
-
-
-struct Match<'a> {
-    order_pair_type: OrderPairType,
-    orders: OrderPair<'a>,
-}
-
-type OrderPair<'a> = [&'a Order; 2];
-
-type MatchedAmounts = [U256; 2];
-
 
 
 pub fn solve_pair(
@@ -89,15 +41,7 @@ pub fn solve_pair(
         let best_sell_order_token0 = &sell_orders_token0[nr_orders_token0 - 1];
         let best_sell_order_token1 = &sell_orders_token1[nr_orders_token1 - 1];
 
-        if let Some(order_pair_type) = best_sell_order_token0.match_compare(
-            &best_sell_order_token1
-        ) {
-            let matched_amounts = get_matched_amounts(
-                &Match {
-                    order_pair_type,
-                    orders: [best_sell_order_token0, best_sell_order_token1],
-                }
-            );
+        if best_sell_order_token0.have_price_overlap(&best_sell_order_token1) {
             executed_sell_orders_token0.push(best_sell_order_token0.clone());
             executed_sell_orders_token1.push(best_sell_order_token1.clone());
         };
@@ -107,24 +51,6 @@ pub fn solve_pair(
         sell_orders_token0: executed_sell_orders_token0,
         sell_orders_token1: executed_sell_orders_token1,
     });
-}
-
-
-fn get_matched_amounts(order_match: &Match) -> MatchedAmounts {
-    let x = &order_match.orders[0];
-    let y = &order_match.orders[1];
-
-    match order_match.order_pair_type {
-        OrderPairType::LhsFullyFilled => {
-            [x.sell_amount, x.buy_amount]
-        }
-        OrderPairType::RhsFullyFilled => {
-            [y.buy_amount, y.sell_amount]
-        }
-        OrderPairType::BothFullyFilled => {
-            [x.sell_amount, y.sell_amount]
-        }
-    }
 }
 
 
