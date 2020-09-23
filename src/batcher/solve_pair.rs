@@ -55,14 +55,16 @@ impl Matchable for Order {
     }
 }
 
-struct Match {
+
+struct Match<'a> {
     order_pair_type: OrderPairType,
-    orders: OrderPair,
+    orders: OrderPair<'a>,
 }
 
-type OrderPair = [Order; 2];
+type OrderPair<'a> = [&'a Order; 2];
 
 type MatchedAmounts = [U256; 2];
+
 
 
 pub fn solve_pair(
@@ -97,7 +99,7 @@ pub fn solve_pair(
             let matched_amounts = get_matched_amounts(
                 &Match {
                     order_pair_type,
-                    orders: [best_sell_order_token0.clone(), best_sell_order_token1.clone()],
+                    orders: [best_sell_order_token0, best_sell_order_token1],
                 }
             );
             sell_volumes_token0[nr_orders_token0 - 1] = matched_amounts[0];
@@ -115,7 +117,6 @@ pub fn solve_pair(
 
 
 fn get_matched_amounts(order_match: &Match) -> MatchedAmounts {
-
     let x = &order_match.orders[0];
     let y = &order_match.orders[1];
 
