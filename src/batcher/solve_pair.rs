@@ -71,13 +71,9 @@ pub fn solve_pair(
     sell_orders_token0: &Vec<Order>,
     sell_orders_token1: &Vec<Order>,
 ) -> Result<Solution> {
-    // Can we assume that the orders are sorted already?
     assert!(check_orders_sorted_by_limit_price(&sell_orders_token0));
     assert!(check_orders_sorted_by_limit_price(&sell_orders_token1));
-    // Or do we need to sort them first here?
-    //sell_orders_token0.sort();
-    //sell_orders_token1.sort();
-
+    
     // Get number of orders in each direction.
     let nr_orders_token0 = sell_orders_token0.len();
     let nr_orders_token1 = sell_orders_token1.len();
