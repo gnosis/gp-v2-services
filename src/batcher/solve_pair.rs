@@ -26,16 +26,9 @@ pub fn solve_pair(
     assert!(check_orders_sorted_by_limit_price(&sell_orders_token0));
     assert!(check_orders_sorted_by_limit_price(&sell_orders_token1));
 
-    // Get number of orders in each direction.
-    let nr_orders_token0 = sell_orders_token0.len();
-    let nr_orders_token1 = sell_orders_token1.len();
-
     // Match orders with best limit prices, if possible.
-    if !(sell_orders_token0.is_empty() || sell_orders_token1.is_empty()) {
-
-        // The best orders are the last elements in their vectors.
-        let best_sell_order_token0 = &sell_orders_token0[nr_orders_token0 - 1];
-        let best_sell_order_token1 = &sell_orders_token1[nr_orders_token1 - 1];
+    if let (Some(best_sell_order_token0), Some(best_sell_order_token1))
+        = (sell_orders_token0.last(), sell_orders_token1.last()) {
 
         if best_sell_order_token0.have_price_overlap(&best_sell_order_token1) {
             return Ok(Solution {
