@@ -65,7 +65,7 @@ impl OrderBook {
         let mut current_orderbook = self.orders.write();
         let layer_hash_map = current_orderbook.entry(order.sell_token).or_default();
         let orders = layer_hash_map.entry(order.buy_token).or_default();
-        let search_result = orders.binary_search(&order.clone());
+        let search_result = orders.binary_search(&order);
         let pos = match search_result {
             Err(_) => return false, // order is not in orderbook
             Ok(e) => e,
