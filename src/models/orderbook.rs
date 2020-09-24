@@ -57,8 +57,8 @@ impl OrderBook {
         let new_hash_map = current_orderbook.get(&token_1).unwrap_or(&empty_hash_map);
         Ok(new_hash_map
             .get(&token_2)
-            .unwrap_or(&empty_hash_vec)
-            .clone())
+            .cloned()
+            .unwrap_or(empty_hash_vec))
     }
     #[allow(dead_code)]
     pub fn remove_order(&mut self, order: Order) -> bool {
