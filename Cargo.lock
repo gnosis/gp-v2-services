@@ -802,6 +802,7 @@ dependencies = [
  "anyhow",
  "ethcontract",
  "hex-literal",
+ "rustc-hex",
  "serde",
  "serde_json",
  "tokio",
