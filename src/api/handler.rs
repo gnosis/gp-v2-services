@@ -1,13 +1,11 @@
-use super::api::SignedOrder;
 use crate::models::{Order, OrderBook, Serializable_OrderBook};
 use anyhow::Result;
 use warp::http;
 
 pub async fn add_order(
-    order: SignedOrder,
+    order: Order,
     orderbook: OrderBook,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-    let order: Order = Order::from(order);
     if !order.validate_order().unwrap_or(false) {
         Ok(warp::reply::with_status(
             "Order does not have a valid signature",
