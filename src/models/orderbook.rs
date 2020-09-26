@@ -2,13 +2,13 @@ use crate::models::Order;
 use anyhow::Result;
 use ethcontract::web3::types::Address;
 use parking_lot::RwLock;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
 pub type OrderBookHashMap = HashMap<Address, HashMap<Address, Vec<Order>>>;
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct OrderBook {
     #[serde(with = "arc_rwlock_serde")]
     pub orders: Arc<RwLock<OrderBookHashMap>>,
@@ -17,9 +17,17 @@ pub struct OrderBook {
 mod arc_rwlock_serde {
     use parking_lot::RwLock;
     use serde::de::Deserializer;
-    use serde::Deserialize;
+    use serde::ser::Serializer;
+    use serde::{Deserialize, Serialize};
     use std::sync::Arc;
 
+    pub fn serialize<S, T>(val: &Arc<RwLock<T>>, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        T: Serialize,
+    {
+        T::serialize(&*val.read(), s)
+    }
     pub fn deserialize<'de, D, T>(d: D) -> Result<Arc<RwLock<T>>, D::Error>
     where
         D: Deserializer<'de>,
