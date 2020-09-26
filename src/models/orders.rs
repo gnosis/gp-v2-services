@@ -1,4 +1,3 @@
-use crate::api::SignedOrder;
 use anyhow::Result;
 use ethcontract::common::abi::encode;
 use ethcontract::web3::contract::tokens::Tokenizable;
@@ -14,8 +13,8 @@ use std::cmp::PartialOrd;
 pub struct Order {
     pub sell_amount: U256,
     pub buy_amount: U256,
-    pub current_sell_amount: U256,
-    pub current_buy_amount: U256,
+    pub current_sell_amount: Option<U256>,
+    pub current_buy_amount: Option<U256>,
     pub buy_token: Address,
     pub sell_token: Address,
     pub owner: Address,
@@ -64,8 +63,8 @@ impl Order {
         Order {
             sell_amount: U256::from_dec_str("1000000000000000000").unwrap(),
             buy_amount: U256::from_dec_str("900000000000000000").unwrap(),
-            current_sell_amount: U256::from_dec_str("1000000000000000000").unwrap(),
-            current_buy_amount: U256::from_dec_str("900000000000000000").unwrap(),
+            current_sell_amount: Some(U256::from_dec_str("1000000000000000000").unwrap()),
+            current_buy_amount: Some(U256::from_dec_str("900000000000000000").unwrap()),
             sell_token: "A193E42526F1FEA8C99AF609dcEabf30C1c29fAA".parse().unwrap(),
             buy_token: "FDFEF9D10d929cB3905C71400ce6be1990EA0F34".parse().unwrap(),
             owner: "63FC2aD3d021a4D7e64323529a55a9442C444dA0".parse().unwrap(),
@@ -78,25 +77,6 @@ impl Order {
                 .parse()
                 .unwrap(),
             valid_until: U256::from("0"),
-        }
-    }
-}
-
-impl From<SignedOrder> for Order {
-    fn from(order: SignedOrder) -> Self {
-        Order {
-            sell_amount: order.sell_amount,
-            buy_amount: order.buy_amount,
-            current_sell_amount: order.sell_amount,
-            current_buy_amount: order.buy_amount,
-            buy_token: order.buy_token,
-            sell_token: order.sell_token,
-            owner: order.owner,
-            nonce: order.nonce,
-            signature_v: order.signature_v,
-            signature_r: order.signature_r,
-            signature_s: order.signature_s,
-            valid_until: order.valid_until,
         }
     }
 }
