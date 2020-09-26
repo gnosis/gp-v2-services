@@ -47,6 +47,7 @@ pub mod test_util {
         let order = Order::new_valid_test_order();
         let orderbook_api = orderbook.clone();
         orderbook.add_order(order.clone()).await;
+
         let filter = get(orderbook_api.clone());
 
         let result = request()

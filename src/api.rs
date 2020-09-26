@@ -1,6 +1,5 @@
 pub mod filter;
 pub mod handler;
-
 use crate::models::OrderBook;
 use filter::{get, post_order};
 use std::future::Future;
