@@ -2,6 +2,7 @@ use crate::models::Order;
 use anyhow::Result;
 use ethcontract::web3::types::Address;
 use serde::Deserialize;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -14,8 +15,19 @@ pub struct OrderBook {
     pub orders: Arc<RwLock<OrderBookHashMap>>,
 }
 
+#[derive(Clone, Serialize)]
+pub struct Serializable_OrderBook {
+    pub orders: OrderBookHashMap,
+}
+impl Serializable_OrderBook {
+    pub fn new(orderbook: OrderBookHashMap) -> Self {
+        Serializable_OrderBook { orders: orderbook }
+    }
+}
+
 mod arc_rwlock_serde {
     use serde::de::Deserializer;
+    use serde::ser::Serializer;
     use serde::Deserialize;
     use std::sync::Arc;
     use tokio::sync::RwLock;

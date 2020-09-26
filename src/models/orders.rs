@@ -1,3 +1,4 @@
+use crate::api::SignedOrder;
 use anyhow::Result;
 use ethcontract::common::abi::encode;
 use ethcontract::web3::contract::tokens::Tokenizable;
@@ -77,6 +78,25 @@ impl Order {
                 .parse()
                 .unwrap(),
             valid_until: U256::from("0"),
+        }
+    }
+}
+
+impl From<SignedOrder> for Order {
+    fn from(order: SignedOrder) -> Self {
+        Order {
+            sell_amount: order.sell_amount,
+            buy_amount: order.buy_amount,
+            current_sell_amount: order.sell_amount,
+            current_buy_amount: order.buy_amount,
+            buy_token: order.buy_token,
+            sell_token: order.sell_token,
+            owner: order.owner,
+            nonce: order.nonce,
+            signature_v: order.signature_v,
+            signature_r: order.signature_r,
+            signature_s: order.signature_s,
+            valid_until: order.valid_until,
         }
     }
 }
