@@ -1204,6 +1204,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ethcontract",
+ "futures 0.3.5",
+ "futures-util",
  "parking_lot",
  "rustc-hex",
  "serde",
