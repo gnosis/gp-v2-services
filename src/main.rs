@@ -1,6 +1,7 @@
 mod api;
-pub mod batcher;
+mod batcher;
 mod models;
+mod solver;
 use crate::api::api::run_api;
 use crate::batcher::batcher::batch_process;
 use crate::models::OrderBook;

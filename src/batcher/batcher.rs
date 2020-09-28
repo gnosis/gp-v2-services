@@ -1,6 +1,6 @@
-use crate::batcher::solve_pair::solve_pair;
 use crate::batcher::submit_solution::submit_solution;
 use crate::models::orderbook::OrderBook;
+use crate::solver::naive_solver::solve_pair;
 use anyhow::Result;
 use ethcontract::web3::types::Address;
 use std::collections::HashMap;
@@ -31,7 +31,7 @@ pub async fn batch_process(orderbook: OrderBook) -> Result<()> {
                 .unwrap_or(&HashMap::new())
                 .get(&token_pair.0)
                 .unwrap_or(&Vec::new()),
-        )?;
+        );
         submit_solution(best_match)?;
     }
     Ok(())

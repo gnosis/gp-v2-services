@@ -26,6 +26,20 @@ pub struct Order {
 }
 
 impl Order {
+    pub fn get_current_sell_amount(&self) -> U256 {
+        if let Some(current_sell_amount) = self.current_sell_amount {
+            current_sell_amount
+        } else {
+            self.sell_amount
+        }
+    }
+    pub fn get_current_buy_amount(&self) -> U256 {
+        if let Some(current_buy_amount) = self.current_buy_amount {
+            current_buy_amount
+        } else {
+            self.buy_amount
+        }
+    }
     #[allow(dead_code)]
     pub fn get_digest(&self) -> Result<[u8; 32]> {
         let domain_separator: H256 =
