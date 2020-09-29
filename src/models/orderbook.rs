@@ -57,7 +57,7 @@ impl OrderBook {
         Ok(new_hash_map.get(&token_2).cloned().unwrap_or_default())
     }
     #[allow(dead_code)]
-    pub fn remove_order(&mut self, order: Order) -> bool {
+    pub fn remove_order(&self, order: Order) -> bool {
         let mut current_orderbook = self.orders.write().unwrap();
         let layer_hash_map = current_orderbook.entry(order.sell_token).or_default();
         let orders = layer_hash_map.entry(order.buy_token).or_default();
@@ -82,7 +82,7 @@ pub mod test_util {
         let order = Order::new_valid_test_order();
         orderbook.add_order(order.clone());
         let mut order_2 = Order::new_valid_test_order();
-        order_2.sell_amount = order_2.sell_amount + U256::one();
+        order_2.sell_amount += U256::one();
         orderbook.add_order(order_2.clone());
 
         assert_eq!(
@@ -96,7 +96,7 @@ pub mod test_util {
         let order = Order::new_valid_test_order();
         orderbook.add_order(order.clone());
         let mut order_2 = Order::new_valid_test_order();
-        order_2.sell_amount = order_2.sell_amount + U256::one();
+        order_2.sell_amount += U256::one();
         orderbook.add_order(order_2.clone());
         orderbook.remove_order(order.clone());
 
