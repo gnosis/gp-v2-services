@@ -1,6 +1,6 @@
 mod api;
 mod models;
-use crate::api::api::run_api;
+use crate::api::run_api;
 use crate::models::OrderBook;
 use tokio::select;
 
