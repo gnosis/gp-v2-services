@@ -38,7 +38,7 @@ impl OrderBook {
     }
     #[allow(dead_code)]
     pub fn add_order(&mut self, order: Order) -> bool {
-        let mut current_orderbook = self.orders.write().unwrap();
+        let mut current_orderbook = self.orders.write().expect("rw lock can never be poisoned");
         let layer_hash_map = current_orderbook.entry(order.sell_token).or_default();
         let orders = layer_hash_map.entry(order.buy_token).or_default();
         let search_result = orders.binary_search(&order);
