@@ -1048,7 +1048,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ethcontract",
- "parking_lot",
  "rustc-hex",
  "serde",
  "serde_json",
