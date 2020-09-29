@@ -61,12 +61,9 @@ pub mod test_util {
             .reply(&filter)
             .await;
         let result_orderbook: OrderBook = serde_json::from_slice(result.body()).unwrap();
-
-        assert!(orderbook
-            .orders
-            .read()
-            .await
-            .eq(&result_orderbook.orders.read().await.clone()));
+        let result_orderbook_orders = result_orderbook.orders.read().await;
+        let orderbook_orders = orderbook.orders.read().await;
+        assert!(orderbook_orders.eq(&result_orderbook_orders));
     }
     #[tokio::test]
     async fn test_post_new_valid_order() {
@@ -88,7 +85,7 @@ pub mod test_util {
         let orderbook = OrderBook::new();
         let filter = post_order(orderbook.clone());
         let mut order = Order::new_valid_test_order();
-        order.sell_amount = order.sell_amount + U256::one();
+        order.sell_amount += U256::one();
         let resp = request()
             .path("/v1/orders")
             .method("POST")
