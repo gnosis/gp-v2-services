@@ -1,4 +1,4 @@
-use crate::models::{Order, OrderBook, Serializable_OrderBook};
+use crate::models::{Order, OrderBook, SerializableOrderBook};
 use anyhow::Result;
 use warp::http;
 
@@ -28,6 +28,6 @@ pub async fn add_order(
 }
 
 pub async fn get_orders(orderbook: OrderBook) -> Result<impl warp::Reply, warp::Rejection> {
-    let orderbook_struct = Serializable_OrderBook::new(orderbook.orders.read().await.clone());
+    let orderbook_struct = SerializableOrderBook::new(orderbook.orders.read().await.clone());
     Ok(warp::reply::json(&orderbook_struct))
 }

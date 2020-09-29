@@ -16,18 +16,17 @@ pub struct OrderBook {
 }
 
 #[derive(Clone, Serialize)]
-pub struct Serializable_OrderBook {
+pub struct SerializableOrderBook {
     pub orders: OrderBookHashMap,
 }
-impl Serializable_OrderBook {
+impl SerializableOrderBook {
     pub fn new(orderbook: OrderBookHashMap) -> Self {
-        Serializable_OrderBook { orders: orderbook }
+        SerializableOrderBook { orders: orderbook }
     }
 }
 
 mod arc_rwlock_serde {
     use serde::de::Deserializer;
-    use serde::ser::Serializer;
     use serde::Deserialize;
     use std::sync::Arc;
     use tokio::sync::RwLock;
@@ -48,7 +47,6 @@ impl OrderBook {
             orders: Arc::new(RwLock::new(HashMap::new())),
         }
     }
-    #[allow(dead_code)]
     pub async fn add_order(&self, order: Order) -> bool {
         let mut current_orderbook = self.orders.write().await;
         let layer_hash_map = current_orderbook.entry(order.sell_token).or_default();

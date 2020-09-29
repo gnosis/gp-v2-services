@@ -49,10 +49,10 @@ pub mod test_util {
 
     #[tokio::test]
     async fn test_rending_of_get_request() {
-        let mut orderbook = OrderBook::new();
+        let orderbook = OrderBook::new();
         let order = Order::new_valid_test_order();
         let orderbook_api = orderbook.clone();
-        orderbook.add_order(order.clone());
+        orderbook.add_order(order.clone()).await;
         let filter = get(orderbook_api.clone());
 
         let result = request()
@@ -72,9 +72,7 @@ pub mod test_util {
     async fn test_post_new_valid_order() {
         let orderbook = OrderBook::new();
         let filter = post_order(orderbook.clone());
-        let mut order = Order::new_valid_test_order();
-        order.current_buy_amount = None;
-        order.current_sell_amount = None;
+        let order = Order::new_valid_test_order();
         let resp = request()
             .path("/v1/orders")
             .method("POST")
