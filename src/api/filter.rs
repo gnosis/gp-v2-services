@@ -37,7 +37,12 @@ pub fn get(
 #[cfg(test)]
 pub mod test_util {
     use super::*;
+<<<<<<< HEAD
     use crate::models::{Order, SerializableOrderBook};
+=======
+    use crate::models::Order;
+    use crate::models::SerializableOrderBook;
+>>>>>>> 19716ec... simplyfing deserializing
     use ethcontract::web3::types::U256;
     use warp::{http::StatusCode, test::request};
 
