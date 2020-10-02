@@ -43,6 +43,7 @@ pub fn get(
 pub mod test_util {
     use super::*;
     use crate::models::Order;
+    use crate::models::SerializableOrderBook;
     use ethcontract::web3::types::U256;
     use warp::http::StatusCode;
     use warp::test::request;
@@ -60,10 +61,10 @@ pub mod test_util {
             .method("GET")
             .reply(&filter)
             .await;
-        let result_orderbook: OrderBook = serde_json::from_slice(result.body()).unwrap();
-        let result_orderbook_orders = result_orderbook.orders.read().await;
+        let result_orderbook: SerializableOrderBook =
+            serde_json::from_slice(result.body()).unwrap();
         let orderbook_orders = orderbook.orders.read().await;
-        assert!(orderbook_orders.eq(&result_orderbook_orders));
+        assert!(orderbook_orders.eq(&result_orderbook.orders));
     }
     #[tokio::test]
     async fn test_post_new_valid_order() {

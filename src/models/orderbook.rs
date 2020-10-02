@@ -9,34 +9,18 @@ use tokio::sync::RwLock;
 
 pub type OrderBookHashMap = HashMap<Address, HashMap<Address, Vec<Order>>>;
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone)]
 pub struct OrderBook {
-    #[serde(with = "arc_rwlock_serde")]
     pub orders: Arc<RwLock<OrderBookHashMap>>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct SerializableOrderBook {
     pub orders: OrderBookHashMap,
 }
 impl SerializableOrderBook {
     pub fn new(orderbook: OrderBookHashMap) -> Self {
         SerializableOrderBook { orders: orderbook }
-    }
-}
-
-mod arc_rwlock_serde {
-    use serde::de::Deserializer;
-    use serde::Deserialize;
-    use std::sync::Arc;
-    use tokio::sync::RwLock;
-
-    pub fn deserialize<'de, D, T>(d: D) -> Result<Arc<RwLock<T>>, D::Error>
-    where
-        D: Deserializer<'de>,
-        T: Deserialize<'de>,
-    {
-        Ok(Arc::new(RwLock::new(T::deserialize(d)?)))
     }
 }
 
