@@ -16,4 +16,3 @@ rustc-hex = "2.1.0"
 tokio = { version = "0.2.4", features =["sync", "macros", "test-util"] }
 warp = "0.2"
 futures = "0.3.5"
-
