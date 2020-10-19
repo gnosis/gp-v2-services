@@ -24,6 +24,7 @@ pub async fn add_order(order: Order, orderbook: OrderBook) -> Result<impl warp::
         }
     }
 }
+
 pub async fn get_orders(orderbook: OrderBook) -> Result<impl warp::Reply, Infallible> {
     let orderbook_struct = SerializableOrderBook::new(orderbook.orders.read().await.clone());
     Ok(warp::reply::json(&orderbook_struct))

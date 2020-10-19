@@ -4,8 +4,7 @@ mod models;
 use crate::batcher::batch_process;
 use crate::{api::run_api, models::OrderBook};
 use std::time::Duration;
-use tokio::time::delay_for;
-use tokio::{select, spawn};
+use tokio::{select, spawn, time::delay_for};
 
 const SLEEP_DURATION_UNTIL_NEXT_SOLVING_ATTEMPT_IN_SEC: u64 = 1;
 
