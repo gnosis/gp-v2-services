@@ -86,7 +86,7 @@ components:
         fillType:
           description: Is this a fill-or-kill order a partially fillable order?
           type: string
-          enum: [fillkill, partial]
+          enum: [fillorkill, partial]
         nonce:
           $ref: "#/components/schemas/Nonce"
         validTo:

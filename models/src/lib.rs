@@ -10,7 +10,7 @@ use std::fmt;
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FillType {
-    FillKill,
+    FillOrKill,
     Partial,
 }
 
@@ -175,7 +175,7 @@ mod tests {
           "sellAmount": "1",
           "sellTokenTip": "5192296858534827628530496329220095",
           "orderType": "buy",
-          "fillType": "fillkill",
+          "fillType": "fillorkill",
           "nonce": 0,
           "validTo": 4294967295u32,
           "signature": "0102000000000000000000000000000000000000000000000000000000000000030400000000000000000000000000000000000000000000000000000000000005",
@@ -190,7 +190,7 @@ mod tests {
                 sell_amount: 1,
                 sell_token_tip: 2u128.pow(112) - 1,
                 order_type: OrderType::Buy,
-                fill_type: FillType::FillKill,
+                fill_type: FillType::FillOrKill,
                 nonce: 0,
                 valid_to: u32::MAX,
                 signature: Signature {
