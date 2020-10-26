@@ -3,7 +3,7 @@
 //! This is in its own crate because we want to share this module between the orderbook and the solver.
 
 use chrono::{offset::Utc, DateTime};
-use primitive_types::H160;
+use primitive_types::{H160, H256};
 use serde::{de, Deserialize, Serialize};
 use std::fmt;
 
@@ -24,8 +24,8 @@ pub enum OrderType {
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub struct Signature {
     pub v: u8,
-    pub r: [u8; 32],
-    pub s: [u8; 32],
+    pub r: H256,
+    pub s: H256,
 }
 
 /// An order as provided to the orderbook by the frontend.
@@ -99,12 +99,11 @@ impl<'de> Deserialize<'de> for Signature {
                 hex::decode_to_slice(s, &mut bytes).map_err(|err| {
                     de::Error::custom(format!("failed to decode {:?} as hex: {}", s, err))
                 })?;
-                // Can't directly assign here because of type system limitations.
-                let mut r = [0u8; 32];
-                r.copy_from_slice(&bytes[1..33]);
-                let mut s = [0u8; 32];
-                s.copy_from_slice(&bytes[33..]);
-                Ok(Signature { v: bytes[0], r, s })
+                Ok(Signature {
+                    v: bytes[0],
+                    r: H256::from_slice(&bytes[1..33]),
+                    s: H256::from_slice(&bytes[33..]),
+                })
             }
         }
 
@@ -146,7 +145,7 @@ mod h160_hex {
                 E: de::Error,
             {
                 let mut value = H160::zero();
-                hex::decode_to_slice(s, &mut value.0).map_err(|err| {
+                hex::decode_to_slice(s, value.as_mut()).map_err(|err| {
                     de::Error::custom(format!("failed to decode {:?} as hex: {}", s, err))
                 })?;
                 Ok(value)
@@ -162,6 +161,7 @@ mod tests {
     use super::*;
     use chrono::NaiveDateTime;
     use serde_json::json;
+    use std::str::FromStr;
 
     #[test]
     fn deserialization_and_back() {
@@ -195,14 +195,14 @@ mod tests {
                 valid_to: u32::MAX,
                 signature: Signature {
                     v: 1,
-                    r: [
-                        2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                        0, 0, 0, 0, 0, 0, 3,
-                    ],
-                    s: [
-                        4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                        0, 0, 0, 0, 0, 0, 5,
-                    ],
+                    r: H256::from_str(
+                        "0200000000000000000000000000000000000000000000000000000000000003",
+                    )
+                    .unwrap(),
+                    s: H256::from_str(
+                        "0400000000000000000000000000000000000000000000000000000000000005",
+                    )
+                    .unwrap(),
                 },
             },
         };
