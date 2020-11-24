@@ -12,6 +12,14 @@ paths:
       responses:
         201:
           description: Order has been accepted.
+        400:
+          description: Gas-tip is not sufficient
+        401:
+          description: Unauthorized, your account is deny-listed
+        409:
+          description: Order exists already
+        429:
+          description: Too many order placements
       requestBody:
         description: The order to create.
         required: true
@@ -22,21 +30,11 @@ paths:
   /api/v1/orders:
     get:
       summary: Get existing orders.
-      # TODO: Later we could add filters through the url query to only get orders matching specific tokens etc.
-      responses:
-        200:
-          description: existing orders
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/OrderFull"
-  /api/v1/nonce:
-    get:
-      summary: The nonce to pick for a new order.
-      description: The best nonce to pick depends on how much time there is left in the current settlement according to the operator. This time is token-pair specific which is why the sell and buy tokens must be supplied.
       parameters:
+        - name: owner
+          in: query
+          schema:
+            $ref: "#/components/schemas/Address"
         - name: sellToken
           in: query
           schema:
@@ -47,11 +45,47 @@ paths:
             $ref: "#/components/schemas/Address"
       responses:
         200:
-          description: the nonce
+          description: existing orders
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Nonce"
+                type: array
+                items:
+                  $ref: "#/components/schemas/OrderFull"
+  /api/v1/tip:
+    get:
+      summary: The tip that is used to pay solvers.
+      description: The tip is calculated by the order service and depends on the current gas price and the expected gas costs to settle the trade
+      parameters:
+        - name: sellToken
+          in: query
+          schema:
+            $ref: "#/components/schemas/Address"
+        - name: buyToken
+          in: query
+          schema:
+            $ref: "#/components/schemas/Address"
+        - name: sellAmount
+          in: query
+          schema:
+            $ref: "#/components/schemas/TokenAmount"
+        - name: buyAmount
+          in: query
+          schema:
+            $ref: "#/components/schemas/TokenAmount"
+        - name: orderType
+          in: query
+          schema:
+            $ref: "#/components/schemas/Flags"
+      responses:
+        200:
+          description: the tip
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tip"
+        400:
+          description: sellToken or buyToken not existent
 components:
   schemas:
     Address:
@@ -59,12 +93,15 @@ components:
       type: string
       example: "6810e776880c02933d47db1b9fc05908e5386b96"
     TokenAmount:
-      description: Amount of a token. uint112 encoded in decimal.
+      description: Amount of a token. uint256 encoded in decimal.
       type: string
       example: "1234567890"
-    Nonce:
-      description: Nonce of the batch in which the order is valid. uint32.
+    Tip:
+      description: The tip that is used to pay solvers. uint256.
       type: integer
+    Flags:
+          description: Integer encodes the information for buy/sell order and fillOrKill/standard order uint8 encoded in decimal.
+          type: integer
     OrderNew:
       description: Data a user provides when creating a new order.
       type: object
@@ -77,18 +114,13 @@ components:
           $ref: "#/components/schemas/TokenAmount"
         sellToken:
           $ref: "#/components/schemas/Address"
-        sellTokenTip:
+        tip:
           $ref: "#/components/schemas/TokenAmount"
-        orderType:
-          description: Is this a buy order or sell order?
-          type: string
-          enum: [buy, sell]
-        fillType:
-          description: Is this a fill-or-kill order a partially fillable order?
-          type: string
-          enum: [fillorkill, partial]
-        nonce:
-          $ref: "#/components/schemas/Nonce"
+        flags:
+          $ref: "#/components/schemas/Flags"
+        appData:
+          description: Identifier to make order unique or pass in arbitrary data. uint32 encoded in decimal.
+          type: integer
         validTo:
           description: Time offset in seconds from epoch until which the order is valid. uint32.
           type: integer
