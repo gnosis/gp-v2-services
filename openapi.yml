@@ -13,13 +13,13 @@ paths:
         201:
           description: Order has been accepted.
         400:
-          description: Gas-tip is not sufficient
-        401:
-          description: Unauthorized, your account is deny-listed
-        409:
-          description: Order exists already
+          $ref: "#/components/schemas/PostError"
+        403:
+          description: Forbidden, your account is deny-listed
         429:
           description: Too many order placements
+        500:
+          description: Error adding an order
       requestBody:
         description: The order to create.
         required: true
@@ -146,3 +146,11 @@ components:
       allOf:
         - $ref: "#/components/schemas/OrderNew"
         - $ref: "#/components/schemas/OrderExtra"
+    PostError:
+      type: object
+      properties:
+        identifier:
+          type: string
+          enum: [ MissingOrderData, InvalidSignature, DuplicateOrder, InsufficientFunds]
+        description:
+          type: string
