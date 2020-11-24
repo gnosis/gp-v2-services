@@ -119,10 +119,9 @@ components:
           $ref: "#/components/schemas/TokenAmount"
         orderType:
           $ref: "#/components/schemas/OrderType"
-        fillType:
-          description: Is this a fill-or-kill order a partially fillable order?
-          type: string
-          enum: [fillorkill, partial]
+        partiallyFillable:
+          description: Is this a fill-or-kill order or a partially fillable order?
+          type: boolean
         appData:
           description: Identifier to make order unique or pass in arbitrary data. uint32 encoded in decimal.
           type: integer
