@@ -6,7 +6,7 @@ servers:
 - url: http://localhost:8080
   description: Local
 paths:
-  /api/v1/order:
+  /api/v1/orders:
     post:
       summary: Create a new order.
       responses:
@@ -27,7 +27,6 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/OrderNew"
-  /api/v1/orders:
     get:
       summary: Get existing orders.
       parameters:
@@ -52,31 +51,10 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/OrderFull"
-  /api/v1/tip:
+  /api/v1/gas-tip/{sellToken}:
     get:
-      summary: The tip that is used to pay solvers.
+      summary: The tip that is used to pay solvers for their service in the sellToken of an order.
       description: The tip is calculated by the order service and depends on the current gas price and the expected gas costs to settle the trade
-      parameters:
-        - name: sellToken
-          in: query
-          schema:
-            $ref: "#/components/schemas/Address"
-        - name: buyToken
-          in: query
-          schema:
-            $ref: "#/components/schemas/Address"
-        - name: sellAmount
-          in: query
-          schema:
-            $ref: "#/components/schemas/TokenAmount"
-        - name: buyAmount
-          in: query
-          schema:
-            $ref: "#/components/schemas/TokenAmount"
-        - name: orderType
-          in: query
-          schema:
-            $ref: "#/components/schemas/OrderType"
       responses:
         200:
           description: the tip
@@ -85,7 +63,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Tip"
         400:
-          description: sellToken or buyToken not existent
+          description: sellToken not existent
 components:
   schemas:
     Address:
@@ -98,7 +76,15 @@ components:
       example: "1234567890"
     Tip:
       description: The tip that is used to pay solvers. uint256.
-      type: integer
+      type: object
+      properties:
+        expirationDate:
+          description: Expiration date of the offered tip. Encoded as ISO 8601 UTC.
+          type: string
+          example: "2020-10-22T07:57:18Z"
+        tipAmount:
+          description: Amount of tip in specified sellToken
+          type: integer
     OrderType:
       description: Is this a buy order or sell order?
       type: string
@@ -108,16 +94,22 @@ components:
       type: object
       properties:
         buyToken:
+          description: "ERC20 token to be bought"
           $ref: "#/components/schemas/Address"
         buyAmount:
+          description: "Amount of buyToken to be bought in atoms"
           $ref: "#/components/schemas/TokenAmount"
         sellAmount:
+          description: "Amount of sellToken to be sold in atoms"
           $ref: "#/components/schemas/TokenAmount"
         sellToken:
+          description: "ERC20 token to be sold"
           $ref: "#/components/schemas/Address"
         tip:
+          description: "Tip to compensate solvers in atoms"
           $ref: "#/components/schemas/TokenAmount"
         orderType:
+          description: "The type is either a buy or sell order"
           $ref: "#/components/schemas/OrderType"
         partiallyFillable:
           description: Is this a fill-or-kill order or a partially fillable order?
@@ -126,7 +118,7 @@ components:
           description: Identifier to make order unique or pass in arbitrary data. uint32 encoded in decimal.
           type: integer
         validTo:
-          description: Time offset in seconds from epoch until which the order is valid. uint32.
+          description: Unix timestamp until the order is valid. uint32.
           type: integer
         signature:
           description: 65 bytes encoded as hex without `0x` prefix. v + r + s from the spec.
