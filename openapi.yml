@@ -76,7 +76,7 @@ paths:
         - name: orderType
           in: query
           schema:
-            $ref: "#/components/schemas/Flags"
+            $ref: "#/components/schemas/OrderType"
       responses:
         200:
           description: the tip
@@ -99,9 +99,10 @@ components:
     Tip:
       description: The tip that is used to pay solvers. uint256.
       type: integer
-    Flags:
-          description: Integer encodes the information for buy/sell order and fillOrKill/standard order uint8 encoded in decimal.
-          type: integer
+    OrderType:
+      description: Is this a buy order or sell order?
+      type: string
+      enum: [buy, sell]
     OrderNew:
       description: Data a user provides when creating a new order.
       type: object
@@ -116,8 +117,12 @@ components:
           $ref: "#/components/schemas/Address"
         tip:
           $ref: "#/components/schemas/TokenAmount"
-        flags:
-          $ref: "#/components/schemas/Flags"
+        orderType:
+          $ref: "#/components/schemas/OrderType"
+        fillType:
+          description: Is this a fill-or-kill order a partially fillable order?
+          type: string
+          enum: [fillorkill, partial]
         appData:
           description: Identifier to make order unique or pass in arbitrary data. uint32 encoded in decimal.
           type: integer
