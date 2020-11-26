@@ -26,7 +26,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/OrderNew"
+              $ref: "#/components/schemas/OrderCreation"
     get:
       summary: Get existing orders.
       parameters:
@@ -79,9 +79,10 @@ components:
       type: object
       properties:
         expirationDate:
-          description: Expiration date of the offered tip. Encoded as ISO 8601 UTC.
-          type: string
-          example: "2020-10-22T07:57:18Z"
+          description: | 
+            Expiration date of the offered tip. Order service might not accept 
+            the tip after this expiration date. Encoded as unix timestamp.
+          type: integer
         tipAmount:
           description: Amount of tip in specified sellToken
           type: integer
@@ -89,22 +90,30 @@ components:
       description: Is this a buy order or sell order?
       type: string
       enum: [buy, sell]
-    OrderNew:
+    OrderCreation:
       description: Data a user provides when creating a new order.
       type: object
       properties:
-        buyToken:
-          description: "ERC20 token to be bought"
-          $ref: "#/components/schemas/Address"
-        buyAmount:
-          description: "Amount of buyToken to be bought in atoms"
-          $ref: "#/components/schemas/TokenAmount"
-        sellAmount:
-          description: "Amount of sellToken to be sold in atoms"
-          $ref: "#/components/schemas/TokenAmount"
         sellToken:
           description: "ERC20 token to be sold"
           $ref: "#/components/schemas/Address"
+        buyToken:
+          description: "ERC20 token to be bought"
+          $ref: "#/components/schemas/Address"
+        sellAmount:
+          description: "Amount of sellToken to be sold in atoms"
+          $ref: "#/components/schemas/TokenAmount"
+        buyAmount:
+          description: "Amount of buyToken to be bought in atoms"
+          $ref: "#/components/schemas/TokenAmount"
+        validTo:
+          description: Unix timestamp until the order is valid. uint32.
+          type: integer
+        appData:
+          description: |
+            Arbitrary identifier sent along with the order.
+            Could be used to track the interface or other meta-aspects of the order. uint32 encoded
+          type: integer
         tip:
           description: "Tip to compensate solvers in atoms"
           $ref: "#/components/schemas/TokenAmount"
@@ -114,12 +123,6 @@ components:
         partiallyFillable:
           description: Is this a fill-or-kill order or a partially fillable order?
           type: boolean
-        appData:
-          description: Identifier to make order unique or pass in arbitrary data. uint32 encoded in decimal.
-          type: integer
-        validTo:
-          description: Unix timestamp until the order is valid. uint32.
-          type: integer
         signature:
           description: 65 bytes encoded as hex without `0x` prefix. v + r + s from the spec.
           example: "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
@@ -135,7 +138,7 @@ components:
           $ref: "#/components/schemas/Address"
     OrderFull:
       allOf:
-        - $ref: "#/components/schemas/OrderNew"
+        - $ref: "#/components/schemas/OrderCreation"
         - $ref: "#/components/schemas/OrderExtra"
     PostError:
       type: object
