@@ -12,6 +12,10 @@ paths:
       responses:
         201:
           description: Order has been accepted.
+          content:
+            application/json:
+              schema:
+                  $ref: "#/components/schemas/UUID"
         400:
           $ref: "#/components/schemas/PostError"
         403:
@@ -79,7 +83,7 @@ components:
       type: object
       properties:
         expirationDate:
-          description: | 
+          description: |
             Expiration date of the offered tip. Order service might not accept 
             the tip after this expiration date. Encoded as unix timestamp.
           type: integer
@@ -127,7 +131,9 @@ components:
           description: 65 bytes encoded as hex without `0x` prefix. v + r + s from the spec.
           example: "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
     OrderExtra:
-      description: Extra order data that is returned to users when querying orders but not provided by users when creating orders.
+      description: |
+        Extra order data that is returned to users when querying orders 
+        but not provided by users when creating orders.
       type: object
       properties:
         creationTime:
@@ -140,6 +146,11 @@ components:
       allOf:
         - $ref: "#/components/schemas/OrderCreation"
         - $ref: "#/components/schemas/OrderExtra"
+    UUID:
+     description: |
+      Unique identifier for the order, calculated by keccak256(orderDigest, ownerAddress, validTo),
+      where orderDigest = keccak256(orderStruct). bytes32.
+     type: string
     PostError:
       type: object
       properties:
