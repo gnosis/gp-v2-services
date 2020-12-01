@@ -89,7 +89,7 @@ components:
           type: integer
         tipAmount:
           description: Amount of tip in specified sellToken
-          type: integer
+          $ref: "#/components/schemas/TokenAmount"
     OrderType:
       description: Is this a buy order or sell order?
       type: string
