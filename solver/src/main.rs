@@ -7,6 +7,7 @@ mod ethereum;
 mod naive_amm_settlement;
 mod orderbook;
 mod settlement;
+mod uniswap;
 
 #[tokio::main]
 async fn main() {
