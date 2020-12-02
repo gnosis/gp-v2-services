@@ -55,17 +55,24 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/OrderFull"
-  /api/v1/gas-tip/{sellToken}:
+  /api/v1/fee:
     get:
-      summary: The tip that is used to pay solvers for their service in the sellToken of an order.
-      description: The tip is calculated by the order service and depends on the current gas price and the expected gas costs to settle the trade
+      description: |
+        The fee that is charged for placing an order. 
+        The fee is described by a minimum fee - in order to cover the gas costs for onchain settling - and
+        a feeRatio charged to the users for using the service. 
+      parameters:
+        - name: sellToken
+          in: query
+          schema:
+            $ref: "#/components/schemas/Address"
       responses:
         200:
           description: the tip
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Tip"
+                $ref: "#/components/schemas/FeeInformation"
         400:
           description: sellToken not existent
 components:
@@ -78,18 +85,24 @@ components:
       description: Amount of a token. uint256 encoded in decimal.
       type: string
       example: "1234567890"
-    Tip:
-      description: The tip that is used to pay solvers. uint256.
+    FeeInformation:
+      description: |
+        Provides the information to calculate the fees. 
       type: object
       properties:
         expirationDate:
           description: |
-            Expiration date of the offered tip. Order service might not accept 
-            the tip after this expiration date. Encoded as unix timestamp.
+            Expiration date of the offered fee. Order service might not accept 
+            the fee after this expiration date. Encoded as unix timestamp.
           type: integer
-        tipAmount:
-          description: Amount of tip in specified sellToken
+        minimalFee:
+          description: Amount of minimal fee charged per order in specified sellToken
           $ref: "#/components/schemas/TokenAmount"
+        feeRatio:
+          description: The fee ratio charged on a sellAmount.
+          example: 0.001
+          type: number
+          format: float
     OrderType:
       description: Is this a buy order or sell order?
       type: string
