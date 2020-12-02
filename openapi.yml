@@ -15,7 +15,7 @@ paths:
           content:
             application/json:
               schema:
-                  $ref: "#/components/schemas/UUID"
+                  $ref: "#/components/schemas/UID"
         400:
           $ref: "#/components/schemas/PostError"
         403:
@@ -130,7 +130,7 @@ components:
         signature:
           description: 65 bytes encoded as hex without `0x` prefix. v + r + s from the spec.
           example: "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
-    OrderExtra:
+    OrderMetaData:
       description: |
         Extra order data that is returned to users when querying orders 
         but not provided by users when creating orders.
@@ -142,13 +142,15 @@ components:
           example: "2020-10-22T07:57:18Z"
         owner:
           $ref: "#/components/schemas/Address"
-    OrderFull:
+        UID:
+          $ref: "#/components/schemas/UID"
+    Order:
       allOf:
         - $ref: "#/components/schemas/OrderCreation"
-        - $ref: "#/components/schemas/OrderExtra"
-    UUID:
+        - $ref: "#/components/schemas/OrderMetadata"
+    UID:
      description: |
-      Unique identifier for the order, calculated by keccak256(orderDigest, ownerAddress, validTo),
+      Unique identifier for the order: orderDigest_ownerAddress,
       where orderDigest = keccak256(orderStruct). bytes32.
      type: string
     PostError:
