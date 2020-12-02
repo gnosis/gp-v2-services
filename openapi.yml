@@ -17,7 +17,7 @@ paths:
               schema:
                   $ref: "#/components/schemas/UID"
         400:
-          $ref: "#/components/schemas/PostError"
+          $ref: "#/components/schemas/OrderPostError"
         403:
           description: Forbidden, your account is deny-listed
         429:
@@ -54,7 +54,21 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/OrderFull"
+                  $ref: "#/components/schemas/Order"
+  /api/v1/orders/{UID}:
+    get:
+      summary: Get existing order from UID.
+      responses:
+        200:
+          description: Order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Order"
+        404: 
+          description: Order was not found
   /api/v1/fee:
     get:
       description: |
@@ -96,13 +110,13 @@ components:
             the fee after this expiration date. Encoded as unix timestamp.
           type: integer
         minimalFee:
-          description: Amount of minimal fee charged per order in specified sellToken
+          description: Absolute amount of minimal fee charged per order in specified sellToken
           $ref: "#/components/schemas/TokenAmount"
         feeRatio:
-          description: The fee ratio charged on a sellAmount.
-          example: 0.001
+          description: The fee ratio charged on a sellAmount. Denoted in basis points
+          example: 10
           type: number
-          format: float
+          format: int32
     OrderType:
       description: Is this a buy order or sell order?
       type: string
@@ -166,10 +180,10 @@ components:
       Unique identifier for the order: orderDigest_ownerAddress,
       where orderDigest = keccak256(orderStruct). bytes32.
      type: string
-    PostError:
+    OrderPostError:
       type: object
       properties:
-        identifier:
+        errorType:
           type: string
           enum: [ MissingOrderData, InvalidSignature, DuplicateOrder, InsufficientFunds]
         description:
