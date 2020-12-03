@@ -73,7 +73,7 @@ paths:
       summary: Deletes order from order service,
       description: |
         The successful deletion might not prevent solvers from settling the order
-        Authentication must be provided by siging the following message:
+        Authentication must be provided by signing the following message:
         signTypedData({operation: "delete", orderUid: "0x.."})
       responses:
         200:
@@ -120,7 +120,7 @@ components:
             Expiration date of the offered fee. Order service might not accept 
             the fee after this expiration date. Encoded as ISO 8601 UTC.
           type: string
-          example: "2020-10-22T07:57:18Z"
+          example: "2020-12-03T18:35:18.814523Z"
         minimalFee:
           description: Absolute amount of minimal fee charged per order in specified sellToken
           $ref: "#/components/schemas/TokenAmount"
@@ -178,7 +178,7 @@ components:
         creationTime:
           description: Creation time of the order. Encoded as ISO 8601 UTC.
           type: string
-          example: "2020-10-22T07:57:18Z"
+          example: "2020-12-03T18:35:18.814523Z"
         owner:
           $ref: "#/components/schemas/Address"
         UID:
