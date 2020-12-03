@@ -69,6 +69,17 @@ paths:
                   $ref: "#/components/schemas/Order"
         404: 
           description: Order was not found
+    delete:
+      summary: Deletes order from order service,
+      description: |
+        The successful deletion might not prevent solvers from settling the order
+        Authentication must be provided by siging the following message:
+        signTypedData({operation: "delete", orderUid: "0x.."})
+      responses:
+        200:
+          description: Order deleted
+        404: 
+          description: Order was not found
   /api/v1/fee:
     get:
       description: |
@@ -82,7 +93,7 @@ paths:
             $ref: "#/components/schemas/Address"
       responses:
         200:
-          description: the tip
+          description: the fee
           content:
             application/json:
               schema:
@@ -107,8 +118,9 @@ components:
         expirationDate:
           description: |
             Expiration date of the offered fee. Order service might not accept 
-            the fee after this expiration date. Encoded as unix timestamp.
-          type: integer
+            the fee after this expiration date. Encoded as ISO 8601 UTC.
+          type: string
+          example: "2020-10-22T07:57:18Z"
         minimalFee:
           description: Absolute amount of minimal fee charged per order in specified sellToken
           $ref: "#/components/schemas/TokenAmount"
@@ -177,7 +189,7 @@ components:
         - $ref: "#/components/schemas/OrderMetadata"
     UID:
      description: |
-      Unique identifier for the order: orderDigest_ownerAddress,
+      Unique identifier for the order: orderDigest_ownerAddress_validTo,
       where orderDigest = keccak256(orderStruct). bytes32.
      type: string
     OrderPostError:
