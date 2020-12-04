@@ -8,6 +8,7 @@ mod u256_decimal;
 use chrono::{offset::Utc, DateTime, NaiveDateTime};
 use primitive_types::{H160, H256, U256};
 use serde::{de, Deserialize, Serialize};
+use serde::{Deserializer, Serializer};
 use std::fmt;
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Deserialize, Serialize)]
@@ -57,23 +58,85 @@ impl OrderCreation {
     }
 }
 
+// uid as 56 bytes: 32 for orderDigest, 20 for ownerAddress and 4 for validTo
+#[derive(Clone, Copy)]
+pub struct OrderUid(pub [u8; 56]);
+
+impl Default for OrderUid {
+    fn default() -> Self {
+        OrderUid([0 as u8; 56])
+    }
+}
+
+impl PartialEq for OrderUid {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.iter().zip(other.0.iter()).all(|(a, b)| a == b)
+    }
+}
+impl Eq for OrderUid {}
+
+impl Serialize for OrderUid {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Todo build in underscores
+        serializer.serialize_str(&hex::encode(self.0.iter()))
+    }
+}
+
+impl<'de> Deserialize<'de> for OrderUid {
+    fn deserialize<D>(deserializer: D) -> Result<OrderUid, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct Visitor {}
+        impl<'de> de::Visitor<'de> for Visitor {
+            type Value = OrderUid;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                write!(formatter, "an uid with orderDigest_owner_validTo")
+            }
+
+            fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                // Todo parse digest, owner and validTo individually and consider underscores
+                let mut value = [0 as u8; 56];
+                hex::decode_to_slice(s, value.as_mut()).map_err(|err| {
+                    de::Error::custom(format!("failed to decode {:?} as hex: {}", s, err))
+                })?;
+                Ok(OrderUid(value))
+            }
+        }
+
+        deserializer.deserialize_str(Visitor {})
+    }
+}
+
+impl fmt::Debug for OrderUid {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0[..].fmt(formatter)
+    }
+}
+
 /// An order as provided to the orderbook by the frontend.
-#[derive(Eq, PartialEq, Clone, Debug, Deserialize, Serialize)]
+#[derive(Eq, PartialEq, Clone, Debug, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderMetaData {
     pub creation_date: DateTime<Utc>,
     #[serde(with = "h160_hexadecimal")]
     pub owner: H160,
-    pub uid: String,
+    pub uid: OrderUid,
 }
 
 impl Default for OrderMetaData {
     fn default() -> Self {
-        let owner: H160 = Default::default();
         Self {
             creation_date: DateTime::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc),
-            owner: owner,
-            uid: String::from("owner"),
+            owner: Default::default(),
+            uid: Default::default(),
         }
     }
 }
@@ -173,7 +236,7 @@ mod tests {
             "orderMetaData": {
                 "creationDate": "1970-01-01T00:00:03Z",
                 "owner": "0000000000000000000000000000000000000001",
-                "uid": "UID_AS_DIGEST_OWNER_VALIDTO",
+                "uid": "1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
             },
             "orderCreation":{
                 "sellToken": "000000000000000000000000000000000000000a",
@@ -192,7 +255,7 @@ mod tests {
             order_meta_data: OrderMetaData {
                 creation_date: DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(3, 0), Utc),
                 owner: H160::from_low_u64_be(1),
-                uid: String::from("UID_AS_DIGEST_OWNER_VALIDTO"),
+                uid: OrderUid([17 as u8; 56]),
             },
             order_creation: OrderCreation {
                 sell_token: H160::from_low_u64_be(10),
