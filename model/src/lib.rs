@@ -134,7 +134,9 @@ impl Default for OrderMetaData {
 #[derive(Eq, PartialEq, Clone, Default, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Order {
+    #[serde(flatten)]
     pub order_meta_data: OrderMetaData,
+    #[serde(flatten)]
     pub order_creation: OrderCreation,
 }
 
@@ -220,23 +222,19 @@ mod tests {
     fn deserialization_and_back() {
         let value = json!(
         {
-            "orderMetaData": {
-                "creationDate": "1970-01-01T00:00:03Z",
-                "owner": "0000000000000000000000000000000000000001",
-                "uid": "1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
-            },
-            "orderCreation":{
-                "sellToken": "000000000000000000000000000000000000000a",
-                "buyToken": "0000000000000000000000000000000000000009",
-                "sellAmount": "1",
-                "buyAmount": "0",
-                "validTo": 4294967295u32,
-                "appData": 0,
-                "feeAmount": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
-                "orderKind": "buy",
-                "partiallyFillable": false,
-                "signature": "0102000000000000000000000000000000000000000000000000000000000000030400000000000000000000000000000000000000000000000000000000000005",
-            }
+            "creationDate": "1970-01-01T00:00:03Z",
+            "owner": "0000000000000000000000000000000000000001",
+            "uid": "1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+            "sellToken": "000000000000000000000000000000000000000a",
+            "buyToken": "0000000000000000000000000000000000000009",
+            "sellAmount": "1",
+            "buyAmount": "0",
+            "validTo": 4294967295u32,
+            "appData": 0,
+            "feeAmount": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+            "orderKind": "buy",
+            "partiallyFillable": false,
+            "signature": "0102000000000000000000000000000000000000000000000000000000000000030400000000000000000000000000000000000000000000000000000000000005",
         });
         let expected = Order {
             order_meta_data: OrderMetaData {
