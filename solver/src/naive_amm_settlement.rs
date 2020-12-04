@@ -1,5 +1,5 @@
 use crate::settlement::{Interaction, Settlement, Trade};
-use model::{OrderKind, OrderCreation};
+use model::{OrderCreation, OrderKind};
 use primitive_types::U256;
 
 // Assume both orders are fill-or-kill sell orders and that sell/buy tokens match.

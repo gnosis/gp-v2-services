@@ -1,4 +1,4 @@
-use model::{OrderKind, OrderCreation};
+use model::{OrderCreation, OrderKind};
 use primitive_types::U256;
 
 const TRADE_STRIDE: usize = 204;

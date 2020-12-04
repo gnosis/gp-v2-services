@@ -12,7 +12,8 @@ fn with_orderbook(
     warp::any().map(move || orderbook.clone())
 }
 
-fn extract_user_order() -> impl Filter<Extract = (OrderCreation,), Error = warp::Rejection> + Clone {
+fn extract_user_order() -> impl Filter<Extract = (OrderCreation,), Error = warp::Rejection> + Clone
+{
     // (rejecting huge payloads)...
     warp::body::content_length_limit(MAX_JSON_BODY_PAYLOAD).and(warp::body::json())
 }
