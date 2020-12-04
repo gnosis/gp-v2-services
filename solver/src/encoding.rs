@@ -1,3 +1,5 @@
+use std::convert::TryInto;
+
 use contracts::IUniswapV2Router02;
 use model::{OrderCreation, OrderKind};
 use primitive_types::{H160, U256};
@@ -54,10 +56,8 @@ fn encode_uniswap_call(
         payout_to,
         U256::MAX,
     );
-    let data = method.tx.data.unwrap().0;
-    let mut result = [0u8; UNISWAP_INTERACTION_SIZE];
-    result.copy_from_slice(data.as_slice());
-    result
+    let data = method.tx.data.expect("call doesn't have calldata").0;
+    data.try_into().expect("unexpected data size")
 }
 
 // To create an ethcontract instance we need to provide a web3 even though we never use it. This
