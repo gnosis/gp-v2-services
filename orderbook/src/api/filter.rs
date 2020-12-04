@@ -1,7 +1,6 @@
 use super::handler;
 use crate::orderbook::OrderBook;
 use model::UserOrder;
-use primitive_types::H160;
 use std::sync::Arc;
 use warp::Filter;
 
