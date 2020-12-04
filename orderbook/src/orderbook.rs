@@ -1,6 +1,6 @@
 use model::{Order, OrderCreation, OrderMetaData, OrderUid};
 use primitive_types::{H160, H256};
-
+use std::convert::TryInto;
 use tokio::sync::RwLock;
 
 #[derive(Debug, Eq, PartialEq)]
@@ -54,18 +54,22 @@ impl OrderBook {
 
 struct InvalidSignatureError {}
 fn user_order_to_full_order(user_order: OrderCreation) -> Result<Order, InvalidSignatureError> {
-    // TODO: verify signature and extract owner, get orderDigest
+    // TODO: verify signature and extract owner, get orderDigest, and do proper error handling
     let owner = H160::zero();
     let digest = H256::zero();
     let valid_to = user_order.valid_to.to_be_bytes();
-    let mut uid = [0 as u8; 56];
-    uid.copy_from_slice(&[digest.as_bytes(), owner.as_bytes(), &valid_to].concat());
+    let uid = OrderUid(
+        [digest.as_bytes(), owner.as_bytes(), &valid_to]
+            .concat()
+            .try_into()
+            .unwrap(),
+    );
 
     Ok(Order {
         order_meta_data: OrderMetaData {
             creation_date: chrono::offset::Utc::now(),
             owner,
-            uid: OrderUid(uid),
+            uid,
         },
         order_creation: user_order,
     })

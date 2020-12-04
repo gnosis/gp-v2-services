@@ -62,18 +62,11 @@ impl OrderCreation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct OrderUid(pub [u8; 56]);
 
-impl Default for OrderUid {
-    fn default() -> Self {
-        OrderUid([0 as u8; 56])
-    }
-}
-
 impl Serialize for OrderUid {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        // Todo: build in underscores
         serializer.serialize_str(&hex::encode(self.0.iter()))
     }
 }
@@ -95,7 +88,6 @@ impl<'de> Deserialize<'de> for OrderUid {
             where
                 E: de::Error,
             {
-                // Todo parse digest, owner and validTo individually and consider underscores
                 let mut value = [0 as u8; 56];
                 hex::decode_to_slice(s, value.as_mut()).map_err(|err| {
                     de::Error::custom(format!("failed to decode {:?} as hex: {}", s, err))
@@ -123,7 +115,7 @@ impl Default for OrderMetaData {
         Self {
             creation_date: DateTime::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc),
             owner: Default::default(),
-            uid: Default::default(),
+            uid: OrderUid([0 as u8; 56]),
         }
     }
 }
