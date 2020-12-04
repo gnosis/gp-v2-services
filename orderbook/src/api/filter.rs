@@ -18,7 +18,8 @@ fn extract_user_order() -> impl Filter<Extract = (UserOrder,), Error = warp::Rej
     warp::body::content_length_limit(MAX_JSON_BODY_PAYLOAD).and(warp::body::json())
 }
 
-fn extract_sell_token() -> impl Filter<Extract = (H160,), Error = warp::Rejection> + Clone {
+fn extract_sell_token(
+) -> impl Filter<Extract = (handler::FeeRequestBody,), Error = warp::Rejection> + Clone {
     // (rejecting huge payloads)...
     warp::body::content_length_limit(MAX_JSON_BODY_PAYLOAD).and(warp::body::json())
 }
@@ -54,6 +55,7 @@ pub mod test_util {
     use super::*;
     use model::Order;
     use primitive_types::U256;
+    use serde_json::json;
     use warp::{http::StatusCode, test::request};
 
     #[tokio::test]
@@ -75,13 +77,15 @@ pub mod test_util {
     #[tokio::test]
     async fn get_fee_info_() {
         let filter = get_fee_info();
-        let sell_token: H160 = "6b175474e89094c44da98b954eedeac495271d0f".parse().unwrap();
+        let json_post = json!({
+            "sellToken": "000000000000000000000000000000000000000a",
+        });
         let post = || async {
             request()
                 .path("/api/v1/fee")
                 .method("GET")
                 .header("content-type", "application/json")
-                .json(&sell_token)
+                .json(&json_post)
                 .reply(&filter)
                 .await
         };
