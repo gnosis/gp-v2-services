@@ -64,7 +64,7 @@ fn user_order_to_full_order(user_order: OrderCreation) -> Result<Order, InvalidS
     Ok(Order {
         order_meta_data: OrderMetaData {
             creation_date: chrono::offset::Utc::now(),
-            owner: owner,
+            owner,
             uid: OrderUid(uid),
         },
         order_creation: user_order,
