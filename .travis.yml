@@ -1,4 +1,8 @@
-if: (branch = master) OR (type = pull_request) OR (tag IS present)
+branches:
+  only:
+    - main
+    - /^v\d+\.\d+(\.\d+)?(-\S*)?$/
+
 language: rust
 rust:
   - stable
@@ -35,3 +39,13 @@ script:
 
 before_cache:
   - rm -rf "$TRAVIS_HOME/.cargo/registry/src"
+
+deploy:
+  - provider: script
+    script: ./docker/deploy.sh $TRAVIS_BRANCH
+    on:
+      branch: main
+  - provider: script
+    script: ./docker/deploy.sh $TRAVIS_TAG
+    on:
+      tags: true
