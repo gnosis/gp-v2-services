@@ -1,11 +1,11 @@
 use crate::orderbook::{AddOrderError, OrderBook};
-use model::UserOrder;
+use model::OrderCreation;
 use std::{convert::Infallible, sync::Arc};
 use warp::http::StatusCode;
 
 pub async fn add_order(
     orderbook: Arc<OrderBook>,
-    order: UserOrder,
+    order: OrderCreation,
 ) -> Result<impl warp::Reply, Infallible> {
     let (body, status_code) = match orderbook.add_order(order).await {
         Ok(()) => ("ok", StatusCode::CREATED),

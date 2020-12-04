@@ -33,7 +33,7 @@ pub struct Signature {
 /// An order as provided to the orderbook by the frontend.
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UserOrder {
+pub struct OrderCreation {
     #[serde(with = "h160_hexadecimal")]
     pub sell_token: H160,
     #[serde(with = "h160_hexadecimal")]
@@ -51,33 +51,41 @@ pub struct UserOrder {
     pub signature: Signature,
 }
 
-impl UserOrder {
+impl OrderCreation {
     pub fn token_pair(&self) -> Option<TokenPair> {
         TokenPair::new(self.buy_token, self.sell_token)
+    }
+}
+
+/// An order as provided to the orderbook by the frontend.
+#[derive(Eq, PartialEq, Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderMetaData {
+    pub creation_date: DateTime<Utc>,
+    #[serde(with = "h160_hexadecimal")]
+    pub owner: H160,
+    pub uid: String,
+}
+
+impl Default for OrderMetaData {
+    fn default() -> Self {
+        let owner: H160 = Default::default();
+        Self {
+            creation_date: DateTime::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc),
+            owner: owner,
+            uid: String::from("owner"),
+        }
     }
 }
 
 /// An order that is returned when querying the orderbook.
 ///
 /// Contains extra fields thats are populated by the orderbook.
-#[derive(Eq, PartialEq, Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Eq, PartialEq, Clone, Default, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Order {
-    pub creation_time: DateTime<Utc>,
-    #[serde(with = "h160_hexadecimal")]
-    pub owner: H160,
-    #[serde(flatten)]
-    pub user_provided: UserOrder,
-}
-
-impl Default for Order {
-    fn default() -> Self {
-        Self {
-            creation_time: DateTime::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc),
-            owner: Default::default(),
-            user_provided: Default::default(),
-        }
-    }
+    pub order_meta_data: OrderMetaData,
+    pub order_creation: OrderCreation,
 }
 
 impl Serialize for Signature {
@@ -162,23 +170,31 @@ mod tests {
     fn deserialization_and_back() {
         let value = json!(
         {
-          "creationTime": "1970-01-01T00:00:03Z",
-          "owner": "0000000000000000000000000000000000000001",
-          "sellToken": "000000000000000000000000000000000000000a",
-          "buyToken": "0000000000000000000000000000000000000009",
-          "sellAmount": "1",
-          "buyAmount": "0",
-          "validTo": 4294967295u32,
-          "appData": 0,
-          "feeAmount": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
-          "orderKind": "buy",
-          "partiallyFillable": false,
-          "signature": "0102000000000000000000000000000000000000000000000000000000000000030400000000000000000000000000000000000000000000000000000000000005",
+            "orderMetaData": {
+                "creationDate": "1970-01-01T00:00:03Z",
+                "owner": "0000000000000000000000000000000000000001",
+                "uid": "UID_AS_DIGEST_OWNER_VALIDTO",
+            },
+            "orderCreation":{
+                "sellToken": "000000000000000000000000000000000000000a",
+                "buyToken": "0000000000000000000000000000000000000009",
+                "sellAmount": "1",
+                "buyAmount": "0",
+                "validTo": 4294967295u32,
+                "appData": 0,
+                "feeAmount": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+                "orderKind": "buy",
+                "partiallyFillable": false,
+                "signature": "0102000000000000000000000000000000000000000000000000000000000000030400000000000000000000000000000000000000000000000000000000000005",
+            }
         });
         let expected = Order {
-            creation_time: DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(3, 0), Utc),
-            owner: H160::from_low_u64_be(1),
-            user_provided: UserOrder {
+            order_meta_data: OrderMetaData {
+                creation_date: DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(3, 0), Utc),
+                owner: H160::from_low_u64_be(1),
+                uid: String::from("UID_AS_DIGEST_OWNER_VALIDTO"),
+            },
+            order_creation: OrderCreation {
                 sell_token: H160::from_low_u64_be(10),
                 buy_token: H160::from_low_u64_be(9),
                 sell_amount: 1.into(),
