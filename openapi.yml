@@ -58,6 +58,12 @@ paths:
   /api/v1/orders/{UID}:
     get:
       summary: Get existing order from UID.
+      parameters:
+        - in: path
+          name: UID
+          schema:
+            $ref: "#/components/schemas/UID"
+          required: true
       responses:
         200:
           description: Order
@@ -75,6 +81,12 @@ paths:
         The successful deletion might not prevent solvers from settling the order
         Authentication must be provided by signing the following message:
         signTypedData({operation: "delete", orderUid: "0x.."})
+      parameters:
+        - in: path
+          name: UID
+          schema:
+            $ref: "#/components/schemas/UID"
+          required: true
       responses:
         200:
           description: Order deleted
@@ -186,11 +198,12 @@ components:
     Order:
       allOf:
         - $ref: "#/components/schemas/OrderCreation"
-        - $ref: "#/components/schemas/OrderMetadata"
+        - $ref: "#/components/schemas/OrderMetaData"
     UID:
      description: |
-      Unique identifier for the order: orderDigest_ownerAddress_validTo,
-      where orderDigest = keccak256(orderStruct). bytes32.
+      Unique identifier for the order: 56 bytes encoded as hex without 0x. 
+      Bytes 0 to 32 are the order digest, bytes 30 to 52 the owner address
+      and bytes 52..56 valid to,
      type: string
     OrderPostError:
       type: object
