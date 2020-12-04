@@ -59,7 +59,7 @@ impl OrderCreation {
 }
 
 // uid as 56 bytes: 32 for orderDigest, 20 for ownerAddress and 4 for validTo
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct OrderUid(pub [u8; 56]);
 
 impl Default for OrderUid {
@@ -68,19 +68,12 @@ impl Default for OrderUid {
     }
 }
 
-impl PartialEq for OrderUid {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.iter().zip(other.0.iter()).all(|(a, b)| a == b)
-    }
-}
-impl Eq for OrderUid {}
-
 impl Serialize for OrderUid {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        // Todo build in underscores
+        // Todo: build in underscores
         serializer.serialize_str(&hex::encode(self.0.iter()))
     }
 }
@@ -112,12 +105,6 @@ impl<'de> Deserialize<'de> for OrderUid {
         }
 
         deserializer.deserialize_str(Visitor {})
-    }
-}
-
-impl fmt::Debug for OrderUid {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0[..].fmt(formatter)
     }
 }
 
