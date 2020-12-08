@@ -7,9 +7,7 @@ pub enum AddOrderError {
     DuplicatedOrder,
     InvalidSignature,
     #[allow(dead_code)]
-    ForBidden,
-    #[allow(dead_code)]
-    TooManyRequests,
+    Forbidden,
     #[allow(dead_code)]
     MissingOrderData,
     #[allow(dead_code)]

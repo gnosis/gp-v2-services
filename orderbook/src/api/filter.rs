@@ -113,16 +113,16 @@ pub mod test_util {
         };
         let response = post().await;
         assert_eq!(response.status(), StatusCode::CREATED);
-        let body: handler::UidResponse = serde_json::from_slice(response.body()).unwrap();
+        let body: serde_json::Value = serde_json::from_slice(response.body()).unwrap();
 
-        assert_eq!(body, serde_json::from_value(expected_uid).unwrap());
+        assert_eq!(body, expected_uid);
         // Posting again should fail because order already exists.
         let response = post().await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-        let body: handler::OrderPostError = serde_json::from_slice(response.body()).unwrap();
+        let body: serde_json::Value = serde_json::from_slice(response.body()).unwrap();
         let expected_error =
             json!({"errorType": "DuplicatedOrder", "description": "order already exists"});
-        assert_eq!(body, serde_json::from_value(expected_error).unwrap());
+        assert_eq!(body, expected_error);
     }
 }

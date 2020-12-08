@@ -30,7 +30,7 @@ pub struct FeeRequestBody {
 #[derive(PartialEq, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderPostError {
-    error_type: AddOrderError,
+    error_type: String,
     description: String,
 }
 
@@ -53,49 +53,42 @@ pub async fn add_order(
         ),
         Err(AddOrderError::DuplicatedOrder) => (
             warp::reply::json(&OrderPostError {
-                error_type: AddOrderError::DuplicatedOrder,
+                error_type: String::from("DuplicatedOrder"),
                 description: String::from("order already exists"),
             }),
             StatusCode::BAD_REQUEST,
         ),
         Err(AddOrderError::InvalidSignature) => (
             warp::reply::json(&OrderPostError {
-                error_type: AddOrderError::InvalidSignature,
+                error_type: String::from("InvalidSignature"),
                 description: String::from("invalid signature"),
             }),
             StatusCode::BAD_REQUEST,
         ),
-        Err(AddOrderError::ForBidden) => (
+        Err(AddOrderError::Forbidden) => (
             warp::reply::json(&OrderPostError {
-                error_type: AddOrderError::ForBidden,
-                description: String::from("forbidden, your account is deny-listed"),
+                error_type: String::from("Forbidden"),
+                description: String::from("Forbidden, your account is deny-listed"),
             }),
             StatusCode::FORBIDDEN,
         ),
-        Err(AddOrderError::TooManyRequests) => (
-            warp::reply::json(&OrderPostError {
-                error_type: AddOrderError::TooManyRequests,
-                description: String::from("too many requests"),
-            }),
-            StatusCode::TOO_MANY_REQUESTS,
-        ),
         Err(AddOrderError::PastValidTo) => (
             warp::reply::json(&OrderPostError {
-                error_type: AddOrderError::PastValidTo,
+                error_type: String::from("PastValidTo"),
                 description: String::from("validTo is in the past"),
             }),
             StatusCode::BAD_REQUEST,
         ),
         Err(AddOrderError::MissingOrderData) => (
             warp::reply::json(&OrderPostError {
-                error_type: AddOrderError::MissingOrderData,
+                error_type: String::from("MissingOrderData"),
                 description: String::from("at least 1 field of orderCreation is missing"),
             }),
             StatusCode::BAD_REQUEST,
         ),
         Err(AddOrderError::InsufficientFunds) => (
             warp::reply::json(&OrderPostError {
-                error_type: AddOrderError::InsufficientFunds,
+                error_type: String::from("InsufficientFunds"),
                 description: String::from(
                     "order owner must have funds worth at least x in his account",
                 ),
