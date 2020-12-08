@@ -4,11 +4,11 @@
 
 pub mod h160_hexadecimal;
 pub mod u256_decimal;
-
 use chrono::{offset::Utc, DateTime, NaiveDateTime};
 use primitive_types::{H160, H256, U256};
 use serde::{de, Deserialize, Serialize};
 use serde::{Deserializer, Serializer};
+use std::convert::TryInto;
 use std::fmt;
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Deserialize, Serialize)]
@@ -55,6 +55,25 @@ pub struct OrderCreation {
 impl OrderCreation {
     pub fn token_pair(&self) -> Option<TokenPair> {
         TokenPair::new(self.buy_token, self.sell_token)
+    }
+    pub fn order_owner(&self) -> H160 {
+        // dummy implementation, waiting for Valentins PR
+        H160::zero()
+    }
+    pub fn order_digest(&self) -> H256 {
+        // dummy implementation, waiting for Valentins PR
+        H256::zero()
+    }
+    pub fn order_uid(&self) -> OrderUid {
+        let owner = self.order_owner();
+        let digest = self.order_digest();
+        let valid_to = self.valid_to.to_be_bytes();
+        OrderUid(
+            [digest.as_bytes(), owner.as_bytes(), &valid_to]
+                .concat()
+                .try_into()
+                .unwrap(),
+        )
     }
 }
 

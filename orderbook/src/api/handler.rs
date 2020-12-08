@@ -1,7 +1,7 @@
 use crate::orderbook::{AddOrderError, OrderBook};
 
 use chrono::prelude::{DateTime, FixedOffset, Utc};
-use model::{h160_hexadecimal, u256_decimal, OrderCreation};
+use model::{h160_hexadecimal, u256_decimal, OrderCreation, OrderUid};
 use primitive_types::{H160, U256};
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, sync::Arc};
@@ -27,16 +27,81 @@ pub struct FeeRequestBody {
     sell_token: H160,
 }
 
+#[derive(PartialEq, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderPostError {
+    error_type: AddOrderError,
+    description: String,
+}
+
+#[derive(PartialEq, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "UPPERCASE")]
+pub struct UidResponse {
+    uid: OrderUid,
+}
+
 pub async fn add_order(
     orderbook: Arc<OrderBook>,
     order: OrderCreation,
 ) -> Result<impl warp::Reply, Infallible> {
     let (body, status_code) = match orderbook.add_order(order).await {
-        Ok(()) => ("ok", StatusCode::CREATED),
-        Err(AddOrderError::AlreadyExists) => ("already exists", StatusCode::BAD_REQUEST),
-        Err(AddOrderError::InvalidSignature) => ("invalid signature", StatusCode::BAD_REQUEST),
-        Err(AddOrderError::PastNonce) => ("nonce is in the past", StatusCode::BAD_REQUEST),
-        Err(AddOrderError::PastValidTo) => ("validTo is in the past", StatusCode::BAD_REQUEST),
+        Ok(()) => (
+            warp::reply::json(&UidResponse {
+                uid: order.order_uid(),
+            }),
+            StatusCode::CREATED,
+        ),
+        Err(AddOrderError::DuplicatedOrder) => (
+            warp::reply::json(&OrderPostError {
+                error_type: AddOrderError::DuplicatedOrder,
+                description: String::from("order already exists"),
+            }),
+            StatusCode::BAD_REQUEST,
+        ),
+        Err(AddOrderError::InvalidSignature) => (
+            warp::reply::json(&OrderPostError {
+                error_type: AddOrderError::InvalidSignature,
+                description: String::from("invalid signature"),
+            }),
+            StatusCode::BAD_REQUEST,
+        ),
+        Err(AddOrderError::ForBidden) => (
+            warp::reply::json(&OrderPostError {
+                error_type: AddOrderError::ForBidden,
+                description: String::from("forbidden, your account is deny-listed"),
+            }),
+            StatusCode::FORBIDDEN,
+        ),
+        Err(AddOrderError::TooManyRequests) => (
+            warp::reply::json(&OrderPostError {
+                error_type: AddOrderError::TooManyRequests,
+                description: String::from("too many requests"),
+            }),
+            StatusCode::TOO_MANY_REQUESTS,
+        ),
+        Err(AddOrderError::PastValidTo) => (
+            warp::reply::json(&OrderPostError {
+                error_type: AddOrderError::PastValidTo,
+                description: String::from("validTo is in the past"),
+            }),
+            StatusCode::BAD_REQUEST,
+        ),
+        Err(AddOrderError::MissingOrderData) => (
+            warp::reply::json(&OrderPostError {
+                error_type: AddOrderError::MissingOrderData,
+                description: String::from("at least 1 field of orderCreation is missing"),
+            }),
+            StatusCode::BAD_REQUEST,
+        ),
+        Err(AddOrderError::InsufficientFunds) => (
+            warp::reply::json(&OrderPostError {
+                error_type: AddOrderError::InsufficientFunds,
+                description: String::from(
+                    "order owner must have funds worth at least x in his account",
+                ),
+            }),
+            StatusCode::BAD_REQUEST,
+        ),
     };
     Ok(warp::reply::with_status(body, status_code))
 }

@@ -1,16 +1,21 @@
-use model::{Order, OrderCreation, OrderMetaData, OrderUid};
-use primitive_types::{H160, H256};
-use std::convert::TryInto;
+use model::{Order, OrderCreation, OrderMetaData};
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum AddOrderError {
-    AlreadyExists,
+    DuplicatedOrder,
     InvalidSignature,
     #[allow(dead_code)]
-    PastNonce,
+    ForBidden,
+    #[allow(dead_code)]
+    TooManyRequests,
+    #[allow(dead_code)]
+    MissingOrderData,
     #[allow(dead_code)]
     PastValidTo,
+    #[allow(dead_code)]
+    InsufficientFunds,
 }
 
 #[derive(Debug)]
@@ -29,7 +34,7 @@ impl OrderBook {
         // TODO: Check order signature, nonce, valid_to.
         let mut orders = self.orders.write().await;
         if orders.iter().any(|x| x.order_creation == order) {
-            return Err(AddOrderError::AlreadyExists);
+            return Err(AddOrderError::DuplicatedOrder);
         }
         let order = user_order_to_full_order(order).map_err(|_| AddOrderError::InvalidSignature)?;
         orders.push(order);
@@ -54,22 +59,11 @@ impl OrderBook {
 
 struct InvalidSignatureError {}
 fn user_order_to_full_order(user_order: OrderCreation) -> Result<Order, InvalidSignatureError> {
-    // TODO: verify signature and extract owner, get orderDigest, and do proper error handling
-    let owner = H160::zero();
-    let digest = H256::zero();
-    let valid_to = user_order.valid_to.to_be_bytes();
-    let uid = OrderUid(
-        [digest.as_bytes(), owner.as_bytes(), &valid_to]
-            .concat()
-            .try_into()
-            .unwrap(),
-    );
-
     Ok(Order {
         order_meta_data: OrderMetaData {
             creation_date: chrono::offset::Utc::now(),
-            owner,
-            uid,
+            owner: user_order.order_owner(),
+            uid: user_order.order_uid(),
         },
         order_creation: user_order,
     })
@@ -87,7 +81,7 @@ pub mod test_util {
         assert_eq!(orderbook.get_orders().await.len(), 1);
         assert_eq!(
             orderbook.add_order(order).await,
-            Err(AddOrderError::AlreadyExists)
+            Err(AddOrderError::DuplicatedOrder)
         );
     }
 
