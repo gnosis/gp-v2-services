@@ -1,8 +1,7 @@
 use model::{Order, OrderCreation, OrderMetaData};
-use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-#[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum AddOrderError {
     DuplicatedOrder,
     InvalidSignature,
