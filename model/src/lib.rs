@@ -8,7 +8,6 @@ use chrono::{offset::Utc, DateTime, NaiveDateTime};
 use primitive_types::{H160, H256, U256};
 use serde::{de, Deserialize, Serialize};
 use serde::{Deserializer, Serializer};
-use std::convert::TryInto;
 use std::fmt;
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Deserialize, Serialize)]
@@ -65,15 +64,11 @@ impl OrderCreation {
         H256::zero()
     }
     pub fn order_uid(&self) -> OrderUid {
-        let owner = self.order_owner();
-        let digest = self.order_digest();
-        let valid_to = self.valid_to.to_be_bytes();
-        OrderUid(
-            [digest.as_bytes(), owner.as_bytes(), &valid_to]
-                .concat()
-                .try_into()
-                .unwrap(),
-        )
+        let mut uid = OrderUid([0u8; 56]);
+        uid.0[0..32].copy_from_slice(self.order_digest().as_fixed_bytes());
+        uid.0[32..52].copy_from_slice(self.order_owner().as_fixed_bytes());
+        uid.0[52..56].copy_from_slice(&self.valid_to.to_be_bytes());
+        uid
     }
 }
 
