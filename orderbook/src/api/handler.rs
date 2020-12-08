@@ -51,50 +51,45 @@ pub async fn add_order(
             }),
             StatusCode::CREATED,
         ),
-        Err(AddOrderError::DuplicatedOrder) => (
-            warp::reply::json(&OrderPostError {
-                error_type: String::from("DuplicatedOrder"),
-                description: String::from("order already exists"),
-            }),
-            StatusCode::BAD_REQUEST,
-        ),
-        Err(AddOrderError::InvalidSignature) => (
-            warp::reply::json(&OrderPostError {
-                error_type: String::from("InvalidSignature"),
-                description: String::from("invalid signature"),
-            }),
-            StatusCode::BAD_REQUEST,
-        ),
-        Err(AddOrderError::Forbidden) => (
-            warp::reply::json(&OrderPostError {
-                error_type: String::from("Forbidden"),
-                description: String::from("Forbidden, your account is deny-listed"),
-            }),
-            StatusCode::FORBIDDEN,
-        ),
-        Err(AddOrderError::PastValidTo) => (
-            warp::reply::json(&OrderPostError {
-                error_type: String::from("PastValidTo"),
-                description: String::from("validTo is in the past"),
-            }),
-            StatusCode::BAD_REQUEST,
-        ),
-        Err(AddOrderError::MissingOrderData) => (
-            warp::reply::json(&OrderPostError {
-                error_type: String::from("MissingOrderData"),
-                description: String::from("at least 1 field of orderCreation is missing"),
-            }),
-            StatusCode::BAD_REQUEST,
-        ),
-        Err(AddOrderError::InsufficientFunds) => (
-            warp::reply::json(&OrderPostError {
-                error_type: String::from("InsufficientFunds"),
-                description: String::from(
-                    "order owner must have funds worth at least x in his account",
+        Err(err) => {
+            let (error_type, description, status_code) = match err {
+                AddOrderError::DuplicatedOrder => (
+                    "DuplicatedOrder",
+                    "order already exists",
+                    StatusCode::BAD_REQUEST,
                 ),
-            }),
-            StatusCode::BAD_REQUEST,
-        ),
+                AddOrderError::InvalidSignature => (
+                    "InvalidSignature",
+                    "invalid signature",
+                    StatusCode::BAD_REQUEST,
+                ),
+                AddOrderError::Forbidden => (
+                    "Forbidden",
+                    "Forbidden, your account is deny-listed",
+                    StatusCode::FORBIDDEN,
+                ),
+                AddOrderError::PastValidTo => (
+                    "PastValidTo",
+                    "validTo is in the past",
+                    StatusCode::BAD_REQUEST,
+                ),
+                AddOrderError::MissingOrderData => (
+                    "MissingOrderData",
+                    "at least 1 field of orderCreation is missing",
+                    StatusCode::BAD_REQUEST,
+                ),
+                AddOrderError::InsufficientFunds => (
+                    "InsufficientFunds",
+                    "order owner must have funds worth at least x in his account",
+                    StatusCode::BAD_REQUEST,
+                ),
+            };
+            let error = OrderPostError {
+                error_type: error_type.to_string(),
+                description: description.to_string(),
+            };
+            (warp::reply::json(&error), status_code)
+        }
     };
     Ok(warp::reply::with_status(body, status_code))
 }
