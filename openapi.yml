@@ -170,7 +170,7 @@ components:
             Could be used to track the interface or other meta-aspects of the order. uint32 encoded
           type: integer
         feeAmount:
-          description: "Fees: feeRatio + minimal_fee in atoms"
+          description: "Fees: feeRatio * sellAmount + minimal_fee in atoms"
           $ref: "#/components/schemas/TokenAmount"
         orderType:
           description: "The type is either a buy or sell order"
