@@ -169,8 +169,8 @@ components:
             Arbitrary identifier sent along with the order.
             Could be used to track the interface or other meta-aspects of the order. uint32 encoded
           type: integer
-        tip:
-          description: "Tip to compensate solvers in atoms"
+        feeAmount:
+          description: "Fees: feeRatio + minimal_fee in atoms"
           $ref: "#/components/schemas/TokenAmount"
         orderType:
           description: "The type is either a buy or sell order"
