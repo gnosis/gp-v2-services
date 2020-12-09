@@ -19,7 +19,11 @@ paths:
               schema:
                   $ref: "#/components/schemas/UID"
         400:
-          $ref: "#/components/schemas/OrderPostError"
+          description: Error during order validation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderPostError"
         403:
           description: Forbidden, your account is deny-listed
         429:
