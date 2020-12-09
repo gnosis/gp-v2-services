@@ -179,8 +179,8 @@ components:
         feeAmount:
           description: "Fees: feeRatio * sellAmount + minimal_fee in atoms"
           $ref: "#/components/schemas/TokenAmount"
-        orderType:
-          description: "The type is either a buy or sell order"
+        kind:
+          description: "The kind is either a buy or sell order"
           $ref: "#/components/schemas/OrderType"
         partiallyFillable:
           description: Is this a fill-or-kill order or a partially fillable order?
