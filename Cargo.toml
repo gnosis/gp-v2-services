@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "contracts",
+    "e2e",
     "model",
     "orderbook",
     "solver",
