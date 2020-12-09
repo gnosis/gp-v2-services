@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, sync::Arc};
 use warp::{
     http::StatusCode,
-    reply::{json, with_status, Json, WithStatus},
+    reply::{json, with_status},
 };
 
 const STANDARD_VALIDITY_FOR_FEE_IN_SEC: i32 = 3600;
@@ -38,7 +38,7 @@ pub struct UidResponse {
 pub async fn add_order(
     orderbook: Arc<OrderBook>,
     order: OrderCreation,
-) -> Result<WithStatus<Json>, Infallible> {
+) -> Result<impl warp::Reply, Infallible> {
     let (body, status_code) = match orderbook.add_order(order).await {
         Ok(()) => (
             warp::reply::json(&UidResponse {
@@ -89,13 +89,13 @@ pub async fn add_order(
     Ok(with_status(body, status_code))
 }
 
-pub async fn get_orders(orderbook: Arc<OrderBook>) -> Result<WithStatus<Json>, Infallible> {
+pub async fn get_orders(orderbook: Arc<OrderBook>) -> Result<impl warp::Reply, Infallible> {
     let orders = orderbook.get_orders().await;
     Ok(with_status(json(&orders), StatusCode::OK))
 }
 
 #[allow(unused_variables)]
-pub async fn get_fee_info(sell_token: H160) -> Result<WithStatus<Json>, Infallible> {
+pub async fn get_fee_info(sell_token: H160) -> Result<impl warp::Reply, Infallible> {
     let fee_info = FeeInfo {
         expiration_date: chrono::offset::Utc::now()
             + FixedOffset::east(STANDARD_VALIDITY_FOR_FEE_IN_SEC),
