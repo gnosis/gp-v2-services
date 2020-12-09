@@ -1,7 +1,7 @@
 use crate::orderbook::{AddOrderError, OrderBook};
 
 use chrono::prelude::{DateTime, FixedOffset, Utc};
-use model::{h160_hexadecimal, u256_decimal, OrderCreation, OrderUid};
+use model::{h160_hexadecimal, u256_decimal, OrderCreation};
 use primitive_types::{H160, U256};
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, sync::Arc};
@@ -34,23 +34,12 @@ pub struct OrderPostError {
     description: String,
 }
 
-#[derive(PartialEq, Serialize, Deserialize, Debug)]
-#[serde(rename_all = "UPPERCASE")]
-pub struct UidResponse {
-    uid: OrderUid,
-}
-
 pub async fn add_order(
     orderbook: Arc<OrderBook>,
     order: OrderCreation,
 ) -> Result<impl warp::Reply, Infallible> {
     let (body, status_code) = match orderbook.add_order(order).await {
-        Ok(()) => (
-            warp::reply::json(&UidResponse {
-                uid: order.order_uid(),
-            }),
-            StatusCode::CREATED,
-        ),
+        Ok(()) => (warp::reply::json(&order.order_uid()), StatusCode::CREATED),
         Err(err) => {
             let (error_type, description, status_code) = match err {
                 AddOrderError::DuplicatedOrder => (
@@ -75,7 +64,7 @@ pub async fn add_order(
                 ),
                 AddOrderError::MissingOrderData => (
                     "MissingOrderData",
-                    "at least 1 field of orderCreation is missing",
+                    "at least 1 field of orderCreation is missing, please check the field",
                     StatusCode::BAD_REQUEST,
                 ),
                 AddOrderError::InsufficientFunds => (

@@ -101,7 +101,7 @@ pub mod test_util {
         let orderbook = Arc::new(OrderBook::default());
         let filter = create_order(orderbook.clone());
         let order = OrderCreation::default();
-        let expected_uid = json!({"UID": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"});
+        let expected_uid = json!("0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
         let post = || async {
             request()
                 .path("/api/v1/orders")
