@@ -1,65 +1,47 @@
-use crate::{
-    ethereum::{Ethereum, SettlementContract},
-    settlement,
-};
-use anyhow::Result;
-use model::{Order, TokenPair};
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use crate::{ethereum::SettlementContract, naive_solver, orderbook::OrderBookApi};
+use anyhow::{Context, Result};
+use std::{sync::Arc, time::Duration};
+
+const SETTLE_INTERVAL: Duration = Duration::from_secs(30);
 
 pub struct Driver {
     contract: Arc<dyn SettlementContract>,
-    ethereum: Arc<dyn Ethereum>,
-    nonces: HashMap<TokenPair, u32>,
-    max_order_age: Duration,
+    orderbook: OrderBookApi,
 }
 
 impl Driver {
-    pub async fn settle_if_needed(&mut self, mut orders: Vec<Order>) -> Result<()> {
-        self.remove_invalid_orders(&mut orders);
-        self.update_missing_nonces(&orders).await?;
-        // This is a loop because several settlements of different token pairs could be triggered
-        // in the same update.
-        while let Some(settlement) =
-            settlement::find_settlement(&orders, &self.nonces, Instant::now(), self.max_order_age)
-        {
-            // Optimistically increase the nonce assuming our settlement goes through. This prevents
-            // from settling the same orders next this function is called because the nonce will no
-            // longer match.
-            // TODO: send settlement transaction and set up reaction to failure
-            // Unwrap because we have the nonce for all tokens in the order book.
-            *self.nonces.get_mut(&settlement.token_pair).unwrap() += 1;
-        }
-        Ok(())
-    }
-
-    fn remove_invalid_orders(&self, orders: &mut Vec<Order>) {
-        // TODO: Filter invalid orders based on spending being approved and token balance. Probably
-        // using a cache so that we make less requests to the node.
-        orders.retain(|order| order.user_provided.token_pair().is_some());
-    }
-
-    async fn update_missing_nonces(&mut self, orders: &[Order]) -> Result<()> {
-        for order in orders {
-            // Unwrap because same token pair would be an invalid order which has already been
-            // filtered out.
-            let token_pair = order.user_provided.token_pair().unwrap();
-            match self.nonces.entry(token_pair) {
-                Entry::Occupied(_) => (),
-                Entry::Vacant(entry) => {
-                    entry.insert(self.contract.get_nonce(token_pair).await?);
-                }
+    async fn run_forever(&mut self) {
+        loop {
+            println!("starting settle attempt");
+            match self.single_run().await {
+                Ok(()) => println!("ok"),
+                Err(err) => println!("error: {:?}", err),
             }
+            tokio::time::delay_for(SETTLE_INTERVAL).await;
         }
-        Ok(())
     }
 
-    fn settlement_failed(&mut self, token_pair: TokenPair) {
-        // Causes the nonce to get updated next time it is needed. We do this instead of
-        // decrementing it in case it somehow got out of sync with the contract.
-        self.nonces.remove(&token_pair);
+    async fn single_run(&mut self) -> Result<()> {
+        let orders = self.orderbook.get_orders().await?;
+        // TODO: order validity checks
+        // Decide what is handled by orderbook service and what by us.
+        // We likely want to at least mark orders we know we have settled so that we don't
+        // attempt to settle them again when they are still in the orderbook.
+        let settlement =
+            match naive_solver::settle(orders.into_iter().map(|order| order.order_creation)) {
+                None => return Ok(()),
+                Some(settlement) => settlement,
+            };
+        // TODO: encode settlement, check if we need to approve spending to uniswap
+        // TODO: use retry transaction sending crate for updating gas prices
+        self.contract
+            .settle_call(&settlement)
+            .await
+            .context("settle call failed")?;
+        self.contract
+            .settle_send(&settlement)
+            .await
+            .context("settle send failed")?;
+        Ok(())
     }
 }
