@@ -25,7 +25,7 @@ fn set_panic_hook() {
         let thread_name = thread.name().unwrap_or("<unnamed>");
         // It is not possible for our custom hook to print a full backtrace on stable rust. To not
         // lose this information we call the default panic handler which prints the full backtrace.
-        // The lpreceding log makes kibana consider this a multi line log message.
+        // The preceding log makes kibana consider this a multi line log message.
         tracing::error!("thread '{}' {}:", thread_name, info);
         default_hook(info);
     };
