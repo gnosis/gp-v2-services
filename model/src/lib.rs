@@ -105,12 +105,28 @@ impl OrderCreation {
         address
     }
 }
+pub struct InvalidSignatureError;
 
 // See https://github.com/gnosis/gp-v2-contracts/blob/main/src/contracts/libraries/GPv2Encoding.sol
 impl OrderCreation {
     const ORDER_TYPE_HASH: [u8; 32] =
         hex!("b71968fcf5e55b9c3370f2809d4078a4695be79dfa43e5aa1f2baa0a9b84f186");
 
+    pub fn order_creation_to_full_order(
+        self: OrderCreation,
+    ) -> Result<Order, InvalidSignatureError> {
+        let owner = self
+            .validate_signature(&Self::ORDER_TYPE_HASH)
+            .ok_or(InvalidSignatureError)?;
+        Ok(Order {
+            order_meta_data: OrderMetaData {
+                creation_date: chrono::offset::Utc::now(),
+                owner,
+                uid: self.uid(&owner),
+            },
+            order_creation: self,
+        })
+    }
     fn order_digest(&self) -> [u8; 32] {
         let mut hash_data = [0u8; 320];
         hash_data[0..32].copy_from_slice(&Self::ORDER_TYPE_HASH);

@@ -1,6 +1,6 @@
 use std::time::SystemTime;
 
-use model::{Order, OrderCreation, OrderMetaData, OrderUid};
+use model::{Order, OrderCreation, OrderUid};
 use tokio::sync::RwLock;
 
 #[derive(Debug, Eq, PartialEq)]
@@ -37,7 +37,9 @@ impl OrderBook {
         if orders.iter().any(|x| x.order_creation == order) {
             return Err(AddOrderError::DuplicatedOrder);
         }
-        let order = user_order_to_full_order(order).map_err(|_| AddOrderError::InvalidSignature)?;
+        let order = order
+            .order_creation_to_full_order()
+            .map_err(|_| AddOrderError::InvalidSignature)?;
         let uid = order.order_meta_data.uid;
         tracing::debug!(?order, "adding order");
         orders.push(order);
@@ -80,23 +82,6 @@ fn now_in_epoch_seconds() -> u64 {
 
 fn has_future_valid_to(now_in_epoch_seconds: u64, order: &OrderCreation) -> bool {
     order.valid_to as u64 > now_in_epoch_seconds
-}
-
-struct InvalidSignatureError;
-fn user_order_to_full_order(user_order: OrderCreation) -> Result<Order, InvalidSignatureError> {
-    // TODO: make domain separator configurable
-    let domain_separator = [0u8; 32];
-    let owner = user_order
-        .validate_signature(&domain_separator)
-        .ok_or(InvalidSignatureError)?;
-    Ok(Order {
-        order_meta_data: OrderMetaData {
-            creation_date: chrono::offset::Utc::now(),
-            owner,
-            uid: user_order.uid(&owner),
-        },
-        order_creation: user_order,
-    })
 }
 
 #[cfg(test)]
