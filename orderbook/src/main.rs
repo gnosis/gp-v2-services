@@ -28,7 +28,7 @@ pub async fn orderbook_maintenance(orderbook: Arc<OrderBook>) -> ! {
 #[tokio::main]
 async fn main() {
     let args = Arguments::from_args();
-    tracing_setup::initialize(args.shared.log_filter.as_str());
+    tracing_setup::initialize(args.shared.log_filter.as_str(), args.shared.colored_output);
     tracing::info!("running order book with {:#?}", args);
     let orderbook = Arc::new(OrderBook::default());
     let filter = api::handle_all_routes(orderbook.clone())

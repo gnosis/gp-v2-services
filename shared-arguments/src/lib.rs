@@ -10,6 +10,16 @@ pub struct Arguments {
         default_value = "warn,orderbook=debug,solver=debug"
     )]
     pub log_filter: String,
+
+    /// Control colors in log output. Useful for example in Kibana where ansi colors are not
+    /// supported.
+    #[structopt(
+        long,
+        env = "COLORED_OUTPUT",
+        parse(try_from_str),
+        default_value = "true"
+    )]
+    pub colored_output: bool,
 }
 
 pub fn duration_from_seconds(s: &str) -> Result<Duration, ParseFloatError> {

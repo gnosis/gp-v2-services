@@ -32,7 +32,7 @@ struct Arguments {
 #[tokio::main]
 async fn main() {
     let args = Arguments::from_args();
-    tracing_setup::initialize(args.shared.log_filter.as_str());
+    tracing_setup::initialize(args.shared.log_filter.as_str(), args.shared.colored_output);
     tracing::info!("running solver with {:#?}", args);
     let orderbook = orderbook::OrderBookApi::new(args.orderbook_url, args.orderbook_timeout);
     // TODO: start driver, for now just fetch orders as placeholder
