@@ -5,4 +5,5 @@ edition = "2018"
 
 [dependencies]
 tracing = "0.1"
-tracing-subscriber = "0.2"
+# All default features but not `ansi` because kibana has problems with ansi color codes.
+tracing-subscriber = { version = "0.2", default-features = false, features = ["chrono", "env-filter", "fmt", "smallvec", "tracing-log"] }
