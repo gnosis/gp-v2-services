@@ -7,13 +7,13 @@ use tracing_subscriber::fmt::time::ChronoUtc;
 /// Initializes tracing setup that is shared between the binaries.
 /// `env_filter` has similar syntax to env_logger. It is documented at
 /// https://docs.rs/tracing-subscriber/0.2.15/tracing_subscriber/filter/struct.EnvFilter.html
-pub fn initialize(env_filter: &str, ansi: bool) {
+pub fn initialize(env_filter: &str) {
     // This is what kibana uses to separate mutli line log messages.
     let time_format_string = "%Y-%m-%dT%H:%M:%S%.3fZ";
     tracing_subscriber::fmt::fmt()
         .with_timer(ChronoUtc::with_format(String::from(time_format_string)))
         .with_env_filter(env_filter)
-        .with_ansi(ansi)
+        .with_ansi(atty::is(atty::Stream::Stdout))
         .init();
     set_panic_hook();
 }

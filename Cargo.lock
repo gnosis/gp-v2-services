@@ -2245,6 +2245,7 @@ dependencies = [
 name = "tracing-setup"
 version = "0.1.0"
 dependencies = [
+ "atty",
  "tracing",
  "tracing-subscriber",
 ]
