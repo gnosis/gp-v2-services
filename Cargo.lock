@@ -1904,6 +1904,7 @@ dependencies = [
 name = "shared-arguments"
 version = "0.1.0"
 dependencies = [
+ "model",
  "structopt",
 ]
 

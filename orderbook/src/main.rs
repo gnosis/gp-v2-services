@@ -30,7 +30,7 @@ async fn main() {
     let args = Arguments::from_args();
     tracing_setup::initialize(args.shared.log_filter.as_str());
     tracing::info!("running order book with {:#?}", args);
-    let orderbook = Arc::new(OrderBook::default());
+    let orderbook = Arc::new(OrderBook::new(args.shared.domain_separator));
     let filter = api::handle_all_routes(orderbook.clone())
         .map(|reply| warp::reply::with_header(reply, "Access-Control-Allow-Origin", "*"));
     let address = SocketAddr::new([0, 0, 0, 0].into(), 8080);
