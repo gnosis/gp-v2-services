@@ -48,6 +48,14 @@ impl OrderBook {
         self.orders.read().await.clone()
     }
 
+    pub async fn get_order_by_uid(&self, uid: OrderUid) -> Option<Order> {
+        let orders = self.get_orders().await;
+        orders
+            .into_iter()
+            .filter(|order| order.order_meta_data.uid == uid)
+            .last()
+    }
+
     #[allow(dead_code)]
     pub async fn remove_order(&self, order: &OrderCreation) -> Result<(), RemoveOrderError> {
         let mut orders = self.orders.write().await;
@@ -82,8 +90,9 @@ fn has_future_valid_to(now_in_epoch_seconds: u64, order: &OrderCreation) -> bool
     order.valid_to as u64 > now_in_epoch_seconds
 }
 
-struct InvalidSignatureError;
-fn user_order_to_full_order(user_order: OrderCreation) -> Result<Order, InvalidSignatureError> {
+#[derive(Debug)]
+pub struct InvalidSignatureError;
+pub fn user_order_to_full_order(user_order: OrderCreation) -> Result<Order, InvalidSignatureError> {
     // TODO: make domain separator configurable
     let domain_separator = [0u8; 32];
     let owner = user_order

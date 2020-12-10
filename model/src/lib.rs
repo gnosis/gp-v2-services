@@ -11,6 +11,7 @@ use secp256k1::{constants::SECRET_KEY_SIZE, SecretKey};
 use serde::{de, Deserialize, Serialize};
 use serde::{Deserializer, Serializer};
 use std::fmt;
+use std::str::FromStr;
 use web3::{
     signing::{self, Key, SecretKeyRef},
     types::Recovery,
@@ -159,12 +160,27 @@ impl OrderCreation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct OrderUid(pub [u8; 56]);
 
+impl FromStr for OrderUid {
+    type Err = hex::FromHexError;
+    fn from_str(s: &str) -> Result<OrderUid, hex::FromHexError> {
+        let mut value = [0 as u8; 56];
+        hex::decode_to_slice(s, value.as_mut())?;
+        Ok(OrderUid(value))
+    }
+}
+
+impl fmt::Display for OrderUid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", hex::encode(self.0.iter()))
+    }
+}
+
 impl Serialize for OrderUid {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        serializer.serialize_str(&hex::encode(self.0.iter()))
+        serializer.collect_str(self)
     }
 }
 

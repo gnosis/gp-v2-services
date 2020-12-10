@@ -89,6 +89,14 @@ pub async fn get_orders(orderbook: Arc<OrderBook>) -> Result<impl warp::Reply, I
     Ok(with_status(json(&orders), StatusCode::OK))
 }
 
+pub async fn get_specific_order(
+    uid: OrderUid,
+    orderbook: Arc<OrderBook>,
+) -> Result<impl warp::Reply, Infallible> {
+    let order = orderbook.get_order_by_uid(uid).await;
+    Ok(warp::reply::json(&order))
+}
+
 #[allow(unused_variables)]
 pub async fn get_fee_info(sell_token: H160) -> Result<impl warp::Reply, Infallible> {
     let fee_info = FeeInfo {
