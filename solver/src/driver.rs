@@ -6,9 +6,9 @@ use std::time::Duration;
 const SETTLE_INTERVAL: Duration = Duration::from_secs(30);
 
 pub struct Driver {
-    settlement_contract: GPv2Settlement,
-    uniswap_router: UniswapV2Router02,
-    orderbook: OrderBookApi,
+    pub settlement_contract: GPv2Settlement,
+    pub uniswap_router: UniswapV2Router02,
+    pub orderbook: OrderBookApi,
 }
 
 impl Driver {
@@ -23,7 +23,7 @@ impl Driver {
         }
     }
 
-    async fn single_run(&mut self) -> Result<()> {
+    pub async fn single_run(&mut self) -> Result<()> {
         let orders = self.orderbook.get_orders().await?;
         // TODO: order validity checks
         // Decide what is handled by orderbook service and what by us.
@@ -37,20 +37,22 @@ impl Driver {
         // TODO: check if we need to approve spending to uniswap
         // TODO: use retry transaction sending crate for updating gas prices
         let settle = || {
-            self.settlement_contract.settle(
-                settlement.tokens(),
-                settlement.clearing_prices(),
-                settlement
-                    .encode_trades()
-                    .expect("naive solver created invalid settlement"),
-                settlement.encode_interactions(
-                    &self.uniswap_router.address(),
-                    &self.settlement_contract.address(),
-                ),
-                Vec::new(),
-            )
+            self.settlement_contract
+                .settle(
+                    settlement.tokens(),
+                    settlement.clearing_prices(),
+                    settlement
+                        .encode_trades()
+                        .expect("naive solver created invalid settlement"),
+                    settlement.encode_interactions(
+                        &self.uniswap_router.address(),
+                        &self.settlement_contract.address(),
+                    ),
+                    Vec::new(),
+                )
+                .gas(8_000_000.into())
         };
-        settle().call().await.context("settle simulation failed")?;
+        //settle().call().await.context("settle simulation failed")?;
         settle().send().await.context("settle execution failed")?;
         Ok(())
     }

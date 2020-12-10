@@ -1,12 +1,3 @@
-#![allow(dead_code)]
-
-mod batcher;
-mod driver;
-mod encoding;
-mod naive_solver;
-mod orderbook;
-mod settlement;
-
 use reqwest::Url;
 use std::time::Duration;
 use structopt::StructOpt;
