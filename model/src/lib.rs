@@ -4,13 +4,14 @@
 
 pub mod h160_hexadecimal;
 pub mod u256_decimal;
+
 use chrono::{offset::Utc, DateTime, NaiveDateTime};
 use hex_literal::hex;
 use primitive_types::{H160, H256, U256};
 use secp256k1::{constants::SECRET_KEY_SIZE, SecretKey};
 use serde::{de, Deserialize, Serialize};
 use serde::{Deserializer, Serializer};
-use std::fmt;
+use std::fmt::{self, Display};
 use std::str::FromStr;
 use web3::{
     signing::{self, Key, SecretKeyRef},
@@ -169,9 +170,14 @@ impl FromStr for OrderUid {
     }
 }
 
-impl fmt::Display for OrderUid {
+impl Display for OrderUid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", hex::encode(self.0.iter()))
+        let mut bytes = [0u8; 56 * 2];
+        // Unwrap because the length is always correct.
+        hex::encode_to_slice(&self.0, &mut bytes).unwrap();
+        // Unwrap because the string is always valid utf8.
+        let str = std::str::from_utf8(&bytes).unwrap();
+        f.write_str(str)
     }
 }
 
@@ -180,36 +186,17 @@ impl Serialize for OrderUid {
     where
         S: Serializer,
     {
-        serializer.collect_str(self)
+        serializer.serialize_str(self.to_string().as_str())
     }
 }
 
 impl<'de> Deserialize<'de> for OrderUid {
-    fn deserialize<D>(deserializer: D) -> Result<OrderUid, D::Error>
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        struct Visitor {}
-        impl<'de> de::Visitor<'de> for Visitor {
-            type Value = OrderUid;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                write!(formatter, "an uid with orderDigest_owner_validTo")
-            }
-
-            fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                let mut value = [0 as u8; 56];
-                hex::decode_to_slice(s, value.as_mut()).map_err(|err| {
-                    de::Error::custom(format!("failed to decode {:?} as hex: {}", s, err))
-                })?;
-                Ok(OrderUid(value))
-            }
-        }
-
-        deserializer.deserialize_str(Visitor {})
+        let s = String::deserialize(deserializer)?;
+        FromStr::from_str(&s).map_err(de::Error::custom)
     }
 }
 
@@ -456,5 +443,15 @@ mod tests {
             order.validate_signature(&OrderCreation::TEST_DOMAIN_SEPARATOR),
             Some(owner)
         );
+    }
+
+    #[test]
+    fn uid_is_displayed_as_hex() {
+        let mut uid = OrderUid([0u8; 56]);
+        uid.0[0] = 0x01;
+        uid.0[55] = 0xff;
+        let expected = "01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000ff";
+        assert_eq!(uid.to_string(), expected);
+        assert_eq!(format!("{}", uid), expected);
     }
 }

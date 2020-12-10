@@ -93,7 +93,6 @@ pub mod test_util {
             .reply(&filter)
             .await;
         assert_eq!(response.status(), StatusCode::OK);
-        println!("{:?}", response.body());
         let response_orders: Order = serde_json::from_slice(response.body()).unwrap();
         let orderbook_orders = orderbook.get_orders().await;
         assert_eq!(response_orders, orderbook_orders[0]);
