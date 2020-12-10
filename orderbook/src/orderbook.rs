@@ -1,6 +1,8 @@
+use anyhow::Result;
+use async_trait::async_trait;
 use std::time::SystemTime;
 
-use model::{Order, OrderCreation, OrderMetaData, OrderUid};
+use model::{Order, OrderCreation, OrderMetaData, OrderUid, OrderbookReading};
 use tokio::sync::RwLock;
 
 #[derive(Debug, Eq, PartialEq)]
@@ -44,10 +46,6 @@ impl OrderBook {
         Ok(uid)
     }
 
-    pub async fn get_orders(&self) -> Vec<Order> {
-        self.orders.read().await.clone()
-    }
-
     #[allow(dead_code)]
     pub async fn remove_order(&self, order: &OrderCreation) -> Result<(), RemoveOrderError> {
         let mut orders = self.orders.write().await;
@@ -68,6 +66,13 @@ impl OrderBook {
         // TODO: use the timestamp from the most recent block instead?
         let mut orders = self.orders.write().await;
         orders.retain(|order| has_future_valid_to(now_in_epoch_seconds, &order.order_creation));
+    }
+}
+
+#[async_trait]
+impl OrderbookReading for OrderBook {
+    async fn get_orders(&self) -> Result<Vec<Order>> {
+        Ok(self.orders.read().await.clone())
     }
 }
 
@@ -110,7 +115,7 @@ pub mod test_util {
         order.valid_to = u32::MAX;
         order.sign_self();
         orderbook.add_order(order).await.unwrap();
-        assert_eq!(orderbook.get_orders().await.len(), 1);
+        assert_eq!(orderbook.get_orders().await.unwrap().len(), 1);
         assert_eq!(
             orderbook.add_order(order).await,
             Err(AddOrderError::DuplicatedOrder)
@@ -124,9 +129,9 @@ pub mod test_util {
         order.valid_to = u32::MAX;
         order.sign_self();
         orderbook.add_order(order).await.unwrap();
-        assert_eq!(orderbook.get_orders().await.len(), 1);
+        assert_eq!(orderbook.get_orders().await.unwrap().len(), 1);
         orderbook.remove_order(&order).await.unwrap();
-        assert_eq!(orderbook.get_orders().await.len(), 0);
+        assert_eq!(orderbook.get_orders().await.unwrap().len(), 0);
     }
 
     #[tokio::test]
@@ -136,12 +141,12 @@ pub mod test_util {
         order.valid_to = u32::MAX - 10;
         order.sign_self();
         orderbook.add_order(order).await.unwrap();
-        assert_eq!(orderbook.get_orders().await.len(), 1);
+        assert_eq!(orderbook.get_orders().await.unwrap().len(), 1);
         orderbook
             .remove_expired_orders((u32::MAX - 11) as u64)
             .await;
-        assert_eq!(orderbook.get_orders().await.len(), 1);
+        assert_eq!(orderbook.get_orders().await.unwrap().len(), 1);
         orderbook.remove_expired_orders((u32::MAX - 9) as u64).await;
-        assert_eq!(orderbook.get_orders().await.len(), 0);
+        assert_eq!(orderbook.get_orders().await.unwrap().len(), 0);
     }
 }

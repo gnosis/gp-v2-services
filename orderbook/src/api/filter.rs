@@ -48,7 +48,7 @@ pub fn get_fee_info() -> impl Filter<Extract = (impl warp::Reply,), Error = warp
 #[cfg(test)]
 pub mod test_util {
     use super::*;
-    use model::Order;
+    use model::{Order, OrderbookReading as _};
     use primitive_types::U256;
     use serde_json::json;
     use warp::{http::StatusCode, test::request};
@@ -64,7 +64,7 @@ pub mod test_util {
         let response = request().path("/orders").method("GET").reply(&filter).await;
         assert_eq!(response.status(), StatusCode::OK);
         let response_orders: Vec<Order> = serde_json::from_slice(response.body()).unwrap();
-        let orderbook_orders = orderbook.get_orders().await;
+        let orderbook_orders = orderbook.get_orders().await.unwrap();
         assert_eq!(response_orders, orderbook_orders);
     }
 

@@ -1,7 +1,7 @@
 use crate::orderbook::{AddOrderError, OrderBook};
 
 use chrono::prelude::{DateTime, FixedOffset, Utc};
-use model::{u256_decimal, OrderCreation};
+use model::{u256_decimal, OrderCreation, OrderbookReading as _};
 use primitive_types::{H160, U256};
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, sync::Arc};
@@ -80,7 +80,13 @@ pub async fn add_order(
 
 pub async fn get_orders(orderbook: Arc<OrderBook>) -> Result<impl warp::Reply, Infallible> {
     let orders = orderbook.get_orders().await;
-    Ok(with_status(json(&orders), StatusCode::OK))
+    match orders {
+        Ok(orders) => Ok(with_status(json(&orders), StatusCode::OK)),
+        Err(_) => Ok(with_status(
+            json(&"Error Fetching Orders"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
 }
 
 #[allow(unused_variables)]

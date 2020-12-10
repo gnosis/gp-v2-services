@@ -1120,6 +1120,8 @@ dependencies = [
 name = "model"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "async-trait",
  "chrono",
  "hex",
  "hex-literal",
@@ -1252,6 +1254,7 @@ name = "orderbook"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "model",
  "primitive-types",

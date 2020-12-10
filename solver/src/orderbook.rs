@@ -1,4 +1,6 @@
-use model::Order;
+use anyhow::{Context, Result};
+use async_trait::async_trait;
+use model::{Order, OrderbookReading};
 use reqwest::{Client, Url};
 use std::time::Duration;
 
@@ -14,12 +16,21 @@ impl OrderBookApi {
         let client = Client::builder().timeout(request_timeout).build().unwrap();
         Self { base, client }
     }
+}
 
-    pub async fn get_orders(&self) -> reqwest::Result<Vec<Order>> {
+#[async_trait]
+impl OrderbookReading for OrderBookApi {
+    async fn get_orders(&self) -> Result<Vec<Order>> {
         const PATH: &str = "/api/v1/orders";
         let mut url = self.base.clone();
         url.set_path(PATH);
-        self.client.get(url).send().await?.json().await
+        self.client
+            .get(url)
+            .send()
+            .await?
+            .json()
+            .await
+            .context("API Request failed")
     }
 }
 

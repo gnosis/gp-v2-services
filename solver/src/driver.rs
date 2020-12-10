@@ -1,5 +1,6 @@
 use crate::{ethereum::SettlementContract, naive_solver, orderbook::OrderBookApi};
 use anyhow::{Context, Result};
+use model::OrderbookReading as _;
 use std::{sync::Arc, time::Duration};
 
 const SETTLE_INTERVAL: Duration = Duration::from_secs(30);

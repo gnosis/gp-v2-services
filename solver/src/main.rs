@@ -11,6 +11,7 @@ mod settlement;
 use reqwest::Url;
 use std::time::Duration;
 use structopt::StructOpt;
+use model::OrderbookReading as _;
 
 #[derive(Debug, StructOpt)]
 struct Arguments {

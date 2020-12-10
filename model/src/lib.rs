@@ -3,7 +3,11 @@
 //! This is in its own crate because we want to share this module between the orderbook and the solver.
 
 pub mod h160_hexadecimal;
+pub mod orderbook;
 pub mod u256_decimal;
+
+pub use orderbook::OrderbookReading;
+
 use chrono::{offset::Utc, DateTime, NaiveDateTime};
 use hex_literal::hex;
 use primitive_types::{H160, H256, U256};

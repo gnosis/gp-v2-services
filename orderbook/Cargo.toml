@@ -5,6 +5,7 @@ edition = "2018"
 
 [dependencies]
 anyhow = "1.0"
+async-trait = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 model = { path = "../model" }
 primitive-types = "0.7"
