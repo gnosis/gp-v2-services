@@ -1,13 +1,13 @@
-use crate::{ethereum::SettlementContract, naive_solver, orderbook::OrderBookApi};
+use crate::{ethereum::SettlementContract, naive_solver};
 use anyhow::{Context, Result};
-use model::OrderbookReading as _;
+use model::OrderbookReading;
 use std::{sync::Arc, time::Duration};
 
 const SETTLE_INTERVAL: Duration = Duration::from_secs(30);
 
 pub struct Driver {
     contract: Arc<dyn SettlementContract>,
-    orderbook: OrderBookApi,
+    orderbook: Box<dyn OrderbookReading>,
 }
 
 impl Driver {
