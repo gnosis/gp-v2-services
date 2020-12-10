@@ -21,7 +21,7 @@ fn extract_user_order() -> impl Filter<Extract = (OrderCreation,), Error = warp:
 
 pub fn create_order(
     orderbook: Arc<OrderBook>,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("orders")
         .and(warp::post())
         .and(with_orderbook(orderbook))
@@ -31,14 +31,15 @@ pub fn create_order(
 
 pub fn get_orders(
     orderbook: Arc<OrderBook>,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("orders")
         .and(warp::get())
         .and(with_orderbook(orderbook))
         .and_then(handler::get_orders)
 }
 
-pub fn get_fee_info() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+pub fn get_fee_info() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
+{
     warp::path!("fee" / H160)
         .and(warp::get())
         .and_then(handler::get_fee_info)
@@ -94,7 +95,9 @@ pub mod test_util {
         let mut order = OrderCreation::default();
         order.valid_to = u32::MAX;
         order.sign_self();
-        let expected_uid = json!({"UID": "98f26f9847f4e365ea530784ce5976f56ea2a67e9cde05fd16fca9a1fadbe5211a642f0e3c3af545e7acbd38b07251b3990914f1ffffffff"});
+        let expected_uid = json!(
+            "98f26f9847f4e365ea530784ce5976f56ea2a67e9cde05fd16fca9a1fadbe5211a642f0e3c3af545e7acbd38b07251b3990914f1ffffffff"
+        );
         let post = || async {
             request()
                 .path("/orders")
