@@ -4,6 +4,7 @@ use chrono::prelude::{DateTime, FixedOffset, Utc};
 use model::{u256_decimal, OrderCreation, OrderUid};
 use primitive_types::{H160, U256};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::{convert::Infallible, sync::Arc};
 use warp::{
     http::StatusCode,
@@ -91,7 +92,7 @@ pub async fn get_order_by_uid(
         Ok(with_status(json(&order), StatusCode::OK))
     } else {
         Ok(with_status(
-            json(&"Order was not found"),
+            json(&json!({ "description": "Order was not found"})),
             StatusCode::NOT_FOUND,
         ))
     }
