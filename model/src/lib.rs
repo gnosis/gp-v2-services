@@ -5,8 +5,10 @@
 pub mod h160_hexadecimal;
 pub mod u256_decimal;
 use chrono::{offset::Utc, DateTime, NaiveDateTime};
+use ethcontract::common::abi::{encode, Token};
 use hex::{FromHex, FromHexError};
 use hex_literal::hex;
+use lazy_static::lazy_static;
 use primitive_types::{H160, H256, U256};
 use secp256k1::{constants::SECRET_KEY_SIZE, SecretKey};
 use serde::{de, Deserialize, Serialize};
@@ -301,7 +303,7 @@ impl TokenPair {
     }
 }
 
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Eq, PartialEq, Clone, Default)]
 pub struct DomainSeparator(pub [u8; 32]);
 
 // For command line argument parsing.
@@ -323,12 +325,53 @@ impl std::fmt::Debug for DomainSeparator {
     }
 }
 
+impl DomainSeparator {
+    pub fn get_domain_separator(chain_id: u64, contract_address: H160) -> Self {
+        lazy_static! {
+            /// The EIP-712 domain name used for computing the domain separator.
+            static ref DOMAIN_NAME: [u8; 32] = signing::keccak256(b"Gnosis Protocol");
+
+            /// The EIP-712 domain version used for computing the domain separator.
+            static ref DOMAIN_VERSION: [u8; 32] = signing::keccak256(b"v2");
+
+            /// The EIP-712 domain type used computing the domain separator.
+            static ref DOMAIN_TYPE_HASH: [u8; 32] = signing::keccak256(
+                b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)",
+            );
+        }
+        let abi_encode_string = encode(&[
+            Token::Uint((*DOMAIN_TYPE_HASH).into()),
+            Token::Uint((*DOMAIN_NAME).into()),
+            Token::Uint((*DOMAIN_VERSION).into()),
+            Token::Uint(chain_id.into()),
+            Token::Address(contract_address),
+        ]);
+
+        DomainSeparator(signing::keccak256(abi_encode_string.as_slice()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::NaiveDateTime;
     use serde_json::json;
     use std::str::FromStr;
+
+    #[test]
+
+    fn domain_separator_rinkeby() {
+        let contract_address: H160 = "91D6387ffbB74621625F39200d91a50386C9Ab15".parse().unwrap();
+        let chain_id: u64 = 4;
+        let domain_separator_rinkeby =
+            DomainSeparator::get_domain_separator(chain_id, contract_address);
+        // domain separator is taken from rinkeby deployment at address 91D6387ffbB74621625F39200d91a50386C9Ab15
+        let expected_domain_separator: DomainSeparator =
+            "9d7e07ef92761aa9453ae5ff25083a2b19764131b15295d3c7e89f1f1b8c67d9"
+                .parse()
+                .unwrap();
+        assert_eq!(domain_separator_rinkeby, expected_domain_separator);
+    }
 
     #[test]
     fn deserialization_and_back() {
