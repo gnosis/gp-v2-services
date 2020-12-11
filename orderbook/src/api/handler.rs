@@ -83,12 +83,18 @@ pub async fn get_orders(orderbook: Arc<OrderBook>) -> Result<impl warp::Reply, I
     Ok(with_status(json(&orders), StatusCode::OK))
 }
 
-pub async fn get_specific_order(
+pub async fn get_order_by_uid(
     uid: OrderUid,
     orderbook: Arc<OrderBook>,
 ) -> Result<impl warp::Reply, Infallible> {
-    let order = orderbook.get_order_by_uid(uid).await;
-    Ok(warp::reply::json(&order))
+    if let Some(order) = orderbook.get_order_by_uid(uid).await {
+        Ok(with_status(json(&order), StatusCode::OK))
+    } else {
+        Ok(with_status(
+            json(&"Order was not found"),
+            StatusCode::NOT_FOUND,
+        ))
+    }
 }
 
 #[allow(unused_variables)]

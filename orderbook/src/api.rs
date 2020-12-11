@@ -11,7 +11,7 @@ pub fn handle_all_routes(
     let order_creation = filter::create_order(orderbook.clone());
     let order_getter = filter::get_orders(orderbook.clone());
     let fee_info = filter::get_fee_info();
-    let order_by_uid = filter::get_specific_order(orderbook);
+    let order_by_uid = filter::get_order_by_uid(orderbook);
     warp::path!("api" / "v1" / ..).and(
         order_creation
             .or(order_getter)

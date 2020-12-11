@@ -38,13 +38,13 @@ pub fn get_orders(
         .and_then(handler::get_orders)
 }
 
-pub fn get_specific_order(
+pub fn get_order_by_uid(
     orderbook: Arc<OrderBook>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("orders" / OrderUid)
         .and(warp::get())
         .and(with_orderbook(orderbook))
-        .and_then(handler::get_specific_order)
+        .and_then(handler::get_order_by_uid)
 }
 
 pub fn get_fee_info() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
@@ -79,9 +79,9 @@ pub mod test_util {
     }
 
     #[tokio::test]
-    async fn get_specific_order_() {
+    async fn get_order_by_uid_() {
         let orderbook = Arc::new(OrderBook::default());
-        let filter = get_specific_order(orderbook.clone());
+        let filter = get_order_by_uid(orderbook.clone());
         let mut order_creation = OrderCreation::default();
         order_creation.valid_to = u32::MAX;
         order_creation.sign_self();
@@ -96,6 +96,21 @@ pub mod test_util {
         let response_orders: Order = serde_json::from_slice(response.body()).unwrap();
         let orderbook_orders = orderbook.get_orders().await;
         assert_eq!(response_orders, orderbook_orders[0]);
+    }
+    #[tokio::test]
+    async fn get_order_by_uid_invalid_request() {
+        let orderbook = Arc::new(OrderBook::default());
+        let filter = get_order_by_uid(orderbook.clone());
+        let mut order_creation = OrderCreation::default();
+        order_creation.valid_to = u32::MAX;
+        order_creation.sign_self();
+        let order = user_order_to_full_order(order_creation).unwrap();
+        let response = request()
+            .path(&format!("/orders/{:}", order.order_meta_data.uid))
+            .method("GET")
+            .reply(&filter)
+            .await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
