@@ -34,12 +34,10 @@ async fn main() {
     tracing_setup::initialize(args.shared.log_filter.as_str());
     tracing::info!("running order book with {:#?}", args);
 
-    let http = Http::new(args.shared.node_url.as_str()).expect("Couldn't connect to HTTP");
-    let web3 = Web3::new(http);
-
-    let settlement_contract = GPv2Settlement::deployed(&web3)
-        .await
-        .expect("Couldn't load deployed settlement");
+    let transport = web3::transports::Http::new(args.shared.node_url.as_str())
+        .expect("transport creation failed");
+    let web3 = web3::Web3::new(transport);
+    let settlement_contract = contracts::GPv2Settlement::deployed(&web3)
     let chain_id = web3.eth().chain_id().await.expect("Could not get chainId");
     let domain_separator =
         DomainSeparator::get_domain_separator(chain_id.as_u64(), settlement_contract.address());
