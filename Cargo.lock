@@ -581,7 +581,7 @@ dependencies = [
  "futures 0.3.8",
  "futures-timer",
  "hex",
- "jsonrpc-core",
+ "jsonrpc-core 14.2.0",
  "lazy_static",
  "primitive-types",
  "secp256k1 0.19.0",
@@ -1186,6 +1186,19 @@ name = "jsonrpc-core"
 version = "14.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a0747307121ffb9703afd93afbd0fb4f854c38fb873f2c8b90e0e902f27c7b62"
+dependencies = [
+ "futures 0.1.30",
+ "log",
+ "serde",
+ "serde_derive",
+ "serde_json",
+]
+
+[[package]]
+name = "jsonrpc-core"
+version = "15.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0745a6379e3edc893c84ec203589790774e4247420033e71a76d3ab4687991fa"
 dependencies = [
  "futures 0.1.30",
  "log",
@@ -2235,7 +2248,7 @@ dependencies = [
  "contracts",
  "ethcontract",
  "futures 0.3.8",
- "jsonrpc-core",
+ "jsonrpc-core 15.1.0",
  "maplit",
  "model",
  "primitive-types",
@@ -2888,7 +2901,7 @@ dependencies = [
  "futures-timer",
  "hyper",
  "hyper-tls",
- "jsonrpc-core",
+ "jsonrpc-core 14.2.0",
  "log",
  "native-tls",
  "parking_lot",
