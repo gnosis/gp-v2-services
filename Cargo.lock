@@ -1257,7 +1257,6 @@ dependencies = [
  "anyhow",
  "chrono",
  "contracts",
- "ethcontract",
  "hex",
  "model",
  "primitive-types",
@@ -1269,6 +1268,7 @@ dependencies = [
  "tracing",
  "tracing-setup",
  "warp",
+ "web3",
 ]
 
 [[package]]

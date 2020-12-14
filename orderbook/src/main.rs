@@ -2,8 +2,6 @@ mod api;
 mod orderbook;
 
 use crate::orderbook::OrderBook;
-use contracts::GPv2Settlement;
-use ethcontract::{Http, Web3};
 use model::DomainSeparator;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use structopt::StructOpt;
@@ -38,6 +36,8 @@ async fn main() {
         .expect("transport creation failed");
     let web3 = web3::Web3::new(transport);
     let settlement_contract = contracts::GPv2Settlement::deployed(&web3)
+        .await
+        .expect("Couldn't load deployed settlement");
     let chain_id = web3.eth().chain_id().await.expect("Could not get chainId");
     let domain_separator =
         DomainSeparator::get_domain_separator(chain_id.as_u64(), settlement_contract.address());
