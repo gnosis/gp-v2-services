@@ -34,7 +34,7 @@ async fn main() {
     tracing_setup::initialize(args.shared.log_filter.as_str());
     tracing::info!("running order book with {:#?}", args);
 
-    let http = Http::new(&args.shared.node_url).expect("Couldn't connect to HTTP");
+    let http = Http::new(args.shared.node_url.as_str()).expect("Couldn't connect to HTTP");
     let web3 = Web3::new(http);
 
     let settlement_contract = GPv2Settlement::deployed(&web3)
