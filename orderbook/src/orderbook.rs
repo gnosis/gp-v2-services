@@ -82,7 +82,6 @@ impl OrderBook {
         let owner = user_order
             .validate_signature(&self.domain_separator)
             .ok_or(AddOrderError::InvalidSignature)?;
-        println!("owner: {}", owner);
         Ok(Order {
             order_meta_data: OrderMetaData {
                 creation_date: chrono::offset::Utc::now(),

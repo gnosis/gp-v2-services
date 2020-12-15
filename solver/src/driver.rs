@@ -52,7 +52,7 @@ impl Driver {
                 )
                 .gas(8_000_000.into())
         };
-        //settle().call().await.context("settle simulation failed")?;
+        settle().call().await.context("settle simulation failed")?;
         settle().send().await.context("settle execution failed")?;
         Ok(())
     }

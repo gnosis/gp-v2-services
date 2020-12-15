@@ -1,3 +1,4 @@
+use orderbook::OrderBookApi;
 use reqwest::Url;
 use std::time::Duration;
 use structopt::StructOpt;
