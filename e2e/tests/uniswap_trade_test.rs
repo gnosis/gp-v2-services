@@ -19,6 +19,7 @@ const ORDER_PLACEMENT_ENDPOINT: &str = "/api/v1/orders/";
 
 #[tokio::test]
 async fn test_with_ganache() {
+    tracing_setup::initialize("debug");
     let http = Http::new(NODE_HOST).expect("transport failure");
     let web3 = Web3::new(http);
 

@@ -360,6 +360,7 @@ dependencies = [
  "serde_json",
  "solver",
  "tokio",
+ "tracing-setup",
  "web3",
 ]
 
