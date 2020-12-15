@@ -8,3 +8,12 @@ members = [
     "solver",
     "tracing-setup",
 ]
+
+default-members = [
+    "contracts",
+    "model",
+    "orderbook",
+    "shared-arguments",
+    "solver",
+    "tracing-setup",
+]

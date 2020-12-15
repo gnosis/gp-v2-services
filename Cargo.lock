@@ -352,6 +352,7 @@ version = "1.0.0"
 dependencies = [
  "contracts",
  "ethcontract",
+ "hex-literal",
  "model",
  "orderbook",
  "reqwest",

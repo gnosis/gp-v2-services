@@ -1,5 +1,6 @@
 use contracts::{ERC20Mintable, GPv2Settlement, UniswapV2Factory, UniswapV2Router02};
 use ethcontract::prelude::{Account, Address, Http, PrivateKey, Web3, U256};
+use hex_literal::hex;
 use model::{DomainSeparator, OrderCreationBuilder, OrderKind};
 use orderbook::orderbook::OrderBook;
 use secp256k1::SecretKey;
@@ -7,12 +8,10 @@ use serde_json::json;
 use std::{str::FromStr, sync::Arc};
 use web3::signing::SecretKeyRef;
 
-const TRADER_A_PK: [u8; 32] = [
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-];
-const TRADER_B_PK: [u8; 32] = [
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
-];
+const TRADER_A_PK: [u8; 32] =
+    hex!("0000000000000000000000000000000000000000000000000000000000000001");
+const TRADER_B_PK: [u8; 32] =
+    hex!("0000000000000000000000000000000000000000000000000000000000000002");
 
 const NODE_HOST: &str = "http://127.0.0.1:8545";
 const API_HOST: &str = "http://127.0.0.1:8080";

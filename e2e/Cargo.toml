@@ -6,6 +6,7 @@ edition = "2018"
 [dev-dependencies]
 contracts = { path = "../contracts" }
 ethcontract = { version = "0.9",  default-features = false, features = ["http"] }
+hex-literal = "0.3"
 model = { path = "../model" }
 orderbook = { path = "../orderbook" }
 secp256k1 = "0.17"
