@@ -163,7 +163,7 @@ async fn test_with_ganache() {
     );
     let mut driver = solver::driver::Driver {
         settlement_contract: gp_settlement,
-        uniswap_router,
+        uniswap_contract: uniswap_router,
         orderbook: orderbook_api,
     };
     driver.single_run().await.unwrap();
