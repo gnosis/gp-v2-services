@@ -590,7 +590,7 @@ mod tests {
                 s: hex!("2eb1863e76c37abb54df6695d54f3abc07db4ff7df57e4564a48aee137f358bd").into(),
             },
         };
-        let expected_owner = hex!("70997970c51812dc3a010c7d01b50e0d17dc79c8");
+        let expected_owner = hex!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
         let owner = order.validate_signature(&domain_separator).unwrap();
         assert_eq!(owner, expected_owner.into());
     }

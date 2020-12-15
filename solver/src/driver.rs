@@ -36,6 +36,7 @@ impl Driver {
             };
         // TODO: check if we need to approve spending to uniswap
         // TODO: use retry transaction sending crate for updating gas prices
+        // TODO: Proper gas estimation
         let settle = || {
             self.settlement_contract
                 .settle(
