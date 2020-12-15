@@ -14,8 +14,8 @@ const TRADER_B_PK: [u8; 32] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
 ];
 
-const NODE_HOST: &str = "http://localhost:8545";
-const API_HOST: &str = "http://localhost:8080";
+const NODE_HOST: &str = "http://127.0.0.1:8545";
+const API_HOST: &str = "http://127.0.0.1:8080";
 const ORDER_PLACEMENT_ENDPOINT: &str = "/api/v1/orders/";
 
 #[tokio::test]
@@ -112,7 +112,10 @@ async fn test_with_ganache() {
             .await
             .expect("Couldn't query domain separator"),
     );
-    orderbook::serve_task(Arc::new(OrderBook::new(domain_separator)));
+    orderbook::serve_task(
+        Arc::new(OrderBook::new(domain_separator)),
+        API_HOST[7..].parse().expect("Couldn't parse API address"),
+    );
     let client = reqwest::Client::new();
 
     let order_a = OrderCreationBuilder::default()

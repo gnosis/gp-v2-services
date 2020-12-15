@@ -39,7 +39,7 @@ async fn main() {
     let domain_separator =
         DomainSeparator::get_domain_separator(chain_id.as_u64(), settlement_contract.address());
     let orderbook = Arc::new(OrderBook::new(domain_separator));
-    let serve_task = serve_task(orderbook.clone());
+    let serve_task = serve_task(orderbook.clone(), args.bind_address);
     let maintenance_task = task::spawn(orderbook_maintenance(orderbook));
     tokio::select! {
         result = serve_task => tracing::error!(?result, "serve task exited"),
