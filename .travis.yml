@@ -34,9 +34,8 @@ jobs:
           popd
         - $SCCACHE --version
       before_script:
-        # For e2e tests
         - GANACHE_DOCKER_CONTAINER=$(docker run -d trufflesuite/ganache-cli)
-        - (cd contracts; cargo run --bin deploy --features bin)
+        - (cd contracts; cargo run --bin deploy --features bin) # For e2e tests
       script:
         - cargo fmt -- --check
         - cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
