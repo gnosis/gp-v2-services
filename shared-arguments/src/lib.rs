@@ -12,11 +12,7 @@ pub struct Arguments {
     pub log_filter: String,
 
     /// The Ethereum node URL to connect to.
-    #[structopt(
-        long,
-        env = "NODE_URL",
-        default_value = "https://rinkeby.infura.io/v3/f9feca3a81474d6392f1cde2e6e9cf84"
-    )]
+    #[structopt(long, env = "NODE_URL", default_value = "http://localhost:8545")]
     pub node_url: Url,
 
     /// Timeout for web3 operations on the node in seconds.
