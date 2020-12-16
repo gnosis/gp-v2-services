@@ -31,7 +31,7 @@ async fn main() {
 
     let transport = web3::transports::Http::new(args.shared.node_url.as_str())
         .expect("transport creation failed");
-    let web3 = web3::Web3::new(transport);
+    let web3: u64 = web3::Web3::new(transport);
     let settlement_contract = contracts::GPv2Settlement::deployed(&web3)
         .await
         .expect("Couldn't load deployed settlement");
