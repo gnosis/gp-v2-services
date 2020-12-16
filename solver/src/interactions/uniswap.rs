@@ -91,7 +91,7 @@ mod tests {
         // Verify Approve
         let mut approve_call = cursor.into_inner();
         assert_eq!(&approve_call[0..20], token_in.as_fixed_bytes());
-        assert_eq!(approve_call[20..23], [0, 0, 68]);
+        assert_eq!(approve_call[20..23], [0, 0, 68]); // length of calldata below
 
         let call = &approve_call[23..];
         let approve_signature = hex!("095ea7b3");
@@ -102,7 +102,8 @@ mod tests {
         // Verify Swap
         let swap_call = approve_call.split_off(91);
         assert_eq!(&swap_call[0..20], contract.address().as_fixed_bytes());
-        assert_eq!(swap_call[20..23], [0, 1, 4]);
+        assert_eq!(swap_call[20..23], [0, 1, 4]); // length of calldata below
+
         let call = &swap_call[23..];
         let swap_signature = [0x38u8, 0xed, 0x17, 0x39];
         let path_offset = 160;
