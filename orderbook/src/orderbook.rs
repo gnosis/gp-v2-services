@@ -64,14 +64,6 @@ impl OrderBook {
         self.orders.read().await.get(uid).cloned()
     }
 
-    pub async fn get_order_by_uid(&self, uid: OrderUid) -> Option<Order> {
-        let orders = self.get_orders().await;
-        orders
-            .into_iter()
-            .filter(|order| order.order_meta_data.uid == uid)
-            .last()
-    }
-
     #[allow(dead_code)]
     pub async fn remove_order(&self, uid: &OrderUid) -> Result<(), RemoveOrderError> {
         self.orders

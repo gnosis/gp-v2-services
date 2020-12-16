@@ -88,7 +88,7 @@ pub async fn get_order_by_uid(
     uid: OrderUid,
     orderbook: Arc<OrderBook>,
 ) -> Result<impl warp::Reply, Infallible> {
-    if let Some(order) = orderbook.get_order_by_uid(uid).await {
+    if let Some(order) = orderbook.get_order(&uid).await {
         Ok(with_status(json(&order), StatusCode::OK))
     } else {
         Ok(with_status(
