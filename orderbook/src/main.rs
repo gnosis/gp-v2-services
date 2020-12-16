@@ -1,6 +1,6 @@
 use model::DomainSeparator;
 use orderbook::orderbook::OrderBook;
-use orderbook::serve_task;
+// use orderbook::serve_task;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use structopt::StructOpt;
 use tokio::task;

@@ -17,7 +17,7 @@ pub struct OnChainStateStore {
     settled_orders: HashMap<OrderUid, U256>, // maybe this needs to become a mutex;
     last_handled_block: u64,
     block_page_size: u64,
-    settlement_event_filter: LogFilterBuilder<web3::transports::Http>,
+    // settlement_event_filter: LogFilterBuilder<web3::transports::Http>,
 }
 const BLOCK_CONFIRMATION_COUNT: u64 = 2;
 
