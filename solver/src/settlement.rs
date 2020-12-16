@@ -19,7 +19,7 @@ pub trait Interaction: std::fmt::Debug {
     // Write::write returns a result but we know we write to a vector in memory so we know it will
     // never fail. Then the question becomes whether interactions should be allowed to fail encoding
     // for other reasons.
-    fn encode(&self, writer: &mut (dyn Write + Send)) -> Result<()>;
+    fn encode(&self, writer: &mut dyn Write) -> Result<()>;
 }
 
 #[derive(Debug, Default)]

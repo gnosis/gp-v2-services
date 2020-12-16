@@ -16,14 +16,14 @@ pub struct UniswapInteraction {
 }
 
 impl Interaction for UniswapInteraction {
-    fn encode(&self, writer: &mut (dyn std::io::Write + Send)) -> Result<()> {
+    fn encode(&self, writer: &mut dyn std::io::Write) -> Result<()> {
         self.encode_approve(writer)?;
         self.encode_swap(writer)
     }
 }
 
 impl UniswapInteraction {
-    fn encode_approve(&self, writer: &mut (dyn std::io::Write + Send)) -> Result<()> {
+    fn encode_approve(&self, writer: &mut dyn std::io::Write) -> Result<()> {
         let token = IERC20::at(&self.web3(), self.token_in);
         if self.set_allowance {
             let method = token.approve(self.contract.address(), U256::MAX);
