@@ -38,7 +38,13 @@ async fn main() {
     let uniswap_contract = contracts::UniswapV2Router02::deployed(&web3)
         .await
         .expect("couldn't load deployed uniswap router");
-    let settlement_contract = solver::get_settlement_contract(&web3, 4, args.private_key)
+    let chain_id = web3
+        .eth()
+        .chain_id()
+        .await
+        .expect("Could not get chainId")
+        .as_u64();
+    let settlement_contract = solver::get_settlement_contract(&web3, chain_id, args.private_key)
         .await
         .expect("couldn't load deployed settlement");
     let orderbook =
