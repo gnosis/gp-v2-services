@@ -1967,6 +1967,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "contracts",
+ "ethcontract",
  "futures 0.3.8",
  "jsonrpc-core",
  "maplit",
