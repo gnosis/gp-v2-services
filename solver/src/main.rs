@@ -1,14 +1,5 @@
-#![allow(dead_code)]
-
-mod batcher;
-mod driver;
-mod encoding;
-mod interactions;
-mod naive_solver;
-mod orderbook;
-mod settlement;
-
 use reqwest::Url;
+use solver::driver::Driver;
 use std::time::Duration;
 use structopt::StructOpt;
 
@@ -38,12 +29,14 @@ async fn main() {
     let transport = web3::transports::Http::new(args.shared.node_url.as_str())
         .expect("transport creation failed");
     let web3 = web3::Web3::new(transport);
-    let _settlement_contract = contracts::GPv2Settlement::deployed(&web3)
+    let settlement_contract = contracts::GPv2Settlement::deployed(&web3)
         .await
-        .expect("Couldn't load deployed settlement");
-    let orderbook = orderbook::OrderBookApi::new(args.orderbook_url, args.orderbook_timeout);
-    // TODO: start driver, for now just fetch orders as placeholder
-    tracing::info!("fetching orders");
-    let orders = orderbook.get_orders().await;
-    tracing::info!(?orders);
+        .expect("couldn't load deployed settlement");
+    let uniswap_contract = contracts::UniswapV2Router02::deployed(&web3)
+        .await
+        .expect("couldn't load deployed uniswap router");
+    let orderbook =
+        solver::orderbook::OrderBookApi::new(args.orderbook_url, args.orderbook_timeout);
+    let mut driver = Driver::new(settlement_contract, uniswap_contract, orderbook);
+    driver.run_forever().await;
 }
