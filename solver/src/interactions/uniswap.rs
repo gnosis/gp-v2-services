@@ -27,7 +27,11 @@ impl UniswapInteraction {
         let token = IERC20::at(&self.web3(), self.token_in);
         if self.set_allowance {
             let method = token.approve(self.contract.address(), U256::MAX);
-            encode_interaction(self.token_in, method.tx.data.expect("no calldata"), writer)?;
+            encode_interaction(
+                self.token_in,
+                method.tx.data.expect("no calldata").0,
+                writer,
+            )?;
         }
         Ok(())
     }
@@ -42,7 +46,7 @@ impl UniswapInteraction {
         );
         encode_interaction(
             self.contract.address(),
-            method.tx.data.expect("no calldata"),
+            method.tx.data.expect("no calldata").0,
             writer,
         )
     }
