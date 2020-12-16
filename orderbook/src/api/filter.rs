@@ -111,12 +111,9 @@ pub mod test_util {
     async fn get_order_by_uid_for_non_existent_order_() {
         let orderbook = Arc::new(OrderBook::default());
         let filter = get_order_by_uid(orderbook.clone());
-        let mut order_creation = OrderCreation::default();
-        order_creation.valid_to = u32::MAX;
-        order_creation.sign_self();
-        let order = orderbook.order_creation_to_order(order_creation).unwrap();
+        let uid = OrderUid([0 as u8; 56]);
         let response = request()
-            .path(&format!("/orders/{:}", order.order_meta_data.uid))
+            .path(&format!("/orders/{:}", uid))
             .method("GET")
             .reply(&filter)
             .await;

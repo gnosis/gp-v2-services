@@ -175,9 +175,7 @@ impl FromStr for OrderUid {
     type Err = hex::FromHexError;
     fn from_str(s: &str) -> Result<OrderUid, hex::FromHexError> {
         let mut value = [0 as u8; 56];
-        let s_without_prefix = s
-            .strip_prefix("0x")
-            .ok_or(hex::FromHexError::InvalidStringLength)?;
+        let s_without_prefix = s.strip_prefix("0x").unwrap_or(s);
         hex::decode_to_slice(s_without_prefix, value.as_mut())?;
         Ok(OrderUid(value))
     }
