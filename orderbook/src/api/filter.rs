@@ -95,10 +95,9 @@ pub mod test_util {
         let mut order_creation = OrderCreation::default();
         order_creation.valid_to = u32::MAX;
         order_creation.sign_self();
-        let order = orderbook.order_creation_to_order(order_creation).unwrap();
-        orderbook.add_order(order_creation).await.unwrap();
+        let uid = orderbook.add_order(order_creation).await.unwrap();
         let response = request()
-            .path(&format!("/orders/{:}", order.order_meta_data.uid))
+            .path(&format!("/orders/{:}", uid))
             .method("GET")
             .reply(&filter)
             .await;

@@ -85,10 +85,7 @@ impl OrderBook {
         orders.retain(|_, order| has_future_valid_to(now_in_epoch_seconds, &order.order_creation));
     }
 
-    pub fn order_creation_to_order(
-        &self,
-        user_order: OrderCreation,
-    ) -> Result<Order, AddOrderError> {
+    fn order_creation_to_order(&self, user_order: OrderCreation) -> Result<Order, AddOrderError> {
         let owner = user_order
             .validate_signature(&self.domain_separator)
             .ok_or(AddOrderError::InvalidSignature)?;
