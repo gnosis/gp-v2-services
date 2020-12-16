@@ -21,7 +21,7 @@ fn main() {
     generate_contract("UniswapV2Factory", hashmap! {});
     generate_contract(
         "GPv2Settlement",
-        hashmap! {4 => Address::from_str("2344e1ee1212C756bAF39547e59118c44f4D7F70").unwrap()},
+        hashmap! {4 => Address::from_str("2344e1ee1212C756bAF39547e59118c44f4D7F70").unwrap(), 5 => Address::from_str("2344e1ee1212C756bAF39547e59118c44f4D7F70").unwrap()},
     );
     generate_contract("GPv2AllowListAuthentication", hashmap! {});
 }

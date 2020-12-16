@@ -9,7 +9,7 @@ use primitive_types::U256;
 use std::collections::{hash_map::Entry, HashMap};
 use web3::Web3;
 
-type Event = ethcontract::contract::Event<contracts::GPv2Settlement::Event>;
+type Event = ethcontract::contract::Event<contracts::g_pv_2_settlement::Event>;
 
 pub struct OnChainStateStore {
     settlement_contract: GPv2Settlement,
@@ -65,7 +65,7 @@ impl OnChainStateStore {
         while let Some(chunk) = events.next().await {
             let events = chunk?;
             for event in events {
-                println!("{:}", event);
+                println!("{:?}", event);
             }
             self.last_handled_block = to_block;
         }

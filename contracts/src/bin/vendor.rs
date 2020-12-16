@@ -28,7 +28,7 @@ const NPM_CONTRACTS: &[(&str, &str)] = &[
         "UniswapV2Factory.json",
     ),
     (
-        "@gnosis.pm/gp-v2-contracts@0.0.1-alpha.5/deployments/rinkeby/GPv2Settlement.json",
+        "@gnosis.pm/gp-v2-contracts@0.0.1-alpha.7/deployments/rinkeby/GPv2Settlement.json",
         "GPv2Settlement.json",
     ),
     (
