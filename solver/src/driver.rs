@@ -2,6 +2,7 @@ use crate::{naive_solver, orderbook::OrderBookApi};
 use anyhow::{anyhow, Context, Result};
 use contracts::{GPv2Settlement, UniswapV2Router02};
 use std::time::Duration;
+use tracing::info;
 
 const SETTLE_INTERVAL: Duration = Duration::from_secs(30);
 
@@ -49,12 +50,12 @@ impl Driver {
         let settlement = match naive_solver::settle(
             orders.into_iter().map(|order| order.order_creation),
             &self.uniswap_contract,
-            &self.settlement_contract.address(),
+            &self.settlement_contract,
         ) {
             None => return Ok(()),
             Some(settlement) => settlement,
         };
-        tracing::debug!("got settlement");
+        info!("Computed {:?}", settlement);
         // TODO: check if we need to approve spending to uniswap
         // TODO: use retry transaction sending crate for updating gas prices
         let encoded_interactions = settlement
@@ -74,7 +75,7 @@ impl Driver {
                 )
                 .gas(8_000_000u32.into())
         };
-        settle().call().await.context("settle simulation failed")?;
+        //settle().call().await.context("settle simulation failed")?;
         settle().send().await.context("settle execution failed")?;
         Ok(())
     }
