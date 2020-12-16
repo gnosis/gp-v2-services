@@ -1,8 +1,9 @@
 use super::handler;
 use crate::orderbook::OrderBook;
+use hex::{FromHex, FromHexError};
 use model::{OrderCreation, OrderUid};
 use primitive_types::H160;
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 use warp::Filter;
 
 const MAX_JSON_BODY_PAYLOAD: u64 = 1024 * 16;
@@ -46,18 +47,27 @@ pub fn get_order_by_uid(
         .and(with_orderbook(orderbook))
         .and_then(handler::get_order_by_uid)
 }
+/// Wraps H160 with FromStr that can handle a `0x` prefix.
+struct H160Wrapper(H160);
+impl FromStr for H160Wrapper {
+    type Err = FromHexError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.strip_prefix("0x").unwrap_or(s);
+        Ok(H160Wrapper(H160(FromHex::from_hex(s)?)))
+    }
+}
 
 pub fn get_fee_info() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
 {
-    warp::path!("fee" / H160)
+    warp::path!("tokens" / H160Wrapper / "fee")
         .and(warp::get())
+        .map(|token: H160Wrapper| token.0)
         .and_then(handler::get_fee_info)
 }
 
 #[cfg(test)]
 pub mod test_util {
     use super::*;
-    use crate::orderbook::user_order_to_full_order;
     use model::Order;
     use primitive_types::U256;
     use serde_json::json;
@@ -85,8 +95,9 @@ pub mod test_util {
         let mut order_creation = OrderCreation::default();
         order_creation.valid_to = u32::MAX;
         order_creation.sign_self();
-        let order = user_order_to_full_order(order_creation).unwrap();
+        let order = orderbook.order_creation_to_order(order_creation).unwrap();
         orderbook.add_order(order_creation).await.unwrap();
+        println!("{:}", &format!("/orders/{:}", order.order_meta_data.uid));
         let response = request()
             .path(&format!("/orders/{:}", order.order_meta_data.uid))
             .method("GET")
@@ -104,7 +115,7 @@ pub mod test_util {
         let mut order_creation = OrderCreation::default();
         order_creation.valid_to = u32::MAX;
         order_creation.sign_self();
-        let order = user_order_to_full_order(order_creation).unwrap();
+        let order = orderbook.order_creation_to_order(order_creation).unwrap();
         let response = request()
             .path(&format!("/orders/{:}", order.order_meta_data.uid))
             .method("GET")
@@ -116,8 +127,8 @@ pub mod test_util {
     #[tokio::test]
     async fn get_fee_info_() {
         let filter = get_fee_info();
-        let sell_token = String::from("000000000000000000000000000000000000000a");
-        let path_string = format!("/fee/{}", sell_token);
+        let sell_token = String::from("0x000000000000000000000000000000000000000a");
+        let path_string = format!("/tokens/{}/fee", sell_token);
         let post = || async {
             request()
                 .path(&path_string)
@@ -141,7 +152,7 @@ pub mod test_util {
         order.valid_to = u32::MAX;
         order.sign_self();
         let expected_uid = json!(
-            "98f26f9847f4e365ea530784ce5976f56ea2a67e9cde05fd16fca9a1fadbe5211a642f0e3c3af545e7acbd38b07251b3990914f1ffffffff"
+            "0x98f26f9847f4e365ea530784ce5976f56ea2a67e9cde05fd16fca9a1fadbe5211a642f0e3c3af545e7acbd38b07251b3990914f1ffffffff"
         );
         let post = || async {
             request()

@@ -6,7 +6,10 @@ pub mod h160_hexadecimal;
 pub mod u256_decimal;
 
 use chrono::{offset::Utc, DateTime, NaiveDateTime};
+use ethabi::{encode, Token};
+use hex::{FromHex, FromHexError};
 use hex_literal::hex;
+use lazy_static::lazy_static;
 use primitive_types::{H160, H256, U256};
 use secp256k1::{constants::SECRET_KEY_SIZE, SecretKey};
 use serde::{de, Deserialize, Serialize};
@@ -33,9 +36,9 @@ impl Default for OrderKind {
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Default)]
 pub struct Signature {
-    pub v: u8,
     pub r: H256,
     pub s: H256,
+    pub v: u8,
 }
 
 /// An order as provided to the orderbook by the frontend.
@@ -65,7 +68,7 @@ impl OrderCreation {
     }
 
     // If signature is valid returns the owner.
-    pub fn validate_signature(&self, domain_separator: &[u8; 32]) -> Option<H160> {
+    pub fn validate_signature(&self, domain_separator: &DomainSeparator) -> Option<H160> {
         // The signature related functionality is defined by the smart contract:
         // https://github.com/gnosis/gp-v2-contracts/blob/main/src/contracts/libraries/GPv2Encoding.sol
 
@@ -87,9 +90,9 @@ impl OrderCreation {
 
 // Intended to be used by tests that need signed orders.
 impl OrderCreation {
-    pub const TEST_DOMAIN_SEPARATOR: [u8; 32] = [0u8; 32];
+    pub const TEST_DOMAIN_SEPARATOR: DomainSeparator = DomainSeparator([0u8; 32]);
 
-    pub fn sign_self_with(&mut self, domain_separator: &[u8; 32], key: SecretKeyRef) {
+    pub fn sign_self_with(&mut self, domain_separator: &DomainSeparator, key: SecretKeyRef) {
         let message = self.signing_digest_message(domain_separator);
         // Unwrap because the only error is for invalid messages which we don't create.
         let signature = Key::sign(&key, &message, None).unwrap();
@@ -132,23 +135,23 @@ impl OrderCreation {
         signing::keccak256(&hash_data)
     }
 
-    fn signing_digest_typed_data(&self, domain_separator: &[u8; 32]) -> [u8; 32] {
+    fn signing_digest_typed_data(&self, domain_separator: &DomainSeparator) -> [u8; 32] {
         let mut hash_data = [0u8; 66];
         hash_data[0..2].copy_from_slice(&[0x19, 0x01]);
-        hash_data[2..34].copy_from_slice(domain_separator);
+        hash_data[2..34].copy_from_slice(&domain_separator.0);
         hash_data[34..66].copy_from_slice(&self.order_digest());
         signing::keccak256(&hash_data)
     }
 
-    fn signing_digest_message(&self, domain_separator: &[u8; 32]) -> [u8; 32] {
+    fn signing_digest_message(&self, domain_separator: &DomainSeparator) -> [u8; 32] {
         let mut hash_data = [0u8; 92];
         hash_data[0..28].copy_from_slice(b"\x19Ethereum Signed Message:\n64");
-        hash_data[28..60].copy_from_slice(domain_separator);
+        hash_data[28..60].copy_from_slice(&domain_separator.0);
         hash_data[60..92].copy_from_slice(&self.order_digest());
         signing::keccak256(&hash_data)
     }
 
-    fn signing_digest(&self, domain_separator: &[u8; 32]) -> [u8; 32] {
+    fn signing_digest(&self, domain_separator: &DomainSeparator) -> [u8; 32] {
         if self.signature.v & 0x80 == 0 {
             self.signing_digest_typed_data(domain_separator)
         } else {
@@ -165,16 +168,20 @@ impl FromStr for OrderUid {
     type Err = hex::FromHexError;
     fn from_str(s: &str) -> Result<OrderUid, hex::FromHexError> {
         let mut value = [0 as u8; 56];
-        hex::decode_to_slice(s, value.as_mut())?;
+        let s_without_prefix = s
+            .strip_prefix("0x")
+            .ok_or(hex::FromHexError::InvalidStringLength)?;
+        hex::decode_to_slice(s_without_prefix, value.as_mut())?;
         Ok(OrderUid(value))
     }
 }
 
 impl Display for OrderUid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut bytes = [0u8; 56 * 2];
+        let mut bytes = [0u8; 2 + 56 * 2];
+        bytes[..2].copy_from_slice(b"0x");
         // Unwrap because the length is always correct.
-        hex::encode_to_slice(&self.0, &mut bytes).unwrap();
+        hex::encode_to_slice(&self.0, &mut bytes[2..]).unwrap();
         // Unwrap because the string is always valid utf8.
         let str = std::str::from_utf8(&bytes).unwrap();
         f.write_str(str)
@@ -191,12 +198,37 @@ impl Serialize for OrderUid {
 }
 
 impl<'de> Deserialize<'de> for OrderUid {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn deserialize<D>(deserializer: D) -> Result<OrderUid, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let s = String::deserialize(deserializer)?;
-        FromStr::from_str(&s).map_err(de::Error::custom)
+        struct Visitor {}
+        impl<'de> de::Visitor<'de> for Visitor {
+            type Value = OrderUid;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                write!(formatter, "an uid with orderDigest_owner_validTo")
+            }
+
+            fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                let s = s.strip_prefix("0x").ok_or_else(|| {
+                    de::Error::custom(format!(
+                        "{:?} can't be decoded as hex uid because it does not start with '0x'",
+                        s
+                    ))
+                })?;
+                let mut value = [0 as u8; 56];
+                hex::decode_to_slice(s, value.as_mut()).map_err(|err| {
+                    de::Error::custom(format!("failed to decode {:?} as hex uid: {}", s, err))
+                })?;
+                Ok(OrderUid(value))
+            }
+        }
+
+        deserializer.deserialize_str(Visitor {})
     }
 }
 
@@ -237,11 +269,12 @@ impl Serialize for Signature {
     where
         S: serde::Serializer,
     {
-        let mut bytes = [0u8; 65 * 2];
+        let mut bytes = [0u8; 2 + 65 * 2];
+        bytes[..2].copy_from_slice(b"0x");
         // Can only fail if the buffer size does not match but we know it is correct.
-        hex::encode_to_slice([self.v], &mut bytes[..2]).unwrap();
         hex::encode_to_slice(self.r, &mut bytes[2..66]).unwrap();
-        hex::encode_to_slice(self.s, &mut bytes[66..]).unwrap();
+        hex::encode_to_slice(self.s, &mut bytes[66..130]).unwrap();
+        hex::encode_to_slice([self.v], &mut bytes[130..132]).unwrap();
         // Hex encoding is always valid utf8.
         let str = std::str::from_utf8(&bytes).unwrap();
         serializer.serialize_str(str)
@@ -265,14 +298,23 @@ impl<'de> Deserialize<'de> for Signature {
             where
                 E: de::Error,
             {
+                let s = s.strip_prefix("0x").ok_or_else(|| {
+                    de::Error::custom(format!(
+                        "{:?} can't be decoded as hex signature because it does not start with '0x'",
+                        s
+                    ))
+                })?;
                 let mut bytes = [0u8; 65];
                 hex::decode_to_slice(s, &mut bytes).map_err(|err| {
-                    de::Error::custom(format!("failed to decode {:?} as hex: {}", s, err))
+                    de::Error::custom(format!(
+                        "failed to decode {:?} as hex signature: {}",
+                        s, err
+                    ))
                 })?;
                 Ok(Signature {
-                    v: bytes[0],
-                    r: H256::from_slice(&bytes[1..33]),
-                    s: H256::from_slice(&bytes[33..]),
+                    r: H256::from_slice(&bytes[..32]),
+                    s: H256::from_slice(&bytes[32..64]),
+                    v: bytes[64],
                 })
             }
         }
@@ -303,22 +345,83 @@ impl TokenPair {
     }
 }
 
+#[derive(Copy, Eq, PartialEq, Clone, Default)]
+pub struct DomainSeparator(pub [u8; 32]);
+
+impl std::str::FromStr for DomainSeparator {
+    type Err = FromHexError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(FromHex::from_hex(s)?))
+    }
+}
+
+impl std::fmt::Debug for DomainSeparator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut hex = [0u8; 64];
+        // Unwrap because we know the length is correct.
+        hex::encode_to_slice(self.0, &mut hex).unwrap();
+        // Unwrap because we know it is valid utf8.
+        f.write_str(std::str::from_utf8(&hex).unwrap())
+    }
+}
+
+impl DomainSeparator {
+    pub fn get_domain_separator(chain_id: u64, contract_address: H160) -> Self {
+        lazy_static! {
+            /// The EIP-712 domain name used for computing the domain separator.
+            static ref DOMAIN_NAME: [u8; 32] = signing::keccak256(b"Gnosis Protocol");
+
+            /// The EIP-712 domain version used for computing the domain separator.
+            static ref DOMAIN_VERSION: [u8; 32] = signing::keccak256(b"v2");
+
+            /// The EIP-712 domain type used computing the domain separator.
+            static ref DOMAIN_TYPE_HASH: [u8; 32] = signing::keccak256(
+                b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)",
+            );
+        }
+        let abi_encode_string = encode(&[
+            Token::Uint((*DOMAIN_TYPE_HASH).into()),
+            Token::Uint((*DOMAIN_NAME).into()),
+            Token::Uint((*DOMAIN_VERSION).into()),
+            Token::Uint(chain_id.into()),
+            Token::Address(contract_address),
+        ]);
+
+        DomainSeparator(signing::keccak256(abi_encode_string.as_slice()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::NaiveDateTime;
+    use hex_literal::hex;
     use serde_json::json;
     use std::str::FromStr;
+
+    #[test]
+    fn domain_separator_rinkeby() {
+        let contract_address: H160 = hex!("91D6387ffbB74621625F39200d91a50386C9Ab15").into();
+        let chain_id: u64 = 4;
+        let domain_separator_rinkeby =
+            DomainSeparator::get_domain_separator(chain_id, contract_address);
+        // domain separator is taken from rinkeby deployment at address 91D6387ffbB74621625F39200d91a50386C9Ab15
+        let expected_domain_separator: DomainSeparator = DomainSeparator(hex!(
+            "9d7e07ef92761aa9453ae5ff25083a2b19764131b15295d3c7e89f1f1b8c67d9"
+        ));
+        assert_eq!(domain_separator_rinkeby, expected_domain_separator);
+    }
 
     #[test]
     fn deserialization_and_back() {
         let value = json!(
         {
             "creationDate": "1970-01-01T00:00:03Z",
-            "owner": "0000000000000000000000000000000000000001",
-            "uid": "1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
-            "sellToken": "000000000000000000000000000000000000000a",
-            "buyToken": "0000000000000000000000000000000000000009",
+            "owner": "0x0000000000000000000000000000000000000001",
+            "uid": "0x1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+            "sellToken": "0x000000000000000000000000000000000000000a",
+            "buyToken": "0x0000000000000000000000000000000000000009",
             "sellAmount": "1",
             "buyAmount": "0",
             "validTo": 4294967295u32,
@@ -326,7 +429,7 @@ mod tests {
             "feeAmount": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
             "kind": "buy",
             "partiallyFillable": false,
-            "signature": "0102000000000000000000000000000000000000000000000000000000000000030400000000000000000000000000000000000000000000000000000000000005",
+            "signature": "0x0200000000000000000000000000000000000000000000000000000000000003040000000000000000000000000000000000000000000000000000000000000501",
         });
         let expected = Order {
             order_meta_data: OrderMetaData {
@@ -384,8 +487,9 @@ mod tests {
     // from two of the tests in https://github.com/gnosis/gp-v2-contracts/blob/main/test/GPv2Encoding.test.ts .
     #[test]
     fn signature_typed_data() {
-        let domain_separator =
-            hex!("f8a1143d44c67470a791201b239ff6b0ecc8910aa9682bebd08145f5fd84722b");
+        let domain_separator = DomainSeparator(hex!(
+            "f8a1143d44c67470a791201b239ff6b0ecc8910aa9682bebd08145f5fd84722b"
+        ));
         let order = OrderCreation {
             sell_token: hex!("0101010101010101010101010101010101010101").into(),
             buy_token: hex!("0202020202020202020202020202020202020202").into(),
@@ -412,8 +516,9 @@ mod tests {
 
     #[test]
     fn signature_message() {
-        let domain_separator =
-            hex!("f8a1143d44c67470a791201b239ff6b0ecc8910aa9682bebd08145f5fd84722b");
+        let domain_separator = DomainSeparator(hex!(
+            "f8a1143d44c67470a791201b239ff6b0ecc8910aa9682bebd08145f5fd84722b"
+        ));
         let order = OrderCreation {
             sell_token: hex!("0101010101010101010101010101010101010101").into(),
             buy_token: hex!("0202020202020202020202020202020202020202").into(),
@@ -446,11 +551,16 @@ mod tests {
     }
 
     #[test]
+    fn domain_separator_does_not_panic_in_debug() {
+        println!("{:?}", DomainSeparator::default());
+    }
+
+    #[test]
     fn uid_is_displayed_as_hex() {
         let mut uid = OrderUid([0u8; 56]);
         uid.0[0] = 0x01;
         uid.0[55] = 0xff;
-        let expected = "01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000ff";
+        let expected = "0x01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000ff";
         assert_eq!(uid.to_string(), expected);
         assert_eq!(format!("{}", uid), expected);
     }
