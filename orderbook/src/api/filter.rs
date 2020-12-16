@@ -97,7 +97,6 @@ pub mod test_util {
         order_creation.sign_self();
         let order = orderbook.order_creation_to_order(order_creation).unwrap();
         orderbook.add_order(order_creation).await.unwrap();
-        println!("{:}", &format!("/orders/{:}", order.order_meta_data.uid));
         let response = request()
             .path(&format!("/orders/{:}", order.order_meta_data.uid))
             .method("GET")
@@ -109,7 +108,7 @@ pub mod test_util {
         assert_eq!(response_orders, orderbook_orders[0]);
     }
     #[tokio::test]
-    async fn get_order_by_uid_invalid_request() {
+    async fn get_order_by_uid_for_non_existent_order_() {
         let orderbook = Arc::new(OrderBook::default());
         let filter = get_order_by_uid(orderbook.clone());
         let mut order_creation = OrderCreation::default();
