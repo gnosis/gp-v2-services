@@ -121,7 +121,7 @@ impl OrderBook {
             .filled_amount(uid.0.to_vec())
             .call()
             .await
-            .unwrap_or(U256::MAX);
+            .unwrap_or(U256::zero());
         // As a simplification the function is returning the uid,
         // if the order was already partially settled
         // or if it was canceled.
