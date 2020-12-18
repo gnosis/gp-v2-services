@@ -1,10 +1,14 @@
+use contracts::GPv2Settlement;
+use futures::future::join_all;
+use futures::join;
+use model::{DomainSeparator, Order, OrderCreation, OrderMetaData, OrderUid};
+use primitive_types::U256;
 use std::{
     collections::{hash_map::Entry, HashMap},
     time::SystemTime,
 };
-
-use model::{DomainSeparator, Order, OrderCreation, OrderMetaData, OrderUid};
 use tokio::sync::RwLock;
+use tracing::info;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum AddOrderError {
@@ -75,14 +79,62 @@ impl OrderBook {
     }
 
     // Run maintenance tasks like removing expired orders.
-    pub async fn run_maintenance(&self) {
-        self.remove_expired_orders(now_in_epoch_seconds()).await;
+    pub async fn run_maintenance(&self, settlement_contract: &GPv2Settlement) {
+        let remove_order_future = self.remove_expired_orders(now_in_epoch_seconds());
+        let remove_settled_orders_future = self.remove_settled_orders(settlement_contract);
+        join!(remove_order_future, remove_settled_orders_future);
     }
 
     async fn remove_expired_orders(&self, now_in_epoch_seconds: u64) {
         // TODO: use the timestamp from the most recent block instead?
         let mut orders = self.orders.write().await;
         orders.retain(|_, order| has_future_valid_to(now_in_epoch_seconds, &order.order_creation));
+    }
+
+    async fn remove_settled_orders(&self, settlement_contract: &GPv2Settlement) {
+        let uids_to_be_removed = self.get_uids_of_settled_orders(settlement_contract).await;
+        info!(
+            "removing following settled orders from orderbook: {:?}",
+            uids_to_be_removed
+        );
+        let mut orders = self.orders.write().await;
+        orders.retain(|uid, _| uids_to_be_removed.contains(uid));
+    }
+
+    async fn get_uids_of_settled_orders(
+        &self,
+        settlement_contract: &GPv2Settlement,
+    ) -> Vec<OrderUid> {
+        let orders = self.orders.read().await;
+        let uid_futures = orders.iter().map(|(uid, _)| async move {
+            (
+                *uid,
+                self.has_not_yet_been_settled(*uid, settlement_contract)
+                    .await,
+            )
+        });
+        let uid_pairs: Vec<(OrderUid, bool)> = join_all(uid_futures).await;
+        uid_pairs
+            .iter()
+            .filter(|(_, not_yet_settled)| *not_yet_settled)
+            .map(|(uid, _)| *uid)
+            .collect()
+    }
+
+    async fn has_not_yet_been_settled(
+        &self,
+        uid: OrderUid,
+        settlement_contract: &GPv2Settlement,
+    ) -> bool {
+        let filled_amount = settlement_contract
+            .filled_amount(uid.0.to_vec())
+            .call()
+            .await
+            .unwrap_or(U256::MAX);
+        // As a simplification the function is returning false,
+        // if the order was already partially settled
+        // or if it was canceled.
+        !filled_amount.gt(&U256::zero())
     }
 
     fn order_creation_to_order(&self, user_order: OrderCreation) -> Result<Order, AddOrderError> {
