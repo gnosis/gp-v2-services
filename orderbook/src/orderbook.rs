@@ -107,34 +107,30 @@ impl OrderBook {
     ) -> Vec<OrderUid> {
         let orders = self.orders.read().await;
         let uid_futures = orders.iter().map(|(uid, _)| async move {
-            (
-                *uid,
-                self.has_not_yet_been_settled(*uid, settlement_contract)
-                    .await,
-            )
+            self.has_uid_been_settled(*uid, settlement_contract).await
         });
-        let uid_pairs: Vec<(OrderUid, bool)> = join_all(uid_futures).await;
-        uid_pairs
-            .iter()
-            .filter(|(_, not_yet_settled)| *not_yet_settled)
-            .map(|(uid, _)| *uid)
-            .collect()
+        let uid_pairs: Vec<Option<OrderUid>> = join_all(uid_futures).await;
+        uid_pairs.iter().filter_map(|uid| *uid).collect()
     }
 
-    async fn has_not_yet_been_settled(
+    async fn has_uid_been_settled(
         &self,
         uid: OrderUid,
         settlement_contract: &GPv2Settlement,
-    ) -> bool {
+    ) -> Option<OrderUid> {
         let filled_amount = settlement_contract
             .filled_amount(uid.0.to_vec())
             .call()
             .await
             .unwrap_or(U256::MAX);
-        // As a simplification the function is returning false,
+        // As a simplification the function is returning the uid,
         // if the order was already partially settled
         // or if it was canceled.
-        !filled_amount.gt(&U256::zero())
+        if filled_amount.gt(&U256::zero()) {
+            None
+        } else {
+            Some(uid)
+        }
     }
 
     fn order_creation_to_order(&self, user_order: OrderCreation) -> Result<Order, AddOrderError> {
