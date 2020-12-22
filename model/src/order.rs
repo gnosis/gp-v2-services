@@ -326,8 +326,8 @@ mod tests {
     use super::*;
     use chrono::NaiveDateTime;
     use hex_literal::hex;
-    use serde_json::json;
     use primitive_types::H256;
+    use serde_json::json;
 
     #[test]
     fn deserialization_and_back() {
