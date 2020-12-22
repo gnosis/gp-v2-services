@@ -43,7 +43,7 @@ impl Order {
                 owner,
                 uid: order_creation.uid(&owner),
             },
-            order_creation: order_creation,
+            order_creation,
         })
     }
 }
