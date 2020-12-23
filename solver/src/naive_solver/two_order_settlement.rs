@@ -22,16 +22,14 @@ impl TwoOrderSettlement {
     ) -> Settlement {
         let mut interactions = Vec::<Box<dyn Interaction>>::new();
         if let Some(interaction) = self.interaction {
-            interactions.push(Box::new(UniswapInteraction {
-                contract: uniswap,
-                settlement: gpv2_settlement,
-                // TODO(fleupold) Only set allowance if we need to
-                set_allowance: true,
-                amount_in: interaction.amount_in,
-                amount_out_min: interaction.amount_out_min,
-                token_in: interaction.token_in,
-                token_out: interaction.token_out,
-            }));
+            interactions.push(Box::new(UniswapInteraction::new(
+                uniswap,
+                gpv2_settlement,
+                interaction.amount_in,
+                interaction.amount_out_min,
+                interaction.token_in,
+                interaction.token_out,
+            )));
         }
         Settlement {
             clearing_prices: self.clearing_prices,

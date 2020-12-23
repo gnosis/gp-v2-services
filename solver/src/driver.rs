@@ -60,6 +60,7 @@ impl Driver {
         // TODO: use retry transaction sending crate for updating gas prices
         let encoded_interactions = settlement
             .encode_interactions()
+            .await
             .context("interaction encoding failed")?;
         let encoded_trades = settlement
             .encode_trades()

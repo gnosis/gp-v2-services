@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use super::encode_interaction;
 use crate::settlement::Interaction;
 use anyhow::Result;
@@ -6,37 +8,67 @@ use primitive_types::{H160, U256};
 
 #[derive(Debug)]
 pub struct UniswapInteraction {
-    pub contract: UniswapV2Router02,
-    pub settlement: GPv2Settlement,
-    pub set_allowance: bool,
-    pub amount_in: U256,
-    pub amount_out_min: U256,
-    pub token_in: H160,
-    pub token_out: H160,
+    contract: UniswapV2Router02,
+    settlement: GPv2Settlement,
+    amount_in: U256,
+    amount_out_min: U256,
+    token_in: H160,
+    token_out: H160,
+    token_in_contract: IERC20,
 }
 
+#[async_trait::async_trait]
 impl Interaction for UniswapInteraction {
-    fn encode(&self, writer: &mut dyn std::io::Write) -> Result<()> {
-        self.encode_approve(writer)?;
+    async fn encode(&self, writer: &mut (dyn Write + Send)) -> Result<()> {
+        if self.needs_approve().await? {
+            self.encode_approve(writer)?;
+        }
         self.encode_swap(writer)
     }
 }
 
 impl UniswapInteraction {
-    fn encode_approve(&self, writer: &mut dyn std::io::Write) -> Result<()> {
-        let token = IERC20::at(&self.web3(), self.token_in);
-        if self.set_allowance {
-            let method = token.approve(self.contract.address(), U256::MAX);
-            encode_interaction(
-                self.token_in,
-                method.tx.data.expect("no calldata").0,
-                writer,
-            )?;
+    pub fn new(
+        contract: UniswapV2Router02,
+        settlement: GPv2Settlement,
+        amount_in: U256,
+        amount_out_min: U256,
+        token_in: H160,
+        token_out: H160,
+    ) -> Self {
+        let web3 = contract.raw_instance().web3();
+        Self {
+            contract,
+            settlement,
+            amount_in,
+            amount_out_min,
+            token_in,
+            token_out,
+            token_in_contract: IERC20::at(&web3, token_in),
         }
-        Ok(())
     }
 
-    fn encode_swap(&self, writer: &mut dyn std::io::Write) -> Result<()> {
+    async fn needs_approve(&self) -> Result<bool> {
+        let allowance = self
+            .token_in_contract
+            .allowance(self.settlement.address(), self.contract.address())
+            .call()
+            .await?;
+        Ok(allowance < self.amount_in)
+    }
+
+    fn encode_approve(&self, writer: &mut dyn Write) -> Result<()> {
+        let method = self
+            .token_in_contract
+            .approve(self.contract.address(), U256::MAX);
+        encode_interaction(
+            self.token_in,
+            method.tx.data.expect("no calldata").0,
+            writer,
+        )
+    }
+
+    fn encode_swap(&self, writer: &mut dyn Write) -> Result<()> {
         let method = self.contract.swap_exact_tokens_for_tokens(
             self.amount_in,
             self.amount_out_min,
@@ -49,10 +81,6 @@ impl UniswapInteraction {
             method.tx.data.expect("no calldata").0,
             writer,
         )
-    }
-
-    fn web3(&self) -> web3::Web3<ethcontract::transport::DynTransport> {
-        self.contract.raw_instance().web3()
     }
 }
 
@@ -76,20 +104,19 @@ mod tests {
             &dummy_web3::dummy_web3(),
             H160::from_low_u64_be(payout_to as u64),
         );
-        let interaction = UniswapInteraction {
-            contract: contract.clone(),
+        let interaction = UniswapInteraction::new(
+            contract.clone(),
             settlement,
-            set_allowance: true,
-            amount_in: amount_in.into(),
-            amount_out_min: amount_out_min.into(),
+            amount_in.into(),
+            amount_out_min.into(),
             token_in,
-            token_out: H160::from_low_u64_be(token_out as u64),
-        };
-        let mut cursor = Cursor::new(Vec::new());
-        interaction.encode(&mut cursor).unwrap();
+            H160::from_low_u64_be(token_out as u64),
+        );
 
-        // Verify Approve
-        let mut approve_call = cursor.into_inner();
+        // Verify approve
+        let mut cursor = Cursor::new(Vec::new());
+        interaction.encode_approve(&mut cursor).unwrap();
+        let approve_call = cursor.into_inner();
         assert_eq!(&approve_call[0..20], token_in.as_fixed_bytes());
         assert_eq!(approve_call[20..23], [0, 0, 68]); // length of calldata below
 
@@ -100,7 +127,9 @@ mod tests {
         assert_eq!(call[36..68], [0xffu8; 32]); // amount
 
         // Verify Swap
-        let swap_call = approve_call.split_off(91);
+        let mut cursor = Cursor::new(Vec::new());
+        interaction.encode_swap(&mut cursor).unwrap();
+        let swap_call = cursor.into_inner();
         assert_eq!(&swap_call[0..20], contract.address().as_fixed_bytes());
         assert_eq!(swap_call[20..23], [0, 1, 4]); // length of calldata below
 

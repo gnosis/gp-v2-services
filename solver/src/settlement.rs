@@ -14,12 +14,9 @@ pub struct Trade {
     pub fee_discount: u16,
 }
 
+#[async_trait::async_trait]
 pub trait Interaction: std::fmt::Debug {
-    // TODO: not sure if this should return a result.
-    // Write::write returns a result but we know we write to a vector in memory so we know it will
-    // never fail. Then the question becomes whether interactions should be allowed to fail encoding
-    // for other reasons.
-    fn encode(&self, writer: &mut dyn Write) -> Result<()>;
+    async fn encode(&self, writer: &mut (dyn Write + Send)) -> Result<()>;
 }
 
 #[derive(Debug, Default)]
@@ -61,10 +58,10 @@ impl Settlement {
         Some(bytes)
     }
 
-    pub fn encode_interactions(&self) -> Result<Vec<u8>> {
+    pub async fn encode_interactions(&self) -> Result<Vec<u8>> {
         let mut cursor = Cursor::new(Vec::new());
         for interaction in &self.interactions {
-            interaction.encode(&mut cursor)?;
+            interaction.encode(&mut cursor).await?;
         }
         Ok(cursor.into_inner())
     }
