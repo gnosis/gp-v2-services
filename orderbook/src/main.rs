@@ -39,8 +39,15 @@ async fn main() {
     let settlement_contract = GPv2Settlement::deployed(&web3)
         .await
         .expect("Couldn't load deployed settlement");
-    let chain_id = web3.eth().chain_id().await.expect("Could not get chainId").as_u64();
-    verify_deployed_contract_constants(&settlement_contract, chain_id).await.expect("Deployed contract constants don't match the ones in this binary");
+    let chain_id = web3
+        .eth()
+        .chain_id()
+        .await
+        .expect("Could not get chainId")
+        .as_u64();
+    verify_deployed_contract_constants(&settlement_contract, chain_id)
+        .await
+        .expect("Deployed contract constants don't match the ones in this binary");
     let domain_separator =
         DomainSeparator::get_domain_separator(chain_id, settlement_contract.address());
     let orderbook = Arc::new(OrderBook::new(domain_separator));
