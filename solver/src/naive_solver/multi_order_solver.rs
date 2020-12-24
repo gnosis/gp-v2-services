@@ -74,7 +74,7 @@ fn split_into_contexts(
             reserve: u256_to_bigint(
                 reserves
                     .get(&order.buy_token)
-                    .ok_or(anyhow!("No reserve for token {}", &order.buy_token))?,
+                    .ok_or_else(|| anyhow!("No reserve for token {}", &order.buy_token))?,
             ),
             ..Default::default()
         });
@@ -83,7 +83,7 @@ fn split_into_contexts(
             reserve: u256_to_bigint(
                 reserves
                     .get(&order.sell_token)
-                    .ok_or(anyhow!("No reserve for token {}", &order.sell_token))?,
+                    .ok_or_else(|| anyhow!("No reserve for token {}", &order.sell_token))?,
             ),
             ..Default::default()
         });
