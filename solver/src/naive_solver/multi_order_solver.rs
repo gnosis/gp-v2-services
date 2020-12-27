@@ -11,37 +11,38 @@ use web3::types::{Address, U256};
 #[derive(Default)]
 struct TokenContext {
     address: Address,
-    reserve: BigInt,
-    buy_volume: BigInt,
-    sell_volume: BigInt,
+    reserve: U256,
+    buy_volume: U256,
+    sell_volume: U256,
 }
 
 impl TokenContext {
     pub fn is_excess(&self, other: &TokenContext) -> bool {
-        &self.reserve * (&other.sell_volume - &other.buy_volume)
-            < &other.reserve * (&self.sell_volume - &self.buy_volume)
+        u256_to_bigint(&self.reserve)
+            * (u256_to_bigint(&other.sell_volume) - u256_to_bigint(&other.buy_volume))
+            < u256_to_bigint(&other.reserve)
+                * (u256_to_bigint(&self.sell_volume) - u256_to_bigint(&self.buy_volume))
     }
 }
 
 /**
  * Computes a settlement using orders of a single pair and the direct AMM between those tokens.
- * Returns an error if computation fails, orders are not already filtered for a specific token pair, or the reserve information for that
+ * Panics orders are not already filtered for a specific token pair, or the reserve information for that
  * pair is not available.
  */
 pub fn solve(
     orders: impl Iterator<Item = OrderCreation> + Clone,
     reserves: &HashMap<Address, U256>,
-) -> Result<SinglePairSettlement> {
-    let (context_a, context_b) = split_into_contexts(orders.clone(), reserves)?;
+) -> SinglePairSettlement {
+    let (context_a, context_b) = split_into_contexts(orders.clone(), reserves);
     let (shortage, excess) = if context_a.is_excess(&context_b) {
         (context_b, context_a)
     } else {
         (context_a, context_b)
     };
     let uniswap_out = compute_uniswap_out(&shortage, &excess);
-    let uniswap_in = bigint_to_u256(&compute_uniswap_in(&uniswap_out, &shortage, &excess))?;
-    let uniswap_out = bigint_to_u256(&uniswap_out)?;
-    let interaction = if uniswap_out > U256::zero() {
+    let uniswap_in = compute_uniswap_in(uniswap_out, &shortage, &excess);
+    let interaction = if !uniswap_out.is_zero() {
         Some(AmmSwapExactTokensForTokens {
             amount_in: uniswap_in,
             amount_out_min: uniswap_out,
@@ -53,72 +54,71 @@ pub fn solve(
         None
     };
     // TODO(fleupold) check that all orders comply with the computed price. Otherwise, remove the least favorable excess order and try again.
-    Ok(SinglePairSettlement {
+    SinglePairSettlement {
         clearing_prices: maplit::hashmap! {
             shortage.address => uniswap_in,
             excess.address => uniswap_out,
         },
         trades: orders.into_iter().map(Trade::fully_matched).collect(),
         interaction,
-    })
+    }
 }
 
 fn split_into_contexts(
     orders: impl Iterator<Item = OrderCreation>,
     reserves: &HashMap<Address, U256>,
-) -> Result<(TokenContext, TokenContext)> {
+) -> (TokenContext, TokenContext) {
     let mut contexts = HashMap::new();
     for order in orders {
-        contexts.entry(order.buy_token).or_insert(TokenContext {
-            address: order.buy_token,
-            reserve: u256_to_bigint(
-                reserves
+        let buy_context = contexts
+            .entry(order.buy_token)
+            .or_insert_with(|| TokenContext {
+                address: order.buy_token,
+                reserve: *reserves
                     .get(&order.buy_token)
-                    .ok_or_else(|| anyhow!("No reserve for token {}", &order.buy_token))?,
-            ),
-            ..Default::default()
-        });
-        contexts.entry(order.sell_token).or_insert(TokenContext {
-            address: order.sell_token,
-            reserve: u256_to_bigint(
-                reserves
+                    .unwrap_or_else(|| panic!("No reserve for token {}", &order.buy_token)),
+                ..Default::default()
+            });
+        if matches!(order.kind, OrderKind::Buy) {
+            buy_context.buy_volume += order.buy_amount
+        }
+
+        let sell_context = contexts
+            .entry(order.sell_token)
+            .or_insert_with(|| TokenContext {
+                address: order.sell_token,
+                reserve: *reserves
                     .get(&order.sell_token)
-                    .ok_or_else(|| anyhow!("No reserve for token {}", &order.sell_token))?,
-            ),
-            ..Default::default()
-        });
-        match order.kind {
-            OrderKind::Buy => {
-                contexts.get_mut(&order.buy_token).unwrap().buy_volume +=
-                    u256_to_bigint(&order.buy_amount)
-            }
-            OrderKind::Sell => {
-                contexts.get_mut(&order.sell_token).unwrap().sell_volume +=
-                    u256_to_bigint(&order.sell_amount)
-            }
+                    .unwrap_or_else(|| panic!("No reserve for token {}", &order.sell_token)),
+                ..Default::default()
+            });
+        if matches!(order.kind, OrderKind::Sell) {
+            sell_context.sell_volume += order.sell_amount
         }
     }
-    if contexts.len() != 2 {
-        return Err(anyhow!("Orders contain more than two tokens"));
-    }
+    assert!(contexts.len() == 2, "Orders contain more than two tokens");
     let mut contexts = contexts.drain().map(|(_, v)| v);
-    Ok((contexts.next().unwrap(), contexts.next().unwrap()))
+    (contexts.next().unwrap(), contexts.next().unwrap())
 }
 
 /**
- * Given information about the shortage token (the one we need to take from Uniswap) and the excess token (the one we gie to Uniswap), this function
+ * Given information about the shortage token (the one we need to take from Uniswap) and the excess token (the one we give to Uniswap), this function
  * computes the exact out_amount required from Uniswap to perfectly match demand and supply at the effective Uniswap price (the one used for that in/out swap).
  *
  * The derivation of this formula is described in https://docs.google.com/document/d/1jS22wxbCqo88fGsqEMZgRQgiAcHlPqxoMw3CJTHst6c/edit
  * It assumes GP fee (φ) to be 1 and Uniswap fee (Φ) to be 0.997
  */
-fn compute_uniswap_out(shortage: &TokenContext, excess: &TokenContext) -> BigInt {
-    let numerator_minuend = 997 * (&excess.sell_volume - &excess.buy_volume) * &shortage.reserve;
-    let numerator_subtrahend =
-        1000 * (&shortage.sell_volume - &shortage.buy_volume) * &excess.reserve;
-    let denominator = (1000 * &excess.reserve) + (997 * (&excess.sell_volume - &excess.buy_volume));
-
-    (numerator_minuend - numerator_subtrahend) / denominator
+fn compute_uniswap_out(shortage: &TokenContext, excess: &TokenContext) -> U256 {
+    let numerator_minuend = 997
+        * (u256_to_bigint(&excess.sell_volume) - u256_to_bigint(&excess.buy_volume))
+        * u256_to_bigint(&shortage.reserve);
+    let numerator_subtrahend = 1000
+        * (u256_to_bigint(&shortage.sell_volume) - u256_to_bigint(&shortage.buy_volume))
+        * u256_to_bigint(&excess.reserve);
+    let denominator = (1000 * u256_to_bigint(&excess.reserve))
+        + (997 * (u256_to_bigint(&excess.sell_volume) - u256_to_bigint(&excess.buy_volume)));
+    bigint_to_u256(&((numerator_minuend - numerator_subtrahend) / denominator))
+        .expect("uniswap_out should always be U256 compatible if excess is chosen correctly")
 }
 
 /**
@@ -126,8 +126,8 @@ fn compute_uniswap_out(shortage: &TokenContext, excess: &TokenContext) -> BigInt
  * of tokens to be sent to the pool.
  * Taken from: https://github.com/Uniswap/uniswap-v2-periphery/blob/4123f93278b60bcf617130629c69d4016f9e7584/contracts/libraries/UniswapV2Library.sol#L53
  */
-fn compute_uniswap_in(out: &BigInt, shortage: &TokenContext, excess: &TokenContext) -> BigInt {
-    1000 * out * &excess.reserve / (997 * (&shortage.reserve - out)) + 1
+fn compute_uniswap_in(out: U256, shortage: &TokenContext, excess: &TokenContext) -> U256 {
+    U256::from(1000) * out * excess.reserve / (U256::from(997) * (shortage.reserve - out)) + 1
 }
 
 fn u256_to_bigint(input: &U256) -> BigInt {
@@ -184,7 +184,7 @@ mod tests {
             token_a => to_wei(1000),
             token_b => to_wei(1000)
         };
-        let result = solve(orders.clone().into_iter(), &reserves).unwrap();
+        let result = solve(orders.clone().into_iter(), &reserves);
 
         // Make sure the uniswap interaction is using the correct direction
         let interaction = result.interaction.unwrap();
@@ -237,7 +237,7 @@ mod tests {
             token_a => to_wei(1000),
             token_b => to_wei(1000)
         };
-        let result = solve(orders.clone().into_iter(), &reserves).unwrap();
+        let result = solve(orders.clone().into_iter(), &reserves);
 
         // Make sure the uniswap interaction is using the correct direction
         let interaction = result.interaction.unwrap();
@@ -286,7 +286,7 @@ mod tests {
             token_a => to_wei(1000),
             token_b => to_wei(1000)
         };
-        let result = solve(orders.clone().into_iter(), &reserves).unwrap();
+        let result = solve(orders.clone().into_iter(), &reserves);
 
         // Make sure the uniswap interaction is using the correct direction
         let interaction = result.interaction.unwrap();
@@ -339,7 +339,7 @@ mod tests {
             token_a => to_wei(1000),
             token_b => to_wei(1000)
         };
-        let result = solve(orders.clone().into_iter(), &reserves).unwrap();
+        let result = solve(orders.clone().into_iter(), &reserves);
 
         // Make sure the uniswap interaction is using the correct direction
         let interaction = result.interaction.unwrap();
