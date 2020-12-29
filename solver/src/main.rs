@@ -1,6 +1,6 @@
 use ethcontract::PrivateKey;
 use reqwest::Url;
-use solver::driver::Driver;
+use solver::{driver::Driver, naive_solver::NaiveSolver};
 use std::time::Duration;
 use structopt::StructOpt;
 #[derive(Debug, StructOpt)]
@@ -54,6 +54,10 @@ async fn main() {
             .expect("couldn't load deployed settlement");
     let orderbook =
         solver::orderbook::OrderBookApi::new(args.orderbook_url, args.orderbook_timeout);
-    let mut driver = Driver::new(settlement_contract, uniswap_contract, orderbook);
+    let solver = NaiveSolver {
+        gpv2_settlement: settlement_contract.clone(),
+        uniswap: uniswap_contract,
+    };
+    let mut driver = Driver::new(settlement_contract, orderbook, Box::new(solver));
     driver.run_forever().await;
 }
