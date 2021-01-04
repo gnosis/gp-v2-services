@@ -52,12 +52,12 @@ async fn main() {
         solver::get_settlement_contract(&web3, chain_id, args.private_key, args.gas_price_factor)
             .await
             .expect("couldn't load deployed settlement");
-    let orderbook =
+    let orderbook_api =
         solver::orderbook::OrderBookApi::new(args.orderbook_url, args.orderbook_timeout);
     let solver = NaiveSolver {
-        gpv2_settlement: settlement_contract.clone(),
         uniswap: uniswap_contract,
+        gpv2_settlement: settlement_contract.clone(),
     };
-    let mut driver = Driver::new(settlement_contract, orderbook, Box::new(solver));
+    let mut driver = Driver::new(settlement_contract, orderbook_api, Box::new(solver));
     driver.run_forever().await;
 }
