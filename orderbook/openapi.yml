@@ -3,7 +3,11 @@ info:
   version: 0.0.1
   title: Order Book API
 servers:
+  - url: https://protocol.dev.gnosisdev.com
+    description: Mainnet (Staging)
   - url: https://protocol-rinkeby.dev.gnosisdev.com
+    description: Rinkeby (Staging)
+  - url: https://protocol-xdai.dev.gnosisdev.com
     description: Rinkeby (Staging)
   - url: http://localhost:8080
     description: Local
