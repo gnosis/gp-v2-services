@@ -32,7 +32,7 @@ impl SolverConfig {
 pub struct HttpSolver {
     base: Url,
     client: Client,
-    api_key: Option<String>,
+    api_pwd: Option<&'static str>,
     config: SolverConfig,
     uniswap: UniswapV2Factory,
 }
@@ -40,7 +40,7 @@ pub struct HttpSolver {
 impl HttpSolver {
     pub fn new(
         base: Url,
-        api_key: Option<String>,
+        api_pwd: Option<&'static str>,
         config: SolverConfig,
         uniswap: UniswapV2Factory,
     ) -> Self {
@@ -49,7 +49,7 @@ impl HttpSolver {
         Self {
             base,
             client,
-            api_key,
+            api_pwd,
             config,
             uniswap,
         }
@@ -148,15 +148,14 @@ impl HttpSolver {
 impl Solver for HttpSolver {
     async fn solve(&self, orders: Vec<Order>) -> Result<Option<Settlement>> {
         let mut url = self.base.clone();
+        url.set_username(&"optimizer").unwrap();
+        url.set_password(self.api_pwd)
+            .expect("Error: setting pwd from api_pwd failed");
         url.set_path("/solve");
         self.config.add_to_query(&mut url);
         let body = self.create_body(orders.as_slice()).await?;
-        let mut request = self.client.post(url);
-        if let Some(api_key) = &self.api_key {
-            request = request.header("X-API-KEY", api_key);
-        }
+        let request = self.client.post(url);
         let request = request.json(&body);
-
         let response = request
             .send()
             .await
@@ -248,6 +247,9 @@ mod tests {
         let transport = web3::transports::Http::new(node_url).unwrap();
         let web3 = web3::Web3::new(transport);
         let uniswap = contracts::UniswapV2Factory::deployed(&web3).await.unwrap();
+        // Either run the optimizer locally or point the request to
+        // https://optimizer.dev.gnosisdev.com:8000
+        // and set the password.
         let solver = HttpSolver::new(
             "http://localhost:8000".parse().unwrap(),
             None,
