@@ -5,7 +5,7 @@ use model::{
     order::{OrderBuilder, OrderKind},
     DomainSeparator,
 };
-use orderbook::orderbook::OrderBook;
+use orderbook::storage::{InMemoryOrderBook, Storage};
 use secp256k1::SecretKey;
 use serde_json::json;
 use std::{str::FromStr, sync::Arc};
@@ -115,7 +115,7 @@ async fn test_with_ganache() {
             .await
             .expect("Couldn't query domain separator"),
     );
-    let orderbook = Arc::new(OrderBook::new(domain_separator));
+    let orderbook = Arc::new(InMemoryOrderBook::new(domain_separator));
     orderbook::serve_task(
         orderbook.clone(),
         API_HOST[7..].parse().expect("Couldn't parse API address"),
@@ -167,8 +167,12 @@ async fn test_with_ganache() {
         reqwest::Url::from_str(API_HOST).unwrap(),
         std::time::Duration::from_secs(10),
     );
+    let solver = solver::naive_solver::NaiveSolver {
+        uniswap: uniswap_router,
+        gpv2_settlement: gp_settlement.clone(),
+    };
     let mut driver =
-        solver::driver::Driver::new(gp_settlement.clone(), uniswap_router, orderbook_api);
+        solver::driver::Driver::new(gp_settlement.clone(), orderbook_api, Box::new(solver));
     driver.single_run().await.unwrap();
 
     // Check matching
@@ -187,7 +191,7 @@ async fn test_with_ganache() {
     assert_eq!(balance, 62500000000000000000u128.into());
 
     // Drive orderbook in order to check the removal of settled order_b
-    orderbook.run_maintenance(&gp_settlement).await;
+    orderbook.run_maintenance(&gp_settlement).await.unwrap();
     let placement = client
         .get(&format!(
             "{}{}{}",
