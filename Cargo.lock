@@ -85,6 +85,12 @@ checksum = "cdb031dd78e28731d87d56cc8ffef4a8f36ca26c38fe2de700543e627f8a464a"
 
 [[package]]
 name = "base64"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b41b7ea54a0c9d92199de89e20e58d49f02f8e699814ef3fdf266f6f748d15c7"
+
+[[package]]
+name = "base64"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3441f0f7b02788e948e47f457ca01f1d7e6d92c693bc132c22b087d3141c03ff"
@@ -361,7 +367,7 @@ dependencies = [
  "solver",
  "tokio",
  "tracing-setup",
- "web3",
+ "web3 0.14.0",
 ]
 
 [[package]]
@@ -429,7 +435,7 @@ dependencies = [
  "futures 0.3.8",
  "futures-timer",
  "hex",
- "jsonrpc-core",
+ "jsonrpc-core 14.2.0",
  "lazy_static",
  "primitive-types",
  "secp256k1 0.19.0",
@@ -437,7 +443,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "uint",
- "web3",
+ "web3 0.13.0",
  "zeroize",
 ]
 
@@ -454,7 +460,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tiny-keccak 2.0.2",
- "web3",
+ "web3 0.13.0",
 ]
 
 [[package]]
@@ -865,6 +871,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyper-proxy"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f93ec5be69758dfc06b9b29efa9d6e9306e387c85eb362c603912eead2ad98c7"
+dependencies = [
+ "bytes",
+ "futures 0.3.8",
+ "http",
+ "hyper",
+ "hyper-tls",
+ "native-tls",
+ "tokio",
+ "tokio-tls",
+ "tower-service",
+ "typed-headers",
+]
+
+[[package]]
 name = "hyper-tls"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -978,6 +1002,19 @@ name = "jsonrpc-core"
 version = "14.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a0747307121ffb9703afd93afbd0fb4f854c38fb873f2c8b90e0e902f27c7b62"
+dependencies = [
+ "futures 0.1.30",
+ "log",
+ "serde",
+ "serde_derive",
+ "serde_json",
+]
+
+[[package]]
+name = "jsonrpc-core"
+version = "15.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0745a6379e3edc893c84ec203589790774e4247420033e71a76d3ab4687991fa"
 dependencies = [
  "futures 0.1.30",
  "log",
@@ -1138,7 +1175,7 @@ dependencies = [
  "secp256k1 0.17.2",
  "serde",
  "serde_json",
- "web3",
+ "web3 0.14.0",
 ]
 
 [[package]]
@@ -1278,7 +1315,7 @@ dependencies = [
  "tracing",
  "tracing-setup",
  "warp",
- "web3",
+ "web3 0.14.0",
 ]
 
 [[package]]
@@ -1973,7 +2010,7 @@ dependencies = [
  "futures 0.3.8",
  "hex",
  "hex-literal",
- "jsonrpc-core",
+ "jsonrpc-core 14.2.0",
  "maplit",
  "model",
  "primitive-types",
@@ -1986,7 +2023,7 @@ dependencies = [
  "tracing",
  "tracing-setup",
  "tracing-subscriber",
- "web3",
+ "web3 0.14.0",
 ]
 
 [[package]]
@@ -2343,6 +2380,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "typed-headers"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3179a61e9eccceead5f1574fd173cf2e162ac42638b9bf214c6ad0baf7efa24a"
+dependencies = [
+ "base64 0.11.0",
+ "bytes",
+ "chrono",
+ "http",
+ "mime",
+]
+
+[[package]]
 name = "typenum"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2589,10 +2639,8 @@ dependencies = [
  "futures 0.3.8",
  "futures-timer",
  "hyper",
- "hyper-tls",
- "jsonrpc-core",
+ "jsonrpc-core 14.2.0",
  "log",
- "native-tls",
  "parking_lot",
  "rlp",
  "rustc-hex",
@@ -2600,6 +2648,36 @@ dependencies = [
  "serde",
  "serde_json",
  "tiny-keccak 2.0.2",
+ "url",
+]
+
+[[package]]
+name = "web3"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c736dcabf7a4d4b9e724ff6696914e205cb37f111a54903b17f76c20d59f7e6"
+dependencies = [
+ "arrayvec",
+ "base64 0.13.0",
+ "derive_more",
+ "ethabi",
+ "ethereum-types",
+ "futures 0.3.8",
+ "futures-timer",
+ "hex",
+ "hyper",
+ "hyper-proxy",
+ "hyper-tls",
+ "jsonrpc-core 15.1.0",
+ "log",
+ "native-tls",
+ "parking_lot",
+ "pin-project 1.0.2",
+ "rlp",
+ "serde",
+ "serde_json",
+ "tiny-keccak 2.0.2",
+ "typed-headers",
  "url",
 ]
 
