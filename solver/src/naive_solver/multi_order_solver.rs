@@ -17,19 +17,19 @@ struct TokenContext {
 }
 
 impl TokenContext {
-    pub fn is_excess(&self, other: &TokenContext) -> bool {
+    pub fn is_excess(&self, deficit: &TokenContext) -> bool {
         u256_to_bigint(&self.reserve)
-            * (u256_to_bigint(&other.sell_volume) - u256_to_bigint(&other.buy_volume))
-            < u256_to_bigint(&other.reserve)
+            * (u256_to_bigint(&deficit.sell_volume) - u256_to_bigint(&deficit.buy_volume))
+            < u256_to_bigint(&deficit.reserve)
                 * (u256_to_bigint(&self.sell_volume) - u256_to_bigint(&self.buy_volume))
     }
 }
 
-/**
- * Computes a settlement using orders of a single pair and the direct AMM between those tokens.
- * Panics orders are not already filtered for a specific token pair, or the reserve information for that
- * pair is not available.
- */
+/// 
+/// Computes a settlement using orders of a single pair and the direct AMM between those tokens.
+/// Panics orders are not already filtered for a specific token pair, or the reserve information for that
+/// pair is not available.
+/// 
 pub fn solve(
     orders: impl Iterator<Item = OrderCreation> + Clone,
     reserves: &HashMap<Address, U256>,
@@ -101,13 +101,13 @@ fn split_into_contexts(
     (contexts.next().unwrap(), contexts.next().unwrap())
 }
 
-/**
- * Given information about the shortage token (the one we need to take from Uniswap) and the excess token (the one we give to Uniswap), this function
- * computes the exact out_amount required from Uniswap to perfectly match demand and supply at the effective Uniswap price (the one used for that in/out swap).
- *
- * The derivation of this formula is described in https://docs.google.com/document/d/1jS22wxbCqo88fGsqEMZgRQgiAcHlPqxoMw3CJTHst6c/edit
- * It assumes GP fee (φ) to be 1 and Uniswap fee (Φ) to be 0.997
- */
+/// 
+/// Given information about the shortage token (the one we need to take from Uniswap) and the excess token (the one we give to Uniswap), this function
+/// computes the exact out_amount required from Uniswap to perfectly match demand and supply at the effective Uniswap price (the one used for that in/out swap).
+/// 
+/// The derivation of this formula is described in https://docs.google.com/document/d/1jS22wxbCqo88fGsqEMZgRQgiAcHlPqxoMw3CJTHst6c/edit
+/// It assumes GP fee (φ) to be 1 and Uniswap fee (Φ) to be 0.997
+/// 
 fn compute_uniswap_out(shortage: &TokenContext, excess: &TokenContext) -> U256 {
     let numerator_minuend = 997
         * (u256_to_bigint(&excess.sell_volume) - u256_to_bigint(&excess.buy_volume))
@@ -121,11 +121,11 @@ fn compute_uniswap_out(shortage: &TokenContext, excess: &TokenContext) -> U256 {
         .expect("uniswap_out should always be U256 compatible if excess is chosen correctly")
 }
 
-/**
- * Given the desired amount to receive and the state of the pool, this computes the required amount
- * of tokens to be sent to the pool.
- * Taken from: https://github.com/Uniswap/uniswap-v2-periphery/blob/4123f93278b60bcf617130629c69d4016f9e7584/contracts/libraries/UniswapV2Library.sol#L53
- */
+/// 
+/// Given the desired amount to receive and the state of the pool, this computes the required amount
+/// of tokens to be sent to the pool.
+/// Taken from: https://github.com/Uniswap/uniswap-v2-periphery/blob/4123f93278b60bcf617130629c69d4016f9e7584/contracts/libraries/UniswapV2Library.sol#L53
+/// 
 fn compute_uniswap_in(out: U256, shortage: &TokenContext, excess: &TokenContext) -> U256 {
     U256::from(1000) * out * excess.reserve / (U256::from(997) * (shortage.reserve - out)) + 1
 }
