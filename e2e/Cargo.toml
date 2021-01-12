@@ -9,7 +9,7 @@ ethcontract = { version = "0.9",  default-features = false, features = ["http"] 
 hex-literal = "0.3"
 model = { path = "../model" }
 orderbook = { path = "../orderbook" }
-secp256k1 = "0.17"
+secp256k1 = "0.19"
 reqwest = "0.10"
 tokio = { version = "0.2", features =[ "macros"] }
 web3 = { version = "0.13", default-features = false }
