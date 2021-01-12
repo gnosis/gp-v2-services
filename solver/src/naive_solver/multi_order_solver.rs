@@ -8,7 +8,7 @@ use num::{bigint::Sign, BigInt};
 use std::collections::HashMap;
 use web3::types::{Address, U256};
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct TokenContext {
     address: Address,
     reserve: U256,
@@ -17,42 +17,70 @@ struct TokenContext {
 }
 
 impl TokenContext {
-    pub fn is_excess(&self, deficit: &TokenContext) -> bool {
-        u256_to_bigint(&self.reserve)
+    pub fn is_excess_after_fees(&self, deficit: &TokenContext) -> bool {
+        1000 * u256_to_bigint(&self.reserve)
             * (u256_to_bigint(&deficit.sell_volume) - u256_to_bigint(&deficit.buy_volume))
-            < u256_to_bigint(&deficit.reserve)
+            < 997
+                * u256_to_bigint(&deficit.reserve)
                 * (u256_to_bigint(&self.sell_volume) - u256_to_bigint(&self.buy_volume))
     }
 }
 
 ///
 /// Computes a settlement using orders of a single pair and the direct AMM between those tokens.
-/// Panics orders are not already filtered for a specific token pair, or the reserve information for that
-/// pair is not available.
+/// Panics if orders are not already filtered for a specific token pair, or the reserve information
+/// for that pair is not available.
 ///
 pub fn solve(
     orders: impl Iterator<Item = OrderCreation> + Clone,
     reserves: &HashMap<Address, U256>,
 ) -> SinglePairSettlement {
     let (context_a, context_b) = split_into_contexts(orders.clone(), reserves);
-    let (shortage, excess) = if context_a.is_excess(&context_b) {
-        (context_b, context_a)
+    if context_a.is_excess_after_fees(&context_b) {
+        solve_with_uniswap(orders, &context_b, &context_a)
+    } else if context_b.is_excess_after_fees(&context_a) {
+        solve_with_uniswap(orders, &context_a, &context_b)
     } else {
-        (context_a, context_b)
-    };
+        solve_without_uniswap(orders, &context_a, &context_b)
+    }
+}
+
+///
+/// Creates a solution using the current AMM spot price, without using any of its liquidity
+///
+fn solve_without_uniswap(
+    orders: impl Iterator<Item = OrderCreation> + Clone,
+    context_a: &TokenContext,
+    context_b: &TokenContext,
+) -> SinglePairSettlement {
+    SinglePairSettlement {
+        clearing_prices: maplit::hashmap! {
+            context_a.address => context_b.reserve,
+            context_b.address => context_a.reserve,
+        },
+        // TODO(fleupold) check that all orders comply with the computed price. Otherwise, remove the least favorable excess order and try again.
+        trades: orders.into_iter().map(Trade::fully_matched).collect(),
+        interaction: None,
+    }
+}
+
+///
+/// Creates a solution using the current AMM's liquidity to balance excess and shortage.
+/// The clearing price is the effective exchange rate used by the AMM interaction.
+///
+fn solve_with_uniswap(
+    orders: impl Iterator<Item = OrderCreation> + Clone,
+    shortage: &TokenContext,
+    excess: &TokenContext,
+) -> SinglePairSettlement {
     let uniswap_out = compute_uniswap_out(&shortage, &excess);
     let uniswap_in = compute_uniswap_in(uniswap_out, &shortage, &excess);
-    let interaction = if !uniswap_out.is_zero() {
-        Some(AmmSwapExactTokensForTokens {
-            amount_in: uniswap_in,
-            amount_out_min: uniswap_out,
-            token_in: excess.address,
-            token_out: shortage.address,
-        })
-    } else {
-        // TODO(fleupold) set correct clearing prices when supply/demand already match current uniswap price
-        None
-    };
+    let interaction = Some(AmmSwapExactTokensForTokens {
+        amount_in: uniswap_in,
+        amount_out_min: uniswap_out,
+        token_in: excess.address,
+        token_out: shortage.address,
+    });
     // TODO(fleupold) check that all orders comply with the computed price. Otherwise, remove the least favorable excess order and try again.
     SinglePairSettlement {
         clearing_prices: maplit::hashmap! {
@@ -151,7 +179,7 @@ fn bigint_to_u256(input: &BigInt) -> Result<U256> {
 mod tests {
     use super::*;
 
-    fn to_wei(base: u32) -> U256 {
+    fn to_wei(base: u128) -> U256 {
         U256::from(base) * U256::from(10).pow(18.into())
     }
 
@@ -365,5 +393,45 @@ mod tests {
         // We should have at least as much to give (sell amount + uniswap out) as is expected by the buyer
         let expected_buy = orders[1].sell_amount * price_b / price_a;
         assert!(orders[0].sell_amount + interaction.amount_out_min >= expected_buy);
+    }
+
+    #[test]
+    fn finds_clearing_without_using_uniswap() {
+        let token_a = Address::from_low_u64_be(0);
+        let token_b = Address::from_low_u64_be(1);
+        let orders = vec![
+            OrderCreation {
+                sell_token: token_a,
+                buy_token: token_b,
+                sell_amount: to_wei(1001),
+                buy_amount: to_wei(1000),
+                kind: OrderKind::Sell,
+                partially_fillable: false,
+                ..Default::default()
+            },
+            OrderCreation {
+                sell_token: token_b,
+                buy_token: token_a,
+                sell_amount: to_wei(1000),
+                buy_amount: to_wei(1000),
+                kind: OrderKind::Sell,
+                partially_fillable: false,
+                ..Default::default()
+            },
+        ];
+
+        let reserves = maplit::hashmap! {
+            token_a => to_wei(1_000_001),
+            token_b => to_wei(1_000_000)
+        };
+        let result = solve(orders.clone().into_iter(), &reserves);
+        assert_eq!(result.interaction, None);
+        assert_eq!(
+            result.clearing_prices,
+            maplit::hashmap! {
+                token_a => to_wei(1_000_000),
+                token_b => to_wei(1_000_001)
+            }
+        );
     }
 }
