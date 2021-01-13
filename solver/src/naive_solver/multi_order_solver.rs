@@ -36,7 +36,7 @@ pub fn solve(
     pool: &Pool,
 ) -> SinglePairSettlement {
     let mut orders: Vec<OrderCreation> = orders.collect();
-    while orders.len() > 0 {
+    while !orders.is_empty() {
         let (context_a, context_b) = split_into_contexts(orders.clone().into_iter(), pool);
         let solution = solve_orders(orders.clone().into_iter(), &context_a, &context_b);
         if is_valid_solution(&solution) {
@@ -199,7 +199,7 @@ fn compute_uniswap_in(out: U256, shortage: &TokenContext, excess: &TokenContext)
 /// Returns true if for each trade the executed price is not smaller than the limit price
 /// Thus we ensure that `buy_token_price / sell_token_price >= limit_buy_amount / limit_sell_amount`
 ///
-fn is_valid_solution<'a>(solution: &SinglePairSettlement) -> bool {
+fn is_valid_solution(solution: &SinglePairSettlement) -> bool {
     for trade in solution.trades.iter() {
         let order = trade.order;
         let buy_token_price = match solution.clearing_prices.get(&order.buy_token) {
