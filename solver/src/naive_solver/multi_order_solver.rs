@@ -6,7 +6,7 @@ use num::{bigint::Sign, BigInt};
 use std::collections::HashMap;
 use web3::types::{Address, U256};
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 struct TokenContext {
     address: Address,
     reserve: U256,
@@ -104,7 +104,8 @@ fn split_into_contexts(
                     .get_reserve(&order.buy_token)
                     .unwrap_or_else(|| panic!("No reserve for token {}", &order.buy_token))
                     .into(),
-                ..Default::default()
+                buy_volume: U256::zero(),
+                sell_volume: U256::zero(),
             });
         if matches!(order.kind, OrderKind::Buy) {
             buy_context.buy_volume += order.buy_amount
@@ -118,7 +119,8 @@ fn split_into_contexts(
                     .get_reserve(&order.sell_token)
                     .unwrap_or_else(|| panic!("No reserve for token {}", &order.sell_token))
                     .into(),
-                ..Default::default()
+                buy_volume: U256::zero(),
+                sell_volume: U256::zero(),
             });
         if matches!(order.kind, OrderKind::Sell) {
             sell_context.sell_volume += order.sell_amount
@@ -214,7 +216,7 @@ mod tests {
             token_pair: TokenPair::new(token_a, token_b).unwrap(),
             reserve0: to_wei(1000).as_u128(),
             reserve1: to_wei(1000).as_u128(),
-            ..Default::default()
+            address: Default::default(),
         };
         let result = solve(orders.clone().into_iter(), &pool);
 
@@ -269,7 +271,7 @@ mod tests {
             token_pair: TokenPair::new(token_a, token_b).unwrap(),
             reserve0: to_wei(1000).as_u128(),
             reserve1: to_wei(1000).as_u128(),
-            ..Default::default()
+            address: Default::default(),
         };
         let result = solve(orders.clone().into_iter(), &pool);
 
@@ -320,7 +322,7 @@ mod tests {
             token_pair: TokenPair::new(token_a, token_b).unwrap(),
             reserve0: to_wei(1000).as_u128(),
             reserve1: to_wei(1000).as_u128(),
-            ..Default::default()
+            address: Default::default(),
         };
         let result = solve(orders.clone().into_iter(), &pool);
 
@@ -375,7 +377,7 @@ mod tests {
             token_pair: TokenPair::new(token_a, token_b).unwrap(),
             reserve0: to_wei(1000).as_u128(),
             reserve1: to_wei(1000).as_u128(),
-            ..Default::default()
+            address: Default::default(),
         };
         let result = solve(orders.clone().into_iter(), &pool);
 
@@ -434,7 +436,7 @@ mod tests {
             token_pair: TokenPair::new(token_a, token_b).unwrap(),
             reserve0: to_wei(1_000_001).as_u128(),
             reserve1: to_wei(1_000_000).as_u128(),
-            ..Default::default()
+            address: Default::default(),
         };
         let result = solve(orders.into_iter(), &pool);
         assert_eq!(result.interaction, None);

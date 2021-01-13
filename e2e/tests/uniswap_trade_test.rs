@@ -182,14 +182,14 @@ async fn test_with_ganache() {
         .call()
         .await
         .expect("Couldn't fetch TokenB's balance");
-    assert_eq!(balance, U256::from(99650498453042316810u128));
+    assert_eq!(balance, U256::from(99_650_498_453_042_316_810u128));
 
     let balance = token_a
         .balance_of(trader_b.address())
         .call()
         .await
         .expect("Couldn't fetch TokenA's balance");
-    assert_eq!(balance, U256::from(50175363672226073522u128));
+    assert_eq!(balance, U256::from(50_175_363_672_226_073_522u128));
 
     // Drive orderbook in order to check the removal of settled order_b
     orderbook.run_maintenance(&gp_settlement).await.unwrap();

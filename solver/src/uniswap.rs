@@ -3,7 +3,7 @@ use contracts::{UniswapV2Factory, UniswapV2Pair};
 use model::TokenPair;
 use primitive_types::H160;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Pool {
     pub address: H160,
     pub token_pair: TokenPair,
