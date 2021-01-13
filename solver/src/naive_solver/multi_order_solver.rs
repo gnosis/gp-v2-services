@@ -424,7 +424,7 @@ mod tests {
             token_a => to_wei(1_000_001),
             token_b => to_wei(1_000_000)
         };
-        let result = solve(orders.clone().into_iter(), &reserves);
+        let result = solve(orders.into_iter(), &reserves);
         assert_eq!(result.interaction, None);
         assert_eq!(
             result.clearing_prices,
