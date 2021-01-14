@@ -48,8 +48,18 @@ pub fn solve(
             } else {
                 context_b.address
             };
-            orders.sort_by(price_comparator_for_selling_excess_token(excess_token));
-            orders.pop();
+            let order_to_remove = orders
+                .iter()
+                .enumerate()
+                .filter(|o| o.1.sell_token == excess_token)
+                .max_by(|lhs, rhs| {
+                    (lhs.1.buy_amount * rhs.1.sell_amount)
+                        .cmp(&(lhs.1.sell_amount * rhs.1.buy_amount))
+                });
+            match order_to_remove {
+                Some((index, _)) => orders.swap_remove(index),
+                None => break,
+            };
         }
     }
 
@@ -202,45 +212,21 @@ fn compute_uniswap_in(out: U256, shortage: &TokenContext, excess: &TokenContext)
 fn is_valid_solution(solution: &SinglePairSettlement) -> bool {
     for trade in solution.trades.iter() {
         let order = trade.order;
-        let buy_token_price = match solution.clearing_prices.get(&order.buy_token) {
-            Some(price) => price,
-            None => return false,
-        };
-        let sell_token_price = match solution.clearing_prices.get(&order.sell_token) {
-            Some(price) => price,
-            None => return false,
-        };
+        let buy_token_price = solution
+            .clearing_prices
+            .get(&order.buy_token)
+            .expect("Solution should contain clearing price for buy token");
+        let sell_token_price = solution
+            .clearing_prices
+            .get(&order.sell_token)
+            .expect("Solution should contain clearing price for sell token");
 
-        if order.sell_amount * buy_token_price < order.buy_amount * sell_token_price {
+        if order.sell_amount * sell_token_price < order.buy_amount * buy_token_price {
             return false;
         }
     }
 
     true
-}
-
-///
-/// Returns a comparator function that can be used e.g. to sort a vector or Orders
-/// Orders that don't sell the excess token are treated like they had a price of 0.
-///
-fn price_comparator_for_selling_excess_token(
-    excess_token: Address,
-) -> impl FnMut(&OrderCreation, &OrderCreation) -> std::cmp::Ordering {
-    move |lhs: &OrderCreation, rhs: &OrderCreation| {
-        let lhs_price = if lhs.sell_token == excess_token {
-            (lhs.buy_amount, lhs.sell_amount)
-        } else {
-            (U256::zero(), U256::one())
-        };
-
-        let rhs_price = if rhs.sell_token == excess_token {
-            (rhs.buy_amount, rhs.sell_amount)
-        } else {
-            (U256::zero(), U256::one())
-        };
-
-        (lhs_price.0 * rhs_price.1).cmp(&(lhs_price.1 * rhs_price.0))
-    }
 }
 
 fn u256_to_bigint(input: &U256) -> BigInt {
@@ -352,8 +338,8 @@ mod tests {
 
         let pool = Pool {
             token_pair: TokenPair::new(token_a, token_b).unwrap(),
-            reserve0: to_wei(1000).as_u128(),
-            reserve1: to_wei(1000).as_u128(),
+            reserve0: to_wei(1_000_000).as_u128(),
+            reserve1: to_wei(1_000_000).as_u128(),
             address: Default::default(),
         };
         let result = solve(orders.clone().into_iter(), &pool);
@@ -635,7 +621,7 @@ mod tests {
                 sell_token: token_a,
                 buy_token: token_b,
                 sell_amount: to_wei(10),
-                buy_amount: to_wei(9),
+                buy_amount: to_wei(8),
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 ..Default::default()
@@ -672,7 +658,7 @@ mod tests {
         assert_eq!(
             is_valid_solution(&SinglePairSettlement {
                 clearing_prices: maplit::hashmap! {
-                    token_a => to_wei(9),
+                    token_a => to_wei(8),
                     token_b => to_wei(10)
                 },
                 interaction: None,
@@ -706,7 +692,7 @@ mod tests {
         assert_eq!(
             is_valid_solution(&SinglePairSettlement {
                 clearing_prices: maplit::hashmap! {
-                    token_a => to_wei(8),
+                    token_a => to_wei(7),
                     token_b => to_wei(10)
                 },
                 interaction: None,
@@ -731,63 +717,5 @@ mod tests {
             }),
             false
         );
-    }
-
-    #[test]
-    fn test_price_comparator_for_selling_excess_token() {
-        let token_a = Address::from_low_u64_be(0);
-        let token_b = Address::from_low_u64_be(1);
-        let orders = vec![
-            // Largest Price a -> b
-            OrderCreation {
-                sell_token: token_a,
-                buy_token: token_b,
-                sell_amount: to_wei(1),
-                buy_amount: to_wei(1000),
-                kind: OrderKind::Sell,
-                partially_fillable: false,
-                ..Default::default()
-            },
-            // Lower limit a -> b
-            OrderCreation {
-                sell_token: token_a,
-                buy_token: token_b,
-                sell_amount: to_wei(1000),
-                buy_amount: to_wei(1000),
-                kind: OrderKind::Sell,
-                partially_fillable: false,
-                ..Default::default()
-            },
-            // Lower limit b -> a
-            OrderCreation {
-                sell_token: token_b,
-                buy_token: token_a,
-                sell_amount: to_wei(1000),
-                buy_amount: to_wei(1000),
-                kind: OrderKind::Sell,
-                partially_fillable: false,
-                ..Default::default()
-            },
-            // Larger limit b -> a
-            OrderCreation {
-                sell_token: token_b,
-                buy_token: token_a,
-                sell_amount: to_wei(2),
-                buy_amount: to_wei(1000),
-                kind: OrderKind::Sell,
-                partially_fillable: false,
-                ..Default::default()
-            },
-        ];
-
-        let mut sorted = orders.clone();
-
-        sorted.sort_by(price_comparator_for_selling_excess_token(token_a));
-        assert_eq!(sorted[3], orders[0]);
-        assert_eq!(sorted[2], orders[1]);
-
-        sorted.sort_by(price_comparator_for_selling_excess_token(token_b));
-        assert_eq!(sorted[3], orders[3]);
-        assert_eq!(sorted[2], orders[2]);
     }
 }
