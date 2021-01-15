@@ -90,26 +90,19 @@ impl Database {
             FROM orders o LEFT OUTER JOIN trades t ON o.uid = t.order_uid
             WHERE \
                 o.valid_to >= $1 AND \
-                ($2 OR o.owner = $3) AND \
-                ($4 OR o.sell_token = $5) AND \
-                ($6 OR o.buy_token = $7) \
+                ($2 IS NULL OR o.owner = $2) AND \
+                ($3 IS NULL OR o.sell_token = $3) AND \
+                ($4 IS NULL OR o.buy_token = $4) \
             GROUP BY o.uid;";
         // To get only not fully executed orders we probably want to use something like
         // `HAVING sum_sell < orders.sell_amount` but still need to find the best way to make this
         // pick the correct column based on order type.
 
-        fn as_bytes_or_default(h160: Option<&H160>) -> &[u8] {
-            h160.map(|h160| h160.as_bytes()).unwrap_or_default()
-        }
-
         sqlx::query_as(QUERY)
             .bind(filter.min_valid_to)
-            .bind(filter.owner.is_none())
-            .bind(as_bytes_or_default(filter.owner))
-            .bind(filter.sell_token.is_none())
-            .bind(as_bytes_or_default(filter.sell_token))
-            .bind(filter.buy_token.is_none())
-            .bind(as_bytes_or_default(filter.buy_token))
+            .bind(filter.owner.map(|h160| h160.as_bytes()))
+            .bind(filter.sell_token.map(|h160| h160.as_bytes()))
+            .bind(filter.buy_token.map(|h160| h160.as_bytes()))
             .fetch(&self.pool)
             .err_into()
             .and_then(|row: OrdersQueryRow| async move { row.into_order() })
