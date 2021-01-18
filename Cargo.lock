@@ -325,7 +325,7 @@ dependencies = [
  "maplit",
  "serde",
  "serde_json",
- "tokio",
+ "tokio 1.0.2",
 ]
 
 [[package]]
@@ -481,7 +481,7 @@ dependencies = [
  "secp256k1",
  "serde_json",
  "solver",
- "tokio",
+ "tokio 1.0.2",
  "tracing-setup",
  "web3",
 ]
@@ -850,7 +850,7 @@ dependencies = [
  "http",
  "indexmap",
  "slab",
- "tokio",
+ "tokio 0.2.24",
  "tokio-util",
  "tracing",
  "tracing-futures",
@@ -996,7 +996,7 @@ dependencies = [
  "itoa",
  "pin-project 1.0.4",
  "socket2",
- "tokio",
+ "tokio 0.2.24",
  "tower-service",
  "tracing",
  "want",
@@ -1014,7 +1014,7 @@ dependencies = [
  "hyper",
  "hyper-tls",
  "native-tls",
- "tokio",
+ "tokio 0.2.24",
  "tokio-tls",
  "tower-service",
  "typed-headers",
@@ -1029,7 +1029,7 @@ dependencies = [
  "bytes 0.5.6",
  "hyper",
  "native-tls",
- "tokio",
+ "tokio 0.2.24",
  "tokio-tls",
 ]
 
@@ -1543,7 +1543,7 @@ dependencies = [
  "shared-arguments",
  "sqlx",
  "structopt",
- "tokio",
+ "tokio 1.0.2",
  "tracing",
  "tracing-setup",
  "warp",
@@ -1917,7 +1917,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded 0.7.0",
- "tokio",
+ "tokio 0.2.24",
  "tokio-tls",
  "url",
  "wasm-bindgen",
@@ -2202,7 +2202,7 @@ dependencies = [
  "serde_json",
  "shared-arguments",
  "structopt",
- "tokio",
+ "tokio 1.0.2",
  "tracing",
  "tracing-setup",
  "tracing-subscriber",
@@ -2305,7 +2305,7 @@ checksum = "63fc5454c9dd7aaea3a0eeeb65ca40d06d0d8e7413a8184f7c3a3ffa5056190b"
 dependencies = [
  "native-tls",
  "once_cell",
- "tokio",
+ "tokio 0.2.24",
  "tokio-native-tls",
 ]
 
@@ -2491,7 +2491,18 @@ dependencies = [
  "num_cpus",
  "pin-project-lite 0.1.11",
  "slab",
- "tokio-macros",
+ "tokio-macros 0.2.6",
+]
+
+[[package]]
+name = "tokio"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ca04cec6ff2474c638057b65798f60ac183e5e79d3448bb7163d36a39cff6ec"
+dependencies = [
+ "autocfg",
+ "pin-project-lite 0.2.4",
+ "tokio-macros 1.0.0",
 ]
 
 [[package]]
@@ -2506,13 +2517,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-macros"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42517d2975ca3114b22a16192634e8241dc5cc1f130be194645970cc1c371494"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "tokio-native-tls"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd608593a919a8e05a7d1fc6df885e40f6a88d3a70a3a7eff23ff27964eda069"
 dependencies = [
  "native-tls",
- "tokio",
+ "tokio 0.2.24",
 ]
 
 [[package]]
@@ -2522,7 +2544,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a70f4fcd7b3b24fb194f837560168208f669ca8cb70d0c4b862944452396343"
 dependencies = [
  "native-tls",
- "tokio",
+ "tokio 0.2.24",
 ]
 
 [[package]]
@@ -2534,7 +2556,7 @@ dependencies = [
  "futures-util",
  "log",
  "pin-project 0.4.27",
- "tokio",
+ "tokio 0.2.24",
  "tungstenite",
 ]
 
@@ -2549,7 +2571,7 @@ dependencies = [
  "futures-sink",
  "log",
  "pin-project-lite 0.1.11",
- "tokio",
+ "tokio 0.2.24",
 ]
 
 [[package]]
@@ -2847,7 +2869,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded 0.6.1",
- "tokio",
+ "tokio 0.2.24",
  "tokio-tungstenite",
  "tower-service",
  "tracing",
