@@ -1,4 +1,5 @@
-use crate::{orderbook::OrderBookApi, solver::Solver};
+use crate::liquidity::uniswap::UniswapLiquidity;
+use crate::{liquidity::LiquiditySource as _, orderbook::OrderBookApi, solver::Solver};
 use anyhow::{anyhow, Context, Result};
 use contracts::GPv2Settlement;
 use std::time::Duration;
@@ -9,12 +10,14 @@ const SETTLE_INTERVAL: Duration = Duration::from_secs(30);
 pub struct Driver {
     settlement_contract: GPv2Settlement,
     orderbook: OrderBookApi,
+    uniswap_liquidity: UniswapLiquidity,
     solver: Box<dyn Solver>,
 }
 
 impl Driver {
     pub fn new(
         settlement_contract: GPv2Settlement,
+        uniswap_liquidity: UniswapLiquidity,
         orderbook: OrderBookApi,
         solver: Box<dyn Solver>,
     ) -> Self {
@@ -22,6 +25,7 @@ impl Driver {
             settlement_contract,
             solver,
             orderbook,
+            uniswap_liquidity,
         }
     }
 
@@ -37,17 +41,25 @@ impl Driver {
 
     pub async fn single_run(&mut self) -> Result<()> {
         tracing::debug!("starting single run");
-        let orders = self
+        let mut liquidity = self
             .orderbook
-            .get_orders()
+            .get_liquidity(std::iter::empty())
             .await
             .context("failed to get orderbook")?;
-        tracing::debug!("got {} orders", orders.len());
+        tracing::debug!("got {} orders", liquidity.len());
+
+        liquidity.extend(
+            self.uniswap_liquidity
+                .get_liquidity(liquidity.iter())
+                .await
+                .context("failed to get uniswap pools")?,
+        );
+
         // TODO: order validity checks
         // Decide what is handled by orderbook service and what by us.
         // We likely want to at least mark orders we know we have settled so that we don't
         // attempt to settle them again when they are still in the orderbook.
-        let settlement = match self.solver.solve(orders).await? {
+        let settlement = match self.solver.solve(liquidity).await? {
             None => return Ok(()),
             Some(settlement) => settlement,
         };
