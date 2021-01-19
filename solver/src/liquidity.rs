@@ -9,6 +9,9 @@ use mockall::automock;
 
 use crate::settlement;
 
+pub mod offchain_orderbook;
+pub mod uniswap;
+
 /// Defines the different types of liquidity our solvers support
 pub enum Liquidity {
     Limit(LimitOrder),
