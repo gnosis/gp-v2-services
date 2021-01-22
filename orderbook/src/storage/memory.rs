@@ -98,6 +98,10 @@ impl Storage for OrderBook {
                         .buy_token
                         .map(|token| token == order.order_creation.buy_token)
                         .unwrap_or(true)
+                    && filter
+                        .uid
+                        .map(|uid| uid == order.order_meta_data.uid)
+                        .unwrap_or(true)
             })
             .cloned()
             .collect())
@@ -117,6 +121,7 @@ impl Storage for OrderBook {
         let remove_order_future = self.remove_expired_orders(now_in_epoch_seconds());
         let remove_settled_orders_future = self.remove_settled_orders(settlement_contract);
         futures::join!(remove_order_future, remove_settled_orders_future);
+        println!("maintained");
         Ok(())
     }
 }
