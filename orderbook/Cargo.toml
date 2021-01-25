@@ -31,7 +31,7 @@ structopt = { version = "0.3" }
 tokio = { version = "0.2", features =["macros", "rt-threaded", "time"] }
 tracing = "0.1"
 tracing-setup = { path = "../tracing-setup" }
-warp = "0.2"
+warp = "0.3"
 web3 = { version = "0.15", default-features = false, features = ["http-tls"] }
 
 [dev-dependencies]
