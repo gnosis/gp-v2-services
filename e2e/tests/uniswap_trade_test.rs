@@ -186,6 +186,7 @@ async fn test_with_ganache() {
         uniswap_liquidity,
         orderbook_api,
         Box::new(solver),
+        Box::new(web3),
     );
     driver.single_run().await.unwrap();
 
