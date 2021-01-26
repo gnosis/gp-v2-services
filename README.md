@@ -16,12 +16,12 @@ The order book service itself uses PostgreSQL as a backend to persist orders. In
 
 The `solver` crate is responsible for submitting on chain settlements based on the orders it gets from the order book and other liquidity sources like uniswap pools.
 
-It implements a solver directly in Rust and can also interact with a more advanced, Gnosis internal, closed source solver.
+It implements a naive solver directly in Rust and can also interact with a more advanced, Gnosis internal, closed source solver.
 
 
 ## Other Crates
 
-Several pieces of functionality are shared between the order book and the solver. They live in other crates in the cargo work space.
+Several pieces of functionality are shared between the order book and the solver. They live in other crates in the cargo workspace.
 
 * `contract` provides ethcontract based smart contract bindings
 * `model` provides the serialization model for orders in the order book api
