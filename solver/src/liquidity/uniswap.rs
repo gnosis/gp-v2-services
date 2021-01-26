@@ -11,10 +11,16 @@ use crate::settlement::Interaction;
 use crate::uniswap;
 use crate::uniswap::Pool;
 
-use super::{AmmOrder, AmmSettlementHandling, Liquidity, LiquiditySource};
+use super::{AmmOrder, AmmSettlementHandling, LimitOrder};
 
 pub struct UniswapLiquidity {
     inner: Arc<Inner>,
+}
+
+struct Inner {
+    factory: UniswapV2Factory,
+    router: UniswapV2Router02,
+    gpv2_settlement: GPv2Settlement,
 }
 
 impl UniswapLiquidity {
@@ -31,26 +37,15 @@ impl UniswapLiquidity {
             }),
         }
     }
-}
 
-struct Inner {
-    factory: UniswapV2Factory,
-    router: UniswapV2Router02,
-    gpv2_settlement: GPv2Settlement,
-}
-
-#[async_trait::async_trait]
-impl LiquiditySource for UniswapLiquidity {
+    /// Given a list of offchain orders returns the list of AMM liquidity to be considered
     async fn get_liquidity(
         &self,
-        liquidity_so_far: impl Iterator<Item = &Liquidity> + Send + Sync + 'async_trait,
-    ) -> Result<Vec<Liquidity>> {
+        offchain_orders: impl Iterator<Item = &LimitOrder> + Send + Sync,
+    ) -> Result<Vec<AmmOrder>> {
         // TODO: include every token with ETH pair in the pools
         let mut pools = HashMap::new();
-        for order in liquidity_so_far.filter_map(|l| match l {
-            Liquidity::Limit(order) => Some(order),
-            _ => None,
-        }) {
+        for order in offchain_orders {
             let pair =
                 TokenPair::new(order.buy_token, order.sell_token).expect("buy token = sell token");
             let vacant = match pools.entry(pair) {
@@ -69,7 +64,6 @@ impl LiquiditySource for UniswapLiquidity {
         Ok(pools
             .values()
             .map(|pool| pool_to_amm_order(pool, self.inner.clone()))
-            .map(Liquidity::Amm)
             .collect())
     }
 }
@@ -91,7 +85,7 @@ impl AmmSettlementHandling for Inner {
 
 fn pool_to_amm_order(pool: &Pool, settlement_handling: Arc<dyn AmmSettlementHandling>) -> AmmOrder {
     AmmOrder {
-        tokens: pool.token_pair.get(),
+        tokens: pool.token_pair,
         reserves: (pool.reserve0, pool.reserve1),
         fee: Rational::new_raw(3, 1000),
         settlement_handling,

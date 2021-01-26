@@ -5,20 +5,17 @@ use model::order::OrderCreation;
 use primitive_types::U256;
 use std::sync::Arc;
 
-use super::{LimitOrder, LimitOrderSettlementHandling, Liquidity, LiquiditySource};
+use super::{LimitOrder, LimitOrderSettlementHandling};
 
-#[async_trait::async_trait]
-impl LiquiditySource for OrderBookApi {
-    async fn get_liquidity(
-        &self,
-        _: impl Iterator<Item = &Liquidity> + Send + 'async_trait,
-    ) -> Result<Vec<Liquidity>> {
+impl OrderBookApi {
+    /// Returns a list of limit orders coming from the offchain orderbook API
+    async fn get_liquidity(&self) -> Result<Vec<LimitOrder>> {
         Ok(self
             .get_orders()
             .await
             .context("failed to get orderbook")?
             .into_iter()
-            .map(|order| Liquidity::Limit(order.order_creation.into()))
+            .map(|order| order.order_creation.into())
             .collect())
     }
 }
