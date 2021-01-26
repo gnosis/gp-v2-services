@@ -1,5 +1,5 @@
-use crate::liquidity::uniswap::UniswapLiquidity;
-use crate::{liquidity::LiquiditySource as _, orderbook::OrderBookApi, solver::Solver};
+use crate::liquidity::{uniswap::UniswapLiquidity, Liquidity};
+use crate::{orderbook::OrderBookApi, solver::Solver};
 use anyhow::{anyhow, Context, Result};
 use contracts::GPv2Settlement;
 use std::time::Duration;
@@ -41,19 +41,24 @@ impl Driver {
 
     pub async fn single_run(&mut self) -> Result<()> {
         tracing::debug!("starting single run");
-        let mut liquidity = self
+        let limit_orders = self
             .orderbook
-            .get_liquidity(std::iter::empty())
+            .get_liquidity()
             .await
             .context("failed to get orderbook")?;
-        tracing::debug!("got {} orders", liquidity.len());
+        tracing::debug!("got {} orders", limit_orders.len());
 
-        liquidity.extend(
-            self.uniswap_liquidity
-                .get_liquidity(liquidity.iter())
-                .await
-                .context("failed to get uniswap pools")?,
-        );
+        let amms = self
+            .uniswap_liquidity
+            .get_liquidity(limit_orders.iter())
+            .await
+            .context("failed to get uniswap pools")?;
+
+        let liquidity = limit_orders
+            .into_iter()
+            .map(Liquidity::Limit)
+            .chain(amms.into_iter().map(Liquidity::Amm))
+            .collect();
 
         // TODO: order validity checks
         // Decide what is handled by orderbook service and what by us.

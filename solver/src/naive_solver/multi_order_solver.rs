@@ -74,7 +74,7 @@ pub fn solve(orders: impl Iterator<Item = LimitOrder> + Clone, pool: &AmmOrder) 
 }
 
 ///
-/// Computes a settlement using orders of a single pair and the direct AMM between those tokens.
+/// Computes a settlement using orders of a single pair and the direct AMM between those tokens.get(.
 /// Panics if orders are not already filtered for a specific token pair, or the reserve information
 /// for that pair is not available.
 ///
@@ -163,9 +163,9 @@ fn fully_matched(
 
 impl AmmOrder {
     fn get_reserve(&self, token: &Address) -> Option<U256> {
-        if &self.tokens.0 == token {
+        if &self.tokens.get().0 == token {
             Some(self.reserves.0.into())
-        } else if &self.tokens.1 == token {
+        } else if &self.tokens.get().1 == token {
             Some(self.reserves.1.into())
         } else {
             None
@@ -287,7 +287,7 @@ mod tests {
     use liquidity::{
         AmmSettlementHandling, LimitOrderSettlementHandling, MockLimitOrderSettlementHandling,
     };
-    use model::order::OrderCreation;
+    use model::{order::OrderCreation, TokenPair};
     use num::Rational;
     use std::sync::{Arc, Mutex};
 
@@ -361,7 +361,7 @@ mod tests {
 
         let amm_handler = Arc::new(AmmSettlementHandler::default());
         let pool = AmmOrder {
-            tokens: (token_a, token_b),
+            tokens: TokenPair::new(token_a, token_b).unwrap(),
             reserves: (to_wei(1000).as_u128(), to_wei(1000).as_u128()),
             fee: Rational::new(3, 1000),
             settlement_handling: amm_handler.clone(),
@@ -417,7 +417,7 @@ mod tests {
 
         let amm_handler = Arc::new(AmmSettlementHandler::default());
         let pool = AmmOrder {
-            tokens: (token_a, token_b),
+            tokens: TokenPair::new(token_a, token_b).unwrap(),
             reserves: (to_wei(1_000_000).as_u128(), to_wei(1_000_000).as_u128()),
             fee: Rational::new(3, 1000),
             settlement_handling: amm_handler.clone(),
@@ -469,7 +469,7 @@ mod tests {
 
         let amm_handler = Arc::new(AmmSettlementHandler::default());
         let pool = AmmOrder {
-            tokens: (token_a, token_b),
+            tokens: TokenPair::new(token_a, token_b).unwrap(),
             reserves: (to_wei(1000).as_u128(), to_wei(1000).as_u128()),
             fee: Rational::new(3, 1000),
             settlement_handling: amm_handler.clone(),
@@ -525,7 +525,7 @@ mod tests {
 
         let amm_handler = Arc::new(AmmSettlementHandler::default());
         let pool = AmmOrder {
-            tokens: (token_a, token_b),
+            tokens: TokenPair::new(token_a, token_b).unwrap(),
             reserves: (to_wei(1000).as_u128(), to_wei(1000).as_u128()),
             fee: Rational::new(3, 1000),
             settlement_handling: amm_handler.clone(),
@@ -585,7 +585,7 @@ mod tests {
 
         let amm_handler = Arc::new(AmmSettlementHandler::default());
         let pool = AmmOrder {
-            tokens: (token_a, token_b),
+            tokens: TokenPair::new(token_a, token_b).unwrap(),
             reserves: (to_wei(1_000_001).as_u128(), to_wei(1_000_000).as_u128()),
             fee: Rational::new(3, 1000),
             settlement_handling: amm_handler.clone(),
@@ -654,7 +654,7 @@ mod tests {
 
         let amm_handler = Arc::new(AmmSettlementHandler::default());
         let pool = AmmOrder {
-            tokens: (token_a, token_b),
+            tokens: TokenPair::new(token_a, token_b).unwrap(),
             reserves: (to_wei(1_000_000).as_u128(), to_wei(1_000_000).as_u128()),
             fee: Rational::new(3, 1000),
             settlement_handling: amm_handler,
@@ -692,7 +692,7 @@ mod tests {
 
         let amm_handler = Arc::new(AmmSettlementHandler::default());
         let pool = AmmOrder {
-            tokens: (token_a, token_b),
+            tokens: TokenPair::new(token_a, token_b).unwrap(),
             reserves: (to_wei(1_000_001).as_u128(), to_wei(1_000_000).as_u128()),
             fee: Rational::new(3, 1000),
             settlement_handling: amm_handler,

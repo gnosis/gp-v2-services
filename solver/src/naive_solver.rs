@@ -28,7 +28,7 @@ impl Solver for NaiveSolver {
                 Liquidity::Amm(uniswap) => {
                     let pair = uniswap.tokens;
                     uniswaps.insert(
-                        TokenPair::new(pair.0, pair.1).expect("Invalid Pair"),
+                        TokenPair::new(pair.get().0, pair.get().1).expect("Invalid Pair"),
                         uniswap,
                     );
                 }

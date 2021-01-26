@@ -60,7 +60,7 @@ impl HttpSolver {
                     std::iter::once(order.sell_token).chain(std::iter::once(order.buy_token))
                 }
                 Liquidity::Amm(amm) => {
-                    std::iter::once(amm.tokens.0).chain(std::iter::once(amm.tokens.1))
+                    std::iter::once(amm.tokens.get().0).chain(std::iter::once(amm.tokens.get().1))
                 }
             })
             .collect::<HashSet<_>>()
@@ -106,8 +106,8 @@ impl HttpSolver {
             .enumerate()
             .map(|(index, amm)| {
                 let uniswap = UniswapModel {
-                    token1: self.token_to_string(&amm.tokens.0),
-                    token2: self.token_to_string(&amm.tokens.1),
+                    token1: self.token_to_string(&amm.tokens.get().0),
+                    token2: self.token_to_string(&amm.tokens.get().1),
                     balance1: amm.reserves.0,
                     balance2: amm.reserves.1,
                     // TODO use AMM fee
