@@ -1,4 +1,3 @@
-use anyhow::Result;
 use model::order::OrderKind;
 use num_rational::Rational;
 use primitive_types::{H160, U256};
@@ -17,22 +16,6 @@ pub enum Liquidity {
     Limit(LimitOrder),
     Amm(AmmOrder),
 }
-
-///
-/// Trait to fetch any kind of liquidity (onchain & off-chain)
-///
-#[async_trait::async_trait]
-pub trait LiquiditySource {
-    ///
-    /// Given all liquidity sourced so far, returns the additional liquidity that can be sourced from
-    /// the concrete implementation.
-    ///
-    async fn get_liquidity(
-        &self,
-        liquidity_so_far: impl Iterator<Item = &Liquidity> + Send + Sync + 'async_trait,
-    ) -> Result<Vec<Liquidity>>;
-}
-
 ///
 /// Basic limit sell and buy orders
 ///
