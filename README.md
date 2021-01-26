@@ -27,3 +27,14 @@ Several pieces of functionality are shared between the order book and the solver
 * `model` provides the serialization model for orders in the order book api
 * `shared-arguments` provides command line arguments
 * `tracing-setup` sets up logging
+
+## Testing
+
+Run unit tests with `cargo test`. Some (by default ignored) tests require a locally running Postgres instance as seen on [CI](.github/workflows/pull-request.yaml). More extensive end to end tests can be run with `cargo test -p e2e`. These require a locally running instance of ganache.
+
+A more extensive e2e test using ganache
+
+## Running
+
+* `cargo run --bin orderbook -- --help`
+* `cargo run --bin solver -- --help`
