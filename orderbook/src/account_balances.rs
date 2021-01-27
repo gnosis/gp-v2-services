@@ -1,0 +1,195 @@
+use anyhow::{Context, Result};
+use ethcontract::{batch::CallBatch, errors::MethodError, Http, Web3};
+use futures::future::{join, join_all, ok, FutureExt as _};
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+use contracts::IERC20;
+use primitive_types::{H160, U256};
+
+#[async_trait::async_trait]
+pub trait BalanceFetching: Send + Sync {
+    // warm cache and setup updates in the background
+    async fn register(&self, owner: H160, token: H160) -> Result<()>;
+
+    // Returns the current balance available to the allowance manager for the given owner and token.
+    // Should be non-blocking
+    fn get_balance(&self, owner: H160, token: H160) -> U256;
+}
+
+pub struct Web3BalanceFetcher {
+    web3: Web3<Http>,
+    allowance_manager: H160,
+    // Mapping of address, token to balance, allowance
+    balances: Mutex<HashMap<SubscriptionKey, SubscriptionValue>>,
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+struct SubscriptionKey {
+    owner: H160,
+    token: H160,
+}
+
+#[derive(Clone, Default)]
+struct SubscriptionValue {
+    balance: U256,
+    allowance: U256,
+}
+
+impl Web3BalanceFetcher {
+    pub fn new(web3: Web3<Http>, allowance_manager: H160) -> Self {
+        Self {
+            web3,
+            allowance_manager,
+            balances: Default::default(),
+        }
+    }
+
+    pub async fn update(&self) {
+        let subscriptions: Vec<_> = {
+            let map = self.balances.lock().expect("mutex holding thread panicked");
+            map.keys().cloned().collect()
+        };
+        let _ = self.register_many(subscriptions.iter()).await;
+    }
+
+    async fn register_many(
+        &self,
+        subscriptions: impl Iterator<Item = &SubscriptionKey>,
+    ) -> Result<()> {
+        let mut batch = CallBatch::new(self.web3.transport());
+        let calls = subscriptions
+            .map(|subscription| {
+                let instance = IERC20::at(&self.web3, subscription.token);
+                join(
+                    instance
+                        .balance_of(subscription.owner)
+                        .view()
+                        .batch_call(&mut batch),
+                    instance
+                        .allowance(subscription.owner, self.allowance_manager)
+                        .view()
+                        .batch_call(&mut batch),
+                )
+                .then(move |(balance, allowance)| {
+                    self.update_with(subscription, balance, allowance);
+                    ok::<_, MethodError>(())
+                })
+            })
+            .collect::<Vec<_>>();
+        let result = batch.execute_all().await;
+        let _ = join_all(calls).await;
+        result.context("Batch call to fetch balances failed")
+    }
+
+    fn update_with(
+        &self,
+        subscription: &SubscriptionKey,
+        balance: Result<U256, MethodError>,
+        allowance: Result<U256, MethodError>,
+    ) {
+        let mut guard = self.balances.lock().expect("thread holding mutex panicked");
+        let entry = guard.entry(*subscription).or_default();
+
+        match balance {
+            Ok(balance) => entry.balance = balance,
+            Err(_) => tracing::warn!("Couldn't fetch balance for {:?}", subscription),
+        }
+        match allowance {
+            Ok(allowance) => entry.allowance = allowance,
+            Err(_) => tracing::warn!("Couldn't fetch allowance for {:?}", subscription),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl BalanceFetching for Web3BalanceFetcher {
+    async fn register(&self, owner: H160, token: H160) -> Result<()> {
+        self.register_many(std::iter::once(&SubscriptionKey { owner, token }))
+            .await
+    }
+
+    fn get_balance(&self, owner: H160, token: H160) -> U256 {
+        let subscription = SubscriptionKey { owner, token };
+        let SubscriptionValue { balance, allowance } = self
+            .balances
+            .lock()
+            .expect("thread holding mutex panicked")
+            .get(&subscription)
+            .cloned()
+            .unwrap_or_default();
+        U256::min(balance, allowance)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use contracts::ERC20Mintable;
+    use ethcontract::prelude::Account;
+
+    #[tokio::test]
+    #[ignore]
+    async fn watch_testnet_balance() {
+        let http = Http::new("http://127.0.0.1:8545").expect("transport failure");
+        let web3 = Web3::new(http);
+
+        let accounts: Vec<H160> = web3.eth().accounts().await.expect("get accounts failed");
+        let trader = Account::Local(accounts[0], None);
+
+        let allowance_target = Account::Local(accounts[1], None);
+
+        let token = ERC20Mintable::builder(&web3)
+            .gas(8_000_000u32.into())
+            .deploy()
+            .await
+            .expect("MintableERC20 deployment failed");
+
+        let fetcher = Web3BalanceFetcher::new(web3, allowance_target.address());
+        fetcher
+            .register(trader.address(), token.address())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            fetcher.get_balance(trader.address(), token.address()),
+            U256::zero(),
+        );
+
+        // Balance without approval should not affect available balance
+        token
+            .mint(trader.address(), 100.into())
+            .send()
+            .await
+            .unwrap();
+        fetcher.update().await;
+        assert_eq!(
+            fetcher.get_balance(trader.address(), token.address()),
+            U256::zero(),
+        );
+
+        // Approving allowance_target should increase available balance
+        token
+            .approve(allowance_target.address(), 200.into())
+            .send()
+            .await
+            .unwrap();
+        fetcher.update().await;
+        assert_eq!(
+            fetcher.get_balance(trader.address(), token.address()),
+            100.into(),
+        );
+
+        // Spending balance should decrease available balance
+        token
+            .transfer(allowance_target.address(), 100.into())
+            .send()
+            .await
+            .unwrap();
+        fetcher.update().await;
+        assert_eq!(
+            fetcher.get_balance(trader.address(), token.address()),
+            U256::zero(),
+        );
+    }
+}
