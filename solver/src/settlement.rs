@@ -36,7 +36,7 @@ impl Trade {
     }
 }
 
-pub trait Interaction: std::fmt::Debug + Send + Sync {
+pub trait Interaction: std::fmt::Debug + Send {
     // TODO: not sure if this should return a result.
     // Write::write returns a result but we know we write to a vector in memory so we know it will
     // never fail. Then the question becomes whether interactions should be allowed to fail encoding
