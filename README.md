@@ -4,13 +4,15 @@ This repository contains backend code for [Gnosis Protocol V2](TODO high level g
 
 ## Order Book
 
-The `orderbook` crate provides the http api through which users (usually through a frontend web application) interact with the order book. Users can add signed orders to the order book and query the state of their orders.
+The `orderbook` crate provides the http api through which users (usually through a frontend web application) interact with the order book.
+Users can add signed orders to the order book and query the state of their orders.
 
 Solvers also interact with the order book by querying a list of open orders that they can attempt to settle.
 
 The api is documented with [openapi](https://protocol-rinkeby.dev.gnosisdev.com/api/).
 
-The order book service itself uses PostgreSQL as a backend to persist orders. In addition to connecting the http api to the database it also checks order validity based on the on chain time, trade events, erc20 funding and approval so that solvers can query only valid orders.
+The order book service itself uses PostgreSQL as a backend to persist orders.
+In addition to connecting the http api to the database it also checks order validity based on the block time, trade events, erc20 funding and approval so that solvers can query only valid orders.
 
 ## Solver
 
@@ -30,7 +32,10 @@ Several pieces of functionality are shared between the order book and the solver
 
 ## Testing
 
-Run unit tests with `cargo test`. Some (by default ignored) tests require a locally running Postgres instance as seen on [CI](.github/workflows/pull-request.yaml). More extensive end to end tests can be run with `cargo test -p e2e`. These require a locally running instance of ganache.
+Run unit tests with `cargo test`. 
+Some (by default ignored) tests require a locally running Postgres instance as seen on [CI](.github/workflows/pull-request.yaml). 
+More extensive end to end tests can be run with `cargo test -p e2e`. 
+These require a locally running instance of ganache.
 
 A more extensive e2e test using ganache
 
