@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use ethcontract::{batch::CallBatch, errors::MethodError, Http, Web3};
-use futures::future::{join, join_all, ok, FutureExt as _};
+use ethcontract::{batch::CallBatch, Http, Web3};
+use futures::future::{join3, join_all};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -60,16 +60,22 @@ impl Web3BalanceFetcher {
     ) -> Result<()> {
         let mut batch = CallBatch::new(self.web3.transport());
 
-        let calls = subscriptions
-            .map(|subscription| {
-                // Make sure subscriptions are registered for next update even if batch call fails
-                {
-                    let mut guard = self.balances.lock().expect("thread holding mutex panicked");
+        // Make sure subscriptions are registered for next update even if batch call fails
+        let subscriptions: Vec<SubscriptionKey> = {
+            let mut guard = self.balances.lock().expect("thread holding mutex panicked");
+            subscriptions
+                .map(|subscription| {
                     let _ = guard.entry(subscription).or_default();
-                }
+                    subscription
+                })
+                .collect()
+        };
 
+        let calls = subscriptions
+            .into_iter()
+            .map(|subscription| {
                 let instance = IERC20::at(&self.web3, subscription.token);
-                join(
+                join3(
                     instance
                         .balance_of(subscription.owner)
                         .view()
@@ -78,35 +84,31 @@ impl Web3BalanceFetcher {
                         .allowance(subscription.owner, self.allowance_manager)
                         .view()
                         .batch_call(&mut batch),
+                    std::future::ready(subscription),
                 )
-                .then(move |(balance, allowance)| {
-                    self.update_with(subscription, balance, allowance);
-                    ok::<_, MethodError>(())
-                })
             })
             .collect::<Vec<_>>();
-        let result = batch.execute_all().await;
-        let _ = join_all(calls).await;
-        result.context("Batch call to fetch balances failed")
-    }
 
-    fn update_with(
-        &self,
-        subscription: SubscriptionKey,
-        balance: Result<U256, MethodError>,
-        allowance: Result<U256, MethodError>,
-    ) {
+        batch
+            .execute_all()
+            .await
+            .context("Batch call to fetch balances failed")?;
+
+        let call_results = join_all(calls).await;
         let mut guard = self.balances.lock().expect("thread holding mutex panicked");
-        let entry = guard.entry(subscription).or_default();
+        for (balance, allowance, subscription) in call_results {
+            let entry = guard.entry(subscription).or_default();
 
-        match balance {
-            Ok(balance) => entry.balance = Some(balance),
-            Err(_) => tracing::warn!("Couldn't fetch balance for {:?}", subscription),
+            match balance {
+                Ok(balance) => entry.balance = Some(balance),
+                Err(_) => tracing::warn!("Couldn't fetch balance for {:?}", subscription),
+            }
+            match allowance {
+                Ok(allowance) => entry.allowance = Some(allowance),
+                Err(_) => tracing::warn!("Couldn't fetch allowance for {:?}", subscription),
+            }
         }
-        match allowance {
-            Ok(allowance) => entry.allowance = Some(allowance),
-            Err(_) => tracing::warn!("Couldn't fetch allowance for {:?}", subscription),
-        }
+        Ok(())
     }
 }
 
