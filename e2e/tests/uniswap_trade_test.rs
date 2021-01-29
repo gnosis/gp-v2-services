@@ -5,9 +5,10 @@ use model::{
     order::{OrderBuilder, OrderKind},
     DomainSeparator,
 };
-use orderbook::storage::{InMemoryOrderBook, Storage};
+use orderbook::{orderbook::Orderbook, storage::InMemoryOrderBook};
 use secp256k1::SecretKey;
 use serde_json::json;
+use solver::liquidity::uniswap::UniswapLiquidity;
 use std::{str::FromStr, sync::Arc};
 use web3::signing::SecretKeyRef;
 
@@ -115,7 +116,10 @@ async fn test_with_ganache() {
             .await
             .expect("Couldn't query domain separator"),
     );
-    let orderbook = Arc::new(InMemoryOrderBook::new(domain_separator));
+    let orderbook = Arc::new(Orderbook::new(
+        DomainSeparator::default(),
+        Box::new(InMemoryOrderBook::default()),
+    ));
     orderbook::serve_task(
         orderbook.clone(),
         API_HOST[7..].parse().expect("Couldn't parse API address"),
@@ -167,13 +171,22 @@ async fn test_with_ganache() {
         reqwest::Url::from_str(API_HOST).unwrap(),
         std::time::Duration::from_secs(10),
     );
+    let uniswap_liquidity = UniswapLiquidity::new(
+        uniswap_factory.clone(),
+        uniswap_router.clone(),
+        gp_settlement.clone(),
+    );
     let solver = solver::naive_solver::NaiveSolver {
         uniswap_router,
         uniswap_factory,
         gpv2_settlement: gp_settlement.clone(),
     };
-    let mut driver =
-        solver::driver::Driver::new(gp_settlement.clone(), orderbook_api, Box::new(solver));
+    let mut driver = solver::driver::Driver::new(
+        gp_settlement.clone(),
+        uniswap_liquidity,
+        orderbook_api,
+        Box::new(solver),
+    );
     driver.single_run().await.unwrap();
 
     // Check matching
