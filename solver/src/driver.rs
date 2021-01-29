@@ -18,6 +18,7 @@ pub struct Driver {
     uniswap_liquidity: UniswapLiquidity,
     solver: Box<dyn Solver>,
     gas_price_estimator: Box<dyn GasPriceEstimating>,
+    target_confirm_time: Duration,
 }
 
 impl Driver {
@@ -27,6 +28,7 @@ impl Driver {
         orderbook: OrderBookApi,
         solver: Box<dyn Solver>,
         gas_price_estimator: Box<dyn GasPriceEstimating>,
+        target_confirm_time: Duration,
     ) -> Self {
         Self {
             settlement_contract,
@@ -34,6 +36,7 @@ impl Driver {
             uniswap_liquidity,
             solver,
             gas_price_estimator,
+            target_confirm_time,
         }
     }
 
@@ -82,6 +85,7 @@ impl Driver {
             settlement,
             &self.settlement_contract,
             self.gas_price_estimator.as_ref(),
+            self.target_confirm_time,
         )
         .await
         .context("failed to submit settlement")?;

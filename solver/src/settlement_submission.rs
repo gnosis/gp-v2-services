@@ -13,6 +13,7 @@ pub async fn submit(
     settlement: Settlement,
     contract: &GPv2Settlement,
     gas: &dyn GasPriceEstimating,
+    target_confirm_time: Duration,
 ) -> Result<()> {
     // TODO: use retry transaction sending crate for updating gas prices
     let encoded_interactions = settlement
@@ -37,9 +38,10 @@ pub async fn submit(
         hex::encode(settle().tx.data.expect("data").0),
     );
     let gas_price = gas
-        .estimate_with_limits(MAX_GAS.into(), Duration::from_secs(60))
+        .estimate_with_limits(MAX_GAS.into(), target_confirm_time)
         .await
         .context("failed to get gas price")?;
+    tracing::info!("Using gas price {}", gas_price);
     settle().call().await.context("settle simulation failed")?;
     settle()
         .gas_price(GasPrice::Value(U256::from_f64_lossy(gas_price)))

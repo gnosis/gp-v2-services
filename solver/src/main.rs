@@ -4,7 +4,7 @@ use solver::{
     driver::Driver, gas_price_estimation::GasEstimatorType, liquidity::uniswap::UniswapLiquidity,
     naive_solver::NaiveSolver,
 };
-use std::time::Duration;
+use std::{num::ParseFloatError, time::Duration};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -44,6 +44,19 @@ struct Arguments {
         use_delimiter = true
     )]
     gas_estimators: Vec<GasEstimatorType>,
+
+    /// The target confirmation time for settlement transactions used to estimate gas price.
+    #[structopt(
+        long,
+        env = "TARGET_CONFIRM_TIME",
+        default_value = "30",
+        parse(try_from_str = duration_from_str),
+    )]
+    target_confirm_time: Duration,
+}
+
+fn duration_from_str(s: &str) -> Result<Duration, ParseFloatError> {
+    Ok(Duration::from_secs_f32(s.parse()?))
 }
 
 #[tokio::main]
@@ -95,6 +108,7 @@ async fn main() {
         orderbook_api,
         Box::new(solver),
         Box::new(gas_price_estimator),
+        args.target_confirm_time,
     );
     driver.run_forever().await;
 }
