@@ -19,6 +19,9 @@ pub trait BalanceFetching: Send + Sync {
     // Returns the latest balance available to the allowance manager for the given owner and token.
     // Should be non-blocking. Returns None if balance has never been fetched.
     fn get_balance(&self, owner: H160, token: H160) -> Option<U256>;
+
+    // Called periodically to perform potential updates on registered balances
+    async fn update(&self);
 }
 
 pub struct Web3BalanceFetcher {
@@ -47,14 +50,6 @@ impl Web3BalanceFetcher {
             allowance_manager,
             balances: Default::default(),
         }
-    }
-
-    pub async fn update(&self) {
-        let subscriptions: Vec<_> = {
-            let map = self.balances.lock().expect("mutex holding thread panicked");
-            map.keys().cloned().collect()
-        };
-        let _ = self._register_many(subscriptions.into_iter()).await;
     }
 
     async fn _register_many(
@@ -136,6 +131,14 @@ impl BalanceFetching for Web3BalanceFetcher {
             .cloned()
             .unwrap_or_default();
         Some(U256::min(balance?, allowance?))
+    }
+
+    async fn update(&self) {
+        let subscriptions: Vec<_> = {
+            let map = self.balances.lock().expect("mutex holding thread panicked");
+            map.keys().cloned().collect()
+        };
+        let _ = self._register_many(subscriptions.into_iter()).await;
     }
 }
 
