@@ -260,6 +260,8 @@ pub struct OrderMetaData {
     #[serde(with = "h160_hexadecimal")]
     pub owner: H160,
     pub uid: OrderUid,
+    // Minimum of balance and allowance for GPv2. None if information is not available
+    pub available_balance: Option<U256>,
     #[serde(with = "serde_with::rust::display_fromstr")]
     pub executed_buy_amount: BigUint,
     #[serde(with = "serde_with::rust::display_fromstr")]
@@ -275,6 +277,7 @@ impl Default for OrderMetaData {
             creation_date: DateTime::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc),
             owner: Default::default(),
             uid: Default::default(),
+            available_balance: Default::default(),
             executed_buy_amount: Default::default(),
             executed_sell_amount: Default::default(),
             executed_fee_amount: Default::default(),
@@ -407,6 +410,7 @@ mod tests {
                 creation_date: DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(3, 0), Utc),
                 owner: H160::from_low_u64_be(1),
                 uid: OrderUid([17u8; 56]),
+                available_balance: None,
                 executed_buy_amount: BigUint::from_bytes_be(&[3]),
                 executed_sell_amount: BigUint::from_bytes_be(&[4]),
                 executed_fee_amount: BigUint::from_bytes_be(&[5]),
