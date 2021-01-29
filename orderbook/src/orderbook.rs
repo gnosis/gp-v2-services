@@ -5,6 +5,7 @@ use anyhow::Result;
 use crate::storage::{AddOrderResult, RemoveOrderResult, Storage};
 use crate::{account_balances::BalanceFetching, database::OrderFilter};
 use contracts::GPv2Settlement;
+use futures::join;
 use model::{
     order::{Order, OrderCreation, OrderUid},
     DomainSeparator,
@@ -79,7 +80,11 @@ impl Orderbook {
     }
 
     pub async fn run_maintenance(&self, settlement_contract: &GPv2Settlement) -> Result<()> {
-        self.storage.run_maintenance(settlement_contract).await
+        join!(
+            self.storage.run_maintenance(settlement_contract),
+            self.balance_fetcher.update()
+        )
+        .0
     }
 }
 
