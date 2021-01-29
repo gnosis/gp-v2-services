@@ -7,6 +7,8 @@ use std::sync::Mutex;
 use contracts::IERC20;
 use primitive_types::{H160, U256};
 
+const MAX_BATCH_SIZE: usize = 100;
+
 #[cfg_attr(test, mockall::automock)]
 #[async_trait::async_trait]
 pub trait BalanceFetching: Send + Sync {
@@ -115,10 +117,13 @@ impl BalanceFetching for Web3BalanceFetcher {
     }
 
     async fn register_many(&self, owner_token_list: Vec<(H160, H160)>) {
-        let subscriptions = owner_token_list
-            .into_iter()
-            .map(|(owner, token)| SubscriptionKey { owner, token });
-        let _ = self._register_many(subscriptions).await;
+        for chunk in owner_token_list.chunks(MAX_BATCH_SIZE) {
+            let subscriptions = chunk.iter().map(|(owner, token)| SubscriptionKey {
+                owner: *owner,
+                token: *token,
+            });
+            let _ = self._register_many(subscriptions).await;
+        }
     }
 
     fn get_balance(&self, owner: H160, token: H160) -> Option<U256> {
