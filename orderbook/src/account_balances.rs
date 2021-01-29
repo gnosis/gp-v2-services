@@ -9,11 +9,11 @@ use primitive_types::{H160, U256};
 
 #[async_trait::async_trait]
 pub trait BalanceFetching: Send + Sync {
-    // warm cache and setup updates in the background
-    async fn register(&self, owner: H160, token: H160) -> Result<()>;
+    // Register owner and address for balance updates in the background
+    async fn register(&self, owner: H160, token: H160);
 
     // Returns the current balance available to the allowance manager for the given owner and token.
-    // Should be non-blocking
+    // Should be non-blocking. Returns 0 if balance is not available for whatever reason.
     fn get_balance(&self, owner: H160, token: H160) -> U256;
 }
 
@@ -58,8 +58,15 @@ impl Web3BalanceFetcher {
         subscriptions: impl Iterator<Item = &SubscriptionKey>,
     ) -> Result<()> {
         let mut batch = CallBatch::new(self.web3.transport());
+
         let calls = subscriptions
             .map(|subscription| {
+                // Make sure subscriptions are registered for next update even if batch call fails
+                {
+                    let mut guard = self.balances.lock().expect("thread holding mutex panicked");
+                    let _ = guard.entry(*subscription).or_default();
+                }
+
                 let instance = IERC20::at(&self.web3, subscription.token);
                 join(
                     instance
@@ -104,9 +111,10 @@ impl Web3BalanceFetcher {
 
 #[async_trait::async_trait]
 impl BalanceFetching for Web3BalanceFetcher {
-    async fn register(&self, owner: H160, token: H160) -> Result<()> {
-        self.register_many(std::iter::once(&SubscriptionKey { owner, token }))
-            .await
+    async fn register(&self, owner: H160, token: H160) {
+        let _ = self
+            .register_many(std::iter::once(&SubscriptionKey { owner, token }))
+            .await;
     }
 
     fn get_balance(&self, owner: H160, token: H160) -> U256 {
@@ -146,10 +154,7 @@ mod tests {
             .expect("MintableERC20 deployment failed");
 
         let fetcher = Web3BalanceFetcher::new(web3, allowance_target.address());
-        fetcher
-            .register(trader.address(), token.address())
-            .await
-            .unwrap();
+        fetcher.register(trader.address(), token.address()).await;
 
         assert_eq!(
             fetcher.get_balance(trader.address(), token.address()),
