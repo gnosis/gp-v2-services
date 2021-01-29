@@ -1651,6 +1651,7 @@ dependencies = [
  "futures",
  "hex",
  "hex-literal",
+ "mockall",
  "model",
  "num-bigint",
  "primitive-types",
