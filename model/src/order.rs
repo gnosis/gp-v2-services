@@ -390,6 +390,7 @@ mod tests {
             "creationDate": "1970-01-01T00:00:03Z",
             "owner": "0x0000000000000000000000000000000000000001",
             "uid": "0x1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+            "availableBalance": None::<U256>,
             "executedBuyAmount": "3",
             "executedSellAmount": "4",
             "executedFeeAmount": "5",

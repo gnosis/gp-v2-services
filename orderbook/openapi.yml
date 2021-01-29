@@ -144,11 +144,6 @@ components:
       description: Amount of a token. uint256 encoded in decimal.
       type: string
       example: "1234567890"
-    OptionalTokenAmount:
-      description: Amount of a token. uint256 encoded in decimal. Can be null
-      type: string
-      example: "1234567890"
-      nullable: true
     FeeInformation:
       description: |
         Provides the information to calculate the fees.
@@ -223,8 +218,9 @@ components:
         UID:
           $ref: "#/components/schemas/UID"
         availableBalance:
-          description: "Amount of sellToken available for the settlement contract to spend on behalf of the owner"
-          $ref: "#/components/schemas/OptionalTokenAmount"
+          description: "Amount of sellToken available for the settlement contract to spend on behalf of the owner. Null if API was unable to fetch balance."
+          $ref: "#/components/schemas/TokenAmount"
+          nullable: true
         executedSellAmount:
           description: "The total amount of sellToken that has been executed for this order."
           $ref: "#/components/schemas/BigUint"
