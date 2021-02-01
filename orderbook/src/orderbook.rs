@@ -49,7 +49,7 @@ impl Orderbook {
     }
 
     pub async fn get_orders(&self, filter: &OrderFilter) -> Result<Vec<Order>> {
-        let orders_without_balance = self.storage.get_orders(filter).await?;
+        let mut orders_without_balance = self.storage.get_orders(filter).await?;
 
         // Since order can come from storage after a cold start there is the possibility that they are not yet registered
         // for balance updates. In this case we do it here.
@@ -68,15 +68,12 @@ impl Orderbook {
         self.balance_fetcher.register_many(untracked).await;
 
         // Enrich orders with balance information
-        Ok(orders_without_balance
-            .into_iter()
-            .map(|mut order| {
-                order.order_meta_data.available_balance = self
-                    .balance_fetcher
-                    .get_balance(order.order_meta_data.owner, order.order_creation.sell_token);
-                order
-            })
-            .collect())
+        for order in orders_without_balance.iter_mut() {
+            order.order_meta_data.available_balance = self
+                .balance_fetcher
+                .get_balance(order.order_meta_data.owner, order.order_creation.sell_token);
+        }
+        Ok(orders_without_balance)
     }
 
     pub async fn run_maintenance(&self, settlement_contract: &GPv2Settlement) -> Result<()> {
