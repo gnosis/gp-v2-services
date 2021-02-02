@@ -174,6 +174,7 @@ async fn test_with_ganache() {
         uniswap_factory.clone(),
         uniswap_router.clone(),
         gp_settlement.clone(),
+        web3.clone(),
     );
     let solver = solver::naive_solver::NaiveSolver {
         uniswap_router,
