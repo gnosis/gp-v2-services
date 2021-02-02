@@ -218,6 +218,9 @@ async fn test_with_ganache() {
         .send()
         .await;
     assert_eq!(placement.unwrap().status(), 404);
+
+    // Drive again to ensure we can continue solution finding
+    driver.single_run().await.unwrap();
 }
 
 fn to_wei(base: u32) -> U256 {
