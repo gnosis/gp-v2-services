@@ -57,7 +57,7 @@ impl OrderBook {
         // As a simplification the function is returning the uid,
         // if the order was already partially settled
         // or if it was canceled.
-        if filled_amount.gt(&U256::zero()) {
+        if filled_amount.is_zero() {
             None
         } else {
             Some(uid)
