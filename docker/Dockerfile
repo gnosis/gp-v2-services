@@ -1,4 +1,4 @@
-FROM clux/muslrust:nightly-2021-02-01 as cargo-build
+FROM clux/muslrust:stable as cargo-build
 WORKDIR /usr/src/oba-services
 
 # Copy and Build Code
