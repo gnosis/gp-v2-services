@@ -5,7 +5,9 @@ use model::{
     order::{OrderBuilder, OrderKind},
     DomainSeparator,
 };
-use orderbook::{orderbook::Orderbook, storage::InMemoryOrderBook};
+use orderbook::{
+    account_balances::Web3BalanceFetcher, orderbook::Orderbook, storage::InMemoryOrderBook,
+};
 use secp256k1::SecretKey;
 use serde_json::json;
 use solver::liquidity::uniswap::UniswapLiquidity;
@@ -117,8 +119,9 @@ async fn test_with_ganache() {
             .expect("Couldn't query domain separator"),
     );
     let orderbook = Arc::new(Orderbook::new(
-        DomainSeparator::default(),
+        domain_separator,
         Box::new(InMemoryOrderBook::default()),
+        Box::new(Web3BalanceFetcher::new(web3.clone(), gp_allowance)),
     ));
     orderbook::serve_task(
         orderbook.clone(),

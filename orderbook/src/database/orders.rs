@@ -20,6 +20,7 @@ pub struct OrderFilter {
     pub buy_token: Option<H160>,
     pub exclude_fully_executed: bool,
     pub exclude_invalidated: bool,
+    pub exclude_insufficient_balance: bool,
     pub uid: Option<OrderUid>,
 }
 
@@ -162,6 +163,7 @@ impl OrdersQueryRow {
                     .try_into()
                     .map_err(|_| anyhow!("order uid has wrong length"))?,
             ),
+            available_balance: Default::default(),
             executed_buy_amount: big_decimal_to_big_uint(&self.sum_buy)
                 .ok_or_else(|| anyhow!("sum_buy is not an unsigned integer"))?,
             executed_sell_amount: big_decimal_to_big_uint(&self.sum_sell)
