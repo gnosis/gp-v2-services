@@ -15,6 +15,8 @@ const UNISWAP_PAIR_INIT_CODE: [u8; 32] =
 const HONEYSWAP_PAIR_INIT_CODE: [u8; 32] =
     hex!("3f88503e8580ab941773b59034fb4b2a63e86dbc031b3633a925533ad3ed2b93");
 
+const MAX_BATCH_SIZE: usize = 100;
+
 use crate::interactions::UniswapInteraction;
 use crate::settlement::Interaction;
 
@@ -76,7 +78,7 @@ impl UniswapLiquidity {
             let future = pair_contract.get_reserves().batch_call(&mut batch);
             vacant.insert(future);
         }
-        batch.execute_all().await?;
+        batch.execute_all(MAX_BATCH_SIZE).await;
 
         let mut result = Vec::new();
         for (pair, future) in pools {
