@@ -87,10 +87,12 @@ impl UniswapLiquidity {
             );
 
             // Include every token with native token pair in the pools
-            TokenPair::new(order.buy_token, self.native_token_wrapper)
-                .map(&mut get_reserves_if_not_yet_tracked);
-            TokenPair::new(order.sell_token, self.native_token_wrapper)
-                .map(&mut get_reserves_if_not_yet_tracked);
+            if let Some(pair) = TokenPair::new(order.buy_token, self.native_token_wrapper) {
+                get_reserves_if_not_yet_tracked(pair);
+            }
+            if let Some(pair) = TokenPair::new(order.sell_token, self.native_token_wrapper) {
+                get_reserves_if_not_yet_tracked(pair);
+            }
         }
         batch.execute_all(MAX_BATCH_SIZE).await;
 
