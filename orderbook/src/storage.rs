@@ -1,5 +1,4 @@
-mod memory;
-mod postgresql;
+pub mod postgresql;
 
 use crate::database::{Database, OrderFilter};
 use anyhow::Result;
@@ -7,11 +6,9 @@ use contracts::GPv2Settlement;
 use model::order::{Order, OrderUid};
 use url::Url;
 
-pub use memory::OrderBook as InMemoryOrderBook;
-
-pub async fn postgres_orderbook(url: Url) -> Result<impl Storage> {
-    let db = Database::new(url.as_str())?;
-    let order_book = postgresql::OrderBook::_new(db);
+pub async fn postgres_orderbook(contract: GPv2Settlement, db_url: Url) -> Result<impl Storage> {
+    let db = Database::new(db_url.as_str())?;
+    let order_book = postgresql::OrderBook::new(contract, db);
     // Perform one operation on the database to ensure that the connection works.
     order_book
         .get_orders(&OrderFilter {
