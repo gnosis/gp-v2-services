@@ -141,14 +141,11 @@ impl UniswapLiquidity {
             token_and_allowance.push((pair, allowance.await.unwrap_or_default()));
         }
 
-        let mut guard = self
-            .inner
+        self.inner
             .allowances
             .lock()
-            .expect("Thread holding mutex panicked");
-        for (pair, allowance) in token_and_allowance {
-            guard.insert(pair, allowance);
-        }
+            .expect("Thread holding mutex panicked")
+            .extend(token_and_allowance);
     }
 }
 
