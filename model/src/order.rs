@@ -272,7 +272,9 @@ pub struct OrderMetaData {
     #[serde(with = "serde_with::rust::display_fromstr")]
     pub executed_buy_amount: BigUint,
     #[serde(with = "serde_with::rust::display_fromstr")]
-    pub executed_sell_amount: BigUint,
+    pub executed_net_sell_amount: BigUint,
+    #[serde(with = "serde_with::rust::display_fromstr")]
+    pub executed_gross_sell_amount: BigUint,
     #[serde(with = "serde_with::rust::display_fromstr")]
     pub executed_fee_amount: BigUint,
     pub invalidated: bool,
@@ -286,7 +288,8 @@ impl Default for OrderMetaData {
             uid: Default::default(),
             available_balance: Default::default(),
             executed_buy_amount: Default::default(),
-            executed_sell_amount: Default::default(),
+            executed_net_sell_amount: Default::default(),
+            executed_gross_sell_amount: Default::default(),
             executed_fee_amount: Default::default(),
             invalidated: Default::default(),
         }
@@ -399,8 +402,9 @@ mod tests {
             "uid": "0x1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
             "availableBalance": "100",
             "executedBuyAmount": "3",
-            "executedSellAmount": "4",
-            "executedFeeAmount": "5",
+            "executedNetSellAmount": "4",
+            "executedGrossSellAmount": "5",
+            "executedFeeAmount": "6",
             "invalidated": true,
             "sellToken": "0x000000000000000000000000000000000000000a",
             "buyToken": "0x0000000000000000000000000000000000000009",
@@ -420,8 +424,9 @@ mod tests {
                 uid: OrderUid([17u8; 56]),
                 available_balance: Some(100.into()),
                 executed_buy_amount: BigUint::from_bytes_be(&[3]),
-                executed_sell_amount: BigUint::from_bytes_be(&[4]),
-                executed_fee_amount: BigUint::from_bytes_be(&[5]),
+                executed_net_sell_amount: BigUint::from_bytes_be(&[4]),
+                executed_gross_sell_amount: BigUint::from_bytes_be(&[5]),
+                executed_fee_amount: BigUint::from_bytes_be(&[6]),
                 invalidated: true,
             },
             order_creation: OrderCreation {
