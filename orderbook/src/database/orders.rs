@@ -155,11 +155,11 @@ fn h160_from_vec(vec: Vec<u8>) -> Result<H160> {
 
 impl OrdersQueryRow {
     fn into_order(self) -> Result<Order> {
-        let executed_net_sell_amount = big_decimal_to_big_uint(&self.sum_sell)
+        let executed_sell_amount = big_decimal_to_big_uint(&self.sum_sell)
             .ok_or_else(|| anyhow!("sum_sell is not an unsigned integer"))?;
         let executed_fee_amount = big_decimal_to_big_uint(&self.sum_fee)
             .ok_or_else(|| anyhow!("sum_fee is not an unsigned integer"))?;
-        let executed_gross_sell_amount = &executed_net_sell_amount - &executed_fee_amount;
+        let executed_sell_amount_before_fees = &executed_sell_amount - &executed_fee_amount;
 
         let order_meta_data = OrderMetaData {
             creation_date: self.creation_timestamp,
@@ -172,8 +172,8 @@ impl OrdersQueryRow {
             available_balance: Default::default(),
             executed_buy_amount: big_decimal_to_big_uint(&self.sum_buy)
                 .ok_or_else(|| anyhow!("sum_buy is not an unsigned integer"))?,
-            executed_net_sell_amount,
-            executed_gross_sell_amount,
+            executed_sell_amount,
+            executed_sell_amount_before_fees,
             executed_fee_amount,
             invalidated: self.invalidated,
         };
@@ -420,7 +420,7 @@ mod tests {
 
         let order = get_order(true).await.unwrap().unwrap();
         assert_eq!(
-            order.order_meta_data.executed_net_sell_amount,
+            order.order_meta_data.executed_sell_amount,
             BigUint::from(0u8)
         );
 
@@ -439,7 +439,7 @@ mod tests {
         .unwrap();
         let order = get_order(true).await.unwrap().unwrap();
         assert_eq!(
-            order.order_meta_data.executed_net_sell_amount,
+            order.order_meta_data.executed_sell_amount,
             BigUint::from(3u8)
         );
 
@@ -458,7 +458,7 @@ mod tests {
         .unwrap();
         let order = get_order(true).await.unwrap().unwrap();
         assert_eq!(
-            order.order_meta_data.executed_net_sell_amount,
+            order.order_meta_data.executed_sell_amount,
             BigUint::from(9u8),
         );
 
@@ -481,7 +481,7 @@ mod tests {
         // If we include fully executed orders it is there.
         let order = get_order(false).await.unwrap().unwrap();
         assert_eq!(
-            order.order_meta_data.executed_net_sell_amount,
+            order.order_meta_data.executed_sell_amount,
             BigUint::from(10u8)
         );
 
@@ -537,7 +537,7 @@ mod tests {
 
         let expected = u256_to_big_uint(&U256::MAX) * BigUint::from(10u8);
         assert!(expected.to_string().len() > 78);
-        assert_eq!(order.order_meta_data.executed_net_sell_amount, expected);
+        assert_eq!(order.order_meta_data.executed_sell_amount, expected);
     }
 
     #[tokio::test]
