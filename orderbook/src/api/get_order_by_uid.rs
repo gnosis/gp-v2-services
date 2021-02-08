@@ -4,6 +4,7 @@ use anyhow::Result;
 use model::order::{Order, OrderUid};
 use std::{convert::Infallible, sync::Arc};
 use warp::{hyper::StatusCode, reply, Filter, Rejection, Reply};
+use crate::api::common::convert_get_orders_error_to_reply;
 
 pub fn get_order_by_uid_request() -> impl Filter<Extract = (OrderFilter,), Error = Rejection> + Clone
 {
@@ -19,11 +20,7 @@ pub fn get_order_by_uid_response(result: Result<Vec<Order>>) -> impl Reply {
     let orders = match result {
         Ok(orders) => orders,
         Err(err) => {
-            tracing::error!(?err, "get_orders error");
-            return Ok(reply::with_status(
-                super::internal_error(),
-                StatusCode::INTERNAL_SERVER_ERROR,
-            ));
+            return Ok(convert_get_orders_error_to_reply(err));
         }
     };
     Ok(match orders.first() {

@@ -7,6 +7,7 @@ use serde::Deserialize;
 use shared::time::now_in_epoch_seconds;
 use std::{convert::Infallible, sync::Arc};
 use warp::{hyper::StatusCode, reply, Filter, Rejection, Reply};
+use crate::api::common::convert_get_orders_error_to_reply;
 
 // The default values create a filter that only includes valid orders.
 #[derive(Deserialize)]
@@ -49,17 +50,12 @@ pub fn get_orders_request() -> impl Filter<Extract = (OrderFilter,), Error = Rej
 }
 
 pub fn get_orders_response(result: Result<Vec<Order>>) -> impl Reply {
-    let orders = match result {
-        Ok(orders) => orders,
+    match result {
+        Ok(orders) => Ok(reply::with_status(reply::json(&orders), StatusCode::OK)),
         Err(err) => {
-            tracing::error!(?err, "get_orders error");
-            return Ok(reply::with_status(
-                super::internal_error(),
-                StatusCode::INTERNAL_SERVER_ERROR,
-            ));
+            Ok(convert_get_orders_error_to_reply(err))
         }
-    };
-    Ok(reply::with_status(reply::json(&orders), StatusCode::OK))
+    }
 }
 
 pub fn get_orders(
