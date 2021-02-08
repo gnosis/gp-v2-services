@@ -1,10 +1,10 @@
+use crate::api::common::convert_get_orders_error_to_reply;
 use crate::database::OrderFilter;
 use crate::orderbook::Orderbook;
 use anyhow::Result;
 use model::order::{Order, OrderUid};
 use std::{convert::Infallible, sync::Arc};
 use warp::{hyper::StatusCode, reply, Filter, Rejection, Reply};
-use crate::api::common::convert_get_orders_error_to_reply;
 
 pub fn get_order_by_uid_request() -> impl Filter<Extract = (OrderFilter,), Error = Rejection> + Clone
 {
