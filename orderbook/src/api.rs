@@ -54,7 +54,7 @@ fn internal_error() -> Json {
 
 pub fn convert_get_orders_error_to_reply(err: anyhowError) -> WithStatus<Json> {
     tracing::error!(?err, "get_orders error");
-    return with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR);
+    with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 /// Wraps H160 with FromStr and Deserialize that can handle a `0x` prefix.
