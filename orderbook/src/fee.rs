@@ -16,7 +16,7 @@ pub struct MinFeeCalculator {
     native_token: H160,
     // TODO persist past measurements to shared storage
     measurements: Mutex<HashMap<H160, Vec<Measurement>>>,
-    now: Box<dyn Fn() -> DateTime<Utc>>,
+    now: Box<dyn Fn() -> DateTime<Utc> + Send + Sync>,
 }
 
 const GAS_PER_ORDER: f64 = 100_000.0;
@@ -87,8 +87,6 @@ impl MinFeeCalculator {
 #[cfg(test)]
 mod tests {
     use chrono::Duration;
-    use std::cell::RefCell;
-    use std::rc::Rc;
     use std::sync::Arc;
 
     use super::*;
@@ -113,7 +111,7 @@ mod tests {
         fn new_for_test(
             gas_estimator: Box<dyn GasPriceEstimating>,
             price_estimator: Box<dyn PriceEstimating>,
-            now: Box<dyn Fn() -> DateTime<Utc>>,
+            now: Box<dyn Fn() -> DateTime<Utc> + Send + Sync>,
         ) -> Self {
             Self {
                 gas_estimator,
@@ -128,12 +126,12 @@ mod tests {
     #[tokio::test]
     async fn accepts_min_fee_if_validated_before_expiry() {
         let gas_price = Arc::new(Mutex::new(100.0));
-        let time = Rc::new(RefCell::new(Utc::now()));
+        let time = Arc::new(Mutex::new(Utc::now()));
 
         let gas_estimator = Box::new(FakeGasEstimator(gas_price.clone()));
         let price_estimator = Box::new(FakePriceEstimator(1.0));
         let time_copy = time.clone();
-        let now = move || *time_copy.borrow();
+        let now = move || *time_copy.lock().unwrap();
 
         let fee_estimator =
             MinFeeCalculator::new_for_test(gas_estimator, price_estimator, Box::new(now));
@@ -145,11 +143,11 @@ mod tests {
         *gas_price.lock().unwrap() *= 2.0;
 
         // fee is valid before expiry
-        time.replace(expiry - Duration::seconds(10));
+        *time.lock().unwrap() = expiry - Duration::seconds(10);
         assert!(fee_estimator.is_valid_fee(token, fee).await);
 
         // fee is invalid after expiry
-        time.replace(expiry + Duration::seconds(10));
+        *time.lock().unwrap() = expiry + Duration::seconds(10);
         assert_eq!(fee_estimator.is_valid_fee(token, fee).await, false);
     }
 
