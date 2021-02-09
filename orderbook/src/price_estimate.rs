@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, ensure, Result};
 use ethcontract::H160;
 use model::TokenPair;
 use shared::uniswap_pool::PoolFetching;
@@ -30,6 +30,7 @@ impl UniswapPriceEstimator {
         } else {
             (pool.reserves.1, pool.reserves.0)
         };
+        ensure!(sell_reserve * buy_reserve != 0, "Pools with empty reserve");
         Ok((sell_reserve as f64) / (buy_reserve as f64))
     }
 }
@@ -81,6 +82,21 @@ mod tests {
         let token_a = H160::from_low_u64_be(1);
         let token_b = H160::from_low_u64_be(2);
         let pool_fetcher = Box::new(FakePoolFetcher(vec![]));
+        let estimator = UniswapPriceEstimator { pool_fetcher };
+
+        assert!(estimator.estimate_price(token_a, token_b).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn return_error_if_invalid_reserves() {
+        let token_a = H160::from_low_u64_be(1);
+        let token_b = H160::from_low_u64_be(2);
+        let pool = Pool {
+            tokens: TokenPair::new(token_a, token_b).unwrap(),
+            reserves: (0, 10),
+        };
+
+        let pool_fetcher = Box::new(FakePoolFetcher(vec![pool]));
         let estimator = UniswapPriceEstimator { pool_fetcher };
 
         assert!(estimator.estimate_price(token_a, token_b).await.is_err());
