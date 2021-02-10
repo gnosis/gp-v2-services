@@ -96,6 +96,7 @@ async fn main() {
         Box::new(price_estimator),
         Box::new(gas_price_estimator),
         native_token.address(),
+        database,
     ));
 
     let orderbook = Arc::new(Orderbook::new(
