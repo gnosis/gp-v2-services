@@ -5,7 +5,7 @@ use crate::{liquidity::Liquidity, settlement::Settlement, solver::Solver};
 use ::model::order::OrderKind;
 use anyhow::{ensure, Context, Result};
 use primitive_types::H160;
-use reqwest::{Client, Url};
+use reqwest::{header::HeaderValue, Client, Url};
 use std::collections::{HashMap, HashSet};
 
 /// The configuration passed as url parameters to the solver.
@@ -138,7 +138,9 @@ impl HttpSolver {
         let query = url.query().map(ToString::to_string).unwrap_or_default();
         let mut request = self.client.post(url);
         if let Some(api_key) = &self.api_key {
-            request = request.header("X-API-KEY", api_key);
+            let mut header = HeaderValue::from_str(api_key.as_str()).unwrap();
+            header.set_sensitive(true);
+            request = request.header("X-API-KEY", header);
         }
         let body = serde_json::to_string(&model).context("failed to encode body")?;
         tracing::debug!("request query {} body {}", query, body);
@@ -146,19 +148,17 @@ impl HttpSolver {
 
         let response = request.send().await.context("failed to send request")?;
         let status = response.status();
-        let body_bytes = response
-            .bytes()
+        let text = response
+            .text()
             .await
-            .context("failed to get response body")?;
-        let body_str =
-            std::str::from_utf8(body_bytes.as_ref()).context("failed to decode response body")?;
-        tracing::debug!("response body {}", body_str);
+            .context("failed to decode response body")?;
+        tracing::debug!("response body {}", text);
         ensure!(
             status.is_success(),
             "solver response is not success: status: {}",
             status
         );
-        serde_json::from_str(body_str).context("failed to decode response json")
+        serde_json::from_str(text.as_str()).context("failed to decode response json")
     }
 }
 
