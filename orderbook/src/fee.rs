@@ -67,16 +67,14 @@ impl MinFeeCalculator {
             .measurements
             .lock()
             .expect("Thread holding mutex panicked")
-            .get(&token)
+            .get_mut(&token)
         {
-            // Previous measurements are ordered ascending by expiry data
-            for (suggested_fee, expiry_date) in measurements.iter().rev() {
-                if expiry_date < &(self.now)() {
-                    break;
-                }
-                if &fee >= suggested_fee {
-                    return true;
-                }
+            measurements.retain(|(_, expiry_date)| expiry_date >= &(self.now)());
+            if measurements
+                .iter()
+                .any(|(suggested_fee, _)| &fee >= suggested_fee)
+            {
+                return true;
             }
         }
         if let Ok((current_fee, _)) = self.min_fee(token).await {
