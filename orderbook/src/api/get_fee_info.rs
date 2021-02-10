@@ -30,7 +30,7 @@ pub fn get_fee_info_response(result: Result<Option<(U256, DateTime<Utc>)>>) -> i
         Ok(Some((minimal_fee, expiration_date))) => {
             let fee_info = FeeInfo {
                 expiration_date,
-                minimal_fee,
+                minimal_fee: 0.into(),
                 fee_ratio: 0u32,
             };
             Ok(reply::with_status(reply::json(&fee_info), StatusCode::OK))
