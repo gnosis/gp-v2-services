@@ -25,9 +25,9 @@ pub fn get_fee_info_request() -> impl Filter<Extract = (H160,), Error = Rejectio
         .map(|token: H160Wrapper| token.0)
 }
 
-pub fn get_fee_info_response(result: Result<(U256, DateTime<Utc>)>) -> impl Reply {
+pub fn get_fee_info_response(result: Result<Option<(U256, DateTime<Utc>)>>) -> impl Reply {
     match result {
-        Ok((minimal_fee, expiration_date)) => {
+        Ok(Some((minimal_fee, expiration_date))) => {
             let fee_info = FeeInfo {
                 expiration_date,
                 minimal_fee,
@@ -35,11 +35,15 @@ pub fn get_fee_info_response(result: Result<(U256, DateTime<Utc>)>) -> impl Repl
             };
             Ok(reply::with_status(reply::json(&fee_info), StatusCode::OK))
         }
+        Ok(None) => Ok(reply::with_status(
+            super::error("NotFound", "Token was not found"),
+            StatusCode::NOT_FOUND,
+        )),
         Err(err) => {
             tracing::error!(?err, "get_fee error");
             Ok(reply::with_status(
-                super::error("NotFound", "Token was not found"),
-                StatusCode::NOT_FOUND,
+                super::internal_error(),
+                StatusCode::INTERNAL_SERVER_ERROR,
             ))
         }
     }
@@ -76,7 +80,7 @@ mod tests {
     #[tokio::test]
     async fn get_fee_info_response_() {
         let response =
-            get_fee_info_response(Ok((U256::zero(), Utc::now() + FixedOffset::east(10))))
+            get_fee_info_response(Ok(Some((U256::zero(), Utc::now() + FixedOffset::east(10)))))
                 .into_response();
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_body(response).await;
