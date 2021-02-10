@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use chrono::{DateTime, FixedOffset, Utc};
+use chrono::{DateTime, Duration, Utc};
 use primitive_types::{H160, U256};
 use std::sync::Mutex;
 
@@ -20,7 +20,7 @@ pub struct MinFeeCalculator {
 }
 
 const GAS_PER_ORDER: f64 = 100_000.0;
-const STANDARD_VALIDITY_FOR_FEE_IN_SEC: i32 = 60;
+const STANDARD_VALIDITY_FOR_FEE_IN_SEC: i64 = 60;
 
 impl MinFeeCalculator {
     pub fn new(
@@ -49,7 +49,7 @@ impl MinFeeCalculator {
             .await?;
 
         let min_fee = U256::from_f64_lossy(gas_price * token_price * GAS_PER_ORDER);
-        let valid_until = (self.now)() + FixedOffset::east(STANDARD_VALIDITY_FOR_FEE_IN_SEC);
+        let valid_until = (self.now)() + Duration::seconds(STANDARD_VALIDITY_FOR_FEE_IN_SEC);
         let result = (min_fee, valid_until);
 
         self.measurements
@@ -86,10 +86,10 @@ impl MinFeeCalculator {
 
 #[cfg(test)]
 mod tests {
+    use chrono::Duration;
     use std::cell::RefCell;
     use std::rc::Rc;
     use std::sync::Arc;
-    use std::time::Duration;
 
     use super::*;
 
@@ -104,7 +104,7 @@ mod tests {
     struct FakeGasEstimator(Arc<Mutex<f64>>);
     #[async_trait::async_trait]
     impl GasPriceEstimating for FakeGasEstimator {
-        async fn estimate_with_limits(&self, _: f64, _: Duration) -> Result<f64> {
+        async fn estimate_with_limits(&self, _: f64, _: std::time::Duration) -> Result<f64> {
             Ok(*self.0.lock().unwrap())
         }
     }
@@ -145,11 +145,11 @@ mod tests {
         *gas_price.lock().unwrap() *= 2.0;
 
         // fee is valid before expiry
-        time.replace(expiry - FixedOffset::east(10));
+        time.replace(expiry - Duration::seconds(10));
         assert!(fee_estimator.is_valid_fee(token, fee).await);
 
         // fee is invalid after expiry
-        time.replace(expiry - FixedOffset::west(10));
+        time.replace(expiry + Duration::seconds(10));
         assert_eq!(fee_estimator.is_valid_fee(token, fee).await, false);
     }
 
