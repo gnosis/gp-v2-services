@@ -52,10 +52,7 @@ pub fn create_order_response(result: Result<AddOrderResult>) -> impl Reply {
             StatusCode::BAD_REQUEST,
         ),
         Ok(AddOrderResult::InsufficientFee) => (
-            super::error(
-                "InsufficientFee",
-                "consult /token/<address>/fee for minimum fee required",
-            ),
+            super::error("InsufficientFee", "Order does not include sufficient fee"),
             StatusCode::BAD_REQUEST,
         ),
         Err(_) => (super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
