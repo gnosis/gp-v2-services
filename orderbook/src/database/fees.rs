@@ -50,6 +50,16 @@ impl Database {
             None => Ok(None),
         }
     }
+
+    pub async fn remove_expired(&self, max_expiry: DateTime<Utc>) -> Result<()> {
+        const QUERY: &str = "DELETE FROM min_fee_measurements WHERE expiration_timestamp < $1;";
+        sqlx::query(QUERY)
+            .bind(max_expiry)
+            .execute(&self.pool)
+            .await
+            .context("insert MinFeeMeasurement failed")
+            .map(|_| ())
+    }
 }
 
 #[cfg(test)]
@@ -100,5 +110,10 @@ mod tests {
                 .unwrap(),
             None
         );
+
+        db.remove_expired(now + Duration::seconds(120))
+            .await
+            .unwrap();
+        assert_eq!(db.get_min_fee(token_b, now).await.unwrap(), None);
     }
 }
