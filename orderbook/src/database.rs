@@ -35,6 +35,9 @@ impl Database {
         self.pool
             .execute(sqlx::query("TRUNCATE invalidations;"))
             .await?;
+        self.pool
+            .execute(sqlx::query("TRUNCATE min_fee_measurements;"))
+            .await?;
         Ok(())
     }
 }
