@@ -18,24 +18,18 @@ pub struct MinFeeCalculator {
     now: Box<dyn Fn() -> DateTime<Utc> + Send + Sync>,
 }
 
-#[derive(PartialEq, Debug, Clone, Copy)]
-pub struct MinFeeMeasurement {
-    pub token: H160,
-    pub expiry: DateTime<Utc>,
-    pub min_fee: U256,
-}
-
 #[async_trait::async_trait]
 pub trait MinFeeStoring: Send + Sync {
     // Stores the given measurement. Returns an error if this fails
-    async fn save_fee_measurement(&self, measurement: MinFeeMeasurement) -> Result<()>;
-
-    // Return a vector of previously stored measurements for the given token that have an expiry >= min expiry
-    async fn load_fee_measurements(
+    async fn save_fee_measurement(
         &self,
         token: H160,
-        min_expiry: DateTime<Utc>,
-    ) -> Vec<MinFeeMeasurement>;
+        expiry: DateTime<Utc>,
+        min_fee: U256,
+    ) -> Result<()>;
+
+    // Return a vector of previously stored measurements for the given token that have an expiry >= min expiry
+    async fn get_min_fee(&self, token: H160, min_expiry: DateTime<Utc>) -> Result<Option<U256>>;
 }
 
 const GAS_PER_ORDER: f64 = 100_000.0;
@@ -78,25 +72,17 @@ impl MinFeeCalculator {
         let valid_until = (self.now)() + Duration::seconds(STANDARD_VALIDITY_FOR_FEE_IN_SEC);
         let _ = self
             .measurements
-            .save_fee_measurement(MinFeeMeasurement {
-                token,
-                min_fee,
-                expiry: valid_until,
-            })
+            .save_fee_measurement(token, valid_until, min_fee)
             .await;
         Ok(Some((min_fee, valid_until)))
     }
 
     // Returns true if the fee satisfies a previous not yet expired estimate, or the fee is high enough given the current estimate.
     pub async fn is_valid_fee(&self, token: H160, fee: U256) -> bool {
-        if self
-            .measurements
-            .load_fee_measurements(token, (self.now)())
-            .await
-            .iter()
-            .any(|measurement| fee >= measurement.min_fee)
-        {
-            return true;
+        if let Ok(Some(past_fee)) = self.measurements.get_min_fee(token, (self.now)()).await {
+            if fee >= past_fee {
+                return true;
+            }
         }
         if let Ok(Some((current_fee, _))) = self.min_fee(token).await {
             return fee >= current_fee;
@@ -105,29 +91,32 @@ impl MinFeeCalculator {
     }
 }
 
+type FeeMeasurement = (DateTime<Utc>, U256);
+
 #[derive(Default)]
-struct InMemoryFeeStore(Mutex<HashMap<H160, Vec<MinFeeMeasurement>>>);
+struct InMemoryFeeStore(Mutex<HashMap<H160, Vec<FeeMeasurement>>>);
 #[async_trait::async_trait]
 impl MinFeeStoring for InMemoryFeeStore {
-    async fn save_fee_measurement(&self, measurement: MinFeeMeasurement) -> Result<()> {
+    async fn save_fee_measurement(
+        &self,
+        token: H160,
+        expiry: DateTime<Utc>,
+        min_fee: U256,
+    ) -> Result<()> {
         self.0
             .lock()
             .expect("Thread holding Mutex panicked")
-            .entry(measurement.token)
+            .entry(token)
             .or_default()
-            .push(measurement);
+            .push((expiry, min_fee));
         Ok(())
     }
 
-    async fn load_fee_measurements(
-        &self,
-        token: H160,
-        min_expiry: DateTime<Utc>,
-    ) -> Vec<MinFeeMeasurement> {
+    async fn get_min_fee(&self, token: H160, min_expiry: DateTime<Utc>) -> Result<Option<U256>> {
         let mut guard = self.0.lock().expect("Thread holding Mutex panicked");
         let measurements = guard.entry(token).or_default();
-        measurements.retain(|measurement| measurement.expiry >= min_expiry);
-        measurements.to_vec()
+        measurements.retain(|(expiry, _)| expiry >= &min_expiry);
+        Ok(measurements.iter().map(|(_, fee)| *fee).min())
     }
 }
 

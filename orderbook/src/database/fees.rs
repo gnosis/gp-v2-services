@@ -1,12 +1,11 @@
 use super::Database;
-use crate::fee::{MinFeeMeasurement, MinFeeStoring};
+use crate::fee::MinFeeStoring;
 use crate::integer_conversions::*;
 
 use anyhow::{anyhow, Context, Result};
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, Utc};
-use ethcontract::H160;
-use futures::StreamExt;
+use ethcontract::{H160, U256};
 
 #[async_trait::async_trait]
 impl MinFeeStoring for Database {
@@ -49,8 +48,10 @@ impl MinFeeStoring for Database {
             None => Ok(None),
         }
     }
+}
 
-    async fn remove_expired(&self, max_expiry: DateTime<Utc>) -> Result<()> {
+impl Database {
+    pub async fn remove_expired_fee_measurements(&self, max_expiry: DateTime<Utc>) -> Result<()> {
         const QUERY: &str = "DELETE FROM min_fee_measurements WHERE expiration_timestamp < $1;";
         sqlx::query(QUERY)
             .bind(max_expiry)
@@ -110,7 +111,7 @@ mod tests {
             None
         );
 
-        db.remove_expired(now + Duration::seconds(120))
+        db.remove_expired_fee_measurements(now + Duration::seconds(120))
             .await
             .unwrap();
         assert_eq!(db.get_min_fee(token_b, now).await.unwrap(), None);
