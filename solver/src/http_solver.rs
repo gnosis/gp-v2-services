@@ -1,7 +1,7 @@
 mod model;
 mod settlement;
 
-use self::{model::*, settlement::PreparedModel};
+use self::{model::*, settlement::SettlementContext};
 use crate::{
     liquidity::{AmmOrder, LimitOrder, Liquidity},
     settlement::Settlement,
@@ -145,7 +145,7 @@ impl HttpSolver {
             .collect()
     }
 
-    fn prepare_model(&self, liquidity: Vec<Liquidity>) -> PreparedModel {
+    fn prepare_model(&self, liquidity: Vec<Liquidity>) -> (BatchAuctionModel, SettlementContext) {
         let tokens = self.tokens(liquidity.as_slice());
         let orders = split_liquidity(liquidity);
         let limit_orders = self.orders(orders.0);
@@ -156,12 +156,12 @@ impl HttpSolver {
             uniswaps: self.amm_models(&amm_orders),
             default_fee: 0.0,
         };
-        PreparedModel {
-            model,
+        let context = SettlementContext {
             tokens,
             limit_orders,
             amm_orders,
-        }
+        };
+        (model, context)
     }
 
     async fn send(&self, model: &BatchAuctionModel) -> Result<SettledBatchAuctionModel> {
@@ -217,10 +217,10 @@ fn split_liquidity(liquidity: Vec<Liquidity>) -> (Vec<LimitOrder>, Vec<AmmOrder>
 #[async_trait::async_trait]
 impl Solver for HttpSolver {
     async fn solve(&self, liquidity: Vec<Liquidity>) -> Result<Option<Settlement>> {
-        let prepared = self.prepare_model(liquidity);
-        let settled = self.send(&prepared.model).await?;
+        let (model, context) = self.prepare_model(liquidity);
+        let settled = self.send(&model).await?;
         tracing::trace!(?settled);
-        settlement::convert_settlement(&settled, &prepared).map(Some)
+        settlement::convert_settlement(&settled, &context).map(Some)
     }
 }
 
@@ -270,8 +270,8 @@ mod tests {
                 settlement_handling: Arc::new(MockAmmSettlementHandling::new()),
             }),
         ];
-        let prepared = solver.prepare_model(orders);
-        let settled = solver.send(&prepared.model).await.unwrap();
+        let (model, _context) = solver.prepare_model(orders);
+        let settled = solver.send(&model).await.unwrap();
         dbg!(&settled);
 
         let exec_order = settled.orders.values().next().unwrap();

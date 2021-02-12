@@ -1,4 +1,4 @@
-use super::model::{BatchAuctionModel, Price, SettledBatchAuctionModel};
+use super::model::{Price, SettledBatchAuctionModel};
 use crate::{
     liquidity::{AmmOrder, LimitOrder},
     settlement::Settlement,
@@ -10,8 +10,7 @@ use std::collections::HashMap;
 
 // To send an instance to the solver we need to identify tokens and orders through strings. This
 // struct combines the created model and a mapping of those identifiers to their original value.
-pub struct PreparedModel {
-    pub model: BatchAuctionModel,
+pub struct SettlementContext {
     pub tokens: HashMap<String, H160>,
     pub limit_orders: HashMap<String, LimitOrder>,
     pub amm_orders: HashMap<String, AmmOrder>,
@@ -19,7 +18,7 @@ pub struct PreparedModel {
 
 pub fn convert_settlement(
     settled: &SettledBatchAuctionModel,
-    prepared: &PreparedModel,
+    prepared: &SettlementContext,
 ) -> Result<Settlement> {
     let mut settlement = Settlement::default();
     set_orders(settled, &prepared.limit_orders, &mut settlement)?;
@@ -199,8 +198,7 @@ mod tests {
             prices: hashmap! { "t0".to_string() => Price(10.0), "t1".to_string() => Price(11.0) },
         };
 
-        let prepared = PreparedModel {
-            model: Default::default(),
+        let prepared = SettlementContext {
             tokens,
             limit_orders: orders,
             amm_orders: amms,
