@@ -153,7 +153,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FeeInformation"
-        400:
+        404:
           description: sellToken not existent
   /api/v1/trades/:
     get:
