@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 // TODO: limit trading for tokens that don't have uniswap - fee pool
 // TODO: exclude partially fillable orders
 // TODO: find correct ordering for uniswap trades
+// TODO: gather real token decimals and store them in a cache
 // TODO: special rounding for the prices we get from the solver?
 // TODO: make sure to give the solver disconnected token islands individually
 
@@ -65,8 +66,7 @@ impl HttpSolver {
         format!("t{:x}", token)
     }
 
-    // Maps string based token index from solver api
-    fn tokens(&self, orders: &[Liquidity]) -> HashMap<String, H160> {
+    fn map_tokens_for_solver(&self, orders: &[Liquidity]) -> HashMap<String, H160> {
         orders
             .iter()
             .flat_map(|liquidity| match liquidity {
@@ -83,17 +83,14 @@ impl HttpSolver {
             .collect()
     }
 
-    // Maps string based token index from solver api
     fn token_models(&self, tokens: &HashMap<String, H160>) -> HashMap<String, TokenInfoModel> {
-        // TODO: gather real decimals and store them in a cache
         tokens
             .iter()
             .map(|(index, _)| (index.clone(), TokenInfoModel { decimals: 18 }))
             .collect()
     }
 
-    // Maps string based order index from solver api
-    fn orders(&self, orders: Vec<LimitOrder>) -> HashMap<String, LimitOrder> {
+    fn map_orders_for_solver(&self, orders: Vec<LimitOrder>) -> HashMap<String, LimitOrder> {
         orders
             .into_iter()
             .enumerate()
@@ -101,7 +98,6 @@ impl HttpSolver {
             .collect()
     }
 
-    // Maps string based order index from solver api
     fn order_models(&self, orders: &HashMap<String, LimitOrder>) -> HashMap<String, OrderModel> {
         orders
             .iter()
@@ -119,8 +115,7 @@ impl HttpSolver {
             .collect()
     }
 
-    // Maps string based amm index from solver api
-    fn amms(&self, orders: Vec<AmmOrder>) -> HashMap<String, AmmOrder> {
+    fn map_amms_for_solver(&self, orders: Vec<AmmOrder>) -> HashMap<String, AmmOrder> {
         orders
             .into_iter()
             .enumerate()
@@ -128,7 +123,6 @@ impl HttpSolver {
             .collect()
     }
 
-    // Maps string based amm index from solver api
     fn amm_models(&self, amms: &HashMap<String, AmmOrder>) -> HashMap<String, UniswapModel> {
         amms.iter()
             .map(|(index, amm)| {
@@ -146,10 +140,13 @@ impl HttpSolver {
     }
 
     fn prepare_model(&self, liquidity: Vec<Liquidity>) -> (BatchAuctionModel, SettlementContext) {
-        let tokens = self.tokens(liquidity.as_slice());
+        // To send an instance to the solver we need to identify tokens and orders through strings.
+        // In order to map back and forth we store the original tokens, orders and the models for
+        // via the same mapping.
+        let tokens = self.map_tokens_for_solver(liquidity.as_slice());
         let orders = split_liquidity(liquidity);
-        let limit_orders = self.orders(orders.0);
-        let amm_orders = self.amms(orders.1);
+        let limit_orders = self.map_orders_for_solver(orders.0);
+        let amm_orders = self.map_amms_for_solver(orders.1);
         let model = BatchAuctionModel {
             tokens: self.token_models(&tokens),
             orders: self.order_models(&limit_orders),
