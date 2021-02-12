@@ -155,6 +155,32 @@ paths:
                 $ref: "#/components/schemas/FeeInformation"
         400:
           description: sellToken not existent
+  /api/v1/trades/:
+    get:
+      summary: Get existing Trades.
+      description: |
+        By default all trades are returned.
+        Queries can be refined by specifiying owner or order_uid.
+      parameters:
+        - name: owner
+          in: query
+          schema:
+            $ref: "#/components/schemas/Address"
+          required: false
+        - name: order_uid
+          in: query
+          schema:
+            $ref: "#/components/schemas/UID"
+          required: false
+      responses:
+        200:
+          description: all trades
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Trade"
+        404:
+          description: No trades found.
 components:
   schemas:
     Address:
@@ -265,6 +291,29 @@ components:
       allOf:
         - $ref: "#/components/schemas/OrderCreation"
         - $ref: "#/components/schemas/OrderMetaData"
+    Trade:
+      description: |
+        Trade data such as executed amounts, fees, order id and block number.
+      type: object
+      properties:
+        blockNumber:
+          description: "Block in which trade occurred"
+          type: integer
+        logIndex:
+          description: "Index in which transaction was included in block"
+          type: integer
+        orderUid:
+          description: "Unique ID of the order matched by this trade"
+          $ref: "#/components/schemas/UID"
+        sellAmount:
+          description: "Amount sold in this trade"
+          $ref: "#/components/schemas/BigUint"
+        buyAmount:
+          description: "Amount bought in this trade"
+          $ref: "#/components/schemas/BigUint"
+        feeAmount:
+          description: "Fee paid (in sell token)"
+          $ref: "#/components/schemas/BigUint"
     UID:
       description: |
         Unique identifier for the order: 56 bytes encoded as hex with `0x` prefix.
