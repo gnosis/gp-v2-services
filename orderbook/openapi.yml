@@ -167,7 +167,7 @@ paths:
           schema:
             $ref: "#/components/schemas/Address"
           required: false
-        - name: order_uid
+        - name: orderUid
           in: query
           schema:
             $ref: "#/components/schemas/UID"
@@ -178,9 +178,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Trade"
-        404:
-          description: No trades found.
+                type: array
+                items:
+                  $ref: "#/components/schemas/Trade"
 components:
   schemas:
     Address:
@@ -307,13 +307,13 @@ components:
           $ref: "#/components/schemas/UID"
         sellAmount:
           description: "Amount sold in this trade"
-          $ref: "#/components/schemas/BigUint"
+          $ref: "#/components/schemas/TokenAmount"
         buyAmount:
           description: "Amount bought in this trade"
-          $ref: "#/components/schemas/BigUint"
+          $ref: "#/components/schemas/TokenAmount"
         feeAmount:
           description: "Fee paid (in sell token)"
-          $ref: "#/components/schemas/BigUint"
+          $ref: "#/components/schemas/TokenAmount"
     UID:
       description: |
         Unique identifier for the order: 56 bytes encoded as hex with `0x` prefix.
