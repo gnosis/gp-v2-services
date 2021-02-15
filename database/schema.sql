@@ -4,10 +4,17 @@
 -- fixed size.
 -- `u32`s are stored in `bigint` which is an 8 bytes signed integer because Postgre does not have
 -- unsigned integers.
+BEGIN;
 
-CREATE TYPE OrderKind AS ENUM ('buy', 'sell');
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'orderkind') THEN
+    CREATE TYPE OrderKind AS ENUM ('buy', 'sell');
+  END IF;
+END
+$$;
 
-CREATE TABLE orders (
+CREATE TABLE IF NOT EXISTS orders (
     uid bytea PRIMARY KEY,
     owner bytea NOT NULL,
     creation_timestamp timestamptz NOT NULL,
@@ -25,7 +32,7 @@ CREATE TABLE orders (
 );
 
 -- Trade events from the smart contract.
-CREATE TABLE trades (
+CREATE TABLE IF NOT EXISTS trades (
     block_number bigint NOT NULL,
     log_index bigint NOT NULL,
     -- Not foreign key because there can be trade events for orders we don't know.
@@ -37,7 +44,7 @@ CREATE TABLE trades (
 );
 
 -- OrderInvalidated events from the smart contract.
-CREATE TABLE invalidations (
+CREATE TABLE IF NOT EXISTS invalidations (
     block_number bigint NOT NULL,
     log_index bigint NOT NULL,
     order_uid bytea NOT NULL,
@@ -47,13 +54,15 @@ CREATE TABLE invalidations (
 -- Indexes for common operations that should be efficient.
 
 -- Get a specific user's orders.
-CREATE INDEX order_owner ON orders USING HASH (owner);
+CREATE INDEX IF NOT EXISTS order_owner ON orders USING HASH (owner);
 
 -- Get all valid orders.
-CREATE INDEX order_valid_to ON orders USING BTREE (valid_to);
+CREATE INDEX IF NOT EXISTS order_valid_to ON orders USING BTREE (valid_to);
 
 -- Get all trades belonging to an order.
-CREATE INDEX trade_order_uid on trades USING BTREE (order_uid, block_number, log_index);
+CREATE INDEX IF NOT EXISTS trade_order_uid on trades USING BTREE (order_uid, block_number, log_index);
 
 -- Get all invalidations belonging to an order.
-CREATE INDEX invalidations_order_uid on invalidations USING BTREE (order_uid, block_number, log_index);
+CREATE INDEX IF NOT EXISTS invalidations_order_uid on invalidations USING BTREE (order_uid, block_number, log_index);
+
+COMMIT
