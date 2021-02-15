@@ -1,10 +1,7 @@
 use contracts::WETH9;
-use ethcontract::PrivateKey;
+use ethcontract::{Account, PrivateKey};
 use reqwest::Url;
-use solver::{
-    driver::Driver, gas_price_estimation::GasEstimatorType, liquidity::uniswap::UniswapLiquidity,
-    naive_solver::NaiveSolver,
-};
+use solver::{driver::Driver, liquidity::uniswap::UniswapLiquidity, naive_solver::NaiveSolver};
 use std::time::Duration;
 use structopt::StructOpt;
 
@@ -30,22 +27,6 @@ struct Arguments {
     #[structopt(short = "k", long, env = "PRIVATE_KEY", hide_env_values = true)]
     private_key: PrivateKey,
 
-    /// Which gas estimators to use. Multiple estimators are used in sequence if a previous one
-    /// fails. Individual estimators support different networks.
-    /// `EthGasStation`: supports mainnet.
-    /// `GasNow`: supports mainnet.
-    /// `GnosisSafe`: supports mainnet and rinkeby.
-    /// `Web3`: supports every network.
-    #[structopt(
-        long,
-        env = "GAS_ESTIMATORS",
-        default_value = "Web3",
-        possible_values = &GasEstimatorType::variants(),
-        case_insensitive = true,
-        use_delimiter = true
-    )]
-    gas_estimators: Vec<GasEstimatorType>,
-
     /// The target confirmation time for settlement transactions used to estimate gas price.
     #[structopt(
         long,
@@ -54,6 +35,15 @@ struct Arguments {
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
     target_confirm_time: Duration,
+
+    /// Every how often we should execute the driver's run loop
+    #[structopt(
+        long,
+        env = "SETTLE_INTERVAL",
+        default_value = "30",
+        parse(try_from_str = shared::arguments::duration_from_seconds),
+    )]
+    settle_interval: Duration,
 }
 
 #[tokio::main]
@@ -65,19 +55,20 @@ async fn main() {
     let transport = web3::transports::Http::new(args.shared.node_url.as_str())
         .expect("transport creation failed");
     let web3 = web3::Web3::new(transport);
-    let uniswap_router = contracts::UniswapV2Router02::deployed(&web3)
-        .await
-        .expect("couldn't load deployed uniswap router");
-    let uniswap_factory = contracts::UniswapV2Factory::deployed(&web3)
-        .await
-        .expect("couldn't load deployed uniswap router");
     let chain_id = web3
         .eth()
         .chain_id()
         .await
         .expect("Could not get chainId")
         .as_u64();
-    let settlement_contract = solver::get_settlement_contract(&web3, chain_id, args.private_key)
+    let uniswap_router = contracts::UniswapV2Router02::deployed(&web3)
+        .await
+        .expect("couldn't load deployed uniswap router");
+    let uniswap_factory = contracts::UniswapV2Factory::deployed(&web3)
+        .await
+        .expect("couldn't load deployed uniswap router");
+    let account = Account::Offline(args.private_key, Some(chain_id));
+    let settlement_contract = solver::get_settlement_contract(&web3, account)
         .await
         .expect("couldn't load deployed settlement");
     let native_token = WETH9::deployed(&web3)
@@ -98,10 +89,10 @@ async fn main() {
         uniswap_factory,
         gpv2_settlement: settlement_contract.clone(),
     };
-    let gas_price_estimator = solver::gas_price_estimation::create_priority_estimator(
+    let gas_price_estimator = shared::gas_price_estimation::create_priority_estimator(
         &reqwest::Client::new(),
         &web3,
-        args.gas_estimators.as_slice(),
+        args.shared.gas_estimators.as_slice(),
     )
     .await
     .expect("failed to create gas price estimator");
@@ -112,6 +103,7 @@ async fn main() {
         Box::new(solver),
         Box::new(gas_price_estimator),
         args.target_confirm_time,
+        args.settle_interval,
     );
     driver.run_forever().await;
 }

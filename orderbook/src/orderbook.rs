@@ -1,7 +1,7 @@
-use crate::database::Database;
 use crate::{
     account_balances::BalanceFetching, database::OrderFilter, event_updater::EventUpdater,
 };
+use crate::{database::Database, fee::MinFeeCalculator};
 use anyhow::Result;
 use contracts::GPv2Settlement;
 use futures::{join, TryStreamExt};
@@ -9,6 +9,8 @@ use model::{
     order::{Order, OrderCreation, OrderUid},
     DomainSeparator,
 };
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum AddOrderResult {
@@ -19,6 +21,7 @@ pub enum AddOrderResult {
     MissingOrderData,
     PastValidTo,
     InsufficientFunds,
+    InsufficientFee,
 }
 
 #[derive(Debug)]
@@ -30,8 +33,9 @@ pub enum RemoveOrderResult {
 pub struct Orderbook {
     domain_separator: DomainSeparator,
     database: Database,
-    event_updater: EventUpdater,
+    event_updater: Mutex<EventUpdater>,
     balance_fetcher: Box<dyn BalanceFetching>,
+    fee_validator: Arc<MinFeeCalculator>,
 }
 
 impl Orderbook {
@@ -40,18 +44,27 @@ impl Orderbook {
         database: Database,
         event_updater: EventUpdater,
         balance_fetcher: Box<dyn BalanceFetching>,
+        fee_validator: Arc<MinFeeCalculator>,
     ) -> Self {
         Self {
             domain_separator,
             database,
-            event_updater,
+            event_updater: Mutex::new(event_updater),
             balance_fetcher,
+            fee_validator,
         }
     }
 
     pub async fn add_order(&self, order: OrderCreation) -> Result<AddOrderResult> {
         if !has_future_valid_to(shared::time::now_in_epoch_seconds(), &order) {
             return Ok(AddOrderResult::PastValidTo);
+        }
+        if !self
+            .fee_validator
+            .is_valid_fee(order.sell_token, order.fee_amount)
+            .await
+        {
+            return Ok(AddOrderResult::InsufficientFee);
         }
         let order = match Order::from_order_creation(order, &self.domain_separator) {
             Some(order) => order,
@@ -78,11 +91,8 @@ impl Orderbook {
     }
 
     pub async fn run_maintenance(&self, _settlement_contract: &GPv2Settlement) -> Result<()> {
-        join!(
-            self.event_updater.update_events(),
-            self.balance_fetcher.update()
-        )
-        .0
+        let update_events = async { self.event_updater.lock().await.update_events().await };
+        join!(update_events, self.balance_fetcher.update()).0
     }
 }
 

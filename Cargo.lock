@@ -556,9 +556,9 @@ dependencies = [
 
 [[package]]
 name = "env_logger"
-version = "0.8.2"
+version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f26ecb66b4bdca6c1409b40fb255eefc2bd4f6d135dab3c3124f80ffa2a9661e"
+checksum = "17392a012ea30ef05a610aa97dfb49496e71c9f676b27879922ea5bdf60d9d3f"
 dependencies = [
  "atty",
  "humantime",
@@ -1399,9 +1399,9 @@ dependencies = [
 
 [[package]]
 name = "mockall"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "619634fd9149c4a06e66d8fd9256e85326d8eeee75abee4565ff76c92e4edfe0"
+checksum = "18d614ad23f9bb59119b8b5670a85c7ba92c5e9adf4385c81ea00c51c8be33d5"
 dependencies = [
  "cfg-if 1.0.0",
  "downcast",
@@ -1414,9 +1414,9 @@ dependencies = [
 
 [[package]]
 name = "mockall_derive"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83714c95dbf4c24202f0f1b208f0f248e6bd65abfa8989303611a71c0f781548"
+checksum = "5dd4234635bca06fc96c7368d038061e0aae1b00a764dc817e900dc974e3deea"
 dependencies = [
  "cfg-if 1.0.0",
  "proc-macro2",
@@ -1656,12 +1656,14 @@ dependencies = [
  "contracts",
  "ethcontract",
  "futures",
+ "gas-estimation",
  "hex",
  "hex-literal",
  "mockall",
  "model",
  "num-bigint",
  "primitive-types",
+ "reqwest",
  "secp256k1",
  "serde",
  "serde_json",
@@ -2330,12 +2332,16 @@ dependencies = [
 name = "shared"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "atty",
  "contracts",
  "ethcontract",
+ "gas-estimation",
  "hex-literal",
  "model",
+ "reqwest",
+ "serde",
  "structopt",
  "tracing",
  "tracing-subscriber",
@@ -2387,11 +2393,13 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "serde_with",
  "shared",
  "structopt",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "transaction-retry",
  "web3",
 ]
 
@@ -2834,6 +2842,15 @@ dependencies = [
  "tracing-core",
  "tracing-log",
  "tracing-serde",
+]
+
+[[package]]
+name = "transaction-retry"
+version = "0.1.0"
+source = "git+https://github.com/gnosis/gp-transaction-retry.git?tag=v0.1.0#31b32869dbc773d62c11e91dac4d66aaa691faa2"
+dependencies = [
+ "async-trait",
+ "futures",
 ]
 
 [[package]]

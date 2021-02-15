@@ -4,17 +4,27 @@ use model::TokenPair;
 use shared::uniswap_pool::PoolFetching;
 use std::iter::once;
 
-#[allow(dead_code)]
-struct UniswapPriceEstimator {
+#[async_trait::async_trait]
+pub trait PriceEstimating: Send + Sync {
+    async fn estimate_price(&self, sell_token: H160, buy_token: H160) -> Result<f64>;
+}
+
+pub struct UniswapPriceEstimator {
     pool_fetcher: Box<dyn PoolFetching>,
 }
 
 impl UniswapPriceEstimator {
+    pub fn new(pool_fetcher: Box<dyn PoolFetching>) -> Self {
+        Self { pool_fetcher }
+    }
+}
+
+#[async_trait::async_trait]
+impl PriceEstimating for UniswapPriceEstimator {
     // Estimates the price using the direct pool between sell and buy token. Price is given in
     // how much of sell_token needs to be sold for one buy_token.
     // Returns an error if no pool exists between sell and buy token.
-    #[allow(dead_code)]
-    pub async fn estimate_price(&self, sell_token: H160, buy_token: H160) -> Result<f64> {
+    async fn estimate_price(&self, sell_token: H160, buy_token: H160) -> Result<f64> {
         let pair = match TokenPair::new(sell_token, buy_token) {
             Some(pair) => pair,
             None => return Ok(1.0),
@@ -30,7 +40,10 @@ impl UniswapPriceEstimator {
         } else {
             (pool.reserves.1, pool.reserves.0)
         };
-        ensure!(sell_reserve * buy_reserve != 0, "Pools with empty reserve");
+        ensure!(
+            sell_reserve != 0 && buy_reserve != 0,
+            "Pools with empty reserve"
+        );
         Ok((sell_reserve as f64) / (buy_reserve as f64))
     }
 }

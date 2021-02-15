@@ -1,10 +1,25 @@
-use crate::{liquidity::Liquidity, settlement::Settlement, solver::Solver};
-use anyhow::{Context, Result};
-use model::{order::OrderKind, u256_decimal};
-use primitive_types::{H160, U256};
-use reqwest::{Client, Url};
-use serde::{Deserialize, Serialize, Serializer};
+mod model;
+mod settlement;
+
+use self::{model::*, settlement::SettlementContext};
+use crate::{
+    liquidity::{AmmOrder, LimitOrder, Liquidity},
+    settlement::Settlement,
+    solver::Solver,
+};
+use ::model::order::OrderKind;
+use anyhow::{ensure, Context, Result};
+use primitive_types::H160;
+use reqwest::{header::HeaderValue, Client, Url};
 use std::collections::{HashMap, HashSet};
+
+// TODO: limit trading for tokens that don't have uniswap - fee pool
+// TODO: exclude partially fillable orders
+// TODO: set settlement.fee_factor
+// TODO: find correct ordering for uniswap trades
+// TODO: gather real token decimals and store them in a cache
+// TODO: special rounding for the prices we get from the solver?
+// TODO: make sure to give the solver disconnected token islands individually
 
 /// The configuration passed as url parameters to the solver.
 #[derive(Debug, Default)]
@@ -52,7 +67,7 @@ impl HttpSolver {
         format!("t{:x}", token)
     }
 
-    fn tokens(&self, orders: &[Liquidity]) -> HashMap<String, TokenInfoModel> {
+    fn map_tokens_for_solver(&self, orders: &[Liquidity]) -> HashMap<String, H160> {
         orders
             .iter()
             .flat_map(|liquidity| match liquidity {
@@ -65,22 +80,28 @@ impl HttpSolver {
             })
             .collect::<HashSet<_>>()
             .into_iter()
-            .map(|token| {
-                // TODO: gather real decimals and store them in a cache
-                let token_model = TokenInfoModel { decimals: 18 };
-                (self.token_to_string(&token), token_model)
-            })
+            .map(|token| (self.token_to_string(&token), token))
             .collect()
     }
 
-    fn orders(&self, orders: &[Liquidity]) -> HashMap<String, OrderModel> {
+    fn token_models(&self, tokens: &HashMap<String, H160>) -> HashMap<String, TokenInfoModel> {
+        tokens
+            .iter()
+            .map(|(index, _)| (index.clone(), TokenInfoModel { decimals: 18 }))
+            .collect()
+    }
+
+    fn map_orders_for_solver(&self, orders: Vec<LimitOrder>) -> HashMap<String, LimitOrder> {
+        orders
+            .into_iter()
+            .enumerate()
+            .map(|(index, order)| (index.to_string(), order))
+            .collect()
+    }
+
+    fn order_models(&self, orders: &HashMap<String, LimitOrder>) -> HashMap<String, OrderModel> {
         orders
             .iter()
-            .filter_map(|liquidity| match liquidity {
-                Liquidity::Limit(order) => Some(order),
-                Liquidity::Amm(_) => None,
-            })
-            .enumerate()
             .map(|(index, order)| {
                 let order = OrderModel {
                     sell_token: self.token_to_string(&order.sell_token),
@@ -90,164 +111,175 @@ impl HttpSolver {
                     allow_partial_fill: order.partially_fillable,
                     is_sell_order: matches!(order.kind, OrderKind::Sell),
                 };
-                (index.to_string(), order)
+                (index.clone(), order)
             })
             .collect()
     }
 
-    async fn uniswaps(&self, orders: &[Liquidity]) -> Result<HashMap<String, UniswapModel>> {
-        // TODO: use a cache
-        Ok(orders
-            .iter()
-            .filter_map(|liquidity| match liquidity {
-                Liquidity::Limit(_) => None,
-                Liquidity::Amm(amm) => Some(amm),
-            })
+    fn map_amms_for_solver(&self, orders: Vec<AmmOrder>) -> HashMap<String, AmmOrder> {
+        orders
+            .into_iter()
             .enumerate()
+            .map(|(index, amm)| (index.to_string(), amm))
+            .collect()
+    }
+
+    fn amm_models(&self, amms: &HashMap<String, AmmOrder>) -> HashMap<String, UniswapModel> {
+        amms.iter()
             .map(|(index, amm)| {
                 let uniswap = UniswapModel {
                     token1: self.token_to_string(&amm.tokens.get().0),
                     token2: self.token_to_string(&amm.tokens.get().1),
                     balance1: amm.reserves.0,
                     balance2: amm.reserves.1,
-                    // TODO use AMM fee
-                    fee: 0.003,
+                    fee: *amm.fee.numer() as f64 / *amm.fee.denom() as f64,
                     mandatory: false,
                 };
-                (index.to_string(), uniswap)
+                (index.clone(), uniswap)
             })
-            .collect())
+            .collect()
     }
 
-    async fn create_body(&self, orders: &[Liquidity]) -> Result<BatchAuctionModel> {
-        Ok(BatchAuctionModel {
-            tokens: self.tokens(orders),
-            orders: self.orders(orders),
-            uniswaps: self.uniswaps(orders).await?,
-            ref_token: self.token_to_string(&H160::zero()),
+    fn prepare_model(&self, liquidity: Vec<Liquidity>) -> (BatchAuctionModel, SettlementContext) {
+        // To send an instance to the solver we need to identify tokens and orders through strings.
+        // In order to map back and forth we store the original tokens, orders and the models for
+        // via the same mapping.
+        let tokens = self.map_tokens_for_solver(liquidity.as_slice());
+        let orders = split_liquidity(liquidity);
+        let limit_orders = self.map_orders_for_solver(orders.0);
+        let amm_orders = self.map_amms_for_solver(orders.1);
+        let model = BatchAuctionModel {
+            tokens: self.token_models(&tokens),
+            orders: self.order_models(&limit_orders),
+            uniswaps: self.amm_models(&amm_orders),
             default_fee: 0.0,
-        })
+        };
+        let context = SettlementContext {
+            tokens,
+            limit_orders,
+            amm_orders,
+        };
+        (model, context)
     }
+
+    async fn send(&self, model: &BatchAuctionModel) -> Result<SettledBatchAuctionModel> {
+        let mut url = self.base.clone();
+        url.set_path("/solve");
+        self.config.add_to_query(&mut url);
+        let query = url.query().map(ToString::to_string).unwrap_or_default();
+        let mut request = self.client.post(url);
+        if let Some(api_key) = &self.api_key {
+            let mut header = HeaderValue::from_str(api_key.as_str()).unwrap();
+            header.set_sensitive(true);
+            request = request.header("X-API-KEY", header);
+        }
+        let body = serde_json::to_string(&model).context("failed to encode body")?;
+        tracing::trace!("request {}", body);
+        let request = request.body(body.clone());
+        let response = request.send().await.context("failed to send request")?;
+        let status = response.status();
+        let text = response
+            .text()
+            .await
+            .context("failed to decode response body")?;
+        tracing::trace!("response {}", text);
+        let context = || {
+            format!(
+                "request query {}, request body {}, response body {}",
+                query, body, text
+            )
+        };
+        ensure!(
+            status.is_success(),
+            "solver response is not success: status {}, {}",
+            status,
+            context()
+        );
+        serde_json::from_str(text.as_str())
+            .with_context(|| format!("failed to decode response json, {}", context()))
+    }
+}
+
+fn split_liquidity(liquidity: Vec<Liquidity>) -> (Vec<LimitOrder>, Vec<AmmOrder>) {
+    let mut limit_orders = Vec::new();
+    let mut amm_orders = Vec::new();
+    for order in liquidity {
+        match order {
+            Liquidity::Limit(order) => limit_orders.push(order),
+            Liquidity::Amm(order) => amm_orders.push(order),
+        }
+    }
+    (limit_orders, amm_orders)
 }
 
 #[async_trait::async_trait]
 impl Solver for HttpSolver {
-    async fn solve(&self, orders: Vec<Liquidity>) -> Result<Option<Settlement>> {
-        let mut url = self.base.clone();
-        url.set_path("/solve");
-        self.config.add_to_query(&mut url);
-        let body = self.create_body(orders.as_slice()).await?;
-        let mut request = self.client.post(url);
-        if let Some(api_key) = &self.api_key {
-            request = request.header("X-API-KEY", api_key);
-        }
-        let request = request.json(&body);
-
-        let response = request
-            .send()
-            .await
-            .context("failed to send solver request")?
-            .error_for_status()
-            .context("solver response was unsuccessful")?;
-        let body = response
-            .bytes()
-            .await
-            .context("failed to get response body")?;
-        let _decoded: Solution =
-            serde_json::from_slice(&body).with_context(|| match std::str::from_utf8(&body) {
-                Ok(body) => format!("failed to decode response body: {}", body),
-                Err(_) => format!("failed to decode response body: {:?}", body),
-            })?;
-        Ok(None)
+    async fn solve(&self, liquidity: Vec<Liquidity>) -> Result<Option<Settlement>> {
+        let (model, context) = self.prepare_model(liquidity);
+        let settled = self.send(&model).await?;
+        tracing::trace!(?settled);
+        settlement::convert_settlement(settled, context).map(Some)
     }
-}
-
-// types used in the solver http api
-
-#[derive(Debug, Default, Serialize)]
-struct BatchAuctionModel {
-    tokens: HashMap<String, TokenInfoModel>,
-    orders: HashMap<String, OrderModel>,
-    uniswaps: HashMap<String, UniswapModel>,
-    ref_token: String,
-    #[serde(serialize_with = "serialize_as_string")]
-    default_fee: f32,
-}
-
-#[derive(Debug, Deserialize)]
-struct Solution {
-    // TODO: wait for solution format to be documented
-}
-
-#[derive(Debug, Serialize)]
-struct OrderModel {
-    sell_token: String,
-    buy_token: String,
-    #[serde(with = "u256_decimal")]
-    sell_amount: U256,
-    #[serde(with = "u256_decimal")]
-    buy_amount: U256,
-    allow_partial_fill: bool,
-    is_sell_order: bool,
-}
-
-#[derive(Debug, Serialize)]
-struct UniswapModel {
-    token1: String,
-    token2: String,
-    #[serde(serialize_with = "serialize_as_string")]
-    balance1: u128,
-    #[serde(serialize_with = "serialize_as_string")]
-    balance2: u128,
-    #[serde(serialize_with = "serialize_as_string")]
-    fee: f32,
-    mandatory: bool,
-}
-
-#[derive(Debug, Serialize)]
-struct TokenInfoModel {
-    #[serde(serialize_with = "serialize_as_string")]
-    decimals: u32,
-}
-
-fn serialize_as_string<S>(t: &impl ToString, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    serializer.serialize_str(t.to_string().as_str())
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::liquidity::{LimitOrder, MockLimitOrderSettlementHandling};
+    use super::*;
+    use crate::liquidity::{
+        AmmOrder, LimitOrder, MockAmmSettlementHandling, MockLimitOrderSettlementHandling,
+    };
+    use ::model::TokenPair;
+    use num::Rational;
     use std::sync::Arc;
 
-    use super::*;
-
     // cargo test real_solver -- --ignored --nocapture
+    // set the env variable GP_V2_OPTIMIZER_URL to use a non localhost optimizer
     #[tokio::test]
     #[ignore]
     async fn real_solver() {
         tracing_subscriber::fmt::fmt()
-            .with_env_filter("debug")
+            .with_env_filter("solver=trace")
             .init();
+        let url = std::env::var("GP_V2_OPTIMIZER_URL")
+            .unwrap_or_else(|_| "http://localhost:8000".to_string());
         let solver = HttpSolver::new(
-            "http://localhost:8000".parse().unwrap(),
+            url.parse().unwrap(),
             None,
             SolverConfig {
                 max_nr_exec_orders: 100,
                 time_limit: 100,
             },
         );
-        let orders = vec![Liquidity::Limit(LimitOrder {
-            buy_token: H160::zero(),
-            sell_token: H160::from_low_u64_be(1),
-            buy_amount: 1.into(),
-            sell_amount: 1.into(),
-            kind: OrderKind::Sell,
-            partially_fillable: false,
-            settlement_handling: Arc::new(MockLimitOrderSettlementHandling::new()),
-        })];
-        solver.solve(orders).await.unwrap();
+        let base = |x: u128| x * 10u128.pow(18);
+        let orders = vec![
+            Liquidity::Limit(LimitOrder {
+                buy_token: H160::zero(),
+                sell_token: H160::from_low_u64_be(1),
+                buy_amount: base(1).into(),
+                sell_amount: base(2).into(),
+                kind: OrderKind::Sell,
+                partially_fillable: false,
+                settlement_handling: Arc::new(MockLimitOrderSettlementHandling::new()),
+            }),
+            Liquidity::Amm(AmmOrder {
+                tokens: TokenPair::new(H160::zero(), H160::from_low_u64_be(1)).unwrap(),
+                reserves: (base(100), base(100)),
+                fee: Rational::new(0, 1),
+                settlement_handling: Arc::new(MockAmmSettlementHandling::new()),
+            }),
+        ];
+        let (model, _context) = solver.prepare_model(orders);
+        let settled = solver.send(&model).await.unwrap();
+        dbg!(&settled);
+
+        let exec_order = settled.orders.values().next().unwrap();
+        assert_eq!(exec_order.exec_sell_amount.as_u128(), base(2));
+        assert!(exec_order.exec_buy_amount.as_u128() > 0);
+
+        let uniswap = settled.uniswaps.values().next().unwrap();
+        assert!(uniswap.balance_update1 < 0);
+        assert_eq!(uniswap.balance_update2 as u128, base(2));
+
+        assert_eq!(settled.prices.len(), 2);
     }
 }
