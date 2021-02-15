@@ -307,13 +307,13 @@ components:
           $ref: "#/components/schemas/UID"
         owner:
           description: "Address of trader"
-            $ref: "#/components/schemas/Address"
+          $ref: "#/components/schemas/Address"
         sellToken:
           description: "address of token sold"
-            $ref: "#/components/schemas/Address"
+          $ref: "#/components/schemas/Address"
         buyToken:
           description: "address of token bought"
-            $ref: "#/components/schemas/Address"
+          $ref: "#/components/schemas/Address"
         sellAmount:
           description: "Amount sold in this trade"
           $ref: "#/components/schemas/TokenAmount"
