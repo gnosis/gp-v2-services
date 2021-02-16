@@ -97,11 +97,11 @@ impl TradesQueryRow {
 mod tests {
 
     use super::*;
-    use crate::database::{Event, EventIndex};
+    use crate::database::{DbTrade, Event, EventIndex};
     use ethcontract::U256;
     use futures::StreamExt;
     use model::order::{Order, OrderCreation, OrderMetaData};
-    use model::trade::{DbTrade, Trade};
+    use model::trade::Trade;
     use num_bigint::BigUint;
     use std::collections::HashSet;
 
@@ -174,12 +174,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    #[ignore]
-    async fn postgres_filter_trades_by_owner() {
-        let db = Database::new("postgresql://").unwrap();
-        db.clear().await.unwrap();
-
+    async fn populate_dummy_trade_db(db: Database) -> (Vec<H160>, Vec<OrderUid>, [Trade; 2]) {
+        // Common values
         let owners: Vec<H160> = [0, 1, 2]
             .iter()
             .map(|t| H160::from_low_u64_be(*t as u64))
@@ -188,15 +184,14 @@ mod tests {
             .iter()
             .map(|t| H160::from_low_u64_be(*t as u64))
             .collect();
-        let uids: Vec<OrderUid> = [0, 1, 2].iter().map(|i| OrderUid([*i; 56])).collect();
-        let order_ids = [OrderUid([0; 56]), OrderUid([1u8; 56]), OrderUid([2u8; 56])];
+        let order_ids: Vec<OrderUid> = [0, 1, 2].iter().map(|i| OrderUid([*i; 56])).collect();
 
         // Create some orders.
         let orders = vec![
             Order {
                 order_meta_data: OrderMetaData {
                     owner: owners[0],
-                    uid: uids[0],
+                    uid: order_ids[0],
                     ..Default::default()
                 },
                 order_creation: OrderCreation {
@@ -291,15 +286,26 @@ mod tests {
         .await
         .unwrap();
 
-        async fn assert_trades(db: &Database, filter: &TradeFilter, expected: &[Trade]) {
-            let filtered = db
-                .trades(&filter)
-                .try_collect::<HashSet<Trade>>()
-                .await
-                .unwrap();
-            let expected = expected.iter().cloned().collect::<HashSet<_>>();
-            assert_eq!(filtered, expected);
-        }
+        return (owners, order_ids, trades);
+    }
+
+    async fn assert_trades(db: &Database, filter: &TradeFilter, expected: &[Trade]) {
+        let filtered = db
+            .trades(&filter)
+            .try_collect::<HashSet<Trade>>()
+            .await
+            .unwrap();
+        let expected = expected.iter().cloned().collect::<HashSet<_>>();
+        assert_eq!(filtered, expected);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn postgres_filter_trades_by_owner() {
+        let db = Database::new("postgresql://").unwrap();
+        db.clear().await.unwrap();
+
+        let (owners, _order_ids, trades) = populate_dummy_trade_db(db.clone()).await;
 
         assert_trades(
             &db,
@@ -331,223 +337,42 @@ mod tests {
         )
         .await;
     }
-    //
-    // #[tokio::test]
-    // #[ignore]
-    // async fn postgres_filter_orders_by_fully_executed() {
-    //     let db = Database::new("postgresql://").unwrap();
-    //     db.clear().await.unwrap();
-    //
-    //     let order = Order {
-    //         order_meta_data: Default::default(),
-    //         order_creation: OrderCreation {
-    //             kind: OrderKind::Sell,
-    //             sell_amount: 10.into(),
-    //             buy_amount: 100.into(),
-    //             ..Default::default()
-    //         },
-    //     };
-    //     db.insert_order(&order).await.unwrap();
-    //
-    //     let get_order = |exclude_fully_executed| {
-    //         let db = db.clone();
-    //         async move {
-    //             db.orders(&OrderFilter {
-    //                 exclude_fully_executed,
-    //                 ..Default::default()
-    //             })
-    //                 .boxed()
-    //                 .next()
-    //                 .await
-    //         }
-    //     };
-    //
-    //     let order = get_order(true).await.unwrap().unwrap();
-    //     assert_eq!(
-    //         order.order_meta_data.executed_sell_amount,
-    //         BigUint::from(0u8)
-    //     );
-    //
-    //     db.insert_events(vec![(
-    //         EventIndex {
-    //             block_number: 0,
-    //             log_index: 0,
-    //         },
-    //         Event::DbTrade(DbTrade {
-    //             order_uid: order.order_meta_data.uid,
-    //             sell_amount_including_fee: 3.into(),
-    //             ..Default::default()
-    //         }),
-    //     )])
-    //         .await
-    //         .unwrap();
-    //     let order = get_order(true).await.unwrap().unwrap();
-    //     assert_eq!(
-    //         order.order_meta_data.executed_sell_amount,
-    //         BigUint::from(3u8)
-    //     );
-    //
-    //     db.insert_events(vec![(
-    //         EventIndex {
-    //             block_number: 1,
-    //             log_index: 0,
-    //         },
-    //         Event::DbTrade(DbTrade {
-    //             order_uid: order.order_meta_data.uid,
-    //             sell_amount_including_fee: 6.into(),
-    //             ..Default::default()
-    //         }),
-    //     )])
-    //         .await
-    //         .unwrap();
-    //     let order = get_order(true).await.unwrap().unwrap();
-    //     assert_eq!(
-    //         order.order_meta_data.executed_sell_amount,
-    //         BigUint::from(9u8),
-    //     );
-    //
-    //     // The order disappears because it is fully executed.
-    //     db.insert_events(vec![(
-    //         EventIndex {
-    //             block_number: 2,
-    //             log_index: 0,
-    //         },
-    //         Event::DbTrade(DbTrade {
-    //             order_uid: order.order_meta_data.uid,
-    //             sell_amount_including_fee: 1.into(),
-    //             ..Default::default()
-    //         }),
-    //     )])
-    //         .await
-    //         .unwrap();
-    //     assert!(get_order(true).await.is_none());
-    //
-    //     // If we include fully executed orders it is there.
-    //     let order = get_order(false).await.unwrap().unwrap();
-    //     assert_eq!(
-    //         order.order_meta_data.executed_sell_amount,
-    //         BigUint::from(10u8)
-    //     );
-    //
-    //     // Change order type and see that is returned as not fully executed again.
-    //     let query = "UPDATE orders SET kind = 'buy';";
-    //     db.pool.execute(query).await.unwrap();
-    //     assert!(get_order(true).await.is_some());
-    // }
-    //
-    // // In the schema we set the type of executed amounts in individual events to a 78 decimal digit
-    // // number. Summing over multiple events could overflow this because the smart contract only
-    // // guarantees that the filled amount (which amount that is depends on order type) does not
-    // // overflow a U256. This test shows that postgres does not error if this happens because
-    // // inside the SUM the number can have more digits.
-    // #[tokio::test]
-    // #[ignore]
-    // async fn postgres_summed_executed_amount_does_not_overflow() {
-    //     let db = Database::new("postgresql://").unwrap();
-    //     db.clear().await.unwrap();
-    //
-    //     let order = Order {
-    //         order_meta_data: Default::default(),
-    //         order_creation: OrderCreation {
-    //             kind: OrderKind::Sell,
-    //             ..Default::default()
-    //         },
-    //     };
-    //     db.insert_order(&order).await.unwrap();
-    //
-    //     for i in 0..10 {
-    //         db.insert_events(vec![(
-    //             EventIndex {
-    //                 block_number: i,
-    //                 log_index: 0,
-    //             },
-    //             Event::DbTrade(DbTrade {
-    //                 order_uid: order.order_meta_data.uid,
-    //                 sell_amount_including_fee: U256::MAX,
-    //                 ..Default::default()
-    //             }),
-    //         )])
-    //             .await
-    //             .unwrap();
-    //     }
-    //
-    //     let order = db
-    //         .orders(&OrderFilter::default())
-    //         .boxed()
-    //         .next()
-    //         .await
-    //         .unwrap()
-    //         .unwrap();
-    //
-    //     let expected = u256_to_big_uint(&U256::MAX) * BigUint::from(10u8);
-    //     assert!(expected.to_string().len() > 78);
-    //     assert_eq!(order.order_meta_data.executed_sell_amount, expected);
-    // }
-    //
-    // #[tokio::test]
-    // #[ignore]
-    // async fn postgres_filter_orders_by_invalidated() {
-    //     let db = Database::new("postgresql://").unwrap();
-    //     db.clear().await.unwrap();
-    //     let uid = OrderUid([0u8; 56]);
-    //     let order = Order {
-    //         order_meta_data: OrderMetaData {
-    //             uid,
-    //             ..Default::default()
-    //         },
-    //         ..Default::default()
-    //     };
-    //     db.insert_order(&order).await.unwrap();
-    //
-    //     let is_order_valid = || async {
-    //         db.orders(&OrderFilter {
-    //             exclude_invalidated: true,
-    //             ..Default::default()
-    //         })
-    //             .boxed()
-    //             .next()
-    //             .await
-    //             .transpose()
-    //             .unwrap()
-    //             .is_some()
-    //     };
-    //
-    //     assert!(is_order_valid().await);
-    //
-    //     // Invalidating a different order doesn't affect first order.
-    //     sqlx::query(
-    //         "INSERT INTO invalidations (block_number, log_index, order_uid) VALUES ($1, $2, $3)",
-    //     )
-    //         .bind(0i64)
-    //         .bind(0i64)
-    //         .bind([1u8; 56].as_ref())
-    //         .execute(&db.pool)
-    //         .await
-    //         .unwrap();
-    //     assert!(is_order_valid().await);
-    //
-    //     // But invalidating it does work
-    //     sqlx::query(
-    //         "INSERT INTO invalidations (block_number, log_index, order_uid) VALUES ($1, $2, $3)",
-    //     )
-    //         .bind(1i64)
-    //         .bind(0i64)
-    //         .bind([0u8; 56].as_ref())
-    //         .execute(&db.pool)
-    //         .await
-    //         .unwrap();
-    //     assert!(!is_order_valid().await);
-    //
-    //     // And we can invalidate it several times.
-    //     sqlx::query(
-    //         "INSERT INTO invalidations (block_number, log_index, order_uid) VALUES ($1, $2, $3)",
-    //     )
-    //         .bind(2i64)
-    //         .bind(0i64)
-    //         .bind([0u8; 56].as_ref())
-    //         .execute(&db.pool)
-    //         .await
-    //         .unwrap();
-    //     assert!(!is_order_valid().await);
-    // }
+
+    #[tokio::test]
+    #[ignore]
+    async fn postgres_filter_trades_order_uid() {
+        let db = Database::new("postgresql://").unwrap();
+        db.clear().await.unwrap();
+        let (_owners, order_ids, trades) = populate_dummy_trade_db(db.clone()).await;
+
+        assert_trades(
+            &db,
+            &TradeFilter {
+                order_uid: Some(order_ids[0]),
+                ..Default::default()
+            },
+            &[],
+        )
+        .await;
+
+        assert_trades(
+            &db,
+            &TradeFilter {
+                order_uid: Some(order_ids[1]),
+                ..Default::default()
+            },
+            &trades[0..1],
+        )
+        .await;
+
+        assert_trades(
+            &db,
+            &TradeFilter {
+                order_uid: Some(order_ids[2]),
+                ..Default::default()
+            },
+            &trades[1..],
+        )
+        .await;
+    }
 }

@@ -1,9 +1,10 @@
 use super::Database;
 use crate::conversions::*;
 use anyhow::{Context, Result};
+use ethcontract::U256;
 use futures::FutureExt;
 use model::order::OrderUid;
-use model::trade::DbTrade;
+use serde::{Deserialize, Serialize};
 use sqlx::{Connection, Executor, Postgres, Transaction};
 use std::convert::TryInto;
 
@@ -17,6 +18,27 @@ pub struct EventIndex {
 pub enum Event {
     DbTrade(DbTrade),
     Invalidation(Invalidation),
+}
+
+#[derive(Eq, PartialEq, Clone, Debug, Deserialize, Serialize, Hash)]
+#[serde(rename_all = "camelCase")]
+pub struct DbTrade {
+    pub order_uid: OrderUid,
+    pub sell_amount_including_fee: U256,
+    pub buy_amount: U256,
+    pub fee_amount: U256,
+}
+
+impl Default for DbTrade {
+    fn default() -> DbTrade {
+        let order_uid = OrderUid::default();
+        DbTrade {
+            order_uid,
+            sell_amount_including_fee: Default::default(),
+            buy_amount: Default::default(),
+            fee_amount: Default::default(),
+        }
+    }
 }
 
 #[derive(Debug, Default)]

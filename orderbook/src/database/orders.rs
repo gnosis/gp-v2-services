@@ -203,7 +203,6 @@ mod tests {
     use super::*;
     use chrono::NaiveDateTime;
     use futures::StreamExt;
-    use model::trade::DbTrade;
     use num_bigint::BigUint;
     use primitive_types::U256;
     use sqlx::Executor;

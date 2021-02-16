@@ -1,4 +1,4 @@
-use crate::database::{Database, Event as DbEvent, EventIndex as DbEventIndex};
+use crate::database::{Database, DbTrade, Event as DbEvent, EventIndex as DbEventIndex};
 use anyhow::{anyhow, Context, Error, Result};
 use contracts::{
     g_pv_2_settlement::{event_data::Trade as ContractTrade, Event as ContractEvent},
@@ -9,7 +9,6 @@ use ethcontract::{
 };
 use futures::{Stream, StreamExt, TryStreamExt};
 use model::order::OrderUid;
-use model::trade::DbTrade;
 use std::{convert::TryInto, ops::RangeInclusive};
 use web3::Web3;
 

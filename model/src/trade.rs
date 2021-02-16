@@ -1,31 +1,9 @@
 //! Contains the Trade type as described by the specification with serialization as described by the openapi documentation.
 
-use num_bigint::BigUint;
-use primitive_types::{H160, U256};
-use serde::{Deserialize, Serialize};
-// use serde_with::serde_as;
 use crate::order::OrderUid;
-
-#[derive(Eq, PartialEq, Clone, Debug, Deserialize, Serialize, Hash)]
-#[serde(rename_all = "camelCase")]
-pub struct DbTrade {
-    pub order_uid: OrderUid,
-    pub sell_amount_including_fee: U256,
-    pub buy_amount: U256,
-    pub fee_amount: U256,
-}
-
-impl Default for DbTrade {
-    fn default() -> DbTrade {
-        let order_uid = OrderUid::default();
-        DbTrade {
-            order_uid,
-            sell_amount_including_fee: Default::default(),
-            buy_amount: Default::default(),
-            fee_amount: Default::default(),
-        }
-    }
-}
+use num_bigint::BigUint;
+use primitive_types::H160;
+use serde::{Deserialize, Serialize};
 
 #[derive(Eq, PartialEq, Clone, Debug, Deserialize, Serialize, Hash)]
 pub struct Trade {
