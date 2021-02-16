@@ -126,9 +126,9 @@ mod tests {
             block_number: 2,
             log_index: 0,
             order_uid: uid,
-            sell_amount: BigUint::from(executed_sell_amount.clone()),
-            buy_amount: BigUint::from(executed_buy_amount.clone()),
-            fee_amount: BigUint::from(fee_amount.clone()),
+            sell_amount: BigUint::from(executed_sell_amount),
+            buy_amount: BigUint::from(executed_buy_amount),
+            fee_amount: BigUint::from(fee_amount),
             owner,
             buy_token,
             sell_token,
@@ -137,9 +137,9 @@ mod tests {
             order_meta_data: OrderMetaData {
                 owner,
                 uid,
-                executed_sell_amount_before_fees: BigUint::from(executed_sell_amount.clone()),
-                executed_fee_amount: BigUint::from(fee_amount.clone()),
-                executed_buy_amount: BigUint::from(executed_buy_amount.clone()),
+                executed_sell_amount_before_fees: BigUint::from(executed_sell_amount),
+                executed_fee_amount: BigUint::from(fee_amount),
+                executed_buy_amount: BigUint::from(executed_buy_amount),
                 ..Default::default()
             },
             order_creation: OrderCreation {
