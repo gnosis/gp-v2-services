@@ -24,7 +24,7 @@ impl Database {
                 t.order_uid, \
                 t.buy_amount, \
                 t.sell_amount, \
-                t.fee_amount,\
+                t.sell_amount - t.fee_amount as sell_amount_before_fees,\
                 o.owner, \
                 o.buy_token, \
                 o.sell_token \
@@ -52,7 +52,7 @@ struct TradesQueryRow {
     order_uid: Vec<u8>,
     buy_amount: BigDecimal,
     sell_amount: BigDecimal,
-    fee_amount: BigDecimal,
+    sell_amount_before_fees: BigDecimal,
     owner: Vec<u8>,
     buy_token: Vec<u8>,
     sell_token: Vec<u8>,
@@ -74,8 +74,8 @@ impl TradesQueryRow {
             .ok_or_else(|| anyhow!("buy_amount is not an unsigned integer"))?;
         let sell_amount = big_decimal_to_big_uint(&self.sell_amount)
             .ok_or_else(|| anyhow!("sell_amount is not an unsigned integer"))?;
-        let fee_amount = big_decimal_to_big_uint(&self.fee_amount)
-            .ok_or_else(|| anyhow!("fee_amount is not an unsigned integer"))?;
+        let sell_amount_before_fees = big_decimal_to_big_uint(&self.sell_amount_before_fees)
+            .ok_or_else(|| anyhow!("sell_amount_before_fees is not an unsigned integer"))?;
         let owner = h160_from_vec(self.owner)?;
         let buy_token = h160_from_vec(self.buy_token)?;
         let sell_token = h160_from_vec(self.sell_token)?;
@@ -85,7 +85,7 @@ impl TradesQueryRow {
             order_uid,
             buy_amount,
             sell_amount,
-            fee_amount,
+            sell_amount_before_fees,
             owner,
             buy_token,
             sell_token,
@@ -97,12 +97,13 @@ impl TradesQueryRow {
 mod tests {
 
     use super::*;
+    use crate::database::{Event, EventIndex};
+    use ethcontract::U256;
     use futures::StreamExt;
+    use model::order::{Order, OrderCreation, OrderMetaData};
     use model::trade::{DbTrade, Trade};
     use num_bigint::BigUint;
-    // use sqlx::Executor;
-    use crate::database::{Event, EventIndex};
-    use model::order::{Order, OrderCreation, OrderMetaData};
+    use std::collections::HashSet;
 
     #[tokio::test]
     #[ignore]
@@ -110,16 +111,15 @@ mod tests {
         let db = Database::new("postgresql://").unwrap();
         db.clear().await.unwrap();
         let filter = TradeFilter::default();
-        println!("{:?}", db.trades(&filter).boxed().next().await);
         assert!(db.trades(&filter).boxed().next().await.is_none());
 
         // Common fields
         let sell_token = H160::from_low_u64_be(1);
         let buy_token = H160::from_low_u64_be(2);
         let owner = H160::from_low_u64_be(3);
-        let executed_buy_amount = 5u32;
+        let executed_buy_amount = 7u32;
         let executed_sell_amount = 3u32;
-        let fee_amount = 7u32;
+        let fee_amount = 2u32;
         let uid = OrderUid([1u8; 56]);
 
         let trade = Trade {
@@ -128,7 +128,7 @@ mod tests {
             order_uid: uid,
             sell_amount: BigUint::from(executed_sell_amount),
             buy_amount: BigUint::from(executed_buy_amount),
-            fee_amount: BigUint::from(fee_amount),
+            sell_amount_before_fees: BigUint::from(executed_sell_amount - fee_amount),
             owner,
             buy_token,
             sell_token,
@@ -173,130 +173,164 @@ mod tests {
             vec![trade]
         );
     }
-    // TODO - these tests
-    // #[tokio::test]
-    // #[ignore]
-    // async fn postgres_filter_orders_by_address() {
-    //     let db = Database::new("postgresql://").unwrap();
-    //     db.clear().await.unwrap();
-    //     let orders = vec![
-    //         Order {
-    //             order_meta_data: OrderMetaData {
-    //                 owner: H160::from_low_u64_be(0),
-    //                 uid: OrderUid([0u8; 56]),
-    //                 ..Default::default()
-    //             },
-    //             order_creation: OrderCreation {
-    //                 sell_token: H160::from_low_u64_be(1),
-    //                 buy_token: H160::from_low_u64_be(2),
-    //                 valid_to: 10,
-    //                 ..Default::default()
-    //             },
-    //         },
-    //         Order {
-    //             order_meta_data: OrderMetaData {
-    //                 owner: H160::from_low_u64_be(0),
-    //                 uid: OrderUid([1; 56]),
-    //                 ..Default::default()
-    //             },
-    //             order_creation: OrderCreation {
-    //                 sell_token: H160::from_low_u64_be(1),
-    //                 buy_token: H160::from_low_u64_be(3),
-    //                 valid_to: 11,
-    //                 ..Default::default()
-    //             },
-    //         },
-    //         Order {
-    //             order_meta_data: OrderMetaData {
-    //                 owner: H160::from_low_u64_be(2),
-    //                 uid: OrderUid([2u8; 56]),
-    //                 ..Default::default()
-    //             },
-    //             order_creation: OrderCreation {
-    //                 sell_token: H160::from_low_u64_be(1),
-    //                 buy_token: H160::from_low_u64_be(3),
-    //                 valid_to: 12,
-    //                 ..Default::default()
-    //             },
-    //         },
-    //     ];
-    //     for order in orders.iter() {
-    //         db.insert_order(order).await.unwrap();
-    //     }
-    //
-    //     async fn assert_orders(db: &Database, filter: &OrderFilter, expected: &[Order]) {
-    //         let filtered = db
-    //             .orders(&filter)
-    //             .try_collect::<HashSet<Order>>()
-    //             .await
-    //             .unwrap();
-    //         let expected = expected.iter().cloned().collect::<HashSet<_>>();
-    //         assert_eq!(filtered, expected);
-    //     }
-    //
-    //     let owner = H160::from_low_u64_be(0);
-    //     assert_orders(
-    //         &db,
-    //         &OrderFilter {
-    //             owner: Some(owner),
-    //             ..Default::default()
-    //         },
-    //         &orders[0..2],
-    //     )
-    //         .await;
-    //
-    //     let sell_token = H160::from_low_u64_be(1);
-    //     assert_orders(
-    //         &db,
-    //         &OrderFilter {
-    //             sell_token: Some(sell_token),
-    //             ..Default::default()
-    //         },
-    //         &orders[0..3],
-    //     )
-    //         .await;
-    //
-    //     let buy_token = H160::from_low_u64_be(3);
-    //     assert_orders(
-    //         &db,
-    //         &OrderFilter {
-    //             buy_token: Some(buy_token),
-    //             ..Default::default()
-    //         },
-    //         &orders[1..3],
-    //     )
-    //         .await;
-    //
-    //     assert_orders(
-    //         &db,
-    //         &OrderFilter {
-    //             min_valid_to: 10,
-    //             ..Default::default()
-    //         },
-    //         &orders[0..3],
-    //     )
-    //         .await;
-    //
-    //     assert_orders(
-    //         &db,
-    //         &OrderFilter {
-    //             min_valid_to: 11,
-    //             ..Default::default()
-    //         },
-    //         &orders[1..3],
-    //     )
-    //         .await;
-    //
-    //     assert_orders(
-    //         &db,
-    //         &OrderFilter {
-    //             uid: Some(orders[0].order_meta_data.uid),
-    //             ..Default::default()
-    //         },
-    //         &orders[0..1],
-    //     )
-    //         .await;
-    // }
+
+    #[tokio::test]
+    #[ignore]
+    async fn postgres_filter_trades_by_owner() {
+        let db = Database::new("postgresql://").unwrap();
+        db.clear().await.unwrap();
+
+        let owners: Vec<H160> = [0, 1, 2]
+            .iter()
+            .map(|t| H160::from_low_u64_be(*t as u64))
+            .collect();
+        let tokens: Vec<H160> = [0, 1, 2, 3]
+            .iter()
+            .map(|t| H160::from_low_u64_be(*t as u64))
+            .collect();
+        let uids: Vec<OrderUid> = [0, 1, 2].iter().map(|i| OrderUid([*i; 56])).collect();
+        let order_ids = [OrderUid([0; 56]), OrderUid([1u8; 56]), OrderUid([2u8; 56])];
+
+        // Create some orders.
+        let orders = vec![
+            Order {
+                order_meta_data: OrderMetaData {
+                    owner: owners[0],
+                    uid: uids[0],
+                    ..Default::default()
+                },
+                order_creation: OrderCreation {
+                    sell_token: tokens[1],
+                    buy_token: tokens[2],
+                    valid_to: 10,
+                    ..Default::default()
+                },
+            },
+            Order {
+                order_meta_data: OrderMetaData {
+                    owner: owners[0],
+                    uid: order_ids[1],
+                    ..Default::default()
+                },
+                order_creation: OrderCreation {
+                    sell_token: tokens[2],
+                    buy_token: tokens[3],
+                    valid_to: 11,
+                    ..Default::default()
+                },
+            },
+            Order {
+                order_meta_data: OrderMetaData {
+                    owner: owners[2],
+                    uid: order_ids[2],
+                    ..Default::default()
+                },
+                order_creation: OrderCreation {
+                    sell_token: tokens[2],
+                    buy_token: tokens[3],
+                    valid_to: 12,
+                    ..Default::default()
+                },
+            },
+        ];
+        for order in orders.iter() {
+            db.insert_order(order).await.unwrap();
+        }
+
+        let trades = [
+            Trade {
+                block_number: 2,
+                log_index: 0,
+                order_uid: order_ids[1],
+                sell_amount: BigUint::from(3u32),
+                buy_amount: BigUint::from(2u32),
+                sell_amount_before_fees: BigUint::from(1u32),
+                owner: owners[0],
+                buy_token: tokens[3],
+                sell_token: tokens[2],
+            },
+            Trade {
+                block_number: 2,
+                log_index: 1,
+                order_uid: order_ids[2],
+                sell_amount: BigUint::from(4u32),
+                buy_amount: BigUint::from(3u32),
+                sell_amount_before_fees: BigUint::from(2u32),
+                owner: owners[2],
+                buy_token: tokens[3],
+                sell_token: tokens[2],
+            },
+        ];
+
+        db.insert_events(vec![
+            (
+                EventIndex {
+                    block_number: 2,
+                    log_index: 0,
+                },
+                Event::DbTrade(DbTrade {
+                    order_uid: order_ids[1],
+                    sell_amount_including_fee: U256::from(3),
+                    buy_amount: U256::from(2),
+                    fee_amount: U256::from(2),
+                }),
+            ),
+            (
+                EventIndex {
+                    block_number: 2,
+                    log_index: 1,
+                },
+                Event::DbTrade(DbTrade {
+                    order_uid: order_ids[2],
+                    sell_amount_including_fee: U256::from(4),
+                    buy_amount: U256::from(3),
+                    fee_amount: U256::from(2),
+                }),
+            ),
+        ])
+        .await
+        .unwrap();
+
+        async fn assert_trades(db: &Database, filter: &TradeFilter, expected: &[Trade]) {
+            let filtered = db
+                .trades(&filter)
+                .try_collect::<HashSet<Trade>>()
+                .await
+                .unwrap();
+            let expected = expected.iter().cloned().collect::<HashSet<_>>();
+            assert_eq!(filtered, expected);
+        }
+
+        assert_trades(
+            &db,
+            &TradeFilter {
+                owner: Some(owners[1]),
+                ..Default::default()
+            },
+            &[],
+        )
+        .await;
+
+        assert_trades(
+            &db,
+            &TradeFilter {
+                owner: Some(owners[0]),
+                ..Default::default()
+            },
+            &trades[0..1],
+        )
+        .await;
+
+        assert_trades(
+            &db,
+            &TradeFilter {
+                owner: Some(owners[2]),
+                ..Default::default()
+            },
+            &trades[1..],
+        )
+        .await;
+    }
     //
     // #[tokio::test]
     // #[ignore]

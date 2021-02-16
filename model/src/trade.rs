@@ -37,7 +37,7 @@ pub struct Trade {
     #[serde(with = "serde_with::rust::display_fromstr")]
     pub sell_amount: BigUint,
     #[serde(with = "serde_with::rust::display_fromstr")]
-    pub fee_amount: BigUint,
+    pub sell_amount_before_fees: BigUint,
     // ORDER DATA
     pub owner: H160,
     pub buy_token: H160,
@@ -53,7 +53,7 @@ impl Default for Trade {
             order_uid,
             buy_amount: Default::default(),
             sell_amount: Default::default(),
-            fee_amount: Default::default(),
+            sell_amount_before_fees: Default::default(),
             owner: Default::default(),
             buy_token: Default::default(),
             sell_token: Default::default(),
