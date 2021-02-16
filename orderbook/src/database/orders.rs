@@ -1,5 +1,5 @@
 use super::*;
-use crate::integer_conversions::*;
+use crate::conversions::*;
 use anyhow::{anyhow, Context, Result};
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, Utc};
@@ -146,13 +146,6 @@ struct OrdersQueryRow {
     invalidated: bool,
 }
 
-fn h160_from_vec(vec: Vec<u8>) -> Result<H160> {
-    let array: [u8; 20] = vec
-        .try_into()
-        .map_err(|_| anyhow!("h160 has wrong length"))?;
-    Ok(H160::from(array))
-}
-
 impl OrdersQueryRow {
     fn into_order(self) -> Result<Order> {
         let executed_sell_amount = big_decimal_to_big_uint(&self.sum_sell)
@@ -206,11 +199,11 @@ impl OrdersQueryRow {
 
 #[cfg(test)]
 mod tests {
-    use crate::database::Trade;
 
     use super::*;
     use chrono::NaiveDateTime;
     use futures::StreamExt;
+    use model::trade::DbTrade;
     use num_bigint::BigUint;
     use primitive_types::U256;
     use sqlx::Executor;
@@ -429,7 +422,7 @@ mod tests {
                 block_number: 0,
                 log_index: 0,
             },
-            Event::Trade(Trade {
+            Event::DbTrade(DbTrade {
                 order_uid: order.order_meta_data.uid,
                 sell_amount_including_fee: 3.into(),
                 ..Default::default()
@@ -448,7 +441,7 @@ mod tests {
                 block_number: 1,
                 log_index: 0,
             },
-            Event::Trade(Trade {
+            Event::DbTrade(DbTrade {
                 order_uid: order.order_meta_data.uid,
                 sell_amount_including_fee: 6.into(),
                 ..Default::default()
@@ -468,7 +461,7 @@ mod tests {
                 block_number: 2,
                 log_index: 0,
             },
-            Event::Trade(Trade {
+            Event::DbTrade(DbTrade {
                 order_uid: order.order_meta_data.uid,
                 sell_amount_including_fee: 1.into(),
                 ..Default::default()
@@ -517,7 +510,7 @@ mod tests {
                     block_number: i,
                     log_index: 0,
                 },
-                Event::Trade(Trade {
+                Event::DbTrade(DbTrade {
                     order_uid: order.order_meta_data.uid,
                     sell_amount_including_fee: U256::MAX,
                     ..Default::default()
