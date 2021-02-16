@@ -1,11 +1,13 @@
 mod events;
 mod orders;
+mod trades;
 
 use anyhow::Result;
 use sqlx::PgPool;
 
 pub use events::*;
 pub use orders::OrderFilter;
+pub use trades::TradeFilter;
 
 // TODO: There is remaining optimization potential by implementing sqlx encoding and decoding for
 // U256 directly instead of going through BigDecimal. This is not very important as this is fast

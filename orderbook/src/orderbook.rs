@@ -1,10 +1,14 @@
 use crate::{
     account_balances::BalanceFetching, database::OrderFilter, event_updater::EventUpdater,
 };
-use crate::{database::Database, fee::MinFeeCalculator};
+use crate::{
+    database::{Database, TradeFilter},
+    fee::MinFeeCalculator,
+};
 use anyhow::Result;
 use contracts::GPv2Settlement;
 use futures::{join, TryStreamExt};
+use model::trade::Trade;
 use model::{
     order::{Order, OrderCreation, OrderUid},
     DomainSeparator,
@@ -88,6 +92,10 @@ impl Orderbook {
             remove_orders_without_sufficient_balance(&mut orders);
         }
         Ok(orders)
+    }
+
+    pub async fn get_trades(&self, filter: &TradeFilter) -> Result<Vec<Trade>> {
+        Ok(self.database.trades(filter).try_collect::<Vec<_>>().await?)
     }
 
     pub async fn run_maintenance(&self, _settlement_contract: &GPv2Settlement) -> Result<()> {
