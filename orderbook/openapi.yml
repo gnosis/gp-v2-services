@@ -297,31 +297,34 @@ components:
       type: object
       properties:
         blockNumber:
-          description: "Block in which trade occurred"
+          description: "Block in which trade occurred."
           type: integer
         logIndex:
-          description: "Index in which transaction was included in block"
+          description: "Index in which transaction was included in block."
+          type: integer
+        batchId:
+          description: "Unique identifier of batch that trade was included. This value is constructed from `blockNumber * 10^4 + log_index`."
           type: integer
         orderUid:
-          description: "Unique ID of the order matched by this trade"
+          description: "Unique ID of the order matched by this trade."
           $ref: "#/components/schemas/UID"
         owner:
-          description: "Address of trader"
+          description: "Address of trader."
           $ref: "#/components/schemas/Address"
         sellToken:
-          description: "address of token sold"
+          description: "Address of token sold."
           $ref: "#/components/schemas/Address"
         buyToken:
-          description: "address of token bought"
+          description: "Address of token bought."
           $ref: "#/components/schemas/Address"
         sellAmount:
-          description: "Amount sold in this trade"
+          description: "Total amount of sellToken that has been executed for this trade (including fees)."
           $ref: "#/components/schemas/TokenAmount"
+        sellAmountBeforeFees:
+          description: "The total amount of sellToken that has been executed for this order without fees."
+          $ref: "#/components/schemas/BigUint"
         buyAmount:
-          description: "Amount bought in this trade"
-          $ref: "#/components/schemas/TokenAmount"
-        feeAmount:
-          description: "Fee paid (in sell token)"
+          description: "Total amount of buyToken received in this trade."
           $ref: "#/components/schemas/TokenAmount"
     UID:
       description: |
