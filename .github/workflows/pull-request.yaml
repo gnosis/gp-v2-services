@@ -29,9 +29,7 @@ jobs:
       - uses: actions/checkout@v2
       - uses: Swatinem/rust-cache@v1
       - run: cargo test --locked --all-features
-      - run: curl -L https://repo1.maven.org/maven2/org/flywaydb/flyway-commandline/7.3.1/flyway-commandline-7.3.1.tar.gz -o flyway-commandline-7.3.1.tar.gz \
-  && tar -xzf flyway-commandline-7.3.1.tar.gz --strip-components=1 \
-  && rm flyway-commandline-7.3.1.tar.gz && PATH=/flyway:$PATH
+      - run: curl -L https://repo1.maven.org/maven2/org/flywaydb/flyway-commandline/7.3.1/flyway-commandline-7.3.1.tar.gz -o flyway-commandline-7.3.1.tar.gz && tar -xzf flyway-commandline-7.3.1.tar.gz --strip-components=1 rm flyway-commandline-7.3.1.tar.gz && PATH=/flyway:$PATH
       - run: |
           sudo systemctl start postgresql.service
           sudo -u postgres createuser $USER
