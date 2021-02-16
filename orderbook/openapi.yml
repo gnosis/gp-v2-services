@@ -302,9 +302,6 @@ components:
         logIndex:
           description: "Index in which transaction was included in block."
           type: integer
-        batchId:
-          description: "Unique identifier of batch that trade was included. This value is constructed from `blockNumber * 10^4 + log_index`."
-          type: integer
         orderUid:
           description: "Unique ID of the order matched by this trade."
           $ref: "#/components/schemas/UID"
