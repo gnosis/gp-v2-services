@@ -2,6 +2,7 @@ mod create_order;
 mod get_fee_info;
 mod get_order_by_uid;
 mod get_orders;
+mod get_trades;
 
 use crate::{fee::MinFeeCalculator, orderbook::Orderbook};
 use anyhow::Error as anyhowError;
@@ -22,13 +23,15 @@ pub fn handle_all_routes(
 ) -> impl Filter<Extract = (impl Reply,), Error = warp::Rejection> + Clone {
     let order_creation = create_order::create_order(orderbook.clone());
     let order_getter = get_orders::get_orders(orderbook.clone());
+    let trade_getter = get_trades::get_trades(orderbook.clone());
     let fee_info = get_fee_info::get_fee_info(fee_calcuator);
     let order_by_uid = get_order_by_uid::get_order_by_uid(orderbook);
     warp::path!("api" / "v1" / ..).and(
         order_creation
             .or(order_getter)
             .or(fee_info)
-            .or(order_by_uid),
+            .or(order_by_uid)
+            .or(trade_getter),
     )
 }
 
@@ -55,6 +58,12 @@ fn internal_error() -> Json {
 
 pub fn convert_get_orders_error_to_reply(err: anyhowError) -> WithStatus<Json> {
     tracing::error!(?err, "get_orders error");
+    with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+// TODO - could generalize this with the above method by passing in string
+pub fn convert_get_trades_error_to_reply(err: anyhowError) -> WithStatus<Json> {
+    tracing::error!(?err, "get_trades error");
     with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
 }
 
