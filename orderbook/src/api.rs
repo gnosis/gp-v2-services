@@ -61,7 +61,6 @@ pub fn convert_get_orders_error_to_reply(err: anyhowError) -> WithStatus<Json> {
     with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
 }
 
-// TODO - could generalize this with the above method by passing in string
 pub fn convert_get_trades_error_to_reply(err: anyhowError) -> WithStatus<Json> {
     tracing::error!(?err, "get_trades error");
     with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR)

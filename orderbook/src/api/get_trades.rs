@@ -9,11 +9,10 @@ use serde::Deserialize;
 use std::{convert::Infallible, sync::Arc};
 use warp::{hyper::StatusCode, reply, Filter, Rejection, Reply};
 
-// The default values create a filter that only includes valid orders.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Query {
-    pub order_uid: OrderUid,
+    pub order_uid: Option<OrderUid>,
     pub owner: Option<H160Wrapper>,
 }
 
