@@ -134,6 +134,31 @@ paths:
           description: Order deleted
         404:
           description: Order was not found
+  /api/v1/cancel_order:
+    post:
+      summary: Cancel an existing order.
+      responses:
+        201:
+          description: Order has been canceled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UID"
+        400:
+          description: Error during order cancellation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderCancellationError"
+        403:
+          description: Forbidden, your account is deny-listed
+      requestBody:
+        description: The order to cancel.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderCancellation"
   /api/v1/tokens/{sellToken}/fee:
     get:
       description: |
@@ -251,9 +276,8 @@ components:
         partiallyFillable:
           description: Is this a fill-or-kill order or a partially fillable order?
           type: boolean
-        signature:
-          description: 65 bytes encoded as hex with `0x` prefix. r + s + v from the spec.
-          example: "0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        Signature:
+          $ref: "#/components/schemas/Signature"
     OrderMetaData:
       description: |
         Extra order data that is returned to users when querying orders
@@ -291,6 +315,11 @@ components:
       allOf:
         - $ref: "#/components/schemas/OrderCreation"
         - $ref: "#/components/schemas/OrderMetaData"
+    OrderCancellation:
+      UID:
+        $ref: "#/components/schemas/UID"
+      Signature:
+        $ref: "#/components/schemas/Signature"
     Trade:
       description: |
         Trade data such as executed amounts, fees, order id and block number.
@@ -329,6 +358,9 @@ components:
         Bytes 0 to 32 are the order digest, bytes 30 to 52 the owner address
         and bytes 52..56 valid to,
       type: string
+    Signature:
+      description: 65 bytes encoded as hex with `0x` prefix. r + s + v from the spec.
+      example: "0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
     OrderPostError:
       type: object
       properties:
@@ -340,6 +372,18 @@ components:
               InvalidSignature,
               DuplicateOrder,
               InsufficientFunds,
+            ]
+        description:
+          type: string
+    OrderCancellationError:
+      type: object
+      properties:
+        errorType:
+          type: string
+          enum:
+            [
+                InvalidSignature,
+                InvalidOrderUid,
             ]
         description:
           type: string
