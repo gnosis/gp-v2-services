@@ -137,9 +137,6 @@ mod tests {
             order_meta_data: OrderMetaData {
                 owner,
                 uid,
-                executed_sell_amount_before_fees: BigUint::from(executed_sell_amount),
-                executed_fee_amount: BigUint::from(fee_amount),
-                executed_buy_amount: BigUint::from(executed_buy_amount),
                 ..Default::default()
             },
             order_creation: OrderCreation {
