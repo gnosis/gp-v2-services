@@ -20,7 +20,7 @@ impl Query {
     fn trade_filter(&self) -> TradeFilter {
         let to_h160 = |option: Option<&H160Wrapper>| option.map(|wrapper| wrapper.0);
         TradeFilter {
-            order_uid: Option::from(self.order_uid),
+            order_uid: self.order_uid,
             owner: to_h160(self.owner.as_ref()),
         }
     }
