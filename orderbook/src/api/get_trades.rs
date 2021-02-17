@@ -66,7 +66,6 @@ mod tests {
             let filter = get_trades_request();
             request.method("GET").filter(&filter).await
         };
-        // TODO - get this little bitty working.
         let result = trade_filter(request().path("/trades")).await.unwrap();
         assert_eq!(result.owner, None);
         assert_eq!(result.order_uid, None);
