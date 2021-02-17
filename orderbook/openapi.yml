@@ -118,47 +118,55 @@ paths:
         404:
           description: Order was not found
     delete:
-      summary: Deletes order from order service,
+      summary: Deletes order from order service
       description: |
         The successful deletion might not prevent solvers from settling the order
         Authentication must be provided by signing the following message:
-        signTypedData({operation: "delete", orderUid: "0x.."})
       parameters:
         - in: path
           name: UID
           schema:
             $ref: "#/components/schemas/UID"
           required: true
-      responses:
-        200:
-          description: Order deleted
-        404:
-          description: Order was not found
-  /api/v1/cancel_order:
-    post:
-      summary: Cancel an existing order.
-      responses:
-        201:
-          description: Order has been canceled.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/UID"
-        400:
-          description: Error during order cancellation.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OrderCancellationError"
-        403:
-          description: Forbidden, your account is deny-listed
       requestBody:
         description: The order to cancel.
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/OrderCancellation"
+              $ref: "#/components/schemas/Signature"
+      responses:
+        200:
+          description: Order deleted
+        401:
+          description: Invalid signature
+        404:
+          description: Order was not found
+#  /api/v1/cancel_order:
+#    post:
+#      summary: Cancel an existing order.
+#      responses:
+#        201:
+#          description: Order has been canceled.
+#          content:
+#            application/json:
+#              schema:
+#                $ref: "#/components/schemas/UID"
+#        400:
+#          description: Error during order cancellation.
+#          content:
+#            application/json:
+#              schema:
+#                $ref: "#/components/schemas/OrderCancellationError"
+#        403:
+#          description: Forbidden, your account is deny-listed
+#      requestBody:
+#        description: The order to cancel.
+#        required: true
+#        content:
+#          application/json:
+#            schema:
+#              $ref: "#/components/schemas/OrderCancellation"
   /api/v1/tokens/{sellToken}/fee:
     get:
       description: |
@@ -315,11 +323,11 @@ components:
       allOf:
         - $ref: "#/components/schemas/OrderCreation"
         - $ref: "#/components/schemas/OrderMetaData"
-    OrderCancellation:
-      UID:
-        $ref: "#/components/schemas/UID"
-      Signature:
-        $ref: "#/components/schemas/Signature"
+#    OrderCancellation:
+#      UID:
+#        $ref: "#/components/schemas/UID"
+#      Signature:
+#        $ref: "#/components/schemas/Signature"
     Trade:
       description: |
         Trade data such as executed amounts, fees, order id and block number.
