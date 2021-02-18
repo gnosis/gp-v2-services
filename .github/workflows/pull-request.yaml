@@ -36,6 +36,9 @@ jobs:
           sudo systemctl start postgresql.service
           sudo -u postgres createuser test
           sudo -u postgres createdb test
+      uses: mxschmitt/action-tmate@v3
+      timeout-minutes: 15
+      -run: |
           FLYWAY_PASSWORD= flyway-${FLYWAY_VERSION}/flyway -url="jdbc:postgresql:///" -user=test -locations="filesystem:database/sql/" migrate 
           # Postgres tests should not run in parallel because they use the same database.
           cargo test --locked --workspace --all-features --jobs 1 postgres -- --ignored --test-threads 1
