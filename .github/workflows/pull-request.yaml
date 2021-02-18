@@ -34,12 +34,12 @@ jobs:
       - run: curl -L https://repo1.maven.org/maven2/org/flywaydb/flyway-commandline/${FLYWAY_VERSION}/flyway-commandline-${FLYWAY_VERSION}.tar.gz -o flyway-commandline-${FLYWAY_VERSION}.tar.gz && tar -xzf flyway-commandline-${FLYWAY_VERSION}.tar.gz && rm flyway-commandline-${FLYWAY_VERSION}.tar.gz
       - run: |
           sudo systemctl start postgresql.service
-          sudo -u postgres createuser test
-          sudo -u postgres createdb test
-      uses: mxschmitt/action-tmate@v3
-      timeout-minutes: 15
+          sudo -u postgres createuser $USER
+          sudo -u postgres createdb $USER
+      - uses: mxschmitt/action-tmate@v3
+      - timeout-minutes: 15
       -run: |
-          FLYWAY_PASSWORD= flyway-${FLYWAY_VERSION}/flyway -url="jdbc:postgresql:///" -user=test -locations="filesystem:database/sql/" migrate 
+          FLYWAY_PASSWORD= flyway-${FLYWAY_VERSION}/flyway -url="jdbc:postgresql:///" -user=$USER -locations="filesystem:database/sql/" migrate 
           # Postgres tests should not run in parallel because they use the same database.
           cargo test --locked --workspace --all-features --jobs 1 postgres -- --ignored --test-threads 1
       - run: |
