@@ -26,8 +26,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: 0
       CARGO_PROFILE_TEST_DEBUG: 0
       FLYWAY_VERSION: 7.3.1
-      PGPASSWORD: password
-      FLYWAY_PASSWORD: password
+      FLYWAY_PASSWORD:
     steps:
       - uses: actions/checkout@v2
       - uses: Swatinem/rust-cache@v1
@@ -37,7 +36,6 @@ jobs:
           sudo systemctl start postgresql.service
           sudo -u postgres createuser $USER
           sudo -u postgres createdb $USER
-          psql -U $USER
           flyway-${FLYWAY_VERSION}/flyway -url="jdbc:postgresql:///" -user=$USER -locations="filesystem:database/sql/" migrate 
           # Postgres tests should not run in parallel because they use the same database.
           cargo test --locked --workspace --all-features --jobs 1 postgres -- --ignored --test-threads 1
