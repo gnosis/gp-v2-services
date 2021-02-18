@@ -36,8 +36,9 @@ jobs:
           sudo systemctl start postgresql.service
           sudo -u postgres createuser $USER
           sudo -u postgres createdb $USER
-      - uses: mxschmitt/action-tmate@v3
-      - timeout-minutes: 15
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 15
       - run: |
           FLYWAY_PASSWORD= flyway-${FLYWAY_VERSION}/flyway -url="jdbc:postgresql:///" -user=$USER -locations="filesystem:database/sql/" migrate 
           # Postgres tests should not run in parallel because they use the same database.
