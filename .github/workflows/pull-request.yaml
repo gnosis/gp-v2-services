@@ -26,7 +26,9 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: 0
       CARGO_PROFILE_TEST_DEBUG: 0
       FLYWAY_VERSION: 7.3.1
-      FLYWAY_PASSWORD:
+      # Flyway is connecting via TCP/IP (authentication via password), whereas psql connects via Unix-domain sockets (authentication via username)
+      # We set the db password of $USER to this value which is also used by the flyway command
+      FLYWAY_PASSWORD: password
     steps:
       - uses: actions/checkout@v2
       - uses: Swatinem/rust-cache@v1
@@ -36,11 +38,8 @@ jobs:
           sudo systemctl start postgresql.service
           sudo -u postgres createuser $USER
           sudo -u postgres createdb $USER
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 15
-      - run: |
-          FLYWAY_PASSWORD= flyway-${FLYWAY_VERSION}/flyway -url="jdbc:postgresql:///" -user=$USER -locations="filesystem:database/sql/" migrate 
+          psql -c "ALTER USER $USER PASSWORD $FLYWAY_PASSWORD;"
+          flyway-${FLYWAY_VERSION}/flyway -url="jdbc:postgresql:///" -user=$USER -locations="filesystem:database/sql/" migrate 
           # Postgres tests should not run in parallel because they use the same database.
           cargo test --locked --workspace --all-features --jobs 1 postgres -- --ignored --test-threads 1
       - run: |
