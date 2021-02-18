@@ -3,7 +3,7 @@ mod create_order;
 mod get_fee_info;
 mod get_order_by_uid;
 mod get_orders;
-mod get_solvable_orders;
+mod get_solver_orders;
 mod get_trades;
 
 use crate::database::Database;
@@ -31,7 +31,7 @@ pub fn handle_all_routes(
     let legacy_fee_info = get_fee_info::legacy_get_fee_info(fee_calculator.clone());
     let fee_info = get_fee_info::get_fee_info(fee_calculator);
     let get_order = get_order_by_uid::get_order_by_uid(orderbook.clone());
-    let get_solvable_orders = get_solvable_orders::get_solvable_orders(orderbook.clone());
+    let get_solvable_orders = get_solver_orders::get_solver_orders(orderbook.clone());
     let get_trades = get_trades::get_trades(database);
     let cancel_order = cancel_order::cancel_order(orderbook);
     warp::path!("api" / "v1" / ..).and(

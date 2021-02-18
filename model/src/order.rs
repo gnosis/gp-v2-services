@@ -17,6 +17,15 @@ use std::fmt::{self, Display};
 use std::str::FromStr;
 use web3::signing::{self, Key, SecretKeyRef};
 
+/// An order returned by the `solvable_orders` route.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SolverOrder {
+    #[serde(flatten)]
+    pub order_creation: OrderCreation,
+    pub executable_amount: Option<U256>,
+}
+
 /// An order that is returned when querying the orderbook.
 ///
 /// Contains extra fields that are populated by the orderbook.

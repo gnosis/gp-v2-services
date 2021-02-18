@@ -1,4 +1,4 @@
-use super::{orders::DbOrderKind, Database};
+use super::{Database, DbOrderKind};
 use crate::conversions::*;
 use crate::fee::MinFeeStoring;
 

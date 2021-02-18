@@ -11,7 +11,7 @@ use contracts::GPv2Settlement;
 use futures::{join, TryStreamExt};
 use model::order::OrderCancellation;
 use model::{
-    order::{Order, OrderCreation, OrderUid},
+    order::{Order, OrderCreation, OrderUid, SolverOrder},
     DomainSeparator, EIP712Signing,
 };
 use shared::time::now_in_epoch_seconds;
@@ -130,15 +130,14 @@ impl Orderbook {
         Ok(orders)
     }
 
-    pub async fn get_solvable_orders(&self) -> Result<Vec<Order>> {
-        let filter = OrderFilter {
-            min_valid_to: now_in_epoch_seconds(),
-            exclude_fully_executed: true,
-            exclude_invalidated: true,
-            exclude_insufficient_balance: true,
-            ..Default::default()
-        };
-        self.get_orders(&filter).await
+    pub async fn get_solvable_orders(&self) -> Result<Vec<SolverOrder>> {
+        let orders = self
+            .database
+            .solver_orders(now_in_epoch_seconds())
+            .try_collect::<Vec<_>>()
+            .await?;
+        // TODO: check balances with balance fetcher and update executable amount
+        Ok(orders)
     }
 
     pub async fn run_maintenance(&self, _settlement_contract: &GPv2Settlement) -> Result<()> {

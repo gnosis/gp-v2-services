@@ -5,7 +5,7 @@ use bigdecimal::BigDecimal;
 use chrono::{DateTime, Utc};
 use futures::{stream::TryStreamExt, Stream};
 use model::{
-    order::{Order, OrderCreation, OrderKind, OrderMetaData, OrderUid},
+    order::{Order, OrderCreation, OrderMetaData, OrderUid},
     Signature,
 };
 use primitive_types::H160;
@@ -22,30 +22,6 @@ pub struct OrderFilter {
     pub exclude_invalidated: bool,
     pub exclude_insufficient_balance: bool,
     pub uid: Option<OrderUid>,
-}
-
-#[derive(sqlx::Type)]
-#[sqlx(rename = "OrderKind")]
-#[sqlx(rename_all = "lowercase")]
-pub enum DbOrderKind {
-    Buy,
-    Sell,
-}
-
-impl DbOrderKind {
-    pub fn from(order_kind: OrderKind) -> Self {
-        match order_kind {
-            OrderKind::Buy => Self::Buy,
-            OrderKind::Sell => Self::Sell,
-        }
-    }
-
-    fn into(self) -> OrderKind {
-        match self {
-            Self::Buy => OrderKind::Buy,
-            Self::Sell => OrderKind::Sell,
-        }
-    }
 }
 
 impl Database {

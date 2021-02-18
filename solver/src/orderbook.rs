@@ -1,4 +1,4 @@
-use model::order::Order;
+use model::order::SolverOrder;
 use reqwest::{Client, Url};
 use std::time::Duration;
 
@@ -15,8 +15,8 @@ impl OrderBookApi {
         Self { base, client }
     }
 
-    pub async fn get_orders(&self) -> reqwest::Result<Vec<Order>> {
-        const PATH: &str = "/api/v1/solvable_orders";
+    pub async fn get_orders(&self) -> reqwest::Result<Vec<SolverOrder>> {
+        const PATH: &str = "/api/v1/solver_orders";
         let mut url = self.base.clone();
         url.set_path(PATH);
         self.client.get(url).send().await?.json().await

@@ -191,9 +191,9 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Trade"
-  /api/v1/solvable_orders:
+  /api/v1/solver_orders:
     get:
-      summary: Get solvable orders.
+      summary: Get orders that should be considered by solvers.
       description: |
         The set of orders that solvers should be solving right now. These orders are determined to
         be valid at the time of the request.
@@ -205,7 +205,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/Order"
+                  $ref: "#/components/schemas/SolverOrder"
   /api/v1/fee:
     get:
       description: |
@@ -361,6 +361,16 @@ components:
         invalidated:
           description: Has this order been invalidated?
           type: boolean
+    PartiallyFillable:
+      description: Extra information about partially fillable orders.
+      type: object
+      properties:
+        executableAmount:
+          description: |
+            Amount of the order that can be executed based on user balance and previous executions.
+            Null for fill or kill orders.
+          $ref: "#/components/schemas/TokenAmount"
+          nullable: true
     Order:
       allOf:
         - $ref: "#/components/schemas/OrderCreation"
@@ -373,6 +383,10 @@ components:
         signature:
           description: "OrderCancellation signed by owner"
           $ref: "#/components/schemas/Signature"
+    SolverOrder:
+      allOf:
+        - $ref: "#/components/schemas/OrderCreation"
+        - $ref: "#/components/schemas/PartiallyFillable"
     Trade:
       description: |
         Trade data such as executed amounts, fees, order id and block number.

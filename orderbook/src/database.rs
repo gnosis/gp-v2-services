@@ -1,10 +1,13 @@
 mod events;
 mod fees;
 mod orders;
+mod solver_orders;
 mod trades;
 
 use anyhow::Result;
+use model::order::OrderKind;
 use sqlx::PgPool;
+use std::convert::TryInto;
 
 pub use events::*;
 pub use orders::OrderFilter;
@@ -53,5 +56,29 @@ impl Database {
             .execute(sqlx::query("TRUNCATE min_fee_measurements;"))
             .await?;
         Ok(())
+    }
+}
+
+#[derive(sqlx::Type)]
+#[sqlx(rename = "OrderKind")]
+#[sqlx(rename_all = "lowercase")]
+enum DbOrderKind {
+    Buy,
+    Sell,
+}
+
+impl DbOrderKind {
+    fn from(order_kind: OrderKind) -> Self {
+        match order_kind {
+            OrderKind::Buy => Self::Buy,
+            OrderKind::Sell => Self::Sell,
+        }
+    }
+
+    fn into(self) -> OrderKind {
+        match self {
+            Self::Buy => OrderKind::Buy,
+            Self::Sell => OrderKind::Sell,
+        }
     }
 }
