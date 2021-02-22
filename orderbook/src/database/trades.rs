@@ -105,72 +105,6 @@ mod tests {
     use num_bigint::BigUint;
     use std::collections::HashSet;
 
-    #[tokio::test]
-    #[ignore]
-    async fn postgres_trade_roundtrip() {
-        let db = Database::new("postgresql://").unwrap();
-        db.clear().await.unwrap();
-        let filter = TradeFilter::default();
-        assert!(db.trades(&filter).boxed().next().await.is_none());
-
-        // Common fields
-        let sell_token = H160::from_low_u64_be(1);
-        let buy_token = H160::from_low_u64_be(2);
-        let owner = H160::from_low_u64_be(3);
-        let executed_buy_amount = 7u32;
-        let executed_sell_amount = 3u32;
-        let fee_amount = 2u32;
-        let uid = OrderUid([1u8; 56]);
-
-        let trade = Trade {
-            block_number: 2,
-            log_index: 0,
-            order_uid: uid,
-            sell_amount: BigUint::from(executed_sell_amount),
-            buy_amount: BigUint::from(executed_buy_amount),
-            sell_amount_before_fees: BigUint::from(executed_sell_amount - fee_amount),
-            owner,
-            buy_token,
-            sell_token,
-        };
-        let order = Order {
-            order_meta_data: OrderMetaData {
-                owner,
-                uid,
-                ..Default::default()
-            },
-            order_creation: OrderCreation {
-                sell_token,
-                buy_token,
-                ..Default::default()
-            },
-        };
-
-        // Add order and trade event
-        db.insert_order(&order).await.unwrap();
-        db.insert_events(vec![(
-            EventIndex {
-                block_number: 2,
-                log_index: 0,
-            },
-            Event::DbTrade(DbTrade {
-                order_uid: uid,
-                sell_amount_including_fee: executed_sell_amount.into(),
-                buy_amount: executed_buy_amount.into(),
-                fee_amount: fee_amount.into(),
-            }),
-        )])
-        .await
-        .unwrap();
-        assert_eq!(
-            db.trades(&filter)
-                .try_collect::<Vec<Trade>>()
-                .await
-                .unwrap(),
-            vec![trade]
-        );
-    }
-
     async fn populate_dummy_trade_db(db: Database) -> (Vec<H160>, Vec<OrderUid>, [Trade; 2]) {
         // Common values
         let owners: Vec<H160> = [0, 1, 2]
@@ -298,12 +232,16 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
-    async fn postgres_filter_trades_by_owner() {
+    async fn postgres_trades_with_and_without_filter() {
         let db = Database::new("postgresql://").unwrap();
         db.clear().await.unwrap();
 
-        let (owners, _order_ids, trades) = populate_dummy_trade_db(db.clone()).await;
+        let (owners, order_ids, trades) = populate_dummy_trade_db(db.clone()).await;
 
+        // No filter assertion
+        assert_trades(&db, &TradeFilter::default(), &trades).await;
+
+        // Owner Filter assertions
         assert_trades(
             &db,
             &TradeFilter {
@@ -333,15 +271,8 @@ mod tests {
             &trades[1..],
         )
         .await;
-    }
 
-    #[tokio::test]
-    #[ignore]
-    async fn postgres_filter_trades_order_uid() {
-        let db = Database::new("postgresql://").unwrap();
-        db.clear().await.unwrap();
-        let (_owners, order_ids, trades) = populate_dummy_trade_db(db.clone()).await;
-
+        // Order ID filter assertions
         assert_trades(
             &db,
             &TradeFilter {
