@@ -9,9 +9,9 @@ use ethcontract::{
 };
 use futures::{Stream, StreamExt, TryStreamExt};
 use model::order::OrderUid;
+use std::sync::Arc;
 use std::{convert::TryInto, ops::RangeInclusive};
 use web3::Web3;
-use std::sync::Arc;
 
 // We expect that there is never a reorg that changes more than the last n blocks.
 const MAX_REORG_BLOCK_COUNT: u64 = 25;
