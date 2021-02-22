@@ -1,4 +1,5 @@
 mod events;
+mod fees;
 mod orders;
 mod trades;
 
@@ -35,6 +36,9 @@ impl Database {
         self.pool.execute(sqlx::query("TRUNCATE trades;")).await?;
         self.pool
             .execute(sqlx::query("TRUNCATE invalidations;"))
+            .await?;
+        self.pool
+            .execute(sqlx::query("TRUNCATE min_fee_measurements;"))
             .await?;
         Ok(())
     }

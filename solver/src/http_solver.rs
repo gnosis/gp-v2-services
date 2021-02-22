@@ -13,13 +13,11 @@ use primitive_types::H160;
 use reqwest::{header::HeaderValue, Client, Url};
 use std::collections::{HashMap, HashSet};
 
-// TODO: limit trading for tokens that don't have uniswap - fee pool
 // TODO: exclude partially fillable orders
 // TODO: set settlement.fee_factor
 // TODO: find correct ordering for uniswap trades
 // TODO: gather real token decimals and store them in a cache
 // TODO: special rounding for the prices we get from the solver?
-// TODO: make sure to give the solver disconnected token islands individually
 
 /// The configuration passed as url parameters to the solver.
 #[derive(Debug, Default)]
@@ -45,10 +43,16 @@ pub struct HttpSolver {
     client: Client,
     api_key: Option<String>,
     config: SolverConfig,
+    native_token: H160,
 }
 
 impl HttpSolver {
-    pub fn new(base: Url, api_key: Option<String>, config: SolverConfig) -> Self {
+    pub fn new(
+        base: Url,
+        api_key: Option<String>,
+        config: SolverConfig,
+        native_token: H160,
+    ) -> Self {
         // Unwrap because we cannot handle client creation failing.
         let client = Client::builder().build().unwrap();
         Self {
@@ -56,6 +60,7 @@ impl HttpSolver {
             client,
             api_key,
             config,
+            native_token,
         }
     }
 
@@ -145,7 +150,14 @@ impl HttpSolver {
         // In order to map back and forth we store the original tokens, orders and the models for
         // via the same mapping.
         let tokens = self.map_tokens_for_solver(liquidity.as_slice());
-        let orders = split_liquidity(liquidity);
+        let mut orders = split_liquidity(liquidity);
+        // For the solver to run correctly we need to be sure that there are no isolated islands of
+        // tokens without connection between them.
+        remove_orders_without_native_connection(
+            &mut orders.0,
+            orders.1.as_slice(),
+            &self.native_token,
+        );
         let limit_orders = self.map_orders_for_solver(orders.0);
         let amm_orders = self.map_amms_for_solver(orders.1);
         let model = BatchAuctionModel {
@@ -212,6 +224,43 @@ fn split_liquidity(liquidity: Vec<Liquidity>) -> (Vec<LimitOrder>, Vec<AmmOrder>
     (limit_orders, amm_orders)
 }
 
+fn remove_orders_without_native_connection(
+    orders: &mut Vec<LimitOrder>,
+    amms: &[AmmOrder],
+    native_token: &H160,
+) {
+    // Find all tokens that are connected through potentially multiple amm hops to the fee.
+    // TODO: Replace with a more optimal graph algorithm.
+    let mut amms = amms.iter().map(|amm| amm.tokens).collect::<HashSet<_>>();
+    let mut fee_connected_tokens = std::iter::once(*native_token).collect::<HashSet<_>>();
+    loop {
+        let mut added_token = false;
+        amms.retain(|token_pair| {
+            let tokens = token_pair.get();
+            if fee_connected_tokens.contains(&tokens.0) {
+                fee_connected_tokens.insert(tokens.1);
+                added_token = true;
+                false
+            } else if fee_connected_tokens.contains(&tokens.1) {
+                fee_connected_tokens.insert(tokens.0);
+                added_token = true;
+                false
+            } else {
+                true
+            }
+        });
+        if amms.is_empty() || !added_token {
+            break;
+        }
+    }
+    // Remove orders that are not connected.
+    orders.retain(|order| {
+        [order.buy_token, order.sell_token]
+            .iter()
+            .any(|token| fee_connected_tokens.contains(token))
+    });
+}
+
 #[async_trait::async_trait]
 impl Solver for HttpSolver {
     async fn solve(&self, liquidity: Vec<Liquidity>) -> Result<Option<Settlement>> {
@@ -249,6 +298,7 @@ mod tests {
                 max_nr_exec_orders: 100,
                 time_limit: 100,
             },
+            H160::zero(),
         );
         let base = |x: u128| x * 10u128.pow(18);
         let orders = vec![
@@ -281,5 +331,54 @@ mod tests {
         assert_eq!(uniswap.balance_update2 as u128, base(2));
 
         assert_eq!(settled.prices.len(), 2);
+    }
+
+    #[test]
+    fn remove_orders_without_native_connection_() {
+        let limit_handling = Arc::new(MockLimitOrderSettlementHandling::new());
+        let amm_handling = Arc::new(MockAmmSettlementHandling::new());
+
+        let native_token = H160::from_low_u64_be(0);
+        let tokens = [
+            H160::from_low_u64_be(1),
+            H160::from_low_u64_be(2),
+            H160::from_low_u64_be(3),
+            H160::from_low_u64_be(4),
+        ];
+
+        let amms = [(native_token, tokens[0]), (tokens[0], tokens[1])]
+            .iter()
+            .map(|tokens| AmmOrder {
+                tokens: TokenPair::new(tokens.0, tokens.1).unwrap(),
+                reserves: (0, 0),
+                fee: 0.into(),
+                settlement_handling: amm_handling.clone(),
+            })
+            .collect::<Vec<_>>();
+
+        let mut orders = [
+            (native_token, tokens[0]),
+            (native_token, tokens[1]),
+            (tokens[0], tokens[1]),
+            (tokens[1], tokens[0]),
+            (tokens[1], tokens[2]),
+            (tokens[2], tokens[1]),
+            (tokens[2], tokens[3]),
+            (tokens[3], tokens[2]),
+        ]
+        .iter()
+        .map(|tokens| LimitOrder {
+            sell_token: tokens.0,
+            buy_token: tokens.1,
+            sell_amount: Default::default(),
+            buy_amount: Default::default(),
+            kind: OrderKind::Sell,
+            partially_fillable: Default::default(),
+            settlement_handling: limit_handling.clone(),
+        })
+        .collect::<Vec<_>>();
+
+        remove_orders_without_native_connection(&mut orders, &amms, &native_token);
+        assert_eq!(orders.len(), 6);
     }
 }

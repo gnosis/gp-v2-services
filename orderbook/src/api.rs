@@ -2,6 +2,7 @@ mod create_order;
 mod get_fee_info;
 mod get_order_by_uid;
 mod get_orders;
+mod get_solvable_orders;
 mod get_trades;
 
 use crate::{fee::MinFeeCalculator, orderbook::Orderbook};
@@ -16,22 +17,26 @@ use warp::{
     reply::{json, with_status, Json, WithStatus},
     Filter, Reply,
 };
+use crate::database::Database;
 
 pub fn handle_all_routes(
+    database: Database,
     orderbook: Arc<Orderbook>,
     fee_calcuator: Arc<MinFeeCalculator>,
 ) -> impl Filter<Extract = (impl Reply,), Error = warp::Rejection> + Clone {
-    let order_creation = create_order::create_order(orderbook.clone());
-    let order_getter = get_orders::get_orders(orderbook.clone());
-    let trade_getter = get_trades::get_trades(orderbook.clone());
+    let create_order = create_order::create_order(orderbook.clone());
+    let get_orders = get_orders::get_orders(orderbook.clone());
     let fee_info = get_fee_info::get_fee_info(fee_calcuator);
-    let order_by_uid = get_order_by_uid::get_order_by_uid(orderbook);
+    let get_order = get_order_by_uid::get_order_by_uid(orderbook.clone());
+    let get_solvable_orders = get_solvable_orders::get_solvable_orders(orderbook);
+    let get_trades = get_trades::get_trades(database.clone());
     warp::path!("api" / "v1" / ..).and(
-        order_creation
-            .or(order_getter)
+            create_order
+            .or(get_orders)
             .or(fee_info)
-            .or(order_by_uid)
-            .or(trade_getter),
+            .or(get_order)
+            .or(get_solvable_orders)
+            .or(get_trades),
     )
 }
 

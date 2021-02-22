@@ -1,8 +1,9 @@
 use super::H160Wrapper;
 use crate::api::convert_get_trades_error_to_reply;
-use crate::database::TradeFilter;
+use crate::database::{Database, TradeFilter};
 use crate::orderbook::Orderbook;
 use anyhow::Result;
+use futures::TryStreamExt;
 use model::order::OrderUid;
 use model::trade::Trade;
 use serde::Deserialize;
@@ -41,15 +42,18 @@ pub fn get_trades_response(result: Result<Vec<Trade>>) -> impl Reply {
 }
 
 pub fn get_trades(
-    orderbook: Arc<Orderbook>,
+    db: Database
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
     get_trades_request().and_then(move |trade_filter| {
-        let orderbook = orderbook.clone();
         async move {
-            let result = orderbook.get_trades(&trade_filter).await;
+            let result = get_trades_from_db(&db, &trade_filter).await;
             Result::<_, Infallible>::Ok(get_trades_response(result))
         }
     })
+}
+
+pub async fn get_trades_from_db(db: &Database, filter: &TradeFilter) -> Result<Vec<Trade>> {
+    Ok(db.trades(filter).try_collect::<Vec<_>>().await?)
 }
 
 #[cfg(test)]
@@ -91,4 +95,3 @@ mod tests {
         let response_trades: Vec<Trade> = serde_json::from_slice(body.as_slice()).unwrap();
         assert_eq!(response_trades, trades);
     }
-}

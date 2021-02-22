@@ -5,7 +5,7 @@ use num_bigint::BigUint;
 use primitive_types::H160;
 use serde::{Deserialize, Serialize};
 
-#[derive(Eq, PartialEq, Clone, Debug, Deserialize, Serialize, Hash)]
+#[derive(Eq, PartialEq, Clone, Debug, Default, Deserialize, Serialize, Hash)]
 pub struct Trade {
     pub block_number: u64,
     pub log_index: u64,
@@ -20,21 +20,4 @@ pub struct Trade {
     pub owner: H160,
     pub buy_token: H160,
     pub sell_token: H160,
-}
-
-impl Default for Trade {
-    fn default() -> Trade {
-        let order_uid = OrderUid::default();
-        Trade {
-            block_number: Default::default(),
-            log_index: Default::default(),
-            order_uid,
-            buy_amount: Default::default(),
-            sell_amount: Default::default(),
-            sell_amount_before_fees: Default::default(),
-            owner: Default::default(),
-            buy_token: Default::default(),
-            sell_token: Default::default(),
-        }
-    }
 }
