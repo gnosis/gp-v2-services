@@ -95,9 +95,9 @@ impl Orderbook {
         Ok(orders)
     }
 
-
     pub async fn get_trades(&self, filter: &TradeFilter) -> Result<Vec<Trade>> {
         Ok(self.database.trades(filter).try_collect::<Vec<_>>().await?)
+    }
 
     pub async fn get_solvable_orders(&self) -> Result<Vec<Order>> {
         let filter = OrderFilter {
