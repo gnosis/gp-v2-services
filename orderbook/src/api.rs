@@ -5,6 +5,7 @@ mod get_orders;
 mod get_solvable_orders;
 mod get_trades;
 
+use crate::database::Database;
 use crate::{fee::MinFeeCalculator, orderbook::Orderbook};
 use anyhow::Error as anyhowError;
 use hex::{FromHex, FromHexError};
@@ -17,10 +18,9 @@ use warp::{
     reply::{json, with_status, Json, WithStatus},
     Filter, Reply,
 };
-use crate::database::Database;
 
 pub fn handle_all_routes(
-    database: Database,
+    database: Arc<Database>,
     orderbook: Arc<Orderbook>,
     fee_calcuator: Arc<MinFeeCalculator>,
 ) -> impl Filter<Extract = (impl Reply,), Error = warp::Rejection> + Clone {
@@ -29,9 +29,9 @@ pub fn handle_all_routes(
     let fee_info = get_fee_info::get_fee_info(fee_calcuator);
     let get_order = get_order_by_uid::get_order_by_uid(orderbook.clone());
     let get_solvable_orders = get_solvable_orders::get_solvable_orders(orderbook);
-    let get_trades = get_trades::get_trades(database.clone());
+    let get_trades = get_trades::get_trades(database);
     warp::path!("api" / "v1" / ..).and(
-            create_order
+        create_order
             .or(get_orders)
             .or(fee_info)
             .or(get_order)
