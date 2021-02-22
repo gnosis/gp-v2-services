@@ -99,7 +99,6 @@ mod tests {
     use super::*;
     use crate::database::{DbTrade, Event, EventIndex};
     use ethcontract::U256;
-    use futures::StreamExt;
     use model::order::{Order, OrderCreation, OrderMetaData};
     use model::trade::Trade;
     use num_bigint::BigUint;
