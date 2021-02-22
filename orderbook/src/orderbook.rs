@@ -1,14 +1,10 @@
 use crate::{
     account_balances::BalanceFetching, database::OrderFilter, event_updater::EventUpdater,
 };
-use crate::{
-    database::{Database, TradeFilter},
-    fee::MinFeeCalculator,
-};
+use crate::{database::Database, fee::MinFeeCalculator};
 use anyhow::Result;
 use contracts::GPv2Settlement;
 use futures::{join, TryStreamExt};
-use model::trade::Trade;
 use model::{
     order::{Order, OrderCreation, OrderUid},
     DomainSeparator,
@@ -93,10 +89,6 @@ impl Orderbook {
             remove_orders_without_sufficient_balance(&mut orders);
         }
         Ok(orders)
-    }
-
-    pub async fn get_trades(&self, filter: &TradeFilter) -> Result<Vec<Trade>> {
-        Ok(self.database.trades(filter).try_collect::<Vec<_>>().await?)
     }
 
     pub async fn get_solvable_orders(&self) -> Result<Vec<Order>> {
@@ -189,7 +181,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resgisters_untracked_balances_on_fetching() {
+    async fn registers_untracked_balances_on_fetching() {
         let mut balance_fetcher = MockBalanceFetching::new();
 
         let a_sell_token = H160::from_low_u64_be(2);
