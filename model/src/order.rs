@@ -258,15 +258,6 @@ impl OrderCreation {
     }
 }
 
-// /// An order cancellation as provided to the orderbook by the frontend.
-// #[serde_as]
-// #[derive(Eq, PartialEq, Clone, Copy, Debug, Deserialize, Serialize, Hash)]
-// #[serde(rename_all = "camelCase")]
-// pub struct OrderCancellation {
-//     pub uid: OrderUid,
-//     pub signature: Signature,
-// }
-
 /// An order as provided to the orderbook by the frontend.
 #[serde_as]
 #[derive(Eq, PartialEq, Clone, Debug, Deserialize, Serialize, Hash)]
