@@ -15,12 +15,12 @@ pub struct EventIndex {
 
 #[derive(Debug)]
 pub enum Event {
-    DbTrade(DbTrade),
+    Trade(Trade),
     Invalidation(Invalidation),
 }
 
 #[derive(Debug, Default)]
-pub struct DbTrade {
+pub struct Trade {
     pub order_uid: OrderUid,
     pub sell_amount_including_fee: U256,
     pub buy_amount: U256,
@@ -111,7 +111,7 @@ async fn insert_events(
     // connections from using the database, so it's not high priority.
     for (index, event) in events {
         match event {
-            Event::DbTrade(event) => insert_trade(transaction, index, event).await?,
+            Event::Trade(event) => insert_trade(transaction, index, event).await?,
             Event::Invalidation(event) => insert_invalidation(transaction, index, event).await?,
         };
     }
@@ -139,7 +139,7 @@ async fn insert_invalidation(
 async fn insert_trade(
     transaction: &mut Transaction<'_, Postgres>,
     index: &EventIndex,
-    event: &DbTrade,
+    event: &Trade,
 ) -> Result<(), sqlx::Error> {
     const QUERY: &str = "INSERT INTO trades (block_number, log_index, order_uid, sell_amount, buy_amount, fee_amount) VALUES ($1, $2, $3, $4, $5, $6);";
     transaction
@@ -184,7 +184,7 @@ mod tests {
                 block_number: 2,
                 log_index: 0,
             },
-            Event::DbTrade(DbTrade::default()),
+            Event::Trade(Trade::default()),
         )])
         .await
         .unwrap();
