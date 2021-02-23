@@ -34,12 +34,12 @@ impl Query {
 
     fn validate(&self) -> Result<TradeFilter, TradeFilterError> {
         // Ensure that not both owner and order_uid are specified
-        match (self.order_uid.as_ref(), self.owner.as_ref()) {
-            (Some(_), Some(_)) => Err(TradeFilterError::InvalidFilter(
+        if self.order_uid.is_some() && self.owner.is_some() {
+            return Err(TradeFilterError::InvalidFilter(
                 "Cannot specify both owner and order_uid".to_owned(),
-            )),
-            _ => Ok(self.trade_filter()),
+            ));
         }
+        Ok(self.trade_filter())
     }
 }
 

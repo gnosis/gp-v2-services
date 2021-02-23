@@ -130,9 +130,9 @@ async fn test_with_ganache() {
             .await
             .expect("Couldn't query domain separator"),
     );
-    let db = Arc::new(Database::new("postgresql://").unwrap());
+    let db = Database::new("postgresql://").unwrap();
     db.clear().await.unwrap();
-    let event_updater = EventUpdater::new(gp_settlement.clone(), db.clone());
+    let event_updater = EventUpdater::new(gp_settlement.clone(), Arc::from(db.clone()));
     let price_estimator = UniswapPriceEstimator::new(Box::new(PoolFetcher {
         factory: uniswap_factory.clone(),
         web3: web3.clone(),
@@ -145,14 +145,14 @@ async fn test_with_ganache() {
     ));
     let orderbook = Arc::new(Orderbook::new(
         domain_separator,
-        db.clone(),
+        Arc::from(db.clone()),
         event_updater,
         Box::new(Web3BalanceFetcher::new(web3.clone(), gp_allowance)),
         fee_calcuator.clone(),
     ));
 
     orderbook::serve_task(
-        db.clone(),
+        Arc::from(db.clone()),
         orderbook.clone(),
         fee_calcuator,
         API_HOST[7..].parse().expect("Couldn't parse API address"),
