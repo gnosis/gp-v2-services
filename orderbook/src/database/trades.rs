@@ -104,7 +104,7 @@ mod tests {
     use num_bigint::BigUint;
     use std::collections::HashSet;
 
-    async fn populate_dummy_trade_db(db: Database) -> (Vec<H160>, Vec<OrderUid>, [Trade; 2]) {
+    async fn populate_dummy_trade_db(db: Database) -> (Vec<H160>, Vec<OrderUid>, [Trade; 3]) {
         // Common values
         let owners: Vec<H160> = [0, 1, 2]
             .iter()
@@ -114,7 +114,7 @@ mod tests {
             .iter()
             .map(|t| H160::from_low_u64_be(*t as u64))
             .collect();
-        let order_ids: Vec<OrderUid> = [0, 1, 2].iter().map(|i| OrderUid([*i; 56])).collect();
+        let order_ids: Vec<OrderUid> = [0, 1, 2, 3].iter().map(|i| OrderUid([*i; 56])).collect();
 
         // Create some orders.
         let orders = vec![
@@ -162,6 +162,18 @@ mod tests {
             db.insert_order(order).await.unwrap();
         }
 
+        let trade_without_order = Trade {
+            block_number: 2,
+            log_index: 0,
+            order_uid: order_ids[3],
+            sell_amount: BigUint::from(3u32),
+            buy_amount: BigUint::from(2u32),
+            sell_amount_before_fees: BigUint::from(1u32),
+            owner: owners[0],
+            buy_token: tokens[3],
+            sell_token: tokens[2],
+        };
+
         let trades = [
             Trade {
                 block_number: 2,
@@ -185,6 +197,7 @@ mod tests {
                 buy_token: tokens[3],
                 sell_token: tokens[2],
             },
+            trade_without_order,
         ];
 
         db.insert_events(vec![
@@ -299,6 +312,26 @@ mod tests {
                 ..Default::default()
             },
             &trades[1..],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn postgres_trade_without_matching_order() {
+        let db = Database::new("postgresql://").unwrap();
+        db.clear().await.unwrap();
+
+        let (_owners, order_ids, _trades) = populate_dummy_trade_db(db.clone()).await;
+
+        // Trade exists in DB but no matching order
+        assert_trades(
+            &db,
+            &TradeFilter {
+                order_uid: Some(order_ids[3]),
+                ..Default::default()
+            },
+            &[],
         )
         .await;
     }
