@@ -32,6 +32,8 @@ impl Database {
             JOIN orders o \
             ON o.uid = t.order_uid \
             WHERE \
+                o.uid IS NOT null \
+            AND \
                 ($1 IS NULL OR o.owner = $1) \
             AND \
                 ($2 IS NULL OR o.uid = $2);";
@@ -166,8 +168,8 @@ mod tests {
             block_number: 2,
             log_index: 0,
             order_uid: order_ids[3],
-            sell_amount: BigUint::from(3u32),
-            buy_amount: BigUint::from(2u32),
+            sell_amount: BigUint::from(9u32),
+            buy_amount: BigUint::from(9u32),
             sell_amount_before_fees: BigUint::from(1u32),
             owner: owners[0],
             buy_token: tokens[3],
@@ -244,16 +246,19 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
-    async fn postgres_trades_with_and_without_filter() {
+    async fn postgres_trades_without_filter() {
         let db = Database::new("postgresql://").unwrap();
         db.clear().await.unwrap();
+        let (_, _, trades) = populate_dummy_trade_db(db.clone()).await;
+        assert_trades(&db, &TradeFilter::default(), &trades[0..2]).await;
+    }
 
-        let (owners, order_ids, trades) = populate_dummy_trade_db(db.clone()).await;
-
-        // No filter assertion
-        assert_trades(&db, &TradeFilter::default(), &trades).await;
-
-        // Owner Filter assertions
+    #[tokio::test]
+    #[ignore]
+    async fn postgres_trades_with_owner_filter() {
+        let db = Database::new("postgresql://").unwrap();
+        db.clear().await.unwrap();
+        let (owners, _, trades) = populate_dummy_trade_db(db.clone()).await;
         assert_trades(
             &db,
             &TradeFilter {
@@ -280,11 +285,18 @@ mod tests {
                 owner: Some(owners[2]),
                 ..Default::default()
             },
-            &trades[1..],
+            &trades[1..2],
         )
         .await;
+    }
 
-        // Order ID filter assertions
+    #[tokio::test]
+    #[ignore]
+    async fn postgres_trades_with_order_uid_filter() {
+        let db = Database::new("postgresql://").unwrap();
+        db.clear().await.unwrap();
+
+        let (_, order_ids, trades) = populate_dummy_trade_db(db.clone()).await;
         assert_trades(
             &db,
             &TradeFilter {
@@ -311,7 +323,7 @@ mod tests {
                 order_uid: Some(order_ids[2]),
                 ..Default::default()
             },
-            &trades[1..],
+            &trades[1..2],
         )
         .await;
     }
