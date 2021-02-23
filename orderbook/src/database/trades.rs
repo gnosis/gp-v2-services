@@ -97,7 +97,7 @@ impl TradesQueryRow {
 mod tests {
 
     use super::*;
-    use crate::database::{DbTrade, Event, EventIndex};
+    use crate::database::{Event, EventIndex, Trade as DbTrade};
     use ethcontract::U256;
     use model::order::{Order, OrderCreation, OrderMetaData};
     use model::trade::Trade;
@@ -193,7 +193,7 @@ mod tests {
                     block_number: 2,
                     log_index: 0,
                 },
-                Event::DbTrade(DbTrade {
+                Event::Trade(DbTrade {
                     order_uid: order_ids[1],
                     sell_amount_including_fee: U256::from(3),
                     buy_amount: U256::from(2),
@@ -205,7 +205,7 @@ mod tests {
                     block_number: 2,
                     log_index: 1,
                 },
-                Event::DbTrade(DbTrade {
+                Event::Trade(DbTrade {
                     order_uid: order_ids[2],
                     sell_amount_including_fee: U256::from(4),
                     buy_amount: U256::from(3),

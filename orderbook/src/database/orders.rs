@@ -421,7 +421,7 @@ mod tests {
                 block_number: 0,
                 log_index: 0,
             },
-            Event::DbTrade(DbTrade {
+            Event::Trade(Trade {
                 order_uid: order.order_meta_data.uid,
                 sell_amount_including_fee: 3.into(),
                 ..Default::default()
@@ -440,7 +440,7 @@ mod tests {
                 block_number: 1,
                 log_index: 0,
             },
-            Event::DbTrade(DbTrade {
+            Event::Trade(Trade {
                 order_uid: order.order_meta_data.uid,
                 sell_amount_including_fee: 6.into(),
                 ..Default::default()
@@ -460,7 +460,7 @@ mod tests {
                 block_number: 2,
                 log_index: 0,
             },
-            Event::DbTrade(DbTrade {
+            Event::Trade(Trade {
                 order_uid: order.order_meta_data.uid,
                 sell_amount_including_fee: 1.into(),
                 ..Default::default()
@@ -509,7 +509,7 @@ mod tests {
                     block_number: i,
                     log_index: 0,
                 },
-                Event::DbTrade(DbTrade {
+                Event::Trade(Trade {
                     order_uid: order.order_meta_data.uid,
                     sell_amount_including_fee: U256::MAX,
                     ..Default::default()
