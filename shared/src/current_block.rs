@@ -1,7 +1,12 @@
-use anyhow::{anyhow, Context, Result};
-use futures::Stream;
+use anyhow::{anyhow, Context as _, Result};
+use futures::{Stream, StreamExt};
 use primitive_types::H256;
-use std::{future::Future, time::Duration};
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
+};
 use tokio::sync::watch;
 use web3::{
     types::{BlockId, BlockNumber},
@@ -18,8 +23,7 @@ const POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// The stream is not guaranteed to yield *every* block individually without gaps but it does yield
 /// the newest block whenever it changes. In practice this means that if the node changes the
 /// current block in quick succession we might only observe the last block, skipping some blocks in
-/// between. If the the current block has not yet been fetched the first time the stream yields a
-/// default block with hash and number 0.
+/// between.
 ///
 /// The future runs until all associated streams have been dropped.
 pub fn current_block_stream(
@@ -28,16 +32,12 @@ pub fn current_block_stream(
     impl Stream<Item = Block> + Clone + Unpin,
     impl Future<Output = ()>,
 ) {
-    let default_hash = H256::default();
-    let default_block = Block {
-        hash: Some(default_hash),
-        number: Some(0.into()),
-        ..Default::default()
-    };
-    let (sender, receiver) = watch::channel(default_block);
+    let (sender, receiver) = watch::channel(None);
+
+    let stream = CurrentBlockStream { receiver };
 
     let update_future = async move {
-        let mut previous_hash = default_hash;
+        let mut previous_hash = H256::default();
         loop {
             tokio::time::delay_for(POLL_INTERVAL).await;
             let block = match current_block(&web3).await {
@@ -57,14 +57,42 @@ pub fn current_block_stream(
             if hash == previous_hash {
                 continue;
             }
-            if sender.broadcast(block).is_err() {
+            if sender.broadcast(Some(block)).is_err() {
                 break;
             }
             previous_hash = hash;
         }
     };
 
-    (receiver, update_future)
+    (stream, update_future)
+}
+
+#[derive(Clone)]
+struct CurrentBlockStream {
+    receiver: watch::Receiver<Option<Block>>,
+}
+
+impl CurrentBlockStream {
+    async fn next(&mut self) -> Option<Block> {
+        loop {
+            // recv returns Option<Option<Block>>. If the outer option is None then the sender has
+            // been dropped in which case the stream ends. If the inner option is None then this is
+            // because we have fetched the initial default value so we loop and try again.
+            if let Some(block) = self.receiver.recv().await? {
+                return Some(block);
+            }
+        }
+    }
+}
+
+impl Stream for CurrentBlockStream {
+    type Item = Block;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let future = self.get_mut().next();
+        futures::pin_mut!(future);
+        future.poll(cx)
+    }
 }
 
 async fn current_block(web3: &Web3<impl Transport>) -> Result<Block> {
