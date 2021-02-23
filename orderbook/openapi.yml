@@ -317,10 +317,10 @@ components:
       description: |
         EIP712 signature of struct OrderCancellation { orderUid: bytes } from the order's owner
       type: object
-        properties:
-          signature:
-            description: "OrderCancellation signed by owner"
-            $ref: "#/components/schemas/Signature"
+      properties:
+        signature:
+          description: "OrderCancellation signed by owner"
+          $ref: "#/components/schemas/Signature"
     Trade:
       description: |
         Trade data such as executed amounts, fees, order id and block number.
