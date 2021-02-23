@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Context as _, Result};
-use futures::{Stream, StreamExt};
+use ethcontract::transport::DynTransport;
+use futures::Stream;
 use primitive_types::H256;
 use std::{
     future::Future,
@@ -10,31 +11,27 @@ use std::{
 use tokio::sync::watch;
 use web3::{
     types::{BlockId, BlockNumber},
-    Transport, Web3,
+    Web3,
 };
 
 pub type Block = web3::types::Block<H256>;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 
-/// Creates a clonable stream that yields the current block whenever it changes and a future
-/// driving the updates of current block.
+/// Creates a clonable stream that yields the current block whenever it changes.
 ///
 /// The stream is not guaranteed to yield *every* block individually without gaps but it does yield
 /// the newest block whenever it changes. In practice this means that if the node changes the
 /// current block in quick succession we might only observe the last block, skipping some blocks in
 /// between.
 ///
-/// The future runs until all associated streams have been dropped.
+/// The stream is clonable so that we only have to poll the node once while being able to share the
+/// result with several consumers. Calling this function again would create a new poller so it is
+/// preferable to clone an existing stream instead.
 pub fn current_block_stream(
-    web3: Web3<impl Transport>,
-) -> (
-    impl Stream<Item = Block> + Clone + Unpin,
-    impl Future<Output = ()>,
-) {
+    web3: Web3<DynTransport>,
+) -> impl Stream<Item = Block> + Clone + Send + Unpin {
     let (sender, receiver) = watch::channel(None);
-
-    let stream = CurrentBlockStream { receiver };
 
     let update_future = async move {
         let mut previous_hash = H256::default();
@@ -64,7 +61,8 @@ pub fn current_block_stream(
         }
     };
 
-    (stream, update_future)
+    tokio::task::spawn(update_future);
+    CurrentBlockStream { receiver }
 }
 
 #[derive(Clone)]
@@ -95,7 +93,7 @@ impl Stream for CurrentBlockStream {
     }
 }
 
-async fn current_block(web3: &Web3<impl Transport>) -> Result<Block> {
+async fn current_block(web3: &Web3<DynTransport>) -> Result<Block> {
     web3.eth()
         .block(BlockId::Number(BlockNumber::Latest))
         .await
@@ -114,15 +112,11 @@ mod tests {
     async fn mainnet() {
         let node = "https://dev-openethereum.mainnet.gnosisdev.com";
         let transport = web3::transports::Http::new(node).unwrap();
-        let web3 = Web3::new(transport);
-        let (mut stream, future) = current_block_stream(web3);
-        let handle = tokio::task::spawn(future);
+        let web3 = Web3::new(DynTransport::new(transport));
+        let mut stream = current_block_stream(web3);
         for _ in 0..3 {
             let block = stream.next().await.unwrap();
             println!("new block number {}", block.number.unwrap().as_u64());
         }
-        println!("dropping stream which should cause the future to exit");
-        std::mem::drop(stream);
-        handle.await.unwrap();
     }
 }
