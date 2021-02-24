@@ -111,7 +111,7 @@ async fn main() {
     let serve_task = serve_task(
         database.clone(),
         orderbook.clone(),
-        fee_calcuator,
+        fee_calculator,
         args.bind_address,
     );
     let maintenance_task = task::spawn(orderbook_maintenance(orderbook, settlement_contract));
