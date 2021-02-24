@@ -93,7 +93,7 @@ async fn main() {
         web3,
         chain_id,
     }));
-    let fee_calcuator = Arc::new(MinFeeCalculator::new(
+    let fee_calculator = Arc::new(MinFeeCalculator::new(
         Box::new(price_estimator),
         Box::new(gas_price_estimator),
         native_token.address(),
@@ -104,7 +104,7 @@ async fn main() {
         database.clone(),
         event_updater,
         Box::new(balance_fetcher),
-        fee_calcuator.clone(),
+        fee_calculator.clone(),
     ));
     check_database_connection(orderbook.as_ref()).await;
 

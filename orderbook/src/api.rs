@@ -22,11 +22,11 @@ use warp::{
 pub fn handle_all_routes(
     database: Arc<Database>,
     orderbook: Arc<Orderbook>,
-    fee_calcuator: Arc<MinFeeCalculator>,
+    fee_calculator: Arc<MinFeeCalculator>,
 ) -> impl Filter<Extract = (impl Reply,), Error = warp::Rejection> + Clone {
     let create_order = create_order::create_order(orderbook.clone());
     let get_orders = get_orders::get_orders(orderbook.clone());
-    let fee_info = get_fee_info::get_fee_info(fee_calcuator);
+    let fee_info = get_fee_info::get_fee_info(fee_calculator);
     let get_order = get_order_by_uid::get_order_by_uid(orderbook.clone());
     let get_solvable_orders = get_solvable_orders::get_solvable_orders(orderbook);
     let get_trades = get_trades::get_trades(database);
