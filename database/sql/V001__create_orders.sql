@@ -11,7 +11,6 @@ CREATE TABLE orders (
     uid bytea PRIMARY KEY,
     owner bytea NOT NULL,
     creation_timestamp timestamptz NOT NULL,
-
     sell_token bytea NOT NULL,
     buy_token bytea NOT NULL,
     sell_amount numeric(78,0) NOT NULL,

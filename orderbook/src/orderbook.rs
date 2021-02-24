@@ -5,6 +5,7 @@ use crate::{database::Database, fee::MinFeeCalculator};
 use anyhow::Result;
 use contracts::GPv2Settlement;
 use futures::{join, TryStreamExt};
+use model::order::OrderCancellation;
 use model::{
     order::{Order, OrderCreation, OrderUid},
     DomainSeparator,
@@ -26,9 +27,11 @@ pub enum AddOrderResult {
 }
 
 #[derive(Debug)]
-pub enum RemoveOrderResult {
-    Removed,
-    DoesNotExist,
+pub enum OrderCancellationResult {
+    Cancelled,
+    InvalidSignature,
+    MissingSignature,
+    OrderNotFound,
 }
 
 pub struct Orderbook {
@@ -78,8 +81,38 @@ impl Orderbook {
         Ok(AddOrderResult::Added(order.order_meta_data.uid))
     }
 
-    pub async fn remove_order(&self, _uid: &OrderUid) -> Result<RemoveOrderResult> {
-        todo!()
+    pub async fn cancel_order(
+        &self,
+        cancellation: &OrderCancellation,
+    ) -> Result<OrderCancellationResult> {
+        // TODO - Would like to use get_order_by_uid, but not implemented on self
+        let orders = self
+            .get_orders(&OrderFilter {
+                uid: Some(cancellation.order_uid),
+                ..Default::default()
+            })
+            .await?;
+        // Could be that order doesn't exist and is not fetched.
+        let order = match orders.first() {
+            Some(order) => order,
+            None => return Ok(OrderCancellationResult::OrderNotFound),
+        };
+
+        match cancellation
+            .signature
+            .validate(&self.domain_separator, &cancellation.digest())
+        {
+            Some(signer) => {
+                if signer == order.order_meta_data.owner {
+                    self.database.cancel_order(&order).await?;
+                    // Can't fail to remove here, since we know it exists already
+                    Ok(OrderCancellationResult::Cancelled)
+                } else {
+                    Ok(OrderCancellationResult::InvalidSignature)
+                }
+            }
+            None => Ok(OrderCancellationResult::MissingSignature),
+        }
     }
 
     pub async fn get_orders(&self, filter: &OrderFilter) -> Result<Vec<Order>> {

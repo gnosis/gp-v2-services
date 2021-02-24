@@ -15,10 +15,8 @@ use serde::{Deserializer, Serializer};
 use serde_with::serde_as;
 use std::fmt::{self, Display};
 use std::str::FromStr;
-use web3::{
-    signing::{self, Key, SecretKeyRef},
-    types::Recovery,
-};
+use web3::signing::{self, Key, SecretKeyRef};
+
 /// An order that is returned when querying the orderbook.
 ///
 /// Contains extra fields that are populated by the orderbook.
@@ -42,7 +40,9 @@ impl Order {
         order_creation: OrderCreation,
         domain: &DomainSeparator,
     ) -> Option<Self> {
-        let owner = order_creation.validate_signature(domain)?;
+        let owner = order_creation
+            .signature
+            .validate(domain, &order_creation.digest())?;
         Some(Self {
             order_meta_data: OrderMetaData {
                 creation_date: chrono::offset::Utc::now(),
@@ -169,20 +169,10 @@ impl OrderCreation {
         TokenPair::new(self.buy_token, self.sell_token)
     }
 
-    // If signature is valid returns the owner.
-    pub fn validate_signature(&self, domain_separator: &DomainSeparator) -> Option<H160> {
-        // The signature related functionality is defined by the smart contract:
-        // https://github.com/gnosis/gp-v2-contracts/blob/main/src/contracts/libraries/GPv2Encoding.sol
-
-        let v = self.signature.v & 0x1f;
-        let message = self.signing_digest(domain_separator);
-        let recovery = Recovery::new(message, v as u64, self.signature.r, self.signature.s);
-        let (signature, recovery_id) = recovery.as_signature()?;
-        signing::recover(&message, &signature, recovery_id).ok()
-    }
-
     fn sign_self_with(&mut self, domain_separator: &DomainSeparator, key: &SecretKeyRef) {
-        let message = self.signing_digest_message(domain_separator);
+        let message = self
+            .signature
+            .signing_digest_message(domain_separator, &self.digest());
         // Unwrap because the only error is for invalid messages which we don't create.
         let signature = Key::sign(key, &message, None).unwrap();
         self.signature.v = signature.v as u8 | 0x80;
@@ -192,7 +182,7 @@ impl OrderCreation {
 
     pub fn uid(&self, owner: &H160) -> OrderUid {
         let mut uid = OrderUid([0u8; 56]);
-        uid.0[0..32].copy_from_slice(&self.order_digest());
+        uid.0[0..32].copy_from_slice(&self.digest());
         uid.0[32..52].copy_from_slice(owner.as_fixed_bytes());
         uid.0[52..56].copy_from_slice(&self.valid_to.to_be_bytes());
         uid
@@ -202,11 +192,10 @@ impl OrderCreation {
 // Intended to be used by tests that need signed orders.
 impl OrderCreation {}
 
-// See https://github.com/gnosis/gp-v2-contracts/blob/main/src/contracts/libraries/GPv2Encoding.sol
 impl OrderCreation {
+    // See https://github.com/gnosis/gp-v2-contracts/blob/main/src/contracts/libraries/GPv2Encoding.sol
     pub const ORDER_TYPE_HASH: [u8; 32] =
         hex!("b2b38b9dcbdeb41f7ad71dea9aed79fb47f7bbc3436576fe994b43d5b16ecdec");
-
     // keccak256("sell")
     const ORDER_KIND_SELL: [u8; 32] =
         hex!("f3b277728b3fee749481eb3e0b3b48980dbbab78658fc419025cb16eee346775");
@@ -214,7 +203,7 @@ impl OrderCreation {
     const ORDER_KIND_BUY: [u8; 32] =
         hex!("6ed88e868af0a1983e3886d5f3e95a2fafbd6c3450bc229e27342283dc429ccc");
 
-    fn order_digest(&self) -> [u8; 32] {
+    pub fn digest(&self) -> [u8; 32] {
         let mut hash_data = [0u8; 320];
         hash_data[0..32].copy_from_slice(&Self::ORDER_TYPE_HASH);
         // Some slots are not assigned (stay 0) because all values are extended to 256 bits.
@@ -232,29 +221,27 @@ impl OrderCreation {
         hash_data[319] = self.partially_fillable as u8;
         signing::keccak256(&hash_data)
     }
+}
 
-    fn signing_digest_typed_data(&self, domain_separator: &DomainSeparator) -> [u8; 32] {
-        let mut hash_data = [0u8; 66];
-        hash_data[0..2].copy_from_slice(&[0x19, 0x01]);
-        hash_data[2..34].copy_from_slice(&domain_separator.0);
-        hash_data[34..66].copy_from_slice(&self.order_digest());
+/// An order cancellation as provided to the orderbook by the frontend.
+#[serde_as]
+#[derive(Eq, PartialEq, Clone, Copy, Debug, Deserialize, Serialize, Hash)]
+pub struct OrderCancellation {
+    // TODO - does it make sense to include the orderUid here?
+    pub order_uid: OrderUid,
+    pub signature: Signature,
+}
+
+impl OrderCancellation {
+    // keccak256("OrderCancellation(bytes orderUid)")
+    const ORDER_CANCELLATION_TYPE_HASH: [u8; 32] =
+        hex!("7b41b3a6e2b3cae020a3b2f9cdc997e0d420643957e7fea81747e984e47c88ec");
+
+    pub fn digest(&self) -> [u8; 32] {
+        let mut hash_data = [0u8; 64];
+        hash_data[0..32].copy_from_slice(&Self::ORDER_CANCELLATION_TYPE_HASH);
+        hash_data[44..64].copy_from_slice(&signing::keccak256(&self.order_uid.0));
         signing::keccak256(&hash_data)
-    }
-
-    fn signing_digest_message(&self, domain_separator: &DomainSeparator) -> [u8; 32] {
-        let mut hash_data = [0u8; 92];
-        hash_data[0..28].copy_from_slice(b"\x19Ethereum Signed Message:\n64");
-        hash_data[28..60].copy_from_slice(&domain_separator.0);
-        hash_data[60..92].copy_from_slice(&self.order_digest());
-        signing::keccak256(&hash_data)
-    }
-
-    fn signing_digest(&self, domain_separator: &DomainSeparator) -> [u8; 32] {
-        if self.signature.v & 0x80 == 0 {
-            self.signing_digest_typed_data(domain_separator)
-        } else {
-            self.signing_digest_message(domain_separator)
-        }
     }
 }
 
@@ -484,7 +471,10 @@ mod tests {
         };
 
         let expected_owner = hex!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
-        let owner = order.validate_signature(&domain_separator).unwrap();
+        let owner = order
+            .signature
+            .validate(&domain_separator, &order.digest())
+            .unwrap();
         assert_eq!(owner, expected_owner.into());
     }
 
@@ -510,7 +500,10 @@ mod tests {
             },
         };
         let expected_owner = hex!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
-        let owner = order.validate_signature(&domain_separator).unwrap();
+        let owner = order
+            .signature
+            .validate(&domain_separator, &order.digest())
+            .unwrap();
         assert_eq!(owner, expected_owner.into());
     }
 
@@ -520,7 +513,9 @@ mod tests {
         let key = SecretKeyRef::from(&ONE_KEY);
         order.sign_self_with(&DomainSeparator::default(), &key);
         assert_eq!(
-            order.validate_signature(&DomainSeparator::default()),
+            order
+                .signature
+                .validate(&DomainSeparator::default(), &order.digest()),
             Some(key.address())
         );
     }

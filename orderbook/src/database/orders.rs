@@ -78,6 +78,19 @@ impl Database {
             .map(|_| ())
     }
 
+    pub async fn cancel_order(&self, order: &Order) -> Result<()> {
+        const QUERY: &str = "\
+            UPDATE orders
+            SET invalidated = true \
+            WHERE uid = $2;";
+        sqlx::query(QUERY)
+            .bind(order.order_meta_data.uid.0.as_ref())
+            .execute(&self.pool)
+            .await
+            .context("cancel_order failed")
+            .map(|_| ())
+    }
+
     pub fn orders<'a>(&'a self, filter: &'a OrderFilter) -> impl Stream<Item = Result<Order>> + 'a {
         // The `or`s in the `where` clause are there so that each filter is ignored when not set.
         // We use a subquery instead of a `having` clause in the inner query because we would not be

@@ -71,7 +71,7 @@ paths:
             default: false
         - name: includeInvalidated
           in: query
-          description: Should orders that have been invalidated in the smart contract be returned?
+          description: Should orders that have been invalidated be returned?
           schema:
             type: boolean
             default: false
@@ -384,7 +384,8 @@ components:
           enum:
             [
                 InvalidSignature,
-                InvalidOrderUid,
+                MissingSignature,
+                OrderNotFound,
             ]
         description:
           type: string

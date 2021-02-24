@@ -12,6 +12,7 @@ use primitive_types::{H160, H256};
 use serde::{de, Deserialize, Serialize};
 use std::fmt;
 use web3::signing;
+use web3::types::Recovery;
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Default, Hash)]
 pub struct Signature {
@@ -36,6 +37,48 @@ impl Signature {
             s: H256::from_slice(&bytes[32..64]),
             v: bytes[64],
         }
+    }
+
+    fn signing_digest_typed_data(
+        &self,
+        domain_separator: &DomainSeparator,
+        digest: &[u8; 32],
+    ) -> [u8; 32] {
+        let mut hash_data = [0u8; 66];
+        hash_data[0..2].copy_from_slice(&[0x19, 0x01]);
+        hash_data[2..34].copy_from_slice(&domain_separator.0);
+        hash_data[34..66].copy_from_slice(digest);
+        signing::keccak256(&hash_data)
+    }
+
+    pub fn signing_digest_message(
+        &self,
+        domain_separator: &DomainSeparator,
+        digest: &[u8; 32],
+    ) -> [u8; 32] {
+        let mut hash_data = [0u8; 92];
+        hash_data[0..28].copy_from_slice(b"\x19Ethereum Signed Message:\n64");
+        hash_data[28..60].copy_from_slice(&domain_separator.0);
+        hash_data[60..92].copy_from_slice(digest);
+        signing::keccak256(&hash_data)
+    }
+
+    fn signing_digest(&self, domain_separator: &DomainSeparator, digest: &[u8; 32]) -> [u8; 32] {
+        // This is fallback for wallets that don't support EIP712
+        if self.v & 0x80 == 0 {
+            self.signing_digest_typed_data(domain_separator, digest)
+        } else {
+            self.signing_digest_message(domain_separator, digest)
+        }
+    }
+
+    pub fn validate(&self, domain_separator: &DomainSeparator, digest: &[u8; 32]) -> Option<H160> {
+        let v = self.v & 0x1f;
+        // Does it make sense to include just order_uid here?
+        let message = self.signing_digest(domain_separator, digest);
+        let recovery = Recovery::new(message, v as u64, self.r, self.s);
+        let (signature, recovery_id) = recovery.as_signature()?;
+        signing::recover(&message, &signature, recovery_id).ok()
     }
 }
 
