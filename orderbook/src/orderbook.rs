@@ -5,9 +5,10 @@ use crate::{database::Database, fee::MinFeeCalculator};
 use anyhow::Result;
 use contracts::GPv2Settlement;
 use futures::{join, TryStreamExt};
+use model::order::OrderCancellation;
 use model::{
     order::{Order, OrderCreation, OrderUid},
-    DomainSeparator,
+    DomainSeparator, EIP712Signing,
 };
 use shared::time::now_in_epoch_seconds;
 use std::sync::Arc;
@@ -26,9 +27,11 @@ pub enum AddOrderResult {
 }
 
 #[derive(Debug)]
-pub enum RemoveOrderResult {
-    Removed,
-    DoesNotExist,
+pub enum OrderCancellationResult {
+    Cancelled,
+    InvalidSignature,
+    WrongOwner,
+    OrderNotFound,
 }
 
 pub struct Orderbook {
@@ -78,16 +81,47 @@ impl Orderbook {
         Ok(AddOrderResult::Added(order.order_meta_data.uid))
     }
 
-    pub async fn remove_order(&self, _uid: &OrderUid) -> Result<RemoveOrderResult> {
-        todo!()
+    pub async fn cancel_order(
+        &self,
+        cancellation: OrderCancellation,
+    ) -> Result<OrderCancellationResult> {
+        // TODO - Would like to use get_order_by_uid, but not implemented on self
+        let orders = self
+            .get_orders(&OrderFilter {
+                uid: Some(cancellation.order_uid),
+                ..Default::default()
+            })
+            .await?;
+        // Could be that order doesn't exist and is not fetched.
+        let order = match orders.first() {
+            Some(order) => order,
+            None => return Ok(OrderCancellationResult::OrderNotFound),
+        };
+
+        match cancellation.validate_signature(&self.domain_separator) {
+            Some(signer) => {
+                if signer == order.order_meta_data.owner {
+                    // order is already known to exist in DB at this point!
+                    self.database
+                        .cancel_order(&order.order_meta_data.uid)
+                        .await?;
+                    Ok(OrderCancellationResult::Cancelled)
+                } else {
+                    Ok(OrderCancellationResult::WrongOwner)
+                }
+            }
+            None => Ok(OrderCancellationResult::InvalidSignature),
+        }
     }
 
     pub async fn get_orders(&self, filter: &OrderFilter) -> Result<Vec<Order>> {
         let mut orders = self.database.orders(filter).try_collect::<Vec<_>>().await?;
         set_order_balance(orders.as_mut_slice(), self.balance_fetcher.as_ref()).await;
+        tracing::debug!("before filter {:?}", orders.as_slice());
         if filter.exclude_insufficient_balance {
             remove_orders_without_sufficient_balance(&mut orders);
         }
+        tracing::debug!("after filter {:?}", orders.as_slice());
         Ok(orders)
     }
 

@@ -3,7 +3,7 @@
 use crate::{
     h160_hexadecimal,
     u256_decimal::{self, DecimalU256},
-    DomainSeparator, Signature, TokenPair,
+    DomainSeparator, EIP712Signing, Signature, TokenPair,
 };
 use chrono::{offset::Utc, DateTime, NaiveDateTime};
 use hex_literal::hex;
@@ -15,10 +15,8 @@ use serde::{Deserializer, Serializer};
 use serde_with::serde_as;
 use std::fmt::{self, Display};
 use std::str::FromStr;
-use web3::{
-    signing::{self, Key, SecretKeyRef},
-    types::Recovery,
-};
+use web3::signing::{self, Key, SecretKeyRef};
+
 /// An order that is returned when querying the orderbook.
 ///
 /// Contains extra fields that are populated by the orderbook.
@@ -159,7 +157,8 @@ impl Default for OrderCreation {
             partially_fillable: Default::default(),
             signature: Default::default(),
         };
-        result.sign_self_with(&DomainSeparator::default(), &SecretKeyRef::new(&ONE_KEY));
+        result.signature =
+            result.sign_self_with(&DomainSeparator::default(), &SecretKeyRef::new(&ONE_KEY));
         result
     }
 }
@@ -169,30 +168,9 @@ impl OrderCreation {
         TokenPair::new(self.buy_token, self.sell_token)
     }
 
-    // If signature is valid returns the owner.
-    pub fn validate_signature(&self, domain_separator: &DomainSeparator) -> Option<H160> {
-        // The signature related functionality is defined by the smart contract:
-        // https://github.com/gnosis/gp-v2-contracts/blob/main/src/contracts/libraries/GPv2Encoding.sol
-
-        let v = self.signature.v & 0x1f;
-        let message = self.signing_digest(domain_separator);
-        let recovery = Recovery::new(message, v as u64, self.signature.r, self.signature.s);
-        let (signature, recovery_id) = recovery.as_signature()?;
-        signing::recover(&message, &signature, recovery_id).ok()
-    }
-
-    fn sign_self_with(&mut self, domain_separator: &DomainSeparator, key: &SecretKeyRef) {
-        let message = self.signing_digest_message(domain_separator);
-        // Unwrap because the only error is for invalid messages which we don't create.
-        let signature = Key::sign(key, &message, None).unwrap();
-        self.signature.v = signature.v as u8 | 0x80;
-        self.signature.r = signature.r;
-        self.signature.s = signature.s;
-    }
-
     pub fn uid(&self, owner: &H160) -> OrderUid {
         let mut uid = OrderUid([0u8; 56]);
-        uid.0[0..32].copy_from_slice(&self.order_digest());
+        uid.0[0..32].copy_from_slice(&self.digest());
         uid.0[32..52].copy_from_slice(owner.as_fixed_bytes());
         uid.0[52..56].copy_from_slice(&self.valid_to.to_be_bytes());
         uid
@@ -202,19 +180,33 @@ impl OrderCreation {
 // Intended to be used by tests that need signed orders.
 impl OrderCreation {}
 
-// See https://github.com/gnosis/gp-v2-contracts/blob/main/src/contracts/libraries/GPv2Encoding.sol
 impl OrderCreation {
+    // See https://github.com/gnosis/gp-v2-contracts/blob/main/src/contracts/libraries/GPv2Encoding.sol
     pub const ORDER_TYPE_HASH: [u8; 32] =
         hex!("b2b38b9dcbdeb41f7ad71dea9aed79fb47f7bbc3436576fe994b43d5b16ecdec");
-
     // keccak256("sell")
     const ORDER_KIND_SELL: [u8; 32] =
         hex!("f3b277728b3fee749481eb3e0b3b48980dbbab78658fc419025cb16eee346775");
     // keccak256("buy")
     const ORDER_KIND_BUY: [u8; 32] =
         hex!("6ed88e868af0a1983e3886d5f3e95a2fafbd6c3450bc229e27342283dc429ccc");
+}
 
-    fn order_digest(&self) -> [u8; 32] {
+impl Default for OrderCancellation {
+    // Custom implementation to make sure the default order is valid
+    fn default() -> Self {
+        let mut result = Self {
+            order_uid: OrderUid::default(),
+            signature: Default::default(),
+        };
+        result.signature =
+            result.sign_self_with(&DomainSeparator::default(), &SecretKeyRef::new(&ONE_KEY));
+        result
+    }
+}
+
+impl EIP712Signing for OrderCreation {
+    fn digest(&self) -> [u8; 32] {
         let mut hash_data = [0u8; 320];
         hash_data[0..32].copy_from_slice(&Self::ORDER_TYPE_HASH);
         // Some slots are not assigned (stay 0) because all values are extended to 256 bits.
@@ -233,28 +225,35 @@ impl OrderCreation {
         signing::keccak256(&hash_data)
     }
 
-    fn signing_digest_typed_data(&self, domain_separator: &DomainSeparator) -> [u8; 32] {
-        let mut hash_data = [0u8; 66];
-        hash_data[0..2].copy_from_slice(&[0x19, 0x01]);
-        hash_data[2..34].copy_from_slice(&domain_separator.0);
-        hash_data[34..66].copy_from_slice(&self.order_digest());
+    fn signature(&self) -> Signature {
+        self.signature
+    }
+}
+
+/// An order cancellation as provided to the orderbook by the frontend.
+#[serde_as]
+#[derive(Eq, PartialEq, Clone, Copy, Debug, Deserialize, Serialize, Hash)]
+pub struct OrderCancellation {
+    pub order_uid: OrderUid,
+    pub signature: Signature,
+}
+
+impl OrderCancellation {
+    // keccak256("OrderCancellation(bytes orderUid)")
+    const ORDER_CANCELLATION_TYPE_HASH: [u8; 32] =
+        hex!("7b41b3a6e2b3cae020a3b2f9cdc997e0d420643957e7fea81747e984e47c88ec");
+}
+
+impl EIP712Signing for OrderCancellation {
+    fn digest(&self) -> [u8; 32] {
+        let mut hash_data = [0u8; 64];
+        hash_data[0..32].copy_from_slice(&Self::ORDER_CANCELLATION_TYPE_HASH);
+        hash_data[32..64].copy_from_slice(&signing::keccak256(&self.order_uid.0));
         signing::keccak256(&hash_data)
     }
 
-    fn signing_digest_message(&self, domain_separator: &DomainSeparator) -> [u8; 32] {
-        let mut hash_data = [0u8; 92];
-        hash_data[0..28].copy_from_slice(b"\x19Ethereum Signed Message:\n64");
-        hash_data[28..60].copy_from_slice(&domain_separator.0);
-        hash_data[60..92].copy_from_slice(&self.order_digest());
-        signing::keccak256(&hash_data)
-    }
-
-    fn signing_digest(&self, domain_separator: &DomainSeparator) -> [u8; 32] {
-        if self.signature.v & 0x80 == 0 {
-            self.signing_digest_typed_data(domain_separator)
-        } else {
-            self.signing_digest_message(domain_separator)
-        }
+    fn signature(&self) -> Signature {
+        self.signature
     }
 }
 
@@ -264,6 +263,7 @@ impl OrderCreation {
 #[serde(rename_all = "camelCase")]
 pub struct OrderMetaData {
     pub creation_date: DateTime<Utc>,
+    pub cancellation_date: Option<DateTime<Utc>>,
     #[serde(with = "h160_hexadecimal")]
     pub owner: H160,
     pub uid: OrderUid,
@@ -284,6 +284,7 @@ impl Default for OrderMetaData {
     fn default() -> Self {
         Self {
             creation_date: DateTime::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc),
+            cancellation_date: None,
             owner: Default::default(),
             uid: Default::default(),
             available_balance: Default::default(),
@@ -391,13 +392,14 @@ mod tests {
     use chrono::NaiveDateTime;
     use hex_literal::hex;
     use primitive_types::H256;
-    use serde_json::json;
+    use serde_json::{json, value::Value::Null};
 
     #[test]
     fn deserialization_and_back() {
         let value = json!(
         {
             "creationDate": "1970-01-01T00:00:03Z",
+            "cancellationDate": Null,
             "owner": "0x0000000000000000000000000000000000000001",
             "uid": "0x1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
             "availableBalance": "100",
@@ -420,6 +422,7 @@ mod tests {
         let expected = Order {
             order_meta_data: OrderMetaData {
                 creation_date: DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(3, 0), Utc),
+                cancellation_date: None,
                 owner: H160::from_low_u64_be(1),
                 uid: OrderUid([17u8; 56]),
                 available_balance: Some(100.into()),
@@ -462,7 +465,7 @@ mod tests {
     // from the test `should recover signing address for all supported schemes` in
     // https://github.com/gnosis/gp-v2-contracts/blob/main/test/GPv2Encoding.test.ts .
     #[test]
-    fn signature_typed_data() {
+    fn order_creation_signature_typed_data() {
         let domain_separator = DomainSeparator(hex!(
             "f8a1143d44c67470a791201b239ff6b0ecc8910aa9682bebd08145f5fd84722b"
         ));
@@ -489,7 +492,7 @@ mod tests {
     }
 
     #[test]
-    fn signature_message() {
+    fn order_creation_signature_message() {
         let domain_separator = DomainSeparator(hex!(
             "f8a1143d44c67470a791201b239ff6b0ecc8910aa9682bebd08145f5fd84722b"
         ));
@@ -514,15 +517,43 @@ mod tests {
         assert_eq!(owner, expected_owner.into());
     }
 
+    // from the test `should recover signing address for all supported signing schemes` in
+    // https://github.com/gnosis/gp-v2-contracts/blob/main/test/sign.test.ts .
     #[test]
-    fn sign_self() {
-        let mut order = OrderCreation::default();
-        let key = SecretKeyRef::from(&ONE_KEY);
-        order.sign_self_with(&DomainSeparator::default(), &key);
-        assert_eq!(
-            order.validate_signature(&DomainSeparator::default()),
-            Some(key.address())
-        );
+    fn order_cancellation_signature_typed_data() {
+        let domain_separator = DomainSeparator(hex!(
+            "f8a1143d44c67470a791201b239ff6b0ecc8910aa9682bebd08145f5fd84722b"
+        ));
+        let cancellation = OrderCancellation {
+            order_uid: OrderUid([42u8; 56]),
+            signature: Signature {
+                v: 0x1b,
+                r: hex!("3691438f224f2ce0bd15bf803479a0c07cfadc11ec69de0ee95f0edf82c9285f").into(),
+                s: hex!("177006a7caeafe8214bd8f51ddb8b0c5a94158dc94c605d9af6c412f80575bf3").into(),
+            },
+        };
+
+        let expected_owner = hex!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
+        let owner = cancellation.validate_signature(&domain_separator).unwrap();
+        assert_eq!(owner, expected_owner.into());
+    }
+
+    #[test]
+    fn order_cancellation_signature_message() {
+        let domain_separator = DomainSeparator(hex!(
+            "f8a1143d44c67470a791201b239ff6b0ecc8910aa9682bebd08145f5fd84722b"
+        ));
+        let cancellation = OrderCancellation {
+            order_uid: OrderUid([42u8; 56]),
+            signature: Signature {
+                v: 0x1b | 0x80,
+                r: hex!("25d9649894322a4d1740f1ff866719ab3e02f7a67fba10887531b13d80adc057").into(),
+                s: hex!("42f29400a7470bbae937200e1c02f31a5ff2e9db5b386c4a78abe8fec7a2fa1c").into(),
+            },
+        };
+        let expected_owner = hex!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
+        let owner = cancellation.validate_signature(&domain_separator).unwrap();
+        assert_eq!(owner, expected_owner.into());
     }
 
     #[test]

@@ -78,6 +78,24 @@ impl Database {
             .map(|_| ())
     }
 
+    pub async fn cancel_order(&self, order_uid: &OrderUid) -> Result<()> {
+        // We do not overwrite previously cancelled orders,
+        // but this query does allow the user to soft cancel
+        // an order that has already been invalidated on-chain.
+        const QUERY: &str = "\
+            UPDATE orders
+            SET cancellation_timestamp = $1 \
+            WHERE uid = $2\
+            AND cancellation_timestamp IS NULL;";
+        sqlx::query(QUERY)
+            .bind(Utc::now())
+            .bind(order_uid.0.as_ref())
+            .execute(&self.pool)
+            .await
+            .context("cancel_order failed")
+            .map(|_| ())
+    }
+
     pub fn orders<'a>(&'a self, filter: &'a OrderFilter) -> impl Stream<Item = Result<Order>> + 'a {
         // The `or`s in the `where` clause are there so that each filter is ignored when not set.
         // We use a subquery instead of a `having` clause in the inner query because we would not be
@@ -85,13 +103,13 @@ impl Database {
         const QUERY: &str = "\
         SELECT * FROM ( \
             SELECT \
-                o.uid, o.owner, o.creation_timestamp, o.sell_token, o.buy_token, o.sell_amount, \
+                o.uid, o.owner, o.creation_timestamp, o.cancellation_timestamp, o.sell_token, o.buy_token, o.sell_amount, \
                 o.buy_amount, o.valid_to, o.app_data, o.fee_amount, o.kind, o.partially_fillable, \
                 o.signature, \
                 COALESCE(SUM(t.buy_amount), 0) AS sum_buy, \
                 COALESCE(SUM(t.sell_amount), 0) AS sum_sell, \
                 COALESCE(SUM(t.fee_amount), 0) AS sum_fee, \
-                COUNT(invalidations.*) > 0 AS invalidated \
+                (COUNT(invalidations.*) > 0 OR o.cancellation_timestamp IS NOT NULL) AS invalidated \
             FROM \
                 orders o \
                 LEFT OUTER JOIN trades t ON o.uid = t.order_uid \
@@ -130,6 +148,7 @@ struct OrdersQueryRow {
     uid: Vec<u8>,
     owner: Vec<u8>,
     creation_timestamp: DateTime<Utc>,
+    cancellation_timestamp: Option<DateTime<Utc>>,
     sell_token: Vec<u8>,
     buy_token: Vec<u8>,
     sell_amount: BigDecimal,
@@ -156,6 +175,7 @@ impl OrdersQueryRow {
 
         let order_meta_data = OrderMetaData {
             creation_date: self.creation_timestamp,
+            cancellation_date: self.cancellation_timestamp,
             owner: h160_from_vec(self.owner)?,
             uid: OrderUid(
                 self.uid
@@ -254,6 +274,56 @@ mod tests {
                 .unwrap(),
             vec![order]
         );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn postgres_cancel_order() {
+        let db = Database::new("postgresql://").unwrap();
+        db.clear().await.unwrap();
+        let filter = OrderFilter::default();
+        assert!(db.orders(&filter).boxed().next().await.is_none());
+
+        let order = Order::default();
+        db.insert_order(&order).await.unwrap();
+        let db_orders = db
+            .orders(&filter)
+            .try_collect::<Vec<Order>>()
+            .await
+            .unwrap();
+        assert_eq!(db_orders[0].order_meta_data.invalidated, false);
+        db.cancel_order(&order.order_meta_data.uid).await.unwrap();
+        let db_orders = db
+            .orders(&filter)
+            .try_collect::<Vec<Order>>()
+            .await
+            .unwrap();
+        assert_eq!(db_orders[0].order_meta_data.invalidated, true);
+
+        assert!(db_orders[0].order_meta_data.cancellation_date.is_some());
+        let first_cancellation_date = db_orders[0].order_meta_data.cancellation_date.unwrap();
+        // Cancel again and see that first cancellation date wasn't overwritten.
+        db.cancel_order(&order.order_meta_data.uid).await.unwrap();
+        let db_orders = db
+            .orders(&filter)
+            .try_collect::<Vec<Order>>()
+            .await
+            .unwrap();
+        assert_eq!(
+            first_cancellation_date,
+            db_orders[0].order_meta_data.cancellation_date.unwrap()
+        );
+
+        let filter = OrderFilter {
+            exclude_invalidated: true,
+            ..Default::default()
+        };
+        let db_orders = db
+            .orders(&filter)
+            .try_collect::<Vec<Order>>()
+            .await
+            .unwrap();
+        assert!(db_orders.is_empty());
     }
 
     #[tokio::test]
