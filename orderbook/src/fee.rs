@@ -62,10 +62,9 @@ impl MinFeeCalculator {
     // Returns an error if there is some estimation error and Ok(None) if no information about the given
     // token exists
     pub async fn min_fee(&self, token: H160) -> Result<Option<Measurement>> {
-        let official_valid_until =
-            (self.now)() + Duration::seconds(STANDARD_VALIDITY_FOR_FEE_IN_SEC);
-        let internal_valid_until =
-            (self.now)() + Duration::seconds(PERSISTED_VALIDITY_FOR_FEE_IN_SEC);
+        let now = (self.now)();
+        let official_valid_until = now + Duration::seconds(STANDARD_VALIDITY_FOR_FEE_IN_SEC);
+        let internal_valid_until = now + Duration::seconds(PERSISTED_VALIDITY_FOR_FEE_IN_SEC);
 
         if let Ok(Some(past_fee)) = self
             .measurements
