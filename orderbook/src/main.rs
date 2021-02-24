@@ -106,7 +106,7 @@ async fn main() {
 
     let orderbook = Arc::new(Orderbook::new(
         domain_separator,
-        database,
+        database.clone(),
         event_updater,
         Box::new(balance_fetcher),
         fee_calcuator.clone(),
