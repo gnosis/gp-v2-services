@@ -38,7 +38,7 @@ Some unit tests and the e2e tests require a local postgres setup. For some ways 
 
 Run postgres unit tests: `cargo test --jobs 1 postgres -- --ignored --test-threads 1`
 
-Run e2e tests: `xcargo test -p e2e -- --test-threads 1`.
+Run e2e tests: `cargo test -p e2e -- --test-threads 1`.
 
 ### Postgres
 
