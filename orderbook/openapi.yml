@@ -384,7 +384,7 @@ components:
           enum:
             [
                 InvalidSignature,
-                MissingSignature,
+                WrongOwner,
                 OrderNotFound,
             ]
         description:

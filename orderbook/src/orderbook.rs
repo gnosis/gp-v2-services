@@ -30,7 +30,7 @@ pub enum AddOrderResult {
 pub enum OrderCancellationResult {
     Cancelled,
     InvalidSignature,
-    MissingSignature,
+    WrongOwner,
     OrderNotFound,
 }
 
@@ -104,14 +104,14 @@ impl Orderbook {
         {
             Some(signer) => {
                 if signer == order.order_meta_data.owner {
+                    // order is already known to exist in DB at this point!
                     self.database.cancel_order(&order).await?;
-                    // Can't fail to remove here, since we know it exists already
                     Ok(OrderCancellationResult::Cancelled)
                 } else {
-                    Ok(OrderCancellationResult::InvalidSignature)
+                    Ok(OrderCancellationResult::WrongOwner)
                 }
             }
-            None => Ok(OrderCancellationResult::MissingSignature),
+            None => Ok(OrderCancellationResult::InvalidSignature),
         }
     }
 
