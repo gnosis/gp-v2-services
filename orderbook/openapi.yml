@@ -118,7 +118,7 @@ paths:
         404:
           description: Order was not found
     delete:
-      summary: Deletes order from order service
+      summary: Cancels order by marking it invalid with a timestamp.
       description: |
         The successful deletion might not prevent solvers from settling the order
         Authentication must be provided by signing the following message:
@@ -129,7 +129,7 @@ paths:
             $ref: "#/components/schemas/UID"
           required: true
       requestBody:
-        description: "EIP712 signature of struct OrderCancellation { orderUid: bytes } from the order's owner"
+        description: "Signed OrderCancellation"
         required: true
         content:
           application/json:
