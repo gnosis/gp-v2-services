@@ -1,4 +1,4 @@
-use crate::database::{Database, Event as DbEvent, EventIndex as DbEventIndex, Trade};
+use crate::database::{Database, Event as DbEvent, EventIndex as DbEventIndex, Trade as DbTrade};
 use anyhow::{anyhow, Context, Error, Result};
 use contracts::{
     g_pv_2_settlement::{event_data::Trade as ContractTrade, Event as ContractEvent},
@@ -156,7 +156,7 @@ fn convert_trade(trade: &ContractTrade, meta: &EventMetadata) -> Result<(DbEvent
         block_number: meta.block_number,
         log_index: meta.log_index as u64,
     };
-    let event = Trade {
+    let event = DbTrade {
         order_uid,
         sell_amount_including_fee: trade.sell_amount,
         buy_amount: trade.buy_amount,

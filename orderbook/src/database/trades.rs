@@ -100,138 +100,62 @@ mod tests {
 
     use super::*;
     use crate::database::{Event, EventIndex, Trade as DbTrade};
-    use ethcontract::U256;
     use model::order::{Order, OrderCreation, OrderMetaData};
     use model::trade::Trade;
-    use num_bigint::BigUint;
     use std::collections::HashSet;
 
-    async fn populate_dummy_trade_db(db: Database) -> (Vec<H160>, Vec<OrderUid>, [Trade; 3]) {
-        // Common values
-        let owners: Vec<H160> = [0, 1, 2]
-            .iter()
-            .map(|t| H160::from_low_u64_be(*t as u64))
+    async fn generate_owners_and_order_ids(
+        num_owners: usize,
+        num_orders: usize,
+    ) -> (Vec<H160>, Vec<OrderUid>) {
+        let owners: Vec<H160> = (0..num_owners)
+            .map(|t| H160::from_low_u64_be(t as u64))
             .collect();
-        let tokens: Vec<H160> = [0, 1, 2, 3]
-            .iter()
-            .map(|t| H160::from_low_u64_be(*t as u64))
-            .collect();
-        let order_ids: Vec<OrderUid> = [0, 1, 2, 3].iter().map(|i| OrderUid([*i; 56])).collect();
+        let order_ids: Vec<OrderUid> = (0..num_orders).map(|i| OrderUid([i as u8; 56])).collect();
+        return (owners, order_ids);
+    }
 
-        // Create some orders.
-        let orders = vec![
-            Order {
-                order_meta_data: OrderMetaData {
-                    owner: owners[0],
-                    uid: order_ids[0],
-                    ..Default::default()
-                },
-                order_creation: OrderCreation {
-                    sell_token: tokens[1],
-                    buy_token: tokens[2],
-                    valid_to: 10,
-                    ..Default::default()
-                },
-            },
-            Order {
-                order_meta_data: OrderMetaData {
-                    owner: owners[0],
-                    uid: order_ids[1],
-                    ..Default::default()
-                },
-                order_creation: OrderCreation {
-                    sell_token: tokens[2],
-                    buy_token: tokens[3],
-                    valid_to: 11,
-                    ..Default::default()
-                },
-            },
-            Order {
-                order_meta_data: OrderMetaData {
-                    owner: owners[2],
-                    uid: order_ids[2],
-                    ..Default::default()
-                },
-                order_creation: OrderCreation {
-                    sell_token: tokens[2],
-                    buy_token: tokens[3],
-                    valid_to: 12,
-                    ..Default::default()
-                },
-            },
-        ];
-        for order in orders.iter() {
-            db.insert_order(order).await.unwrap();
-        }
-
-        let trade_without_order = Trade {
-            block_number: 2,
-            log_index: 0,
-            order_uid: order_ids[3],
-            sell_amount: BigUint::from(9u32),
-            buy_amount: BigUint::from(9u32),
-            sell_amount_before_fees: BigUint::from(1u32),
-            owner: owners[0],
-            buy_token: tokens[3],
-            sell_token: tokens[2],
+    async fn add_trade(db: &Database, owner: H160, order_uid: OrderUid, log_index: u64) -> Trade {
+        let trade = Trade {
+            block_number: 0,
+            log_index,
+            order_uid,
+            owner,
+            ..Default::default()
         };
-
-        let trades = [
-            Trade {
-                block_number: 2,
-                log_index: 0,
-                order_uid: order_ids[1],
-                sell_amount: BigUint::from(3u32),
-                buy_amount: BigUint::from(2u32),
-                sell_amount_before_fees: BigUint::from(1u32),
-                owner: owners[0],
-                buy_token: tokens[3],
-                sell_token: tokens[2],
+        db.insert_events(vec![(
+            EventIndex {
+                block_number: 0,
+                log_index,
             },
-            Trade {
-                block_number: 2,
-                log_index: 1,
-                order_uid: order_ids[2],
-                sell_amount: BigUint::from(4u32),
-                buy_amount: BigUint::from(3u32),
-                sell_amount_before_fees: BigUint::from(2u32),
-                owner: owners[2],
-                buy_token: tokens[3],
-                sell_token: tokens[2],
-            },
-            trade_without_order,
-        ];
-
-        db.insert_events(vec![
-            (
-                EventIndex {
-                    block_number: 2,
-                    log_index: 0,
-                },
-                Event::Trade(DbTrade {
-                    order_uid: order_ids[1],
-                    sell_amount_including_fee: U256::from(3),
-                    buy_amount: U256::from(2),
-                    fee_amount: U256::from(2),
-                }),
-            ),
-            (
-                EventIndex {
-                    block_number: 2,
-                    log_index: 1,
-                },
-                Event::Trade(DbTrade {
-                    order_uid: order_ids[2],
-                    sell_amount_including_fee: U256::from(4),
-                    buy_amount: U256::from(3),
-                    fee_amount: U256::from(2),
-                }),
-            ),
-        ])
+            Event::Trade(DbTrade {
+                order_uid,
+                ..Default::default()
+            }),
+        )])
         .await
         .unwrap();
+        trade
+    }
 
-        return (owners, order_ids, trades);
+    async fn add_order_and_trade(
+        db: &Database,
+        owner: H160,
+        order_uid: OrderUid,
+        log_index: u64,
+    ) -> Trade {
+        let order = Order {
+            order_meta_data: OrderMetaData {
+                owner,
+                uid: order_uid,
+                ..Default::default()
+            },
+            order_creation: OrderCreation {
+                ..Default::default()
+            },
+        };
+        db.insert_order(&order).await.unwrap();
+        add_trade(db, owner, order_uid, log_index).await
     }
 
     async fn assert_trades(db: &Database, filter: &TradeFilter, expected: &[Trade]) {
@@ -249,8 +173,14 @@ mod tests {
     async fn postgres_trades_without_filter() {
         let db = Database::new("postgresql://").unwrap();
         db.clear().await.unwrap();
-        let (_, _, trades) = populate_dummy_trade_db(db.clone()).await;
-        assert_trades(&db, &TradeFilter::default(), &trades[0..2]).await;
+        let (owners, order_ids) = generate_owners_and_order_ids(2, 2).await;
+        assert_trades(&db, &TradeFilter::default(), &[]).await;
+
+        let trade_a = add_order_and_trade(&db, owners[0], order_ids[0], 0).await;
+        assert_trades(&db, &TradeFilter::default(), &[trade_a.clone()]).await;
+
+        let trade_b = add_order_and_trade(&db, owners[0], order_ids[1], 1).await;
+        assert_trades(&db, &TradeFilter::default(), &[trade_a, trade_b]).await;
     }
 
     #[tokio::test]
@@ -258,16 +188,10 @@ mod tests {
     async fn postgres_trades_with_owner_filter() {
         let db = Database::new("postgresql://").unwrap();
         db.clear().await.unwrap();
-        let (owners, _, trades) = populate_dummy_trade_db(db.clone()).await;
-        assert_trades(
-            &db,
-            &TradeFilter {
-                owner: Some(owners[1]),
-                ..Default::default()
-            },
-            &[],
-        )
-        .await;
+        let (owners, order_ids) = generate_owners_and_order_ids(3, 2).await;
+
+        let trade_0 = add_order_and_trade(&db, owners[0], order_ids[0], 0).await;
+        let trade_1 = add_order_and_trade(&db, owners[1], order_ids[1], 1).await;
 
         assert_trades(
             &db,
@@ -275,7 +199,17 @@ mod tests {
                 owner: Some(owners[0]),
                 ..Default::default()
             },
-            &trades[0..1],
+            &[trade_0],
+        )
+        .await;
+
+        assert_trades(
+            &db,
+            &TradeFilter {
+                owner: Some(owners[1]),
+                ..Default::default()
+            },
+            &[trade_1],
         )
         .await;
 
@@ -285,7 +219,7 @@ mod tests {
                 owner: Some(owners[2]),
                 ..Default::default()
             },
-            &trades[1..2],
+            &[],
         )
         .await;
     }
@@ -296,7 +230,51 @@ mod tests {
         let db = Database::new("postgresql://").unwrap();
         db.clear().await.unwrap();
 
-        let (_, order_ids, trades) = populate_dummy_trade_db(db.clone()).await;
+        let (owners, order_ids) = generate_owners_and_order_ids(2, 3).await;
+
+        let trade_0 = add_order_and_trade(&db, owners[0], order_ids[0], 0).await;
+        let trade_1 = add_order_and_trade(&db, owners[1], order_ids[1], 1).await;
+
+        assert_trades(
+            &db,
+            &TradeFilter {
+                order_uid: Some(order_ids[0]),
+                ..Default::default()
+            },
+            &[trade_0],
+        )
+        .await;
+
+        assert_trades(
+            &db,
+            &TradeFilter {
+                order_uid: Some(order_ids[1]),
+                ..Default::default()
+            },
+            &[trade_1],
+        )
+        .await;
+
+        assert_trades(
+            &db,
+            &TradeFilter {
+                order_uid: Some(order_ids[2]),
+                ..Default::default()
+            },
+            &[],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn postgres_trade_without_matching_order() {
+        let db = Database::new("postgresql://").unwrap();
+        db.clear().await.unwrap();
+
+        let (owners, order_ids) = generate_owners_and_order_ids(1, 1).await;
+        add_trade(&db, owners[0], order_ids[0], 0).await;
+        // Trade exists in DB but no matching order
         assert_trades(
             &db,
             &TradeFilter {
@@ -310,37 +288,7 @@ mod tests {
         assert_trades(
             &db,
             &TradeFilter {
-                order_uid: Some(order_ids[1]),
-                ..Default::default()
-            },
-            &trades[0..1],
-        )
-        .await;
-
-        assert_trades(
-            &db,
-            &TradeFilter {
-                order_uid: Some(order_ids[2]),
-                ..Default::default()
-            },
-            &trades[1..2],
-        )
-        .await;
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn postgres_trade_without_matching_order() {
-        let db = Database::new("postgresql://").unwrap();
-        db.clear().await.unwrap();
-
-        let (_owners, order_ids, _trades) = populate_dummy_trade_db(db.clone()).await;
-
-        // Trade exists in DB but no matching order
-        assert_trades(
-            &db,
-            &TradeFilter {
-                order_uid: Some(order_ids[3]),
+                owner: Some(owners[0]),
                 ..Default::default()
             },
             &[],
