@@ -21,6 +21,10 @@ pub struct Signature {
     pub v: u8,
 }
 
+pub trait EIP712Signing {
+    fn digest(&self) -> [u8; 32];
+}
+
 impl Signature {
     /// r + s +v
     pub fn to_bytes(&self) -> [u8; 65] {

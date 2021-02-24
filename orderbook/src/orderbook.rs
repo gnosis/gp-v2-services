@@ -8,7 +8,7 @@ use futures::{join, TryStreamExt};
 use model::order::OrderCancellation;
 use model::{
     order::{Order, OrderCreation, OrderUid},
-    DomainSeparator,
+    DomainSeparator, EIP712Signing,
 };
 use shared::time::now_in_epoch_seconds;
 use std::sync::Arc;
@@ -83,7 +83,7 @@ impl Orderbook {
 
     pub async fn cancel_order(
         &self,
-        cancellation: &OrderCancellation,
+        cancellation: OrderCancellation,
     ) -> Result<OrderCancellationResult> {
         // TODO - Would like to use get_order_by_uid, but not implemented on self
         let orders = self

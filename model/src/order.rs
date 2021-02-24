@@ -3,7 +3,7 @@
 use crate::{
     h160_hexadecimal,
     u256_decimal::{self, DecimalU256},
-    DomainSeparator, Signature, TokenPair,
+    DomainSeparator, EIP712Signing, Signature, TokenPair,
 };
 use chrono::{offset::Utc, DateTime, NaiveDateTime};
 use hex_literal::hex;
@@ -202,8 +202,10 @@ impl OrderCreation {
     // keccak256("buy")
     const ORDER_KIND_BUY: [u8; 32] =
         hex!("6ed88e868af0a1983e3886d5f3e95a2fafbd6c3450bc229e27342283dc429ccc");
+}
 
-    pub fn digest(&self) -> [u8; 32] {
+impl EIP712Signing for OrderCreation {
+    fn digest(&self) -> [u8; 32] {
         let mut hash_data = [0u8; 320];
         hash_data[0..32].copy_from_slice(&Self::ORDER_TYPE_HASH);
         // Some slots are not assigned (stay 0) because all values are extended to 256 bits.
@@ -236,8 +238,10 @@ impl OrderCancellation {
     // keccak256("OrderCancellation(bytes orderUid)")
     const ORDER_CANCELLATION_TYPE_HASH: [u8; 32] =
         hex!("7b41b3a6e2b3cae020a3b2f9cdc997e0d420643957e7fea81747e984e47c88ec");
+}
 
-    pub fn digest(&self) -> [u8; 32] {
+impl EIP712Signing for OrderCancellation {
+    fn digest(&self) -> [u8; 32] {
         let mut hash_data = [0u8; 64];
         hash_data[0..32].copy_from_slice(&Self::ORDER_CANCELLATION_TYPE_HASH);
         hash_data[44..64].copy_from_slice(&signing::keccak256(&self.order_uid.0));
