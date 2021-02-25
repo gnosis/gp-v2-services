@@ -1,6 +1,6 @@
 use super::Database;
-use crate::fee::MinFeeStoring;
 use crate::conversions::*;
+use crate::fee::MinFeeStoring;
 
 use anyhow::{anyhow, Context, Result};
 use bigdecimal::BigDecimal;
