@@ -1,12 +1,13 @@
 pub mod account_balances;
 pub mod api;
+pub mod conversions;
 pub mod database;
 pub mod event_updater;
 pub mod fee;
-pub mod integer_conversions;
 pub mod orderbook;
 pub mod price_estimate;
 
+use crate::database::Database;
 use crate::orderbook::Orderbook;
 use anyhow::{anyhow, Context as _, Result};
 use contracts::GPv2Settlement;
@@ -17,6 +18,7 @@ use tokio::{task, task::JoinHandle};
 use warp::Filter;
 
 pub fn serve_task(
+    database: Database,
     orderbook: Arc<Orderbook>,
     fee_calculator: Arc<MinFeeCalculator>,
     address: SocketAddr,
@@ -25,7 +27,7 @@ pub fn serve_task(
         .allow_any_origin()
         .allow_methods(vec!["GET", "POST", "DELETE", "OPTIONS", "PUT", "PATCH"])
         .allow_headers(vec!["Origin", "Content-Type", "X-Auth-Token", "X-AppId"]);
-    let filter = api::handle_all_routes(orderbook, fee_calculator).with(cors);
+    let filter = api::handle_all_routes(database, orderbook, fee_calculator).with(cors);
     tracing::info!(%address, "serving order book");
     task::spawn(warp::serve(filter).bind(address))
 }
