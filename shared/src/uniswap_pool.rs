@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use contracts::{UniswapV2Factory, UniswapV2Pair};
 use ethcontract::{batch::CallBatch, Http, Web3, H160, U256};
-use num::rational::Rational;
+use num::rational::Ratio;
 use web3::signing::keccak256;
 
 use hex_literal::hex;
@@ -24,7 +24,7 @@ pub trait PoolFetching: Send + Sync {
 pub struct Pool {
     pub tokens: TokenPair,
     pub reserves: (u128, u128),
-    pub fee: Rational,
+    pub fee: Ratio<u32>,
 }
 
 impl Pool {
@@ -32,12 +32,13 @@ impl Pool {
         Self {
             tokens,
             reserves,
-            fee: Rational::new(3, 1000),
+            fee: Ratio::new(3, 1000),
         }
     }
 
     /// Given an input amount and token, returns the maximum output amount and address of the other asset.
-    pub fn get_amount_out(&self, token_in: H160, amount_in: U256) -> (U256, H160) {
+    /// Returns None if operation not possible due to arithmetic issues (e.g. over or underflow)
+    pub fn get_amount_out(&self, token_in: H160, amount_in: U256) -> Option<(U256, H160)> {
         // https://github.com/Uniswap/uniswap-v2-periphery/blob/master/contracts/libraries/UniswapV2Library.sol#L43
         let (reserve_in, reserve_out, token_out) = if token_in == self.tokens.get().0 {
             (
@@ -54,13 +55,14 @@ impl Pool {
             )
         };
 
-        let amount_in_with_fee = amount_in * (self.fee.denom() - self.fee.numer());
-        let numerator = amount_in_with_fee * reserve_out;
-        let denominator = reserve_in * self.fee.denom() + amount_in_with_fee;
-        (numerator / denominator, token_out)
+        Some((
+            self.amount_out(amount_in, reserve_in, reserve_out)?,
+            token_out,
+        ))
     }
 
-    /// Given an output amount and token, returns a required input amount and address of the other asset. Returns None if out amount is larger than reserve.
+    /// Given an output amount and token, returns a required input amount and address of the other asset.
+    /// Returns None if operation not possible due to arithmetic issues (e.g. over or underflow, reserve too small)
     pub fn get_amount_in(&self, token_out: H160, amount_out: U256) -> Option<(U256, H160)> {
         // https://github.com/Uniswap/uniswap-v2-periphery/blob/master/contracts/libraries/UniswapV2Library.sol#L53
         let (reserve_out, reserve_in, token_in) = if token_out == self.tokens.get().0 {
@@ -77,14 +79,38 @@ impl Pool {
                 self.tokens.get().0,
             )
         };
+        Some((
+            self.amount_in(amount_out, reserve_in, reserve_out)?,
+            token_in,
+        ))
+    }
 
-        if amount_out >= reserve_out {
+    fn amount_out(&self, amount_in: U256, reserve_in: U256, reserve_out: U256) -> Option<U256> {
+        if amount_in.is_zero() || reserve_in.is_zero() || reserve_out.is_zero() {
             return None;
         }
 
-        let numerator = reserve_in * amount_out * self.fee.denom();
-        let denominator = (reserve_out - amount_out) * (self.fee.denom() - self.fee.numer());
-        Some(((numerator / denominator) + 1, token_in))
+        let amount_in_with_fee =
+            amount_in.checked_mul(U256::from(self.fee.denom().checked_sub(*self.fee.numer())?))?;
+        let numerator = amount_in_with_fee.checked_mul(reserve_out)?;
+        let denominator = reserve_in
+            .checked_mul(U256::from(*self.fee.denom()))?
+            .checked_add(amount_in_with_fee)?;
+        numerator.checked_div(denominator)
+    }
+
+    fn amount_in(&self, amount_out: U256, reserve_in: U256, reserve_out: U256) -> Option<U256> {
+        if amount_out.is_zero() || reserve_in.is_zero() || reserve_out.is_zero() {
+            return None;
+        }
+
+        let numerator = reserve_in
+            .checked_mul(amount_out)?
+            .checked_mul(U256::from(*self.fee.denom()))?;
+        let denominator = reserve_out
+            .checked_sub(amount_out)?
+            .checked_mul(U256::from(self.fee.denom().checked_sub(*self.fee.numer())?))?;
+        numerator.checked_div(denominator)?.checked_add(1.into())
     }
 }
 
@@ -186,30 +212,30 @@ mod tests {
         let pool = Pool::uniswap(TokenPair::new(sell_token, buy_token).unwrap(), (100, 100));
         assert_eq!(
             pool.get_amount_out(sell_token, 10.into()),
-            (9.into(), buy_token)
+            Some((9.into(), buy_token))
         );
         assert_eq!(
             pool.get_amount_out(sell_token, 100.into()),
-            (49.into(), buy_token)
+            Some((49.into(), buy_token))
         );
         assert_eq!(
             pool.get_amount_out(sell_token, 1000.into()),
-            (90.into(), buy_token)
+            Some((90.into(), buy_token))
         );
 
         //Uneven Pool
         let pool = Pool::uniswap(TokenPair::new(sell_token, buy_token).unwrap(), (200, 50));
         assert_eq!(
             pool.get_amount_out(sell_token, 10.into()),
-            (2.into(), buy_token)
+            Some((2.into(), buy_token))
         );
         assert_eq!(
             pool.get_amount_out(sell_token, 100.into()),
-            (16.into(), buy_token)
+            Some((16.into(), buy_token))
         );
         assert_eq!(
             pool.get_amount_out(sell_token, 1000.into()),
-            (41.into(), buy_token)
+            Some((41.into(), buy_token))
         );
 
         // Large Numbers
@@ -219,8 +245,11 @@ mod tests {
         );
         assert_eq!(
             pool.get_amount_out(sell_token, 10u128.pow(20).into()),
-            (99_699_999_999_999_999_970u128.into(), buy_token)
+            Some((99_699_999_999_999_999_970u128.into(), buy_token))
         );
+
+        // Overflow
+        assert_eq!(pool.get_amount_out(sell_token, U256::max_value()), None);
     }
 
     #[test]
