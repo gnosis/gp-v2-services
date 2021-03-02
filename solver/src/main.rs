@@ -1,8 +1,8 @@
-use contracts::WETH9;
 use ethcontract::{Account, PrivateKey};
 use reqwest::Url;
 use solver::{driver::Driver, liquidity::uniswap::UniswapLiquidity, naive_solver::NaiveSolver};
-use std::time::Duration;
+use std::iter::FromIterator as _;
+use std::{collections::HashSet, time::Duration};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -71,16 +71,14 @@ async fn main() {
     let settlement_contract = solver::get_settlement_contract(&web3, account)
         .await
         .expect("couldn't load deployed settlement");
-    let native_token = WETH9::deployed(&web3)
-        .await
-        .expect("couldn't load deployed native token");
     let orderbook_api =
         solver::orderbook::OrderBookApi::new(args.orderbook_url, args.orderbook_timeout);
+    let base_tokens = HashSet::from_iter(args.shared.base_tokens);
     let uniswap_liquidity = UniswapLiquidity::new(
         uniswap_factory.clone(),
         uniswap_router.clone(),
         settlement_contract.clone(),
-        native_token.address(),
+        base_tokens.clone(),
         web3.clone(),
         chain_id,
     );
