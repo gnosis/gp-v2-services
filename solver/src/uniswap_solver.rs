@@ -4,7 +4,9 @@ use maplit::hashmap;
 use model::TokenPair;
 use shared::{
     uniswap_pool::Pool,
-    uniswap_solver::{estimate_buy_amount, estimate_sell_amount, path_candidates},
+    uniswap_solver::{
+        estimate_buy_amount, estimate_sell_amount, path_candidates, token_path_to_pair_path,
+    },
 };
 use std::collections::{HashMap, HashSet};
 
@@ -78,28 +80,28 @@ impl UniswapSolver {
         );
         let (best, executed_sell_amount, executed_buy_amount) = match order.kind {
             model::order::OrderKind::Buy => {
-                let path = candidates.iter().min_by_key(|path| {
-                    estimate_sell_amount(order.buy_token, order.buy_amount, path, &pools)
-                })?;
+                let path = candidates
+                    .iter()
+                    .min_by_key(|path| estimate_sell_amount(order.buy_amount, path, &pools))?;
                 (
                     path,
-                    estimate_sell_amount(order.buy_token, order.buy_amount, path, &pools)?,
+                    estimate_sell_amount(order.buy_amount, path, &pools)?,
                     order.buy_amount,
                 )
             }
             model::order::OrderKind::Sell => {
-                let path = candidates.iter().max_by_key(|path| {
-                    estimate_buy_amount(order.sell_token, order.sell_amount, path, &pools)
-                })?;
+                let path = candidates
+                    .iter()
+                    .max_by_key(|path| estimate_buy_amount(order.sell_amount, path, &pools))?;
                 (
                     path,
                     order.sell_amount,
-                    estimate_buy_amount(order.sell_token, order.sell_amount, path, &pools)?,
+                    estimate_buy_amount(order.sell_amount, path, &pools)?,
                 )
             }
         };
         Some(Solution {
-            path: best
+            path: token_path_to_pair_path(best)
                 .iter()
                 .map(|pair| {
                     pools
@@ -135,7 +137,9 @@ impl Solution {
 
         let (mut sell_amount, mut sell_token) = (self.executed_sell_amount, order.sell_token);
         for pool in self.path {
-            let (buy_amount, buy_token) = pool.get_amount_out(sell_token, sell_amount);
+            let (buy_amount, buy_token) = pool
+                .get_amount_out(sell_token, sell_amount)
+                .expect("Path was found, so amount must be caluclatable");
             let amm = amm_map
                 .get(&pool.tokens)
                 .expect("Path was found so AMM must exist");
@@ -174,7 +178,7 @@ fn amm_to_pool(amm: &AmmOrder) -> Pool {
 mod tests {
     use maplit::hashset;
     use model::order::OrderKind;
-    use num::Rational;
+    use num::rational::Ratio;
 
     use crate::liquidity::{
         tests::{
@@ -225,20 +229,20 @@ mod tests {
             AmmOrder {
                 tokens: TokenPair::new(buy_token, sell_token).unwrap(),
                 reserves: (1_000_000, 1_000_000),
-                fee: Rational::new(3, 1000),
+                fee: Ratio::new(3, 1000),
                 settlement_handling: amm_handler[0].clone(),
             },
             // Path via native token has more liquidity
             AmmOrder {
                 tokens: TokenPair::new(sell_token, native_token).unwrap(),
                 reserves: (10_000_000, 10_000_000),
-                fee: Rational::new(3, 1000),
+                fee: Ratio::new(3, 1000),
                 settlement_handling: amm_handler[1].clone(),
             },
             AmmOrder {
                 tokens: TokenPair::new(native_token, buy_token).unwrap(),
                 reserves: (10_000_000, 10_000_000),
-                fee: Rational::new(3, 1000),
+                fee: Ratio::new(3, 1000),
                 settlement_handling: amm_handler[2].clone(),
             },
         ];
@@ -323,20 +327,20 @@ mod tests {
             AmmOrder {
                 tokens: TokenPair::new(buy_token, sell_token).unwrap(),
                 reserves: (1_000_000, 1_000_000),
-                fee: Rational::new(3, 1000),
+                fee: Ratio::new(3, 1000),
                 settlement_handling: amm_handler[0].clone(),
             },
             // Path via native token has more liquidity
             AmmOrder {
                 tokens: TokenPair::new(sell_token, native_token).unwrap(),
                 reserves: (10_000_000, 10_000_000),
-                fee: Rational::new(3, 1000),
+                fee: Ratio::new(3, 1000),
                 settlement_handling: amm_handler[1].clone(),
             },
             AmmOrder {
                 tokens: TokenPair::new(native_token, buy_token).unwrap(),
                 reserves: (10_000_000, 10_000_000),
-                fee: Rational::new(3, 1000),
+                fee: Ratio::new(3, 1000),
                 settlement_handling: amm_handler[2].clone(),
             },
         ];
