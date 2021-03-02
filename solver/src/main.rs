@@ -1,3 +1,4 @@
+use contracts::WETH9;
 use ethcontract::{Account, PrivateKey};
 use reqwest::Url;
 use solver::{driver::Driver, liquidity::uniswap::UniswapLiquidity, naive_solver::NaiveSolver};
@@ -71,9 +72,14 @@ async fn main() {
     let settlement_contract = solver::get_settlement_contract(&web3, account)
         .await
         .expect("couldn't load deployed settlement");
+    let native_token = WETH9::deployed(&web3)
+        .await
+        .expect("couldn't load deployed native token");
     let orderbook_api =
         solver::orderbook::OrderBookApi::new(args.orderbook_url, args.orderbook_timeout);
-    let base_tokens = HashSet::from_iter(args.shared.base_tokens);
+    let mut base_tokens = HashSet::from_iter(args.shared.base_tokens);
+    // We should always use the native token as a base token.
+    base_tokens.insert(native_token.address());
     let uniswap_liquidity = UniswapLiquidity::new(
         uniswap_factory.clone(),
         uniswap_router.clone(),
