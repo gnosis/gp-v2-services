@@ -20,7 +20,7 @@ pub fn estimate_buy_amount(
             };
 
             match pools.get(pair) {
-                Some(pool) => Some(pool.get_amount_out(previous.1, previous.0)),
+                Some(pool) => pool.get_amount_out(previous.1, previous.0),
                 None => None,
             }
         })
