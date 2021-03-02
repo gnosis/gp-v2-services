@@ -4,22 +4,25 @@ use std::collections::{HashMap, HashSet};
 
 use crate::uniswap_pool::Pool;
 
-type PathCandidate = Vec<TokenPair>;
+type PathCandidate = Vec<H160>;
 
+// Given a path and sell amount (first token of the path) estimates the buy amount (last token of the path).
+// Returns None if the path is invalid or pool information doesn't exist.
 pub fn estimate_buy_amount(
-    sell_token: H160,
     sell_amount: U256,
-    path: &[TokenPair],
+    path: &[H160],
     pools: &HashMap<TokenPair, Pool>,
 ) -> Option<U256> {
+    let sell_token = path.first()?;
     path.iter()
-        .fold(Some((sell_amount, sell_token)), |previous, pair| {
+        .skip(1)
+        .fold(Some((sell_amount, *sell_token)), |previous, current| {
             let previous = match previous {
                 Some(previous) => previous,
                 None => return None,
             };
 
-            match pools.get(pair) {
+            match pools.get(&TokenPair::new(*current, previous.1)?) {
                 Some(pool) => pool.get_amount_out(previous.1, previous.0),
                 None => None,
             }
@@ -27,21 +30,23 @@ pub fn estimate_buy_amount(
         .map(|(amount, _)| amount)
 }
 
+// Given a path and buy amount (last token of the path) estimates the sell amount (first token of the path).
+// Returns None if the path is invalid or pool information doesn't exist.
 pub fn estimate_sell_amount(
-    buy_token: H160,
     buy_amount: U256,
-    path: &[TokenPair],
+    path: &[H160],
     pools: &HashMap<TokenPair, Pool>,
 ) -> Option<U256> {
+    let buy_token = path.last()?;
     path.iter()
         .rev()
-        .fold(Some((buy_amount, buy_token)), |previous, pair| {
+        .skip(1)
+        .fold(Some((buy_amount, *buy_token)), |previous, current| {
             let previous = match previous {
                 Some(previous) => previous,
                 None => return None,
             };
-
-            match pools.get(pair) {
+            match pools.get(&TokenPair::new(*current, previous.1)?) {
                 Some(pool) => pool.get_amount_in(previous.1, previous.0),
                 None => None,
             }
@@ -49,6 +54,8 @@ pub fn estimate_sell_amount(
         .map(|(amount, _)| amount)
 }
 
+// Returns possible paths from sell_token to buy token, given a list of potential intermediate base tokens
+// and a maximum number of intermediate steps.
 pub fn path_candidates(
     sell_token: H160,
     buy_token: H160,
@@ -65,7 +72,7 @@ pub fn path_candidates(
             // For this round, add the buy token and path to the candidates
             let mut full_path = path_prefix.clone();
             full_path.push(buy_token);
-            candidates.insert(tokens_list_to_path_candidate(&full_path));
+            candidates.insert(full_path);
 
             // For the next round, amend current prefix with all base tokens that are not yet on the path
             for base_token in base_tokens {
@@ -81,7 +88,7 @@ pub fn path_candidates(
     candidates
 }
 
-fn tokens_list_to_path_candidate(token_list: &[H160]) -> PathCandidate {
+pub fn tokens_list_to_pair_list(token_list: &[H160]) -> Vec<TokenPair> {
     token_list
         .windows(2)
         .map(|window| {
@@ -113,17 +120,17 @@ mod tests {
         // 0 hops
         assert_eq!(
             path_candidates(sell_token, buy_token, base_token_set, 0),
-            hashset! {vec![TokenPair::new(sell_token, buy_token).unwrap()]}
+            hashset! {vec![sell_token, buy_token]}
         );
 
         // 1 hop with all permutations
         assert_eq!(
             path_candidates(sell_token, buy_token, base_token_set, 1),
             hashset! {
-                vec![TokenPair::new(sell_token, buy_token).unwrap()],
-                vec![TokenPair::new(sell_token, base_tokens[0]).unwrap(), TokenPair::new(base_tokens[0], buy_token).unwrap()],
-                vec![TokenPair::new(sell_token, base_tokens[1]).unwrap(), TokenPair::new(base_tokens[1], buy_token).unwrap()],
-                vec![TokenPair::new(sell_token, base_tokens[2]).unwrap(), TokenPair::new(base_tokens[2], buy_token).unwrap()],
+                vec![sell_token, buy_token],
+                vec![sell_token, base_tokens[0], buy_token],
+                vec![sell_token, base_tokens[1], buy_token],
+                vec![sell_token, base_tokens[2], buy_token],
 
             }
         );
@@ -148,18 +155,18 @@ mod tests {
         assert_eq!(
             path_candidates(base_tokens[0], buy_token, base_token_set, 1),
             hashset! {
-                vec![TokenPair::new(base_tokens[0], buy_token).unwrap()],
-                vec![TokenPair::new(base_tokens[0], base_tokens[1]).unwrap(), TokenPair::new(base_tokens[1], buy_token).unwrap()],
-                vec![TokenPair::new(base_tokens[0], base_tokens[2]).unwrap(), TokenPair::new(base_tokens[2], buy_token).unwrap()],
+                vec![base_tokens[0], buy_token],
+                vec![base_tokens[0], base_tokens[1], buy_token],
+                vec![base_tokens[0], base_tokens[2], buy_token],
 
             }
         );
         assert_eq!(
             path_candidates(sell_token, base_tokens[0], base_token_set, 1),
             hashset! {
-                vec![TokenPair::new(sell_token, base_tokens[0]).unwrap()],
-                vec![TokenPair::new(sell_token, base_tokens[1]).unwrap(), TokenPair::new(base_tokens[1], base_tokens[0]).unwrap()],
-                vec![TokenPair::new(sell_token, base_tokens[2]).unwrap(), TokenPair::new(base_tokens[2], base_tokens[0]).unwrap()],
+                vec![sell_token, base_tokens[0]],
+                vec![sell_token, base_tokens[1], base_tokens[0]],
+                vec![sell_token, base_tokens[2], base_tokens[0]],
 
             }
         );
@@ -171,22 +178,17 @@ mod tests {
         let intermediate = H160::from_low_u64_be(2);
         let buy_token = H160::from_low_u64_be(3);
 
-        let path = vec![
-            TokenPair::new(sell_token, intermediate).unwrap(),
-            TokenPair::new(intermediate, buy_token).unwrap(),
-        ];
+        let path = vec![sell_token, intermediate, buy_token];
+        let pools = [Pool::uniswap(
+            TokenPair::new(path[0], path[1]).unwrap(),
+            (100, 100),
+        )];
         let pools = hashmap! {
-            path[0] => Pool::uniswap(path[0], (100, 100)),
+            pools[0].tokens => pools[0].clone(),
         };
 
-        assert_eq!(
-            estimate_buy_amount(sell_token, 1.into(), &path, &pools),
-            None
-        );
-        assert_eq!(
-            estimate_sell_amount(sell_token, 1.into(), &path, &pools),
-            None
-        );
+        assert_eq!(estimate_buy_amount(1.into(), &path, &pools), None);
+        assert_eq!(estimate_sell_amount(1.into(), &path, &pools), None);
     }
 
     #[test]
@@ -195,22 +197,23 @@ mod tests {
         let intermediate = H160::from_low_u64_be(2);
         let buy_token = H160::from_low_u64_be(3);
 
-        let path = vec![
-            TokenPair::new(sell_token, intermediate).unwrap(),
-            TokenPair::new(intermediate, buy_token).unwrap(),
+        let path = vec![sell_token, intermediate, buy_token];
+        let pools = [
+            Pool::uniswap(TokenPair::new(path[0], path[1]).unwrap(), (100, 100)),
+            Pool::uniswap(TokenPair::new(path[1], path[2]).unwrap(), (200, 50)),
         ];
         let pools = hashmap! {
-            path[0] => Pool::uniswap(path[0],(100, 100)),
-            path[1] => Pool::uniswap(path[1],(200, 50)),
+            pools[0].tokens => pools[0].clone(),
+            pools[1].tokens => pools[1].clone(),
         };
 
         assert_eq!(
-            estimate_buy_amount(sell_token, 10.into(), &path, &pools),
+            estimate_buy_amount(10.into(), &path, &pools),
             Some(2.into())
         );
 
         assert_eq!(
-            estimate_sell_amount(buy_token, 10.into(), &path, &pools),
+            estimate_sell_amount(10.into(), &path, &pools),
             Some(105.into())
         );
     }
@@ -221,18 +224,16 @@ mod tests {
         let intermediate = H160::from_low_u64_be(2);
         let buy_token = H160::from_low_u64_be(3);
 
-        let path = vec![
-            TokenPair::new(sell_token, intermediate).unwrap(),
-            TokenPair::new(intermediate, buy_token).unwrap(),
+        let path = vec![sell_token, intermediate, buy_token];
+        let pools = [
+            Pool::uniswap(TokenPair::new(path[0], path[1]).unwrap(), (100, 100)),
+            Pool::uniswap(TokenPair::new(path[1], path[2]).unwrap(), (200, 50)),
         ];
         let pools = hashmap! {
-            path[0] => Pool::uniswap(path[0],(100, 100)),
-            path[1] => Pool::uniswap(path[1],(200, 50)),
+            pools[0].tokens => pools[0].clone(),
+            pools[1].tokens => pools[1].clone(),
         };
 
-        assert_eq!(
-            estimate_sell_amount(buy_token, 100.into(), &path, &pools),
-            None
-        );
+        assert_eq!(estimate_sell_amount(100.into(), &path, &pools), None);
     }
 }
