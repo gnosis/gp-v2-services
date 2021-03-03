@@ -50,7 +50,7 @@ struct Arguments {
     #[structopt(
         long,
         env = "SOLVER_TYPE",
-        default_value = "Naive",
+        default_value = "Naive,UniswapBaseline",
         possible_values = &SolverType::variants(),
         case_insensitive = true,
         use_delimiter = true,
