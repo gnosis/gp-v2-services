@@ -53,8 +53,9 @@ struct Arguments {
         default_value = "Naive",
         possible_values = &SolverType::variants(),
         case_insensitive = true,
+        use_delimiter = true,
     )]
-    solver_type: SolverType,
+    solvers: Vec<SolverType>,
 }
 
 #[tokio::main]
@@ -98,7 +99,7 @@ async fn main() {
         web3.clone(),
         chain_id,
     );
-    let solver = solver::solver::create(args.solver_type, base_tokens);
+    let solver = solver::solver::create(args.solvers, base_tokens);
     let gas_price_estimator = shared::gas_price_estimation::create_priority_estimator(
         &reqwest::Client::new(),
         &web3,
