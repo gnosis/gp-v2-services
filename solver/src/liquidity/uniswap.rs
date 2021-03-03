@@ -181,8 +181,7 @@ mod tests {
 
         let inner = Inner::new(allowances);
 
-        // 
-      A below, equal, above
+        // Token A below, equal, above
         let interaction = inner._settle((token_a, 50.into()), (token_b, 100.into()));
         assert_eq!(interaction.set_allowance, false);
 
