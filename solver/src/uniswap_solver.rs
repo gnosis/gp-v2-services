@@ -156,10 +156,7 @@ impl Solution {
                 order.buy_token => self.executed_sell_amount,
             },
             fee_factor: U256::zero(),
-            trades: match trade {
-                Some(trade) => vec![trade],
-                None => vec![],
-            },
+            trades: trade.into_iter().collect(),
             interactions,
             order_refunds: Vec::new(),
         }
