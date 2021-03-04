@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use contracts::GPv2Settlement;
 use futures::future::join_all;
 use gas_estimation::GasPriceEstimating;
-use std::time::Duration;
+use std::{cmp::Reverse, time::Duration};
 use tracing::info;
 
 // There is no economic viability calculation yet so we're using an arbitrary very high cap to
@@ -97,9 +97,9 @@ impl Driver {
             })
             .collect();
 
-        // Sort by key yields ascending order, but we want to start with the highest objective value, so reverse iterator in loop
-        settlements.sort_by_key(|(_, settlement)| settlement.objective_value());
-        for (solver, settlement) in settlements.into_iter().rev() {
+        // Sort by key in descending order
+        settlements.sort_by_key(|(_, settlement)| Reverse(settlement.objective_value()));
+        for (solver, settlement) in settlements {
             info!("{} computed {:?}", solver, settlement);
             if settlement.trades.is_empty() {
                 info!("Skipping empty settlement");
