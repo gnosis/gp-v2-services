@@ -90,7 +90,12 @@ impl MinFeeCalculator {
         let gas_price = self.gas_estimator.estimate().await?;
         let token_price = match self
             .price_estimator
-            .estimate_price(token, self.native_token)
+            .estimate_price(
+                token,
+                self.native_token,
+                U256::from_f64_lossy(gas_price * GAS_PER_ORDER),
+                model::order::OrderKind::Buy,
+            )
             .await
         {
             Ok(price) => price,
@@ -148,6 +153,7 @@ impl MinFeeStoring for InMemoryFeeStore {
 #[cfg(test)]
 mod tests {
     use chrono::Duration;
+    use model::order::OrderKind;
     use std::sync::Arc;
 
     use super::*;
@@ -155,7 +161,7 @@ mod tests {
     struct FakePriceEstimator(f64);
     #[async_trait::async_trait]
     impl PriceEstimating for FakePriceEstimator {
-        async fn estimate_price(&self, _: H160, _: H160) -> Result<f64> {
+        async fn estimate_price(&self, _: H160, _: H160, _: U256, _: OrderKind) -> Result<f64> {
             Ok(self.0)
         }
     }
