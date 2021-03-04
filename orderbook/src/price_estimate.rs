@@ -54,6 +54,7 @@ impl PriceEstimating for UniswapPriceEstimator {
         if sell_token == buy_token {
             return Ok(1.0);
         }
+        let amount = U256::max(amount, U256::one());
 
         match kind {
             OrderKind::Buy => {
@@ -220,6 +221,28 @@ mod tests {
             0.1003,
             1.0e-4
         );
+    }
+
+    #[tokio::test]
+    async fn estimate_price_with_zero_amount() {
+        let token_a = H160::from_low_u64_be(1);
+        let token_b = H160::from_low_u64_be(2);
+        let pool = Pool::uniswap(
+            TokenPair::new(token_a, token_b).unwrap(),
+            (10u128.pow(30), 10u128.pow(29)),
+        );
+
+        let pool_fetcher = Box::new(FakePoolFetcher(vec![pool]));
+        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!());
+
+        assert!(estimator
+            .estimate_price(token_a, token_b, 0.into(), OrderKind::Buy)
+            .await
+            .is_ok());
+        assert!(estimator
+            .estimate_price(token_a, token_b, 0.into(), OrderKind::Sell)
+            .await
+            .is_ok());
     }
 
     #[tokio::test]

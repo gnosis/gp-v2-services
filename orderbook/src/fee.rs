@@ -100,7 +100,10 @@ impl MinFeeCalculator {
             .await
         {
             Ok(price) => price,
-            Err(_) => return Ok(None),
+            Err(err) => {
+                tracing::warn!("Failed to estimate sell token price: {}", err);
+                return Ok(None);
+            }
         };
 
         Ok(Some(U256::from_f64_lossy(fee_in_eth * token_price)))
