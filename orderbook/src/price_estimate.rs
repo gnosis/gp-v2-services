@@ -106,17 +106,17 @@ impl UniswapPriceEstimator {
         .await
     }
 
-    async fn best_execution<A, C, O>(
+    async fn best_execution<AmountFn, CompareFn, O>(
         &self,
         sell_token: H160,
         buy_token: H160,
         amount: U256,
-        comparison: C,
-        resulting_amount: A,
+        comparison: CompareFn,
+        resulting_amount: AmountFn,
     ) -> Result<(Vec<H160>, U256)>
     where
-        A: Fn(U256, &[H160], &HashMap<TokenPair, Pool>) -> Option<U256>,
-        C: Fn(U256, &[H160], &HashMap<TokenPair, Pool>) -> O,
+        AmountFn: Fn(U256, &[H160], &HashMap<TokenPair, Pool>) -> Option<U256>,
+        CompareFn: Fn(U256, &[H160], &HashMap<TokenPair, Pool>) -> O,
         O: Ord,
     {
         let path_candidates = path_candidates(sell_token, buy_token, &self.base_tokens, MAX_HOPS);
