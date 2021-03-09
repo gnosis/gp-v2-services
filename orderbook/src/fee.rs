@@ -5,7 +5,7 @@ use chrono::{DateTime, Duration, Utc};
 use primitive_types::{H160, U256};
 use std::sync::Mutex;
 
-use crate::price_estimate::PriceEstimating;
+use crate::{database::Database, price_estimate::PriceEstimating};
 use gas_estimation::GasPriceEstimating;
 
 type Measurement = (U256, DateTime<Utc>);
@@ -14,25 +14,43 @@ pub struct MinFeeCalculator {
     price_estimator: Box<dyn PriceEstimating>,
     gas_estimator: Box<dyn GasPriceEstimating>,
     native_token: H160,
-    // TODO persist past measurements to shared storage
-    measurements: Mutex<HashMap<H160, Vec<Measurement>>>,
+    measurements: Box<dyn MinFeeStoring>,
     now: Box<dyn Fn() -> DateTime<Utc> + Send + Sync>,
 }
 
+#[async_trait::async_trait]
+pub trait MinFeeStoring: Send + Sync {
+    // Stores the given measurement. Returns an error if this fails
+    async fn save_fee_measurement(
+        &self,
+        token: H160,
+        expiry: DateTime<Utc>,
+        min_fee: U256,
+    ) -> Result<()>;
+
+    // Return a vector of previously stored measurements for the given token that have an expiry >= min expiry
+    async fn get_min_fee(&self, token: H160, min_expiry: DateTime<Utc>) -> Result<Option<U256>>;
+}
+
 const GAS_PER_ORDER: f64 = 100_000.0;
+
+// We use a longer validity internally for persistence to avoid writing a value to storage on every request
+// This way we can serve a previous estimate if the same token is queried again shortly after
 const STANDARD_VALIDITY_FOR_FEE_IN_SEC: i64 = 60;
+const PERSISTED_VALIDITY_FOR_FEE_IN_SEC: i64 = 120;
 
 impl MinFeeCalculator {
     pub fn new(
         price_estimator: Box<dyn PriceEstimating>,
         gas_estimator: Box<dyn GasPriceEstimating>,
         native_token: H160,
+        database: Database,
     ) -> Self {
         Self {
             price_estimator,
             gas_estimator,
             native_token,
-            measurements: Default::default(),
+            measurements: Box::new(database),
             now: Box::new(Utc::now),
         }
     }
@@ -44,6 +62,31 @@ impl MinFeeCalculator {
     // Returns an error if there is some estimation error and Ok(None) if no information about the given
     // token exists
     pub async fn min_fee(&self, token: H160) -> Result<Option<Measurement>> {
+        let now = (self.now)();
+        let official_valid_until = now + Duration::seconds(STANDARD_VALIDITY_FOR_FEE_IN_SEC);
+        let internal_valid_until = now + Duration::seconds(PERSISTED_VALIDITY_FOR_FEE_IN_SEC);
+
+        if let Ok(Some(past_fee)) = self
+            .measurements
+            .get_min_fee(token, official_valid_until)
+            .await
+        {
+            return Ok(Some((past_fee, official_valid_until)));
+        }
+
+        let min_fee = match self.compute_min_fee(token).await? {
+            Some(fee) => fee,
+            None => return Ok(None),
+        };
+
+        let _ = self
+            .measurements
+            .save_fee_measurement(token, internal_valid_until, min_fee)
+            .await;
+        Ok(Some((min_fee, official_valid_until)))
+    }
+
+    async fn compute_min_fee(&self, token: H160) -> Result<Option<U256>> {
         let gas_price = self.gas_estimator.estimate().await?;
         let token_price = match self
             .price_estimator
@@ -54,39 +97,51 @@ impl MinFeeCalculator {
             Err(_) => return Ok(None),
         };
 
-        let min_fee = U256::from_f64_lossy(gas_price * token_price * GAS_PER_ORDER);
-        let valid_until = (self.now)() + Duration::seconds(STANDARD_VALIDITY_FOR_FEE_IN_SEC);
-        let result = (min_fee, valid_until);
-
-        self.measurements
-            .lock()
-            .expect("Thread holding mutex panicked")
-            .entry(token)
-            .or_default()
-            .push(result);
-        Ok(Some(result))
+        Ok(Some(U256::from_f64_lossy(
+            gas_price * token_price * GAS_PER_ORDER,
+        )))
     }
 
     // Returns true if the fee satisfies a previous not yet expired estimate, or the fee is high enough given the current estimate.
     pub async fn is_valid_fee(&self, token: H160, fee: U256) -> bool {
-        if let Some(measurements) = self
-            .measurements
-            .lock()
-            .expect("Thread holding mutex panicked")
-            .get_mut(&token)
-        {
-            measurements.retain(|(_, expiry_date)| expiry_date >= &(self.now)());
-            if measurements
-                .iter()
-                .any(|(suggested_fee, _)| &fee >= suggested_fee)
-            {
+        if let Ok(Some(past_fee)) = self.measurements.get_min_fee(token, (self.now)()).await {
+            if fee >= past_fee {
                 return true;
             }
         }
-        if let Ok(Some((current_fee, _))) = self.min_fee(token).await {
+        if let Ok(Some(current_fee)) = self.compute_min_fee(token).await {
             return fee >= current_fee;
         }
         false
+    }
+}
+
+type FeeMeasurement = (DateTime<Utc>, U256);
+
+#[derive(Default)]
+struct InMemoryFeeStore(Mutex<HashMap<H160, Vec<FeeMeasurement>>>);
+#[async_trait::async_trait]
+impl MinFeeStoring for InMemoryFeeStore {
+    async fn save_fee_measurement(
+        &self,
+        token: H160,
+        expiry: DateTime<Utc>,
+        min_fee: U256,
+    ) -> Result<()> {
+        self.0
+            .lock()
+            .expect("Thread holding Mutex panicked")
+            .entry(token)
+            .or_default()
+            .push((expiry, min_fee));
+        Ok(())
+    }
+
+    async fn get_min_fee(&self, token: H160, min_expiry: DateTime<Utc>) -> Result<Option<U256>> {
+        let mut guard = self.0.lock().expect("Thread holding Mutex panicked");
+        let measurements = guard.entry(token).or_default();
+        measurements.retain(|(expiry, _)| expiry >= &min_expiry);
+        Ok(measurements.iter().map(|(_, fee)| *fee).min())
     }
 }
 
@@ -123,7 +178,7 @@ mod tests {
                 gas_estimator,
                 price_estimator,
                 native_token: Default::default(),
-                measurements: Default::default(),
+                measurements: Box::new(InMemoryFeeStore::default()),
                 now,
             }
         }
@@ -152,8 +207,8 @@ mod tests {
         *time.lock().unwrap() = expiry - Duration::seconds(10);
         assert!(fee_estimator.is_valid_fee(token, fee).await);
 
-        // fee is invalid after expiry
-        *time.lock().unwrap() = expiry + Duration::seconds(10);
+        // fee is invalid for some uncached token
+        let token = H160::from_low_u64_be(2);
         assert_eq!(fee_estimator.is_valid_fee(token, fee).await, false);
     }
 

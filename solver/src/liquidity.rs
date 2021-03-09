@@ -1,5 +1,5 @@
 use model::{order::OrderKind, TokenPair};
-use num::rational::Rational;
+use num::rational::Ratio;
 use primitive_types::{H160, U256};
 use settlement::{Interaction, Trade};
 use std::sync::Arc;
@@ -13,6 +13,7 @@ pub mod offchain_orderbook;
 pub mod uniswap;
 
 /// Defines the different types of liquidity our solvers support
+#[derive(Clone)]
 pub enum Liquidity {
     Limit(LimitOrder),
     Amm(AmmOrder),
@@ -40,7 +41,7 @@ pub trait LimitOrderSettlementHandling: Send + Sync {
 pub struct AmmOrder {
     pub tokens: TokenPair,
     pub reserves: (u128, u128),
-    pub fee: Rational,
+    pub fee: Ratio<u32>,
     pub settlement_handling: Arc<dyn AmmSettlementHandling>,
 }
 
@@ -48,4 +49,70 @@ pub struct AmmOrder {
 #[cfg_attr(test, automock)]
 pub trait AmmSettlementHandling: Send + Sync {
     fn settle(&self, input: (H160, U256), output: (H160, U256)) -> Vec<Box<dyn Interaction>>;
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use ethcontract::Address;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    pub struct CapturingLimitOrderSettlementHandler {
+        #[allow(clippy::type_complexity)]
+        pub calls: Mutex<Vec<U256>>,
+    }
+
+    impl CapturingLimitOrderSettlementHandler {
+        pub fn arc() -> Arc<Self> {
+            Arc::new(Default::default())
+        }
+
+        pub fn calls(&self) -> Vec<U256> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    impl LimitOrderSettlementHandling for CapturingLimitOrderSettlementHandler {
+        fn settle(&self, executed_amount: U256) -> (Option<Trade>, Vec<Box<dyn Interaction>>) {
+            self.calls.lock().unwrap().push(executed_amount);
+            (None, Vec::new())
+        }
+    }
+
+    #[derive(Default)]
+    pub struct CapturingAmmSettlementHandler {
+        #[allow(clippy::type_complexity)]
+        pub calls: Mutex<Vec<AmmSettlement>>,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub struct AmmSettlement {
+        pub token_in: Address,
+        pub token_out: Address,
+        pub amount_in: U256,
+        pub amount_out: U256,
+    }
+
+    impl CapturingAmmSettlementHandler {
+        pub fn arc() -> Arc<Self> {
+            Arc::new(Default::default())
+        }
+
+        pub fn calls(&self) -> Vec<AmmSettlement> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    impl AmmSettlementHandling for CapturingAmmSettlementHandler {
+        fn settle(&self, input: (H160, U256), output: (H160, U256)) -> Vec<Box<dyn Interaction>> {
+            self.calls.lock().unwrap().push(AmmSettlement {
+                token_in: input.0,
+                token_out: output.0,
+                amount_in: input.1,
+                amount_out: output.1,
+            });
+            Vec::new()
+        }
+    }
 }

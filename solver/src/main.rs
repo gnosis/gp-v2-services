@@ -1,8 +1,9 @@
 use contracts::WETH9;
 use ethcontract::{Account, PrivateKey};
 use reqwest::Url;
-use solver::{driver::Driver, liquidity::uniswap::UniswapLiquidity, naive_solver::NaiveSolver};
-use std::time::Duration;
+use solver::{driver::Driver, liquidity::uniswap::UniswapLiquidity, solver::SolverType};
+use std::iter::FromIterator as _;
+use std::{collections::HashSet, time::Duration};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -44,6 +45,17 @@ struct Arguments {
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
     settle_interval: Duration,
+
+    /// Which type of solver to use
+    #[structopt(
+        long,
+        env = "SOLVER_TYPE",
+        default_value = "Naive,UniswapBaseline",
+        possible_values = &SolverType::variants(),
+        case_insensitive = true,
+        use_delimiter = true,
+    )]
+    solvers: Vec<SolverType>,
 }
 
 #[tokio::main]
@@ -76,19 +88,18 @@ async fn main() {
         .expect("couldn't load deployed native token");
     let orderbook_api =
         solver::orderbook::OrderBookApi::new(args.orderbook_url, args.orderbook_timeout);
+    let mut base_tokens = HashSet::from_iter(args.shared.base_tokens);
+    // We should always use the native token as a base token.
+    base_tokens.insert(native_token.address());
     let uniswap_liquidity = UniswapLiquidity::new(
         uniswap_factory.clone(),
         uniswap_router.clone(),
         settlement_contract.clone(),
-        native_token.address(),
+        base_tokens.clone(),
         web3.clone(),
         chain_id,
     );
-    let solver = NaiveSolver {
-        uniswap_router,
-        uniswap_factory,
-        gpv2_settlement: settlement_contract.clone(),
-    };
+    let solver = solver::solver::create(args.solvers, base_tokens);
     let gas_price_estimator = shared::gas_price_estimation::create_priority_estimator(
         &reqwest::Client::new(),
         &web3,
@@ -100,7 +111,7 @@ async fn main() {
         settlement_contract,
         uniswap_liquidity,
         orderbook_api,
-        Box::new(solver),
+        solver,
         Box::new(gas_price_estimator),
         args.target_confirm_time,
         args.settle_interval,

@@ -1,8 +1,5 @@
 use contracts::{ERC20Mintable, UniswapV2Factory, UniswapV2Router02};
-use ethcontract::{
-    prelude::{Account, Address, Http, PrivateKey, Web3, U256},
-    H160,
-};
+use ethcontract::prelude::{Account, Address, Http, PrivateKey, Web3, U256};
 use hex_literal::hex;
 use model::{
     order::{OrderBuilder, OrderKind},
@@ -16,7 +13,7 @@ use secp256k1::SecretKey;
 use serde_json::json;
 use shared::uniswap_pool::PoolFetcher;
 use solver::{liquidity::uniswap::UniswapLiquidity, orderbook::OrderBookApi};
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 use web3::signing::SecretKeyRef;
 
 const TRADER_A_PK: [u8; 32] =
@@ -47,7 +44,6 @@ async fn test_with_ganache() {
 
     let deploy_mintable_token = || async {
         ERC20Mintable::builder(&web3)
-            .gas(8_000_000u32.into())
             .deploy()
             .await
             .expect("MintableERC20 deployment failed")
@@ -58,7 +54,6 @@ async fn test_with_ganache() {
             const NAME: &str = stringify!($call);
             $call
                 .from($acc.clone())
-                .gas(8_000_000u32.into())
                 .send()
                 .await
                 .expect(&format!("{} failed", NAME))
@@ -132,7 +127,8 @@ async fn test_with_ganache() {
     );
     let db = Database::new("postgresql://").unwrap();
     db.clear().await.unwrap();
-    let event_updater = EventUpdater::new(gp_settlement.clone(), Arc::from(db.clone()));
+    let event_updater = EventUpdater::new(gp_settlement.clone(), db.clone());
+
     let price_estimator = UniswapPriceEstimator::new(Box::new(PoolFetcher {
         factory: uniswap_factory.clone(),
         web3: web3.clone(),
@@ -142,17 +138,18 @@ async fn test_with_ganache() {
         Box::new(price_estimator),
         Box::new(web3.clone()),
         token_a.address(),
+        db.clone(),
     ));
     let orderbook = Arc::new(Orderbook::new(
         domain_separator,
-        Arc::from(db.clone()),
+        db.clone(),
         event_updater,
         Box::new(Web3BalanceFetcher::new(web3.clone(), gp_allowance)),
         fee_calculator.clone(),
     ));
 
     orderbook::serve_task(
-        Arc::from(db.clone()),
+        db.clone(),
         orderbook.clone(),
         fee_calculator,
         API_HOST[7..].parse().expect("Couldn't parse API address"),
@@ -204,20 +201,16 @@ async fn test_with_ganache() {
         uniswap_factory.clone(),
         uniswap_router.clone(),
         gp_settlement.clone(),
-        H160::default(),
+        HashSet::new(),
         web3.clone(),
         1,
     );
-    let solver = solver::naive_solver::NaiveSolver {
-        uniswap_router,
-        uniswap_factory,
-        gpv2_settlement: gp_settlement.clone(),
-    };
+    let solver = solver::naive_solver::NaiveSolver {};
     let mut driver = solver::driver::Driver::new(
         gp_settlement.clone(),
         uniswap_liquidity,
         create_orderbook_api(),
-        Box::new(solver),
+        vec![Box::new(solver)],
         Box::new(web3),
         Duration::from_secs(1),
         Duration::from_secs(30),

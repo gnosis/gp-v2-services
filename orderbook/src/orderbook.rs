@@ -36,7 +36,7 @@ pub enum OrderCancellationResult {
 
 pub struct Orderbook {
     domain_separator: DomainSeparator,
-    database: Arc<Database>,
+    database: Database,
     event_updater: Mutex<EventUpdater>,
     balance_fetcher: Box<dyn BalanceFetching>,
     fee_validator: Arc<MinFeeCalculator>,
@@ -45,7 +45,7 @@ pub struct Orderbook {
 impl Orderbook {
     pub fn new(
         domain_separator: DomainSeparator,
-        database: Arc<Database>,
+        database: Database,
         event_updater: EventUpdater,
         balance_fetcher: Box<dyn BalanceFetching>,
         fee_validator: Arc<MinFeeCalculator>,

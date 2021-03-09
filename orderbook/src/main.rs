@@ -1,3 +1,4 @@
+use chrono::offset::Utc;
 use contracts::{GPv2Settlement, UniswapV2Factory, WETH9};
 use model::{order::OrderUid, DomainSeparator};
 use orderbook::{
@@ -32,12 +33,16 @@ const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(10);
 
 pub async fn orderbook_maintenance(
     storage: Arc<Orderbook>,
+    database: Database,
     settlement_contract: GPv2Settlement,
 ) -> ! {
     loop {
-        tracing::debug!("running order book maintenance");
+        tracing::debug!("running maintenance");
         if let Err(err) = storage.run_maintenance(&settlement_contract).await {
-            tracing::error!(?err, "maintenance error");
+            tracing::error!(?err, "orderbook maintenance error");
+        }
+        if let Err(err) = database.remove_expired_fee_measurements(Utc::now()).await {
+            tracing::error!(?err, "fee measurement maintenance error");
         }
         tokio::time::delay_for(MAINTENANCE_INTERVAL).await;
     }
@@ -76,8 +81,7 @@ async fn main() {
         .expect("Deployed contract constants don't match the ones in this binary");
     let domain_separator =
         DomainSeparator::get_domain_separator(chain_id, settlement_contract.address());
-    let database =
-        Arc::new(Database::new(args.db_url.as_str()).expect("failed to create database"));
+    let database = Database::new(args.db_url.as_str()).expect("failed to create database");
     let event_updater = EventUpdater::new(settlement_contract.clone(), database.clone());
     let balance_fetcher = Web3BalanceFetcher::new(web3.clone(), gp_allowance);
 
@@ -97,6 +101,7 @@ async fn main() {
         Box::new(price_estimator),
         Box::new(gas_price_estimator),
         native_token.address(),
+        database.clone(),
     ));
 
     let orderbook = Arc::new(Orderbook::new(
@@ -114,7 +119,11 @@ async fn main() {
         fee_calculator,
         args.bind_address,
     );
-    let maintenance_task = task::spawn(orderbook_maintenance(orderbook, settlement_contract));
+    let maintenance_task = task::spawn(orderbook_maintenance(
+        orderbook,
+        database,
+        settlement_contract,
+    ));
     tokio::select! {
         result = serve_task => tracing::error!(?result, "serve task exited"),
         result = maintenance_task => tracing::error!(?result, "maintenance task exited"),
