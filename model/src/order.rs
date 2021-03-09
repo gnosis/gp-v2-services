@@ -40,9 +40,7 @@ impl Order {
         order_creation: OrderCreation,
         domain: &DomainSeparator,
     ) -> Option<Self> {
-        let owner = order_creation
-            .signature
-            .validate(domain, &order_creation.digest())?;
+        let owner = order_creation.validate_signature(domain)?;
         Some(Self {
             order_meta_data: OrderMetaData {
                 creation_date: chrono::offset::Utc::now(),
@@ -202,6 +200,10 @@ impl OrderCreation {
     // keccak256("buy")
     const ORDER_KIND_BUY: [u8; 32] =
         hex!("6ed88e868af0a1983e3886d5f3e95a2fafbd6c3450bc229e27342283dc429ccc");
+
+    pub fn validate_signature(&self, domain_separator: &DomainSeparator) -> Option<H160> {
+        self.signature.validate(domain_separator, &self.digest())
+    }
 }
 
 impl EIP712Signing for OrderCreation {
@@ -238,6 +240,10 @@ impl OrderCancellation {
     // keccak256("OrderCancellation(bytes orderUid)")
     const ORDER_CANCELLATION_TYPE_HASH: [u8; 32] =
         hex!("7b41b3a6e2b3cae020a3b2f9cdc997e0d420643957e7fea81747e984e47c88ec");
+
+    pub fn validate_signature(&self, domain_separator: &DomainSeparator) -> Option<H160> {
+        self.signature.validate(domain_separator, &self.digest())
+    }
 }
 
 impl EIP712Signing for OrderCancellation {
@@ -475,10 +481,7 @@ mod tests {
         };
 
         let expected_owner = hex!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
-        let owner = order
-            .signature
-            .validate(&domain_separator, &order.digest())
-            .unwrap();
+        let owner = order.validate_signature(&domain_separator).unwrap();
         assert_eq!(owner, expected_owner.into());
     }
 
@@ -504,10 +507,7 @@ mod tests {
             },
         };
         let expected_owner = hex!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
-        let owner = order
-            .signature
-            .validate(&domain_separator, &order.digest())
-            .unwrap();
+        let owner = order.validate_signature(&domain_separator).unwrap();
         assert_eq!(owner, expected_owner.into());
     }
 
@@ -517,9 +517,7 @@ mod tests {
         let key = SecretKeyRef::from(&ONE_KEY);
         order.sign_self_with(&DomainSeparator::default(), &key);
         assert_eq!(
-            order
-                .signature
-                .validate(&DomainSeparator::default(), &order.digest()),
+            order.validate_signature(&DomainSeparator::default()),
             Some(key.address())
         );
     }

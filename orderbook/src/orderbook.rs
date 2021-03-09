@@ -8,7 +8,7 @@ use futures::{join, TryStreamExt};
 use model::order::OrderCancellation;
 use model::{
     order::{Order, OrderCreation, OrderUid},
-    DomainSeparator, EIP712Signing,
+    DomainSeparator,
 };
 use shared::time::now_in_epoch_seconds;
 use std::sync::Arc;
@@ -98,10 +98,7 @@ impl Orderbook {
             None => return Ok(OrderCancellationResult::OrderNotFound),
         };
 
-        match cancellation
-            .signature
-            .validate(&self.domain_separator, &cancellation.digest())
-        {
+        match cancellation.validate_signature(&self.domain_separator) {
             Some(signer) => {
                 if signer == order.order_meta_data.owner {
                     // order is already known to exist in DB at this point!
