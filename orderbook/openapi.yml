@@ -160,9 +160,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FeeInformation"
+                $ref: "#/components/schemas/LegacyFeeInformation"
         404:
-          description: sellToken not existent
+          description: sellToken non-existent
   /api/v1/trades:
     get:
       summary: Get existing Trades.
@@ -239,7 +239,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/FeeInformation"
         404:
-          description: Token not existent or not connected to native token
+          description: Token non-existent or not connected to native token
 components:
   schemas:
     Address:
@@ -255,6 +255,20 @@ components:
       type: string
       example: "1234567890"
     FeeInformation:
+      description: |
+        Provides the information to calculate the fees.
+      type: object
+      properties:
+        expirationDate:
+          description: |
+            Expiration date of the offered fee. Order service might not accept
+            the fee after this expiration date. Encoded as ISO 8601 UTC.
+          type: string
+          example: "2020-12-03T18:35:18.814523Z"
+        amount:
+          description: Absolute amount of fee charged per order in specified sellToken
+          $ref: "#/components/schemas/TokenAmount"
+    LegacyFeeInformation:
       description: |
         Provides the information to calculate the fees.
       type: object
