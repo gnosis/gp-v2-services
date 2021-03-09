@@ -42,8 +42,8 @@ impl UniswapPriceEstimator {
 
 #[async_trait::async_trait]
 impl PriceEstimating for UniswapPriceEstimator {
-    // Estimates the price using the direct pool between sell and buy token.
-    // Returns an error if no pool exists between sell and buy token.
+    // Estimates the price between sell and buy token denominated in |sell token| per buy token.
+    // Returns an error if no path exists between sell and buy token.
     async fn estimate_price(
         &self,
         sell_token: H160,
