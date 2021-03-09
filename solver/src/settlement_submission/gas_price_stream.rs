@@ -15,7 +15,6 @@ pub fn gas_price_stream(
         if !first_call {
             tokio::time::delay_for(GAS_PRICE_REFRESH_INTERVAL).await;
         }
-        // TODO: once we have gas limit size aware estimators, use a real estimation.
         let estimate = estimator
             .estimate_with_limits(gas_limit, target_confirm_time)
             .await;
