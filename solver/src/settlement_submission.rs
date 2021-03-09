@@ -29,6 +29,7 @@ pub async fn submit(
     // Check that a simulation of the transaction works before submitting it.
     simulate_settlement(&settlement, contract).await?;
 
+    // Account for some buffer in the gas limit in case racing state changes result in slightly more heavy computation at execution time
     let gas_limit = retry::settle_method_builder(contract, settlement.clone())
         .tx
         .estimate_gas()
