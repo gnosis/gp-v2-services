@@ -8,6 +8,7 @@ use std::time::Duration;
 pub fn gas_price_stream(
     target_confirm_time: Duration,
     gas_price_cap: f64,
+    gas_limit: f64,
     estimator: &dyn GasPriceEstimating,
 ) -> impl Stream<Item = f64> + '_ {
     let stream = stream::unfold(true, move |first_call| async move {
@@ -16,7 +17,7 @@ pub fn gas_price_stream(
         }
         // TODO: once we have gas limit size aware estimators, use a real estimation.
         let estimate = estimator
-            .estimate_with_limits(1_000_000.0, target_confirm_time)
+            .estimate_with_limits(gas_limit, target_confirm_time)
             .await;
         Some((estimate, false))
     })
