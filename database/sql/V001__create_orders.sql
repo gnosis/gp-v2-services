@@ -1,6 +1,6 @@
 -- `u256`s are stored as `numeric(78,0)` which is an integer with up to 78 decimal digits.
 -- This is the number of digits in `2**256 - 1`.
--- Bytes are stored in `bytea` which is a variable size byte string. There is no way to specifiy a
+-- Bytes are stored in `bytea` which is a variable size byte string. There is no way to specify a
 -- fixed size.
 -- `u32`s are stored in `bigint` which is an 8 bytes signed integer because Postgre does not have
 -- unsigned integers.
@@ -11,6 +11,8 @@ CREATE TABLE orders (
     uid bytea PRIMARY KEY,
     owner bytea NOT NULL,
     creation_timestamp timestamptz NOT NULL,
+--     TODO - Create new file to alter table and add column since the database already exists.
+    invalidated timestamptz,
     sell_token bytea NOT NULL,
     buy_token bytea NOT NULL,
     sell_amount numeric(78,0) NOT NULL,

@@ -79,11 +79,16 @@ impl Database {
     }
 
     pub async fn cancel_order(&self, order: &Order) -> Result<()> {
+        // We do not overwrite previously cancelled orders,
+        // but this query does allow the user to soft cancel
+        // an order that has already been invalidated on-chain.
         const QUERY: &str = "\
             UPDATE orders
-            SET invalidated = true \
-            WHERE uid = $2;";
+            SET invalidated = $1 \
+            WHERE uid = $2;\
+            AND invalidated IS NULL";
         sqlx::query(QUERY)
+            .bind(Utc::now())
             .bind(order.order_meta_data.uid.0.as_ref())
             .execute(&self.pool)
             .await
@@ -104,7 +109,7 @@ impl Database {
                 COALESCE(SUM(t.buy_amount), 0) AS sum_buy, \
                 COALESCE(SUM(t.sell_amount), 0) AS sum_sell, \
                 COALESCE(SUM(t.fee_amount), 0) AS sum_fee, \
-                COUNT(invalidations.*) > 0 AS invalidated \
+                COUNT(invalidations.*) > 0 OR invalidated IS NOT NULL AS invalidated \
             FROM \
                 orders o \
                 LEFT OUTER JOIN trades t ON o.uid = t.order_uid \

@@ -206,6 +206,31 @@ impl OrderCreation {
     }
 }
 
+impl Default for OrderCancellation {
+    // Custom implementation to make sure the default order is valid
+    fn default() -> Self {
+        let mut result = Self {
+            order_uid: OrderUid::default(),
+            signature: Default::default(),
+        };
+        result.sign_self_with(&DomainSeparator::default(), &SecretKeyRef::new(&ONE_KEY));
+        result
+    }
+}
+
+impl OrderCancellation {
+    fn sign_self_with(&mut self, domain_separator: &DomainSeparator, key: &SecretKeyRef) {
+        let message = self
+            .signature
+            .signing_digest_message(domain_separator, &self.digest());
+        // Unwrap because the only error is for invalid messages which we don't create.
+        let signature = Key::sign(key, &message, None).unwrap();
+        self.signature.v = signature.v as u8 | 0x80;
+        self.signature.r = signature.r;
+        self.signature.s = signature.s;
+    }
+}
+
 impl EIP712Signing for OrderCreation {
     fn digest(&self) -> [u8; 32] {
         let mut hash_data = [0u8; 320];
@@ -231,7 +256,6 @@ impl EIP712Signing for OrderCreation {
 #[serde_as]
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Deserialize, Serialize, Hash)]
 pub struct OrderCancellation {
-    // TODO - does it make sense to include the orderUid here?
     pub order_uid: OrderUid,
     pub signature: Signature,
 }
@@ -250,7 +274,7 @@ impl EIP712Signing for OrderCancellation {
     fn digest(&self) -> [u8; 32] {
         let mut hash_data = [0u8; 64];
         hash_data[0..32].copy_from_slice(&Self::ORDER_CANCELLATION_TYPE_HASH);
-        hash_data[44..64].copy_from_slice(&signing::keccak256(&self.order_uid.0));
+        hash_data[32..64].copy_from_slice(&signing::keccak256(&self.order_uid.0));
         signing::keccak256(&hash_data)
     }
 }
@@ -459,7 +483,7 @@ mod tests {
     // from the test `should recover signing address for all supported schemes` in
     // https://github.com/gnosis/gp-v2-contracts/blob/main/test/GPv2Encoding.test.ts .
     #[test]
-    fn signature_typed_data() {
+    fn order_creation_signature_typed_data() {
         let domain_separator = DomainSeparator(hex!(
             "f8a1143d44c67470a791201b239ff6b0ecc8910aa9682bebd08145f5fd84722b"
         ));
@@ -486,7 +510,7 @@ mod tests {
     }
 
     #[test]
-    fn signature_message() {
+    fn order_creation_signature_message() {
         let domain_separator = DomainSeparator(hex!(
             "f8a1143d44c67470a791201b239ff6b0ecc8910aa9682bebd08145f5fd84722b"
         ));
@@ -509,6 +533,54 @@ mod tests {
         let expected_owner = hex!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
         let owner = order.validate_signature(&domain_separator).unwrap();
         assert_eq!(owner, expected_owner.into());
+    }
+
+    #[test]
+    fn order_cancellation_signature_typed_data() {
+        let domain_separator = DomainSeparator(hex!(
+            "f8a1143d44c67470a791201b239ff6b0ecc8910aa9682bebd08145f5fd84722b"
+        ));
+        let cancellation = OrderCancellation {
+            order_uid: OrderUid([42u8; 56]),
+            signature: Signature {
+                v: 0x1b,
+                r: hex!("3691438f224f2ce0bd15bf803479a0c07cfadc11ec69de0ee95f0edf82c9285f").into(),
+                s: hex!("177006a7caeafe8214bd8f51ddb8b0c5a94158dc94c605d9af6c412f80575bf3").into(),
+            },
+        };
+
+        let expected_owner = hex!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
+        let owner = cancellation.validate_signature(&domain_separator).unwrap();
+        assert_eq!(owner, expected_owner.into());
+    }
+
+    #[test]
+    fn order_cancellation_signature_message() {
+        let domain_separator = DomainSeparator(hex!(
+            "f8a1143d44c67470a791201b239ff6b0ecc8910aa9682bebd08145f5fd84722b"
+        ));
+        let cancellation = OrderCancellation {
+            order_uid: OrderUid([42u8; 56]),
+            signature: Signature {
+                v: 0x1b | 0x80,
+                r: hex!("25d9649894322a4d1740f1ff866719ab3e02f7a67fba10887531b13d80adc057").into(),
+                s: hex!("42f29400a7470bbae937200e1c02f31a5ff2e9db5b386c4a78abe8fec7a2fa1c").into(),
+            },
+        };
+        let expected_owner = hex!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
+        let owner = cancellation.validate_signature(&domain_separator).unwrap();
+        assert_eq!(owner, expected_owner.into());
+    }
+
+    #[test]
+    fn order_cancellation_self_sign() {
+        let mut cancellation = OrderCancellation::default();
+        let key = SecretKeyRef::from(&ONE_KEY);
+        cancellation.sign_self_with(&DomainSeparator::default(), &key);
+        assert_eq!(
+            cancellation.validate_signature(&DomainSeparator::default()),
+            Some(key.address())
+        );
     }
 
     #[test]
