@@ -23,6 +23,10 @@ pub struct Signature {
 
 pub trait EIP712Signing {
     fn digest(&self) -> [u8; 32];
+    fn signature(&self) -> Signature;
+    fn validate_signature(&self, domain_separator: &DomainSeparator) -> Option<H160> {
+        self.signature().validate(domain_separator, &self.digest())
+    }
 }
 
 impl Signature {

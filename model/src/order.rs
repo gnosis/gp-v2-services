@@ -200,10 +200,6 @@ impl OrderCreation {
     // keccak256("buy")
     const ORDER_KIND_BUY: [u8; 32] =
         hex!("6ed88e868af0a1983e3886d5f3e95a2fafbd6c3450bc229e27342283dc429ccc");
-
-    pub fn validate_signature(&self, domain_separator: &DomainSeparator) -> Option<H160> {
-        self.signature.validate(domain_separator, &self.digest())
-    }
 }
 
 impl Default for OrderCancellation {
@@ -250,6 +246,10 @@ impl EIP712Signing for OrderCreation {
         hash_data[319] = self.partially_fillable as u8;
         signing::keccak256(&hash_data)
     }
+
+    fn signature(&self) -> Signature {
+        self.signature
+    }
 }
 
 /// An order cancellation as provided to the orderbook by the frontend.
@@ -276,6 +276,10 @@ impl EIP712Signing for OrderCancellation {
         hash_data[0..32].copy_from_slice(&Self::ORDER_CANCELLATION_TYPE_HASH);
         hash_data[32..64].copy_from_slice(&signing::keccak256(&self.order_uid.0));
         signing::keccak256(&hash_data)
+    }
+
+    fn signature(&self) -> Signature {
+        self.signature
     }
 }
 
