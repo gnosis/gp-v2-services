@@ -281,7 +281,10 @@ mod tests {
         let updated_uniswap = UpdatedUniswapModel {
             balance_update1: 8,
             balance_update2: -9,
-            exec_plan: ExecPlanCoordsModel { sequence:0, position: 0 }
+            exec_plan: ExecPlanCoordsModel {
+                sequence:0,
+                position: 0,
+            }
         };
         let settled = SettledBatchAuctionModel {
             orders: hashmap! { "lo0".to_string() => executed_order },

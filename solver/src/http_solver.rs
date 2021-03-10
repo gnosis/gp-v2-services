@@ -122,7 +122,7 @@ impl HttpSolver {
                     fee: 0.0,
                     cost: CostModel {
                         amount: 0,
-                        token: self.token_to_string(&order.sell_token)
+                        token: self.token_to_string(&order.sell_token),
                     }
                 };
                 (index.clone(), order)
@@ -150,7 +150,7 @@ impl HttpSolver {
                     // TODO: map uniswap fixed cost
                     cost: CostModel {
                         amount: 0,
-                        token: self.token_to_string(&amm.tokens.get().0)
+                        token: self.token_to_string(&amm.tokens.get().0),
                     },
                     mandatory: false,
                 };
