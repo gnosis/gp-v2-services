@@ -15,3 +15,7 @@ default-members = [
     "shared",
     "solver",
 ]
+
+[patch.crates-io]
+ethcontract = { git = "https://github.com/gnosis/ethcontract-rs.git", rev = "39d40e06428df7da6d36318054ca672ff4e2d115" }
+ethcontract-generate = { git = "https://github.com/gnosis/ethcontract-rs.git", rev = "39d40e06428df7da6d36318054ca672ff4e2d115" }

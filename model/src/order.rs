@@ -1,9 +1,10 @@
 //! Contains the order type as described by the specification with serialization as described by the openapi documentation.
 
 use crate::{
-    h160_hexadecimal,
+    appdata_hexadecimal,
+    h160_hexadecimal::{self, HexadecimalH160},
     u256_decimal::{self, DecimalU256},
-    DomainSeparator, Eip712Signing, Signature, TokenPair,
+    DomainSeparator, Signature, SigningScheme, TokenPair,
 };
 use chrono::{offset::Utc, DateTime, NaiveDateTime};
 use hex_literal::hex;
@@ -40,12 +41,14 @@ impl Order {
         order_creation: OrderCreation,
         domain: &DomainSeparator,
     ) -> Option<Self> {
-        let owner = order_creation.validate_signature(domain)?;
+        let owner = order_creation
+            .signature
+            .validate(domain, &order_creation.hash_struct())?;
         Some(Self {
             order_meta_data: OrderMetaData {
                 creation_date: chrono::offset::Utc::now(),
                 owner,
-                uid: order_creation.uid(&owner),
+                uid: order_creation.uid(domain, &owner),
                 ..Default::default()
             },
             order_creation,
@@ -82,7 +85,7 @@ impl OrderBuilder {
         self
     }
 
-    pub fn with_app_data(mut self, app_data: u32) -> Self {
+    pub fn with_app_data(mut self, app_data: [u8; 32]) -> Self {
         self.0.order_creation.app_data = app_data;
         self
     }
@@ -108,11 +111,11 @@ impl OrderBuilder {
     }
 
     /// Sets owner, uid, signature.
-    pub fn sign_with(mut self, domain_separator: &DomainSeparator, key: SecretKeyRef) -> Self {
+    pub fn sign_with(mut self, domain: &DomainSeparator, key: SecretKeyRef) -> Self {
         self.0.order_meta_data.owner = key.address();
-        self.0.order_meta_data.uid = self.0.order_creation.uid(&key.address());
+        self.0.order_meta_data.uid = self.0.order_creation.uid(domain, &key.address());
         self.0.order_creation.signature =
-            self.0.order_creation.sign_self_with(domain_separator, &key);
+            Signature::sign(domain, &self.0.order_creation.hash_struct(), key);
         self
     }
 
@@ -130,17 +133,21 @@ pub struct OrderCreation {
     pub sell_token: H160,
     #[serde(with = "h160_hexadecimal")]
     pub buy_token: H160,
+    #[serde_as(as = "Option<HexadecimalH160>")]
+    pub receiver: Option<H160>,
     #[serde(with = "u256_decimal")]
     pub sell_amount: U256,
     #[serde(with = "u256_decimal")]
     pub buy_amount: U256,
     pub valid_to: u32,
-    pub app_data: u32,
+    #[serde(with = "appdata_hexadecimal")]
+    pub app_data: [u8; 32],
     #[serde(with = "u256_decimal")]
     pub fee_amount: U256,
     pub kind: OrderKind,
     pub partially_fillable: bool,
     pub signature: Signature,
+    pub signing_scheme: SigningScheme,
 }
 
 impl Default for OrderCreation {
@@ -149,6 +156,7 @@ impl Default for OrderCreation {
         let mut result = Self {
             sell_token: Default::default(),
             buy_token: Default::default(),
+            receiver: Default::default(),
             sell_amount: Default::default(),
             buy_amount: Default::default(),
             valid_to: u32::MAX,
@@ -156,10 +164,14 @@ impl Default for OrderCreation {
             fee_amount: Default::default(),
             kind: Default::default(),
             partially_fillable: Default::default(),
+            signing_scheme: SigningScheme::Eip712,
             signature: Default::default(),
         };
-        result.signature =
-            result.sign_self_with(&DomainSeparator::default(), &SecretKeyRef::new(&ONE_KEY));
+        result.signature = Signature::sign(
+            &DomainSeparator::default(),
+            &result.hash_struct(),
+            SecretKeyRef::new(&ONE_KEY),
+        );
         result
     }
 }
@@ -169,64 +181,46 @@ impl OrderCreation {
         TokenPair::new(self.buy_token, self.sell_token)
     }
 
-    pub fn uid(&self, owner: &H160) -> OrderUid {
+    pub fn uid(&self, domain: &DomainSeparator, owner: &H160) -> OrderUid {
         let mut uid = OrderUid([0u8; 56]);
-        uid.0[0..32].copy_from_slice(&self.digest());
+        uid.0[0..32].copy_from_slice(&super::hashed_eip712_message(domain, &self.hash_struct()));
         uid.0[32..52].copy_from_slice(owner.as_fixed_bytes());
         uid.0[52..56].copy_from_slice(&self.valid_to.to_be_bytes());
         uid
     }
 }
 
-// Intended to be used by tests that need signed orders.
-impl OrderCreation {}
-
+// EIP-712
 impl OrderCreation {
     // See https://github.com/gnosis/gp-v2-contracts/blob/main/src/contracts/libraries/GPv2Encoding.sol
     pub const ORDER_TYPE_HASH: [u8; 32] =
-        hex!("b2b38b9dcbdeb41f7ad71dea9aed79fb47f7bbc3436576fe994b43d5b16ecdec");
+        hex!("d604be04a8c6d2df582ec82eba9b65ce714008acbf9122dd95e499569c8f1a80");
     // keccak256("sell")
     const ORDER_KIND_SELL: [u8; 32] =
         hex!("f3b277728b3fee749481eb3e0b3b48980dbbab78658fc419025cb16eee346775");
     // keccak256("buy")
     const ORDER_KIND_BUY: [u8; 32] =
         hex!("6ed88e868af0a1983e3886d5f3e95a2fafbd6c3450bc229e27342283dc429ccc");
-}
 
-impl Default for OrderCancellation {
-    fn default() -> Self {
-        let mut result = Self {
-            order_uid: OrderUid::default(),
-            signature: Default::default(),
-        };
-        result.signature =
-            result.sign_self_with(&DomainSeparator::default(), &SecretKeyRef::new(&ONE_KEY));
-        result
-    }
-}
-
-impl Eip712Signing for OrderCreation {
-    fn digest(&self) -> [u8; 32] {
-        let mut hash_data = [0u8; 320];
+    pub fn hash_struct(&self) -> [u8; 32] {
+        let mut hash_data = [0u8; 352];
         hash_data[0..32].copy_from_slice(&Self::ORDER_TYPE_HASH);
         // Some slots are not assigned (stay 0) because all values are extended to 256 bits.
         hash_data[44..64].copy_from_slice(self.sell_token.as_fixed_bytes());
         hash_data[76..96].copy_from_slice(self.buy_token.as_fixed_bytes());
-        self.sell_amount.to_big_endian(&mut hash_data[96..128]);
-        self.buy_amount.to_big_endian(&mut hash_data[128..160]);
-        hash_data[188..192].copy_from_slice(&self.valid_to.to_be_bytes());
-        hash_data[220..224].copy_from_slice(&self.app_data.to_be_bytes());
-        self.fee_amount.to_big_endian(&mut hash_data[224..256]);
-        hash_data[256..288].copy_from_slice(match self.kind {
+        hash_data[108..128]
+            .copy_from_slice(self.receiver.unwrap_or_else(H160::zero).as_fixed_bytes());
+        self.sell_amount.to_big_endian(&mut hash_data[128..160]);
+        self.buy_amount.to_big_endian(&mut hash_data[160..192]);
+        hash_data[220..224].copy_from_slice(&self.valid_to.to_be_bytes());
+        hash_data[224..256].copy_from_slice(&self.app_data);
+        self.fee_amount.to_big_endian(&mut hash_data[256..288]);
+        hash_data[288..320].copy_from_slice(match self.kind {
             OrderKind::Sell => &Self::ORDER_KIND_SELL,
             OrderKind::Buy => &Self::ORDER_KIND_BUY,
         });
-        hash_data[319] = self.partially_fillable as u8;
+        hash_data[351] = self.partially_fillable as u8;
         signing::keccak256(&hash_data)
-    }
-
-    fn signature(&self) -> Signature {
-        self.signature
     }
 }
 
@@ -238,22 +232,37 @@ pub struct OrderCancellation {
     pub signature: Signature,
 }
 
+impl Default for OrderCancellation {
+    fn default() -> Self {
+        let mut result = Self {
+            order_uid: OrderUid::default(),
+            signature: Default::default(),
+        };
+        result.signature = Signature::sign(
+            &DomainSeparator::default(),
+            &result.hash_struct(),
+            SecretKeyRef::new(&ONE_KEY),
+        );
+        result
+    }
+}
+
+// EIP-712
 impl OrderCancellation {
     // keccak256("OrderCancellation(bytes orderUid)")
     const ORDER_CANCELLATION_TYPE_HASH: [u8; 32] =
         hex!("7b41b3a6e2b3cae020a3b2f9cdc997e0d420643957e7fea81747e984e47c88ec");
-}
 
-impl Eip712Signing for OrderCancellation {
-    fn digest(&self) -> [u8; 32] {
+    pub fn hash_struct(&self) -> [u8; 32] {
         let mut hash_data = [0u8; 64];
         hash_data[0..32].copy_from_slice(&Self::ORDER_CANCELLATION_TYPE_HASH);
         hash_data[32..64].copy_from_slice(&signing::keccak256(&self.order_uid.0));
         signing::keccak256(&hash_data)
     }
 
-    fn signature(&self) -> Signature {
+    pub fn validate(&self, domain_separator: &DomainSeparator) -> Option<H160> {
         self.signature
+            .validate(domain_separator, &self.hash_struct())
     }
 }
 
@@ -410,14 +419,16 @@ mod tests {
             "invalidated": true,
             "sellToken": "0x000000000000000000000000000000000000000a",
             "buyToken": "0x0000000000000000000000000000000000000009",
+            "receiver": "0x000000000000000000000000000000000000000b",
             "sellAmount": "1",
             "buyAmount": "0",
             "validTo": 4294967295u32,
-            "appData": 0,
+            "appData": "0x6000000000000000000000000000000000000000000000000000000000000007",
             "feeAmount": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
             "kind": "buy",
             "partiallyFillable": false,
             "signature": "0x0200000000000000000000000000000000000000000000000000000000000003040000000000000000000000000000000000000000000000000000000000000501",
+            "signingScheme": "eip712",
         });
         let expected = Order {
             order_meta_data: OrderMetaData {
@@ -434,10 +445,11 @@ mod tests {
             order_creation: OrderCreation {
                 sell_token: H160::from_low_u64_be(10),
                 buy_token: H160::from_low_u64_be(9),
+                receiver: Some(H160::from_low_u64_be(11)),
                 sell_amount: 1.into(),
                 buy_amount: 0.into(),
                 valid_to: u32::MAX,
-                app_data: 0,
+                app_data: hex!("6000000000000000000000000000000000000000000000000000000000000007"),
                 fee_amount: U256::MAX,
                 kind: OrderKind::Buy,
                 partially_fillable: false,
@@ -452,6 +464,7 @@ mod tests {
                     )
                     .unwrap(),
                 },
+                signing_scheme: SigningScheme::Eip712,
             },
         };
         let deserialized: Order = serde_json::from_value(value.clone()).unwrap();
@@ -461,59 +474,38 @@ mod tests {
     }
 
     // these two signature tests have been created by printing the order and signature information
-    // from the test `should recover signing address for all supported schemes` in
-    // https://github.com/gnosis/gp-v2-contracts/blob/main/test/GPv2Encoding.test.ts .
+    // from the test `should recover signing address for all supported ECDSA-based schemes` in
+    // https://github.com/gnosis/gp-v2-contracts/blob/main/test/GPv2Signing.test.ts .
     #[test]
     fn order_creation_signature_typed_data() {
         let domain_separator = DomainSeparator(hex!(
-            "f8a1143d44c67470a791201b239ff6b0ecc8910aa9682bebd08145f5fd84722b"
+            "74e0b11bd18120612556bae4578cfd3a254d7e2495f543c569a92ff5794d9b09"
         ));
         let order = OrderCreation {
             sell_token: hex!("0101010101010101010101010101010101010101").into(),
             buy_token: hex!("0202020202020202020202020202020202020202").into(),
+            receiver: Some(hex!("0303030303030303030303030303030303030303").into()),
             sell_amount: hex!("0246ddf97976680000").as_ref().into(),
             buy_amount: hex!("b98bc829a6f90000").as_ref().into(),
             valid_to: 4294967295,
-            app_data: 0,
+            app_data: hex!("0000000000000000000000000000000000000000000000000000000000000000"),
             fee_amount: hex!("0de0b6b3a7640000").as_ref().into(),
             kind: OrderKind::Sell,
             partially_fillable: false,
-            signature: Signature {
-                v: 0x1b,
-                r: hex!("41c6a5841abbd04049aa0ec4290487c72d62adcd30054cb4df39988e1ef1a732").into(),
-                s: hex!("132ba700917828073a730044f1d8cf280d11faff0c2d43125d910fbf18222c1b").into(),
-            },
+            signature: Signature::from_bytes(&hex!("32f1261f1a30c4f9b3e7d17f572ded5c5f4077edce0c105d82c87fd63ae1f9a93bc8e28b1fe390fa45af8217e90c7cf506996c06cdeae9d18f51444e3520d17c1c")),
+            signing_scheme: SigningScheme::Eip712,
         };
 
         let expected_owner = hex!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
-        let owner = order.validate_signature(&domain_separator).unwrap();
+        let owner = order
+            .signature
+            .validate(&domain_separator, &order.hash_struct())
+            .unwrap();
         assert_eq!(owner, expected_owner.into());
-    }
 
-    #[test]
-    fn order_creation_signature_message() {
-        let domain_separator = DomainSeparator(hex!(
-            "f8a1143d44c67470a791201b239ff6b0ecc8910aa9682bebd08145f5fd84722b"
-        ));
-        let order = OrderCreation {
-            sell_token: hex!("0101010101010101010101010101010101010101").into(),
-            buy_token: hex!("0202020202020202020202020202020202020202").into(),
-            sell_amount: hex!("0246ddf97976680000").as_ref().into(),
-            buy_amount: hex!("b98bc829a6f90000").as_ref().into(),
-            valid_to: 4294967295,
-            app_data: 0,
-            fee_amount: hex!("0de0b6b3a7640000").as_ref().into(),
-            kind: OrderKind::Sell,
-            partially_fillable: false,
-            signature: Signature {
-                v: 0x1b | 0x80,
-                r: hex!("2c807a9e4f7f72489636d30b33d72b246c6fb467ba203d954ccf2022763a8b21").into(),
-                s: hex!("2eb1863e76c37abb54df6695d54f3abc07db4ff7df57e4564a48aee137f358bd").into(),
-            },
-        };
-        let expected_owner = hex!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
-        let owner = order.validate_signature(&domain_separator).unwrap();
-        assert_eq!(owner, expected_owner.into());
+        let expected_uid = hex!("f308e6d59020614692e6d60e53689343e8aa9a3e21670da7e3153aecc5500e6a70997970c51812dc3a010c7d01b50e0d17dc79c8ffffffff");
+        let uid = order.uid(&domain_separator, &owner);
+        assert_eq!(uid, OrderUid(expected_uid));
     }
 
     // from the test `should recover signing address for all supported signing schemes` in
@@ -533,25 +525,7 @@ mod tests {
         };
 
         let expected_owner = hex!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
-        let owner = cancellation.validate_signature(&domain_separator).unwrap();
-        assert_eq!(owner, expected_owner.into());
-    }
-
-    #[test]
-    fn order_cancellation_signature_message() {
-        let domain_separator = DomainSeparator(hex!(
-            "f8a1143d44c67470a791201b239ff6b0ecc8910aa9682bebd08145f5fd84722b"
-        ));
-        let cancellation = OrderCancellation {
-            order_uid: OrderUid([42u8; 56]),
-            signature: Signature {
-                v: 0x1b | 0x80,
-                r: hex!("25d9649894322a4d1740f1ff866719ab3e02f7a67fba10887531b13d80adc057").into(),
-                s: hex!("42f29400a7470bbae937200e1c02f31a5ff2e9db5b386c4a78abe8fec7a2fa1c").into(),
-            },
-        };
-        let expected_owner = hex!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
-        let owner = cancellation.validate_signature(&domain_separator).unwrap();
+        let owner = cancellation.validate(&domain_separator).unwrap();
         assert_eq!(owner, expected_owner.into());
     }
 
@@ -593,7 +567,11 @@ mod tests {
 
         let owner = order
             .order_creation
-            .validate_signature(&DomainSeparator::default())
+            .signature
+            .validate(
+                &DomainSeparator::default(),
+                &order.order_creation.hash_struct(),
+            )
             .unwrap();
 
         assert_eq!(owner, h160_from_public_key(public_key));

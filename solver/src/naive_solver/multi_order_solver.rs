@@ -106,7 +106,7 @@ fn solve_without_uniswap(
             context_b.address => context_a.reserve,
         },
         trades,
-        interactions,
+        intra_interactions: interactions,
         ..Default::default()
     }
 }
@@ -135,7 +135,7 @@ fn solve_with_uniswap(
             excess.address => uniswap_out,
         },
         trades,
-        interactions,
+        intra_interactions: interactions,
         ..Default::default()
     })
 }
@@ -695,7 +695,6 @@ mod tests {
                     token_a => to_wei(1),
                     token_b => to_wei(1)
                 },
-                interactions: Vec::new(),
                 trades: orders
                     .clone()
                     .into_iter()
@@ -713,7 +712,6 @@ mod tests {
                     token_a => to_wei(8),
                     token_b => to_wei(10)
                 },
-                interactions: Vec::new(),
                 trades: orders
                     .clone()
                     .into_iter()
@@ -731,7 +729,6 @@ mod tests {
                     token_a => to_wei(10),
                     token_b => to_wei(9)
                 },
-                interactions: Vec::new(),
                 trades: orders
                     .clone()
                     .into_iter()
@@ -749,7 +746,6 @@ mod tests {
                     token_a => to_wei(7),
                     token_b => to_wei(10)
                 },
-                interactions: Vec::new(),
                 trades: orders
                     .clone()
                     .into_iter()
@@ -767,7 +763,6 @@ mod tests {
                     token_a => to_wei(10),
                     token_b => to_wei(8)
                 },
-                interactions: Vec::new(),
                 trades: orders.into_iter().map(Trade::fully_matched).collect(),
                 ..Default::default()
             }),
