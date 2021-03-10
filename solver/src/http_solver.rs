@@ -123,7 +123,7 @@ impl HttpSolver {
                     cost: CostModel {
                         amount: 0,
                         token: self.token_to_string(&order.sell_token),
-                    }
+                    },
                 };
                 (index.clone(), order)
             })
