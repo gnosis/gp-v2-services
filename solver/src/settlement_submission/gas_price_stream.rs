@@ -1,15 +1,14 @@
-use super::{GAS_PRICE_REFRESH_INTERVAL, MAX_GAS};
+use super::GAS_PRICE_REFRESH_INTERVAL;
 use futures::{stream, Stream, StreamExt};
 use gas_estimation::GasPriceEstimating;
 use std::time::Duration;
-
-// TODO: use a real gas estimation instead of MAX_GAS.
 
 // Create a never ending stream of gas prices based on checking the estimator in fixed intervals
 // and enforcing the minimum increase. Errors are ignored.
 pub fn gas_price_stream(
     target_confirm_time: Duration,
     gas_price_cap: f64,
+    gas_limit: f64,
     estimator: &dyn GasPriceEstimating,
 ) -> impl Stream<Item = f64> + '_ {
     let stream = stream::unfold(true, move |first_call| async move {
@@ -17,7 +16,7 @@ pub fn gas_price_stream(
             tokio::time::delay_for(GAS_PRICE_REFRESH_INTERVAL).await;
         }
         let estimate = estimator
-            .estimate_with_limits(MAX_GAS as f64, target_confirm_time)
+            .estimate_with_limits(gas_limit, target_confirm_time)
             .await;
         Some((estimate, false))
     })
