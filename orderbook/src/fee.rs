@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
+use model::order::OrderKind;
 use primitive_types::{H160, U256};
 use std::sync::Mutex;
 
@@ -66,7 +67,7 @@ impl MinFeeCalculator {
 }
 
 impl MinFeeCalculator {
-    // Returns the minimum amount of fee required to accept an order selling the specified token
+    // Returns the minimum amount of fee required to accept an order selling the specified order
     // and an expiry date for the estimate.
     // Returns an error if there is some estimation error and Ok(None) if no information about the given
     // token exists
@@ -74,11 +75,28 @@ impl MinFeeCalculator {
         &self,
         sell_token: H160,
         buy_token: Option<H160>,
-        sell_amount: Option<U256>,
+        amount: Option<U256>,
+        kind: Option<OrderKind>,
     ) -> Result<Option<Measurement>> {
         let now = (self.now)();
         let official_valid_until = now + Duration::seconds(STANDARD_VALIDITY_FOR_FEE_IN_SEC);
         let internal_valid_until = now + Duration::seconds(PERSISTED_VALIDITY_FOR_FEE_IN_SEC);
+
+        let sell_amount =
+            if let (Some(buy_token), Some(amount), Some(kind)) = (buy_token, amount, kind) {
+                Some(round_amount(
+                    get_sell_amount(
+                        sell_token,
+                        buy_token,
+                        amount,
+                        kind,
+                        self.price_estimator.as_ref(),
+                    )
+                    .await?,
+                ))
+            } else {
+                None
+            };
 
         if let Ok(Some(past_fee)) = self
             .measurements
@@ -138,6 +156,29 @@ impl MinFeeCalculator {
         }
         false
     }
+}
+
+async fn get_sell_amount(
+    sell_token: H160,
+    buy_token: H160,
+    amount: U256,
+    kind: OrderKind,
+    price_estimator: &dyn PriceEstimating,
+) -> Result<U256> {
+    Ok(match kind {
+        OrderKind::Buy => U256::from_f64_lossy(
+            amount.to_f64_lossy()
+                * price_estimator
+                    .estimate_price(sell_token, buy_token)
+                    .await?,
+        ),
+        OrderKind::Sell => amount,
+    })
+}
+
+fn round_amount(amount: U256) -> U256 {
+    let order_of_magnitude = amount.to_string().len() - 1;
+    U256::exp10(order_of_magnitude) * 5
 }
 
 struct FeeMeasurement {
@@ -252,7 +293,7 @@ mod tests {
 
         let token = H160::from_low_u64_be(1);
         let (fee, expiry) = fee_estimator
-            .min_fee(token, None, None)
+            .min_fee(token, None, None, None)
             .await
             .unwrap()
             .unwrap();
@@ -281,7 +322,7 @@ mod tests {
 
         let token = H160::from_low_u64_be(1);
         let (fee, _) = fee_estimator
-            .min_fee(token, None, None)
+            .min_fee(token, None, None, None)
             .await
             .unwrap()
             .unwrap();
@@ -294,5 +335,49 @@ mod tests {
         // Gas price reduces, and slightly lower fee is now valid
         *gas_price.lock().unwrap() /= 2.0;
         assert!(fee_estimator.is_valid_fee(token, lower_fee).await);
+    }
+
+    #[tokio::test]
+    async fn test_sell_amount() {
+        let price_estimator = Box::new(FakePriceEstimator(10.0));
+        let sell_token = H160::from_low_u64_be(1);
+        let buy_token = H160::from_low_u64_be(2);
+        let amount = U256::exp10(18);
+
+        let sell_amount = get_sell_amount(
+            sell_token,
+            buy_token,
+            amount,
+            OrderKind::Sell,
+            price_estimator.as_ref(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(sell_amount, amount);
+
+        let sell_amount = get_sell_amount(
+            sell_token,
+            buy_token,
+            amount,
+            OrderKind::Buy,
+            price_estimator.as_ref(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(sell_amount, amount * 10);
+    }
+
+    #[test]
+    fn test_round_amount() {
+        assert_eq!(round_amount(0.into()), 5.into());
+        assert_eq!(round_amount(1.into()), 5.into());
+        assert_eq!(round_amount(9.into()), 5.into());
+        assert_eq!(round_amount(10.into()), 50.into());
+        assert_eq!(round_amount(100.into()), 500.into());
+
+        assert_eq!(
+            round_amount(U256::exp10(18)),
+            5_000_000_000_000_000_000u128.into()
+        );
     }
 }
