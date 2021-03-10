@@ -281,7 +281,7 @@ mod tests {
         let updated_uniswap = UpdatedUniswapModel {
             balance_update1: 8,
             balance_update2: -9,
-            exec_plan: ExecPlanCoordsModel {
+            exec_plan: ExecutionPlanCoordinatesModel {
                 sequence: 0,
                 position: 0,
             },

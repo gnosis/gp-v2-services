@@ -74,11 +74,11 @@ pub struct UpdatedUniswapModel {
     pub balance_update1: i128,
     #[serde(with = "serde_with::rust::display_fromstr")]
     pub balance_update2: i128,
-    pub exec_plan: ExecPlanCoordsModel,
+    pub exec_plan: ExecutionPlanCoordinatesModel,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ExecPlanCoordsModel {
+pub struct ExecutionPlanCoordinatesModel {
     pub sequence: u32,
     pub position: u32,
 }
