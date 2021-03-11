@@ -539,6 +539,8 @@ mod tests {
         assert_eq!(owner, expected_owner.into());
     }
 
+    // from the test `should recover signing address for all supported signing schemes` in
+    // https://github.com/gnosis/gp-v2-contracts/blob/main/test/sign.test.ts .
     #[test]
     fn order_cancellation_signature_typed_data() {
         let domain_separator = DomainSeparator(hex!(
