@@ -12,8 +12,8 @@ use primitive_types::{H160, H256};
 use serde::{de, Deserialize, Serialize};
 use std::fmt;
 use web3::signing;
+use web3::signing::{Key, SecretKeyRef};
 use web3::types::Recovery;
-use web3::signing::{SecretKeyRef, Key};
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Default, Hash)]
 pub struct Signature {
@@ -33,7 +33,7 @@ pub trait EIP712Signing {
             .signing_digest_message(domain_separator, &self.digest());
         // Unwrap because the only error is for invalid messages which we don't create.
         let signature = Key::sign(key, &message, None).unwrap();
-        self.update_signature(Signature{
+        self.update_signature(Signature {
             v: signature.v as u8 | 0x80,
             r: signature.r,
             s: signature.s,
