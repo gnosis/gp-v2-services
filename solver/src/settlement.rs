@@ -141,6 +141,7 @@ impl Settlement {
             acc?.checked_add(trade.surplus(*sell_token_price, *buy_token_price)?)
         })?;
 
+        // TODO: not done yet
         let nr_tokens = self.tokens().len();
         let sum_of_prices = self
             .clearing_prices()
