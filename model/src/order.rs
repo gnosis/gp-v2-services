@@ -167,17 +167,6 @@ impl OrderCreation {
         TokenPair::new(self.buy_token, self.sell_token)
     }
 
-    fn sign_self_with(&mut self, domain_separator: &DomainSeparator, key: &SecretKeyRef) {
-        let message = self
-            .signature
-            .signing_digest_message(domain_separator, &self.digest());
-        // Unwrap because the only error is for invalid messages which we don't create.
-        let signature = Key::sign(key, &message, None).unwrap();
-        self.signature.v = signature.v as u8 | 0x80;
-        self.signature.r = signature.r;
-        self.signature.s = signature.s;
-    }
-
     pub fn uid(&self, owner: &H160) -> OrderUid {
         let mut uid = OrderUid([0u8; 56]);
         uid.0[0..32].copy_from_slice(&self.digest());
@@ -214,19 +203,6 @@ impl Default for OrderCancellation {
     }
 }
 
-impl OrderCancellation {
-    fn sign_self_with(&mut self, domain_separator: &DomainSeparator, key: &SecretKeyRef) {
-        let message = self
-            .signature
-            .signing_digest_message(domain_separator, &self.digest());
-        // Unwrap because the only error is for invalid messages which we don't create.
-        let signature = Key::sign(key, &message, None).unwrap();
-        self.signature.v = signature.v as u8 | 0x80;
-        self.signature.r = signature.r;
-        self.signature.s = signature.s;
-    }
-}
-
 impl EIP712Signing for OrderCreation {
     fn digest(&self) -> [u8; 32] {
         let mut hash_data = [0u8; 320];
@@ -250,6 +226,10 @@ impl EIP712Signing for OrderCreation {
     fn signature(&self) -> Signature {
         self.signature
     }
+
+    fn update_signature(&mut self, new_signature: Signature) {
+        self.signature = new_signature;
+    }
 }
 
 /// An order cancellation as provided to the orderbook by the frontend.
@@ -264,10 +244,6 @@ impl OrderCancellation {
     // keccak256("OrderCancellation(bytes orderUid)")
     const ORDER_CANCELLATION_TYPE_HASH: [u8; 32] =
         hex!("7b41b3a6e2b3cae020a3b2f9cdc997e0d420643957e7fea81747e984e47c88ec");
-
-    pub fn validate_signature(&self, domain_separator: &DomainSeparator) -> Option<H160> {
-        self.signature.validate(domain_separator, &self.digest())
-    }
 }
 
 impl EIP712Signing for OrderCancellation {
@@ -280,6 +256,10 @@ impl EIP712Signing for OrderCancellation {
 
     fn signature(&self) -> Signature {
         self.signature
+    }
+
+    fn update_signature(&mut self, new_signature: Signature) {
+        self.signature = new_signature
     }
 }
 

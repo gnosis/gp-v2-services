@@ -9,6 +9,7 @@ use model::order::OrderCancellation;
 use model::{
     order::{Order, OrderCreation, OrderUid},
     DomainSeparator,
+    EIP712Signing
 };
 use shared::time::now_in_epoch_seconds;
 use std::sync::Arc;
