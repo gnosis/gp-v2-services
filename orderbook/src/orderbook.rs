@@ -71,6 +71,9 @@ impl Orderbook {
             Some(order) => order,
             None => return Ok(AddOrderResult::InvalidSignature),
         };
+        if self.get_order(order.order_meta_data.uid).await?.is_some() {
+            return Ok(AddOrderResult::DuplicatedOrder);
+        }
         self.balance_fetcher
             .register(order.order_meta_data.owner, order.order_creation.sell_token)
             .await;
@@ -105,6 +108,14 @@ impl Orderbook {
     pub async fn run_maintenance(&self, _settlement_contract: &GPv2Settlement) -> Result<()> {
         let update_events = async { self.event_updater.lock().await.update_events().await };
         join!(update_events, self.balance_fetcher.update()).0
+    }
+
+    async fn get_order(&self, uid: OrderUid) -> Result<Option<Order>> {
+        let filter = OrderFilter {
+            uid: Some(uid),
+            ..Default::default()
+        };
+        Ok(self.get_orders(&filter).await?.first().cloned())
     }
 }
 
