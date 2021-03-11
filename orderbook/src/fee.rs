@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
+use model::order::OrderKind;
 use primitive_types::{H160, U256};
 use std::sync::Mutex;
 
@@ -25,7 +26,8 @@ pub trait MinFeeStoring: Send + Sync {
         &self,
         sell_token: H160,
         buy_token: Option<H160>,
-        sell_amount: Option<U256>,
+        amount: Option<U256>,
+        kind: Option<OrderKind>,
         expiry: DateTime<Utc>,
         min_fee: U256,
     ) -> Result<()>;
@@ -36,7 +38,8 @@ pub trait MinFeeStoring: Send + Sync {
         &self,
         sell_token: H160,
         buy_token: Option<H160>,
-        sell_amount: Option<U256>,
+        amount: Option<U256>,
+        kind: Option<OrderKind>,
         min_expiry: DateTime<Utc>,
     ) -> Result<Option<U256>>;
 }
@@ -74,7 +77,8 @@ impl MinFeeCalculator {
         &self,
         sell_token: H160,
         buy_token: Option<H160>,
-        sell_amount: Option<U256>,
+        amount: Option<U256>,
+        kind: Option<OrderKind>,
     ) -> Result<Option<Measurement>> {
         let now = (self.now)();
         let official_valid_until = now + Duration::seconds(STANDARD_VALIDITY_FOR_FEE_IN_SEC);
@@ -82,7 +86,7 @@ impl MinFeeCalculator {
 
         if let Ok(Some(past_fee)) = self
             .measurements
-            .get_min_fee(sell_token, buy_token, sell_amount, official_valid_until)
+            .get_min_fee(sell_token, buy_token, amount, kind, official_valid_until)
             .await
         {
             return Ok(Some((past_fee, official_valid_until)));
@@ -98,7 +102,8 @@ impl MinFeeCalculator {
             .save_fee_measurement(
                 sell_token,
                 buy_token,
-                sell_amount,
+                amount,
+                kind,
                 internal_valid_until,
                 min_fee,
             )
@@ -133,7 +138,7 @@ impl MinFeeCalculator {
     pub async fn is_valid_fee(&self, sell_token: H160, fee: U256) -> bool {
         if let Ok(Some(past_fee)) = self
             .measurements
-            .get_min_fee(sell_token, None, None, (self.now)())
+            .get_min_fee(sell_token, None, None, None, (self.now)())
             .await
         {
             if fee >= past_fee {
@@ -149,7 +154,8 @@ impl MinFeeCalculator {
 
 struct FeeMeasurement {
     buy_token: Option<H160>,
-    sell_amount: Option<U256>,
+    amount: Option<U256>,
+    kind: Option<OrderKind>,
     expiry: DateTime<Utc>,
     min_fee: U256,
 }
@@ -162,7 +168,8 @@ impl MinFeeStoring for InMemoryFeeStore {
         &self,
         sell_token: H160,
         buy_token: Option<H160>,
-        sell_amount: Option<U256>,
+        amount: Option<U256>,
+        kind: Option<OrderKind>,
         expiry: DateTime<Utc>,
         min_fee: U256,
     ) -> Result<()> {
@@ -173,7 +180,8 @@ impl MinFeeStoring for InMemoryFeeStore {
             .or_default()
             .push(FeeMeasurement {
                 buy_token,
-                sell_amount,
+                amount,
+                kind,
                 expiry,
                 min_fee,
             });
@@ -184,7 +192,8 @@ impl MinFeeStoring for InMemoryFeeStore {
         &self,
         sell_token: H160,
         buy_token: Option<H160>,
-        sell_amount: Option<U256>,
+        amount: Option<U256>,
+        kind: Option<OrderKind>,
         min_expiry: DateTime<Utc>,
     ) -> Result<Option<U256>> {
         let mut guard = self.0.lock().expect("Thread holding Mutex panicked");
@@ -193,7 +202,10 @@ impl MinFeeStoring for InMemoryFeeStore {
             if buy_token.is_some() && buy_token != measurement.buy_token {
                 return false;
             }
-            if sell_amount.is_some() && sell_amount != measurement.sell_amount {
+            if amount.is_some() && amount != measurement.amount {
+                return false;
+            }
+            if kind.is_some() && kind != measurement.kind {
                 return false;
             }
             measurement.expiry >= min_expiry
@@ -260,7 +272,7 @@ mod tests {
 
         let token = H160::from_low_u64_be(1);
         let (fee, expiry) = fee_estimator
-            .min_fee(token, None, None)
+            .min_fee(token, None, None, None)
             .await
             .unwrap()
             .unwrap();
@@ -289,7 +301,7 @@ mod tests {
 
         let token = H160::from_low_u64_be(1);
         let (fee, _) = fee_estimator
-            .min_fee(token, None, None)
+            .min_fee(token, None, None, None)
             .await
             .unwrap()
             .unwrap();
