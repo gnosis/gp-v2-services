@@ -21,7 +21,7 @@ impl MinFeeStoring for Database {
             "INSERT INTO min_fee_measurements (sell_token, buy_token, sell_amount, expiration_timestamp, min_fee) VALUES ($1, $2, $3, $4, $5);";
         sqlx::query(QUERY)
             .bind(sell_token.as_bytes())
-            .bind(buy_token.map(|t| t.as_bytes().to_owned()))
+            .bind(buy_token.as_ref().map(|t| t.as_bytes()))
             .bind(sell_amount.map(|a| u256_to_big_decimal(&a)))
             .bind(expiry)
             .bind(u256_to_big_decimal(&min_fee))
@@ -48,7 +48,7 @@ impl MinFeeStoring for Database {
 
         let result: Option<BigDecimal> = sqlx::query_scalar(QUERY)
             .bind(sell_token.as_bytes())
-            .bind(buy_token.map(|t| t.as_bytes().to_owned()))
+            .bind(buy_token.as_ref().map(|t| t.as_bytes()))
             .bind(sell_amount.map(|a| u256_to_big_decimal(&a)))
             .bind(min_expiry)
             .fetch_one(&self.pool)
