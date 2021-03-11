@@ -1,2 +1,2 @@
 ALTER TABLE orders
-    ADD COLUMN invalidated timestamptz;
+    ADD COLUMN cancellation_timestamp timestamptz;

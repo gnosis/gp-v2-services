@@ -84,9 +84,9 @@ impl Database {
         // an order that has already been invalidated on-chain.
         const QUERY: &str = "\
             UPDATE orders
-            SET invalidated = $1 \
+            SET cancellation_timestamp = $1 \
             WHERE uid = $2;\
-            AND invalidated IS NULL";
+            AND cancellation_timestamp IS NULL";
         sqlx::query(QUERY)
             .bind(Utc::now())
             .bind(order_uid.0.as_ref())
@@ -109,7 +109,7 @@ impl Database {
                 COALESCE(SUM(t.buy_amount), 0) AS sum_buy, \
                 COALESCE(SUM(t.sell_amount), 0) AS sum_sell, \
                 COALESCE(SUM(t.fee_amount), 0) AS sum_fee, \
-                COUNT(invalidations.*) > 0 OR invalidated IS NOT NULL AS invalidated \
+                COUNT(invalidations.*) > 0 OR o.cancellation_timestamp IS NOT NULL AS invalidated \
             FROM \
                 orders o \
                 LEFT OUTER JOIN trades t ON o.uid = t.order_uid \
