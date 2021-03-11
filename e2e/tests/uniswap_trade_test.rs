@@ -127,13 +127,16 @@ async fn test_with_ganache() {
     );
     let db = Database::new("postgresql://").unwrap();
     db.clear().await.unwrap();
-    let event_updater = EventUpdater::new(gp_settlement.clone(), db.clone());
+    let event_updater = EventUpdater::new(gp_settlement.clone(), db.clone(), None);
 
-    let price_estimator = UniswapPriceEstimator::new(Box::new(PoolFetcher {
-        factory: uniswap_factory.clone(),
-        web3: web3.clone(),
-        chain_id,
-    }));
+    let price_estimator = UniswapPriceEstimator::new(
+        Box::new(PoolFetcher {
+            factory: uniswap_factory.clone(),
+            web3: web3.clone(),
+            chain_id,
+        }),
+        HashSet::new(),
+    );
     let fee_calculator = Arc::new(MinFeeCalculator::new(
         Box::new(price_estimator),
         Box::new(web3.clone()),
