@@ -111,14 +111,12 @@ impl Settlement {
         Ok(cursor.into_inner())
     }
 
-    // For now this computes the total surplus of all EOA trades.
-    // Objective is computed using external prices.
-    fn objective_value_v1(&self, external_prices: &HashMap<H160, U256>) -> Option<U256> {
+    fn total_surplus(self, prices: &HashMap<H160, U256>) -> Option<U256> {
         self.trades.iter().fold(Some(U256::zero()), |acc, trade| {
-            let sell_token_external_price = external_prices
+            let sell_token_external_price = prices
                 .get(&trade.order.sell_token)
                 .expect("Solution with trade but without price for sell token");
-            let buy_token_external_price = external_prices
+            let buy_token_external_price = prices
                 .get(&trade.order.buy_token)
                 .expect("Solution with trade but without price for buy token");
             acc?.checked_add(trade.surplus(*sell_token_external_price, *buy_token_external_price)?)
@@ -126,31 +124,29 @@ impl Settlement {
     }
 
     // For now this computes the total surplus of all EOA trades.
+    // Objective is computed using external prices.
+    fn objective_value_v1(&self, external_prices: &HashMap<H160, U256>) -> Option<U256> {
+        self.total_surplus(external_prices)
+    }
+
+    // For now this computes the total surplus of all EOA trades.
     // Objective is computed using (scaled) found prices.
     fn objective_value_v2(&self, external_prices: &HashMap<H160, U256>) -> Option<U256> {
-        let unscaled_obj = self.trades.iter().fold(Some(U256::zero()), |acc, trade| {
-            let sell_token_price = self
-                .clearing_prices
-                .get(&trade.order.sell_token)
-                .expect("Solution with trade but without price for sell token");
-            let buy_token_price = self
-                .clearing_prices
-                .get(&trade.order.buy_token)
-                .expect("Solution with trade but without price for buy token");
+        let unscaled_obj = self.total_surplus(&self.clearing_prices)?;
 
-            acc?.checked_add(trade.surplus(*sell_token_price, *buy_token_price)?)
-        })?;
-
-        // TODO: not done yet
-        let nr_tokens = self.tokens().len();
-        let sum_of_prices = self
-            .clearing_prices()
+        // scale = nr_tokens / (p_1/ep_1 + ... + p_n/ep_n)
+        let numerator = U256::from(self.tokens().len());
+        let denominator = self
+            .clearing_prices
             .iter()
-            .fold(Some(U256::zero()), |acc, value| acc?.checked_add(*value))?;
+            .fold(Some(U256::zero()), |acc, value| {
+                let external_price = external_prices.get(value.0)?;
+                acc?.checked_add(value.1.checked_div(*external_price)?)
+            })?;
 
         unscaled_obj
-            .checked_mul(U256::from(nr_tokens))?
-            .checked_div(sum_of_prices)
+            .checked_mul(numerator)?
+            .checked_div(denominator)
     }
 
     // For now this computes the total surplus of all EOA trades.
