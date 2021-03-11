@@ -25,19 +25,22 @@ pub struct Signature {
 pub trait EIP712Signing {
     fn digest(&self) -> [u8; 32];
     fn signature(&self) -> Signature;
-    fn update_signature(&mut self, new_signature: Signature);
 
-    fn sign_self_with(&mut self, domain_separator: &DomainSeparator, key: &SecretKeyRef) {
+    fn sign_self_with(
+        &mut self,
+        domain_separator: &DomainSeparator,
+        key: &SecretKeyRef,
+    ) -> Signature {
         let message = self
             .signature()
             .signing_digest_message(domain_separator, &self.digest());
         // Unwrap because the only error is for invalid messages which we don't create.
         let signature = Key::sign(key, &message, None).unwrap();
-        self.update_signature(Signature {
+        Signature {
             v: signature.v as u8 | 0x80,
             r: signature.r,
             s: signature.s,
-        });
+        }
     }
 
     fn validate_signature(&self, domain_separator: &DomainSeparator) -> Option<H160> {
@@ -256,6 +259,7 @@ impl DomainSeparator {
 mod tests {
     use super::*;
     use hex_literal::hex;
+    use secp256k1::key::ONE_KEY;
 
     #[test]
     fn domain_separator_rinkeby() {
@@ -302,5 +306,40 @@ mod tests {
         assert_eq!(iter.next(), Some(token_a));
         assert_eq!(iter.next(), Some(token_b));
         assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn self_sign_with() {
+        struct TestEIP712Structure {
+            signature: Signature,
+        }
+        impl Default for TestEIP712Structure {
+            fn default() -> Self {
+                let mut result = Self {
+                    signature: Default::default(),
+                };
+                result.signature = result
+                    .sign_self_with(&DomainSeparator::default(), &SecretKeyRef::new(&ONE_KEY));
+                result
+            }
+        }
+
+        impl EIP712Signing for TestEIP712Structure {
+            fn digest(&self) -> [u8; 32] {
+                [0u8; 32]
+            }
+
+            fn signature(&self) -> Signature {
+                self.signature
+            }
+        }
+
+        let mut test_struct = TestEIP712Structure::default();
+        let key = SecretKeyRef::from(&ONE_KEY);
+        test_struct.sign_self_with(&DomainSeparator::default(), &key);
+        assert_eq!(
+            test_struct.validate_signature(&DomainSeparator::default()),
+            Some(key.address())
+        );
     }
 }

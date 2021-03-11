@@ -157,7 +157,8 @@ impl Default for OrderCreation {
             partially_fillable: Default::default(),
             signature: Default::default(),
         };
-        result.sign_self_with(&DomainSeparator::default(), &SecretKeyRef::new(&ONE_KEY));
+        result.signature =
+            result.sign_self_with(&DomainSeparator::default(), &SecretKeyRef::new(&ONE_KEY));
         result
     }
 }
@@ -198,7 +199,8 @@ impl Default for OrderCancellation {
             order_uid: OrderUid::default(),
             signature: Default::default(),
         };
-        result.sign_self_with(&DomainSeparator::default(), &SecretKeyRef::new(&ONE_KEY));
+        result.signature =
+            result.sign_self_with(&DomainSeparator::default(), &SecretKeyRef::new(&ONE_KEY));
         result
     }
 }
@@ -226,10 +228,6 @@ impl EIP712Signing for OrderCreation {
     fn signature(&self) -> Signature {
         self.signature
     }
-
-    fn update_signature(&mut self, new_signature: Signature) {
-        self.signature = new_signature;
-    }
 }
 
 /// An order cancellation as provided to the orderbook by the frontend.
@@ -256,10 +254,6 @@ impl EIP712Signing for OrderCancellation {
 
     fn signature(&self) -> Signature {
         self.signature
-    }
-
-    fn update_signature(&mut self, new_signature: Signature) {
-        self.signature = new_signature
     }
 }
 
@@ -556,28 +550,6 @@ mod tests {
         let expected_owner = hex!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
         let owner = cancellation.validate_signature(&domain_separator).unwrap();
         assert_eq!(owner, expected_owner.into());
-    }
-
-    #[test]
-    fn order_cancellation_self_sign() {
-        let mut cancellation = OrderCancellation::default();
-        let key = SecretKeyRef::from(&ONE_KEY);
-        cancellation.sign_self_with(&DomainSeparator::default(), &key);
-        assert_eq!(
-            cancellation.validate_signature(&DomainSeparator::default()),
-            Some(key.address())
-        );
-    }
-
-    #[test]
-    fn sign_self() {
-        let mut order = OrderCreation::default();
-        let key = SecretKeyRef::from(&ONE_KEY);
-        order.sign_self_with(&DomainSeparator::default(), &key);
-        assert_eq!(
-            order.validate_signature(&DomainSeparator::default()),
-            Some(key.address())
-        );
     }
 
     #[test]
