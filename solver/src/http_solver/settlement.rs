@@ -4,14 +4,13 @@ use crate::{
     settlement::Settlement,
 };
 use anyhow::{anyhow, ensure, Result};
+use itertools::Itertools;
 use model::order::OrderKind;
 use primitive_types::{H160, U256};
 use std::{
     collections::{hash_map::Entry, HashMap},
     iter,
 };
-use itertools::Itertools;
-
 
 // To send an instance to the solver we need to identify tokens and orders through strings. This
 // struct combines the created model and a mapping of those identifiers to their original value.
@@ -133,7 +132,7 @@ fn match_prepared_and_settled_amms(
         .into_iter()
         .filter(|(_, settled)| !(settled.balance_update1 == 0 && settled.balance_update2 == 0))
         // .sorted_by_key(|su| {&su.1.exec_plan})  // How to make this work?
-        .sorted_by(|a, b| {a.1.exec_plan.cmp(&b.1.exec_plan)})
+        .sorted_by(|a, b| a.1.exec_plan.cmp(&b.1.exec_plan))
         .map(|(index, settled)| {
             let prepared = prepared_orders
                 .remove(index.as_str())
