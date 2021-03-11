@@ -112,11 +112,23 @@ impl Settlement {
     }
 
     // For now this computes the total surplus of all EOA trades.
-    pub fn objective_value(&self) -> U256 {
-        // TODO: in order to achieve a fair comparison between different solutions, we need to normalize the price
-        // vector as otherwise any price vector scaling by factor x would also scale the objective value by that factor
-        // without affecting the validity of the solution.
-        match self.trades.iter().fold(Some(U256::zero()), |acc, trade| {
+    // Objective is computed using external prices.
+    fn objective_value_v1(&self, external_prices: &HashMap<H160, U256>) -> Option<U256> {
+        self.trades.iter().fold(Some(U256::zero()), |acc, trade| {
+            let sell_token_external_price = external_prices
+                .get(&trade.order.sell_token)
+                .expect("Solution with trade but without price for sell token");
+            let buy_token_external_price = external_prices
+                .get(&trade.order.buy_token)
+                .expect("Solution with trade but without price for buy token");
+            acc?.checked_add(trade.surplus(*sell_token_external_price, *buy_token_external_price)?)
+        })
+    }
+
+    // For now this computes the total surplus of all EOA trades.
+    // Objective is computed using (scaled) found prices.
+    fn objective_value_v2(&self, external_prices: &HashMap<H160, U256>) -> Option<U256> {
+        let unscaled_obj = self.trades.iter().fold(Some(U256::zero()), |acc, trade| {
             let sell_token_price = self
                 .clearing_prices
                 .get(&trade.order.sell_token)
@@ -124,9 +136,25 @@ impl Settlement {
             let buy_token_price = self
                 .clearing_prices
                 .get(&trade.order.buy_token)
-                .expect("Solution with trade but without price for sell token");
+                .expect("Solution with trade but without price for buy token");
+
             acc?.checked_add(trade.surplus(*sell_token_price, *buy_token_price)?)
-        }) {
+        })?;
+
+        let nr_tokens = self.tokens().len();
+        let sum_of_prices = self
+            .clearing_prices()
+            .iter()
+            .fold(Some(U256::zero()), |acc, value| acc?.checked_add(*value))?;
+
+        unscaled_obj
+            .checked_mul(U256::from(nr_tokens))?
+            .checked_div(sum_of_prices)
+    }
+
+    // For now this computes the total surplus of all EOA trades.
+    pub fn objective_value(&self, external_prices: &HashMap<H160, U256>) -> U256 {
+        match self.objective_value_v1(external_prices) {
             Some(value) => value,
             None => {
                 tracing::error!("Overflow computing objective value for: {:?}", self);
