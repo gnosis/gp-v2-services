@@ -31,9 +31,7 @@ pub trait EIP712Signing {
         domain_separator: &DomainSeparator,
         key: &SecretKeyRef,
     ) -> Signature {
-        let message = self
-            .signature()
-            .signing_digest_message(domain_separator, &self.digest());
+        let message = Signature::signing_digest_message(domain_separator, &self.digest());
         // Unwrap because the only error is for invalid messages which we don't create.
         let signature = Key::sign(key, &message, None).unwrap();
         Signature {
@@ -67,7 +65,6 @@ impl Signature {
     }
 
     fn signing_digest_typed_data(
-        &self,
         domain_separator: &DomainSeparator,
         digest: &[u8; 32],
     ) -> [u8; 32] {
@@ -79,7 +76,6 @@ impl Signature {
     }
 
     pub fn signing_digest_message(
-        &self,
         domain_separator: &DomainSeparator,
         digest: &[u8; 32],
     ) -> [u8; 32] {
@@ -93,9 +89,9 @@ impl Signature {
     fn signing_digest(&self, domain_separator: &DomainSeparator, digest: &[u8; 32]) -> [u8; 32] {
         // This is fallback for wallets that don't support EIP712
         if self.v & 0x80 == 0 {
-            self.signing_digest_typed_data(domain_separator, digest)
+            Signature::signing_digest_typed_data(domain_separator, digest)
         } else {
-            self.signing_digest_message(domain_separator, digest)
+            Signature::signing_digest_message(domain_separator, digest)
         }
     }
 

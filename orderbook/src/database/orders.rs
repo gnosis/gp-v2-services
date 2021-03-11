@@ -78,7 +78,7 @@ impl Database {
             .map(|_| ())
     }
 
-    pub async fn cancel_order(&self, order: &Order) -> Result<()> {
+    pub async fn cancel_order(&self, order_uid: &OrderUid) -> Result<()> {
         // We do not overwrite previously cancelled orders,
         // but this query does allow the user to soft cancel
         // an order that has already been invalidated on-chain.
@@ -89,7 +89,7 @@ impl Database {
             AND invalidated IS NULL";
         sqlx::query(QUERY)
             .bind(Utc::now())
-            .bind(order.order_meta_data.uid.0.as_ref())
+            .bind(order_uid.0.as_ref())
             .execute(&self.pool)
             .await
             .context("cancel_order failed")

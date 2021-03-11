@@ -102,7 +102,9 @@ impl Orderbook {
             Some(signer) => {
                 if signer == order.order_meta_data.owner {
                     // order is already known to exist in DB at this point!
-                    self.database.cancel_order(&order).await?;
+                    self.database
+                        .cancel_order(&order.order_meta_data.uid)
+                        .await?;
                     Ok(OrderCancellationResult::Cancelled)
                 } else {
                     Ok(OrderCancellationResult::WrongOwner)
