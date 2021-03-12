@@ -7,11 +7,11 @@ use model::{
 };
 use orderbook::{
     account_balances::Web3BalanceFetcher, database::Database, event_updater::EventUpdater,
-    fee::MinFeeCalculator, orderbook::Orderbook, price_estimate::UniswapPriceEstimator,
+    fee::MinFeeCalculator, orderbook::Orderbook,
 };
 use secp256k1::SecretKey;
 use serde_json::json;
-use shared::uniswap_pool::PoolFetcher;
+use shared::{price_estimate::UniswapPriceEstimator, uniswap_pool::PoolFetcher};
 use solver::{liquidity::uniswap::UniswapLiquidity, orderbook::OrderBookApi};
 use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 use web3::signing::SecretKeyRef;
@@ -127,7 +127,7 @@ async fn test_with_ganache() {
     );
     let db = Database::new("postgresql://").unwrap();
     db.clear().await.unwrap();
-    let event_updater = EventUpdater::new(gp_settlement.clone(), db.clone());
+    let event_updater = EventUpdater::new(gp_settlement.clone(), db.clone(), None);
 
     let price_estimator = UniswapPriceEstimator::new(
         Box::new(PoolFetcher {
