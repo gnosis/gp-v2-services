@@ -132,12 +132,6 @@ impl UniswapPriceEstimator {
             |_, path, pools| estimate_spot_price(path, pools),
         )
         .await
-        /*.and_then(|(path, price)| {
-            Ok((
-                path,
-                price
-            ))
-        })*/
     }
 
     /*
@@ -150,13 +144,7 @@ impl UniswapPriceEstimator {
         denominator_token: H160,
     ) -> Result<Vec<BigRational>> {
         let res = join_all(tokens.iter().map(|token| {
-            self.best_execution(
-                *token,
-                denominator_token,
-                U256::zero(),
-                |_, path, pools| estimate_spot_price(path, pools),
-                |_, path, pools| estimate_spot_price(path, pools),
-            )
+            self.best_execution_spot_price(*token, denominator_token)
         }))
         .await;
         let res: Result<Vec<(Vec<H160>, BigRational)>, anyhow::Error> = res.into_iter().collect();
