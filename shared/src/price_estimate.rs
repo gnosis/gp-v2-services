@@ -61,7 +61,10 @@ impl PriceEstimating for UniswapPriceEstimator {
             return self
                 .best_execution_spot_price(sell_token, buy_token)
                 .await
-                .map(|(_, price)| price);
+                .and_then(|(_, price)| {
+                    big_rational_to_float(price)
+                        .ok_or_else(|| anyhow!("Cannot convert price ratio to float"))
+                });
         }
 
         match kind {
@@ -120,7 +123,7 @@ impl UniswapPriceEstimator {
         &self,
         sell_token: H160,
         buy_token: H160,
-    ) -> Result<(Vec<H160>, f64)> {
+    ) -> Result<(Vec<H160>, BigRational)> {
         self.best_execution(
             sell_token,
             buy_token,
@@ -129,13 +132,12 @@ impl UniswapPriceEstimator {
             |_, path, pools| estimate_spot_price(path, pools),
         )
         .await
-        .and_then(|(path, price)| {
+        /*.and_then(|(path, price)| {
             Ok((
                 path,
-                big_rational_to_float(price)
-                    .ok_or_else(|| anyhow!("Cannot convert price ratio to float"))?,
+                price
             ))
-        })
+        })*/
     }
 
     /*
