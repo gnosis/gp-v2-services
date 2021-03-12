@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 use contracts::GPv2Settlement;
 use futures::future::join_all;
 use gas_estimation::GasPriceEstimating;
+use orderbook::price_estimate::UniswapPriceEstimator;
 use std::{cmp::Reverse, time::Duration};
 use tracing::info;
 
@@ -20,6 +21,7 @@ pub struct Driver {
     settlement_contract: GPv2Settlement,
     orderbook: OrderBookApi,
     uniswap_liquidity: UniswapLiquidity,
+    price_estimator: UniswapPriceEstimator,
     solver: Vec<Box<dyn Solver>>,
     gas_price_estimator: Box<dyn GasPriceEstimating>,
     target_confirm_time: Duration,
@@ -31,6 +33,7 @@ impl Driver {
         settlement_contract: GPv2Settlement,
         uniswap_liquidity: UniswapLiquidity,
         orderbook: OrderBookApi,
+        price_estimator: UniswapPriceEstimator,
         solver: Vec<Box<dyn Solver>>,
         gas_price_estimator: Box<dyn GasPriceEstimating>,
         target_confirm_time: Duration,
@@ -40,6 +43,7 @@ impl Driver {
             settlement_contract,
             orderbook,
             uniswap_liquidity,
+            price_estimator,
             solver,
             gas_price_estimator,
             target_confirm_time,
@@ -78,6 +82,23 @@ impl Driver {
             .map(Liquidity::Limit)
             .chain(amms.into_iter().map(Liquidity::Amm))
             .collect();
+
+        /*
+        // Computes set of traded tokens (limit orders only).
+        let tokens = limit_orders
+            .into_iter()
+            .flat_map(|lo| vec![lo.sell_token, lo.buy_token].iter())
+            .sorted()
+            .dedup();
+
+        web3 = ...
+
+        let native_token = WETH9::deployed(&web3)
+            .await
+            .expect("couldn't load deployed native token");
+        let estimated_prices = self.price_estimator.best_execution_spot_prices(
+            tokens, native_token)
+        */
 
         let mut settlements: Vec<(&Box<dyn Solver>, Settlement)> =
             join_all(self.solver.iter().map(|solver| {

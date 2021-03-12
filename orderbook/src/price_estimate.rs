@@ -1,6 +1,8 @@
 use anyhow::{anyhow, Result};
 use ethcontract::{H160, U256};
+use futures::future::join_all;
 use model::{order::OrderKind, TokenPair};
+use num::BigRational;
 use shared::{
     conversions::big_rational_to_float,
     uniswap_pool::{Pool, PoolFetching},
@@ -136,6 +138,29 @@ impl UniswapPriceEstimator {
                     .ok_or_else(|| anyhow!("Cannot convert price ratio to float"))?,
             ))
         })
+    }
+
+    /*
+        Returns a vector of (rational) prices for the given tokens
+        denominated in denominator_token.
+    */
+    pub async fn best_execution_spot_prices(
+        &self,
+        tokens: &Vec<H160>,
+        denominator_token: H160,
+    ) -> Result<Vec<BigRational>> {
+        let res = join_all(tokens.iter().map(|token| {
+            self.best_execution(
+                *token,
+                denominator_token,
+                U256::zero(),
+                |_, path, pools| estimate_spot_price(path, pools),
+                |_, path, pools| estimate_spot_price(path, pools),
+            )
+        }))
+        .await;
+        let res: Result<Vec<(Vec<H160>, BigRational)>, anyhow::Error> = res.into_iter().collect();
+        res.map(|v| v.into_iter().map(|t| t.1).collect())
     }
 
     async fn best_execution<AmountFn, CompareFn, O, Amount>(
