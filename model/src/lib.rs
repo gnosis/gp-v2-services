@@ -26,11 +26,7 @@ pub trait EIP712Signing {
     fn digest(&self) -> [u8; 32];
     fn signature(&self) -> Signature;
 
-    fn sign_self_with(
-        &self,
-        domain_separator: &DomainSeparator,
-        key: &SecretKeyRef,
-    ) -> Signature {
+    fn sign_self_with(&self, domain_separator: &DomainSeparator, key: &SecretKeyRef) -> Signature {
         let message = Signature::signing_digest_message(domain_separator, &self.digest());
         // Unwrap because the only error is for invalid messages which we don't create.
         let signature = Key::sign(key, &message, None).unwrap();
