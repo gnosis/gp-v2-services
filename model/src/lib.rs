@@ -326,7 +326,7 @@ mod tests {
             }
         }
 
-        let mut test_struct = TestEIP712Structure::default();
+        let test_struct = TestEIP712Structure::default();
         let key = SecretKeyRef::from(&ONE_KEY);
         test_struct.sign_self_with(&DomainSeparator::default(), &key);
         assert_eq!(
