@@ -120,7 +120,9 @@ impl Driver {
             .collect();
 
         // Sort by key in descending order
-        settlements.sort_by_key(|(_, settlement)| Reverse(settlement.objective_value(/* estimated_prices*/)));
+        settlements.sort_by_key(|(_, settlement)| {
+            Reverse(settlement.objective_value(/* estimated_prices*/))
+        });
         for (solver, settlement) in settlements {
             info!("{} computed {:?}", solver, settlement);
             if settlement.trades.is_empty() {
