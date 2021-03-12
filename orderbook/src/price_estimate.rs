@@ -146,7 +146,7 @@ impl UniswapPriceEstimator {
     */
     pub async fn best_execution_spot_prices(
         &self,
-        tokens: &Vec<H160>,
+        tokens: &[H160],
         denominator_token: H160,
     ) -> Result<Vec<BigRational>> {
         let res = join_all(tokens.iter().map(|token| {
