@@ -1,7 +1,9 @@
 use crate::encoding;
 use anyhow::Result;
 use model::order::OrderCreation;
+use num::{BigRational, CheckedAdd, CheckedDiv, CheckedMul, CheckedSub, FromPrimitive};
 use primitive_types::{H160, U256};
+use shared::conversions::u256_to_big_rational;
 use std::{
     collections::HashMap,
     io::{Cursor, Write},
@@ -36,21 +38,25 @@ impl Trade {
     }
 
     // The difference between the minimum you were willing to buy/maximum you were willing to sell, and what you ended up buying/selling
-    pub fn surplus(&self, sell_token_price: U256, buy_token_price: U256) -> Option<U256> {
+    pub fn surplus(
+        &self,
+        sell_token_price: &BigRational,
+        buy_token_price: &BigRational,
+    ) -> Option<BigRational> {
         match self.order.kind {
             model::order::OrderKind::Buy => buy_order_surplus(
                 sell_token_price,
                 buy_token_price,
-                self.order.sell_amount,
-                self.order.buy_amount,
-                self.executed_amount,
+                &u256_to_big_rational(&self.order.sell_amount),
+                &u256_to_big_rational(&self.order.buy_amount),
+                &u256_to_big_rational(&self.executed_amount),
             ),
             model::order::OrderKind::Sell => sell_order_surplus(
                 sell_token_price,
                 buy_token_price,
-                self.order.sell_amount,
-                self.order.buy_amount,
-                self.executed_amount,
+                &u256_to_big_rational(&self.order.sell_amount),
+                &u256_to_big_rational(&self.order.buy_amount),
+                &u256_to_big_rational(&self.executed_amount),
             ),
         }
     }
@@ -111,51 +117,61 @@ impl Settlement {
         Ok(cursor.into_inner())
     }
 
-    fn total_surplus(self, prices: &HashMap<H160, U256>) -> Option<U256> {
-        self.trades.iter().fold(Some(U256::zero()), |acc, trade| {
+    fn total_surplus(self, prices: &HashMap<H160, BigRational>) -> Option<BigRational> {
+        self.trades.iter().fold(Some(num::zero()), |acc, trade| {
             let sell_token_external_price = prices
                 .get(&trade.order.sell_token)
                 .expect("Solution with trade but without price for sell token");
             let buy_token_external_price = prices
                 .get(&trade.order.buy_token)
                 .expect("Solution with trade but without price for buy token");
-            acc?.checked_add(trade.surplus(*sell_token_external_price, *buy_token_external_price)?)
+            acc?.checked_add(&trade.surplus(sell_token_external_price, buy_token_external_price)?)
         })
     }
 
     // For now this computes the total surplus of all EOA trades.
     // Objective is computed using external prices.
-    fn objective_value_v1(&self, external_prices: &HashMap<H160, U256>) -> Option<U256> {
+    fn objective_value_v1(
+        &self,
+        external_prices: &HashMap<H160, BigRational>,
+    ) -> Option<BigRational> {
         self.total_surplus(external_prices)
     }
 
     // For now this computes the total surplus of all EOA trades.
     // Objective is computed using (scaled) found prices.
-    fn objective_value_v2(&self, external_prices: &HashMap<H160, U256>) -> Option<U256> {
-        let unscaled_obj = self.total_surplus(&self.clearing_prices)?;
-
-        // scale = nr_tokens / (p_1/ep_1 + ... + p_n/ep_n)
-        let numerator = U256::from(self.tokens().len());
-        let denominator = self
+    fn objective_value_v2(
+        &self,
+        external_prices: &HashMap<H160, BigRational>,
+    ) -> Option<BigRational> {
+        let clearing_prices = self
             .clearing_prices
             .iter()
-            .fold(Some(U256::zero()), |acc, value| {
+            .map(|tp| (tp.0.clone(), u256_to_big_rational(tp.1)))
+            .collect();
+        let unscaled_obj = self.total_surplus(&clearing_prices)?;
+
+        // scale = nr_tokens / (p_1/ep_1 + ... + p_n/ep_n)
+        let numerator: BigRational = BigRational::from_usize(self.tokens().len()).unwrap();
+        let denominator: BigRational = clearing_prices
+            .iter()
+            .fold(Some(num::zero()), |acc: Option<BigRational>, value| {
                 let external_price = external_prices.get(value.0)?;
-                acc?.checked_add(value.1.checked_div(*external_price)?)
+                acc?.checked_add(&value.1.checked_div(external_price)?)
             })?;
 
         unscaled_obj
-            .checked_mul(numerator)?
-            .checked_div(denominator)
+            .checked_mul(&numerator)?
+            .checked_div(&denominator)
     }
 
     // For now this computes the total surplus of all EOA trades.
-    pub fn objective_value(&self, external_prices: &HashMap<H160, U256>) -> U256 {
-        match self.objective_value_v1(external_prices) {
+    pub fn objective_value(&self, external_prices: &HashMap<H160, BigRational>) -> BigRational {
+        match self.objective_value_v1(&external_prices) {
             Some(value) => value,
             None => {
                 tracing::error!("Overflow computing objective value for: {:?}", self);
-                U256::zero()
+                num::zero()
             }
         }
     }
@@ -164,31 +180,31 @@ impl Settlement {
 // The difference between what you were willing to sell (executed_amount * limit_price) converted into reference token (multiplied by buy_token_price)
 // and what you had to sell denominated in the reference token (executed_amount * buy_token_price)
 fn buy_order_surplus(
-    sell_token_price: U256,
-    buy_token_price: U256,
-    sell_amount_limit: U256,
-    buy_amount_limit: U256,
-    executed_amount: U256,
-) -> Option<U256> {
+    sell_token_price: &BigRational,
+    buy_token_price: &BigRational,
+    sell_amount_limit: &BigRational,
+    buy_amount_limit: &BigRational,
+    executed_amount: &BigRational,
+) -> Option<BigRational> {
     executed_amount
         .checked_mul(sell_amount_limit)?
         .checked_div(buy_amount_limit)?
         .checked_mul(sell_token_price)?
-        .checked_sub(executed_amount.checked_mul(buy_token_price)?)
+        .checked_sub(&executed_amount.checked_mul(buy_token_price)?)
 }
 
 // The difference of your proceeds denominated in the reference token (executed_sell_amount * sell_token_price)
 // and what you were minimally willing to receive in buy tokens (executed_sell_amount * limit_price)
 // converted to amount in reference token at the effective price (multiplied by buy_token_price)
 fn sell_order_surplus(
-    sell_token_price: U256,
-    buy_token_price: U256,
-    sell_amount_limit: U256,
-    buy_amount_limit: U256,
-    executed_amount: U256,
-) -> Option<U256> {
+    sell_token_price: &BigRational,
+    buy_token_price: &BigRational,
+    sell_amount_limit: &BigRational,
+    buy_amount_limit: &BigRational,
+    executed_amount: &BigRational,
+) -> Option<BigRational> {
     executed_amount.checked_mul(sell_token_price)?.checked_sub(
-        executed_amount
+        &executed_amount
             .checked_mul(buy_amount_limit)?
             .checked_div(sell_amount_limit)?
             .checked_mul(buy_token_price)?,
