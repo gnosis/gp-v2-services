@@ -50,8 +50,6 @@ impl DbOrderKind {
 }
 
 impl Database {
-    // TODO: Errors if order uid already exists. We might want to have different behavior like
-    // indicating this in the return value or simply allowing it to happen.
     pub async fn insert_order(&self, order: &Order) -> Result<(), InsertionError> {
         const FETCH: &str = "SELECT uid FROM orders WHERE uid = $1";
         const INSERT: &str = "\
