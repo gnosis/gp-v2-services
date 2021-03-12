@@ -27,7 +27,7 @@ pub trait EIP712Signing {
     fn signature(&self) -> Signature;
 
     fn sign_self_with(
-        &mut self,
+        &self,
         domain_separator: &DomainSeparator,
         key: &SecretKeyRef,
     ) -> Signature {
