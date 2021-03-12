@@ -1,8 +1,7 @@
 use contracts::WETH9;
 use ethcontract::{Account, PrivateKey};
-use orderbook::price_estimate::UniswapPriceEstimator;
 use reqwest::Url;
-use shared::uniswap_pool::PoolFetcher;
+use shared::{price_estimate::UniswapPriceEstimator, uniswap_pool::PoolFetcher};
 use solver::{driver::Driver, liquidity::uniswap::UniswapLiquidity, solver::SolverType};
 use std::iter::FromIterator as _;
 use std::{collections::HashSet, sync::Arc, time::Duration};

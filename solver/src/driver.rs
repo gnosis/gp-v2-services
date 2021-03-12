@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use contracts::GPv2Settlement;
 use futures::future::join_all;
 use gas_estimation::GasPriceEstimating;
-use orderbook::price_estimate::PriceEstimating;
+use shared::price_estimate::PriceEstimating;
 use std::{cmp::Reverse, sync::Arc, time::Duration};
 use tracing::info;
 

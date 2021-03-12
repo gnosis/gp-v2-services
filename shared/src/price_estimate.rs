@@ -1,16 +1,14 @@
+use crate::conversions::big_rational_to_float;
+use crate::uniswap_pool::{Pool, PoolFetching};
+use crate::uniswap_solver::{
+    estimate_buy_amount, estimate_sell_amount, estimate_spot_price, path_candidates,
+    token_path_to_pair_path,
+};
 use anyhow::{anyhow, Result};
 use ethcontract::{H160, U256};
 use futures::future::join_all;
 use model::{order::OrderKind, TokenPair};
 use num::BigRational;
-use shared::{
-    conversions::big_rational_to_float,
-    uniswap_pool::{Pool, PoolFetching},
-    uniswap_solver::{
-        estimate_buy_amount, estimate_sell_amount, estimate_spot_price, path_candidates,
-        token_path_to_pair_path,
-    },
-};
 use std::{
     cmp::Reverse,
     collections::{HashMap, HashSet},
@@ -210,7 +208,7 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
-    use shared::uniswap_pool::{Pool, PoolFetching};
+    use crate::uniswap_pool::{Pool, PoolFetching};
 
     struct FakePoolFetcher(Vec<Pool>);
     #[async_trait::async_trait]
