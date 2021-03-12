@@ -5,7 +5,7 @@ use reqwest::Url;
 use shared::uniswap_pool::PoolFetcher;
 use solver::{driver::Driver, liquidity::uniswap::UniswapLiquidity, solver::SolverType};
 use std::iter::FromIterator as _;
-use std::{collections::HashSet, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -101,14 +101,14 @@ async fn main() {
         web3.clone(),
         chain_id,
     );
-    let price_estimator = UniswapPriceEstimator::new(
+    let price_estimator = Arc::new(UniswapPriceEstimator::new(
         Box::new(PoolFetcher {
             factory: uniswap_factory,
             web3: web3.clone(),
             chain_id,
         }),
         base_tokens.clone(),
-    );
+    ));
     let solver = solver::solver::create(args.solvers, base_tokens);
     let gas_price_estimator = shared::gas_price_estimation::create_priority_estimator(
         &reqwest::Client::new(),

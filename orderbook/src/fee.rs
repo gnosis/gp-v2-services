@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use primitive_types::{H160, U256};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::{database::Database, price_estimate::PriceEstimating};
 use gas_estimation::GasPriceEstimating;
@@ -11,7 +11,7 @@ use gas_estimation::GasPriceEstimating;
 type Measurement = (U256, DateTime<Utc>);
 
 pub struct MinFeeCalculator {
-    price_estimator: Box<dyn PriceEstimating>,
+    price_estimator: Arc<dyn PriceEstimating>,
     gas_estimator: Box<dyn GasPriceEstimating>,
     native_token: H160,
     measurements: Box<dyn MinFeeStoring>,
@@ -41,7 +41,7 @@ const PERSISTED_VALIDITY_FOR_FEE_IN_SEC: i64 = 120;
 
 impl MinFeeCalculator {
     pub fn new(
-        price_estimator: Box<dyn PriceEstimating>,
+        price_estimator: Arc<dyn PriceEstimating>,
         gas_estimator: Box<dyn GasPriceEstimating>,
         native_token: H160,
         database: Database,
@@ -179,7 +179,7 @@ mod tests {
     impl MinFeeCalculator {
         fn new_for_test(
             gas_estimator: Box<dyn GasPriceEstimating>,
-            price_estimator: Box<dyn PriceEstimating>,
+            price_estimator: Arc<dyn PriceEstimating>,
             now: Box<dyn Fn() -> DateTime<Utc> + Send + Sync>,
         ) -> Self {
             Self {
@@ -198,7 +198,7 @@ mod tests {
         let time = Arc::new(Mutex::new(Utc::now()));
 
         let gas_estimator = Box::new(FakeGasEstimator(gas_price.clone()));
-        let price_estimator = Box::new(FakePriceEstimator(1.0));
+        let price_estimator = Arc::new(FakePriceEstimator(1.0));
         let time_copy = time.clone();
         let now = move || *time_copy.lock().unwrap();
 
@@ -225,7 +225,7 @@ mod tests {
         let gas_price = Arc::new(Mutex::new(100.0));
 
         let gas_estimator = Box::new(FakeGasEstimator(gas_price.clone()));
-        let price_estimator = Box::new(FakePriceEstimator(1.0));
+        let price_estimator = Arc::new(FakePriceEstimator(1.0));
 
         let fee_estimator =
             MinFeeCalculator::new_for_test(gas_estimator, price_estimator, Box::new(Utc::now));
