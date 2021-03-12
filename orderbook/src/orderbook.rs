@@ -1,7 +1,10 @@
 use crate::{
     account_balances::BalanceFetching, database::OrderFilter, event_updater::EventUpdater,
 };
-use crate::{database::Database, fee::MinFeeCalculator};
+use crate::{
+    database::{Database, InsertionError},
+    fee::MinFeeCalculator,
+};
 use anyhow::Result;
 use contracts::GPv2Settlement;
 use futures::{join, TryStreamExt};
@@ -71,14 +74,14 @@ impl Orderbook {
             Some(order) => order,
             None => return Ok(AddOrderResult::InvalidSignature),
         };
-        if self.get_order(order.order_meta_data.uid).await?.is_some() {
-            return Ok(AddOrderResult::DuplicatedOrder);
-        }
         self.balance_fetcher
             .register(order.order_meta_data.owner, order.order_creation.sell_token)
             .await;
-        self.database.insert_order(&order).await?;
-        Ok(AddOrderResult::Added(order.order_meta_data.uid))
+        match self.database.insert_order(&order).await {
+            Ok(()) => Ok(AddOrderResult::Added(order.order_meta_data.uid)),
+            Err(InsertionError::DuplicatedRecord) => Ok(AddOrderResult::DuplicatedOrder),
+            Err(InsertionError::DbError(err)) => Err(err.into()),
+        }
     }
 
     pub async fn remove_order(&self, _uid: &OrderUid) -> Result<RemoveOrderResult> {
@@ -108,14 +111,6 @@ impl Orderbook {
     pub async fn run_maintenance(&self, _settlement_contract: &GPv2Settlement) -> Result<()> {
         let update_events = async { self.event_updater.lock().await.update_events().await };
         join!(update_events, self.balance_fetcher.update()).0
-    }
-
-    async fn get_order(&self, uid: OrderUid) -> Result<Option<Order>> {
-        let filter = OrderFilter {
-            uid: Some(uid),
-            ..Default::default()
-        };
-        Ok(self.get_orders(&filter).await?.first().cloned())
     }
 }
 
