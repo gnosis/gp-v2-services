@@ -143,9 +143,11 @@ impl UniswapPriceEstimator {
         tokens: &[H160],
         denominator_token: H160,
     ) -> Result<Vec<BigRational>> {
-        let res = join_all(tokens.iter().map(|token| {
-            self.best_execution_spot_price(*token, denominator_token)
-        }))
+        let res = join_all(
+            tokens
+                .iter()
+                .map(|token| self.best_execution_spot_price(*token, denominator_token)),
+        )
         .await;
         let res: Result<Vec<(Vec<H160>, BigRational)>, anyhow::Error> = res.into_iter().collect();
         res.map(|v| v.into_iter().map(|t| t.1).collect())
