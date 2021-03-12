@@ -1,5 +1,6 @@
 use chrono::offset::Utc;
 use contracts::{GPv2Settlement, UniswapV2Factory, WETH9};
+use futures::StreamExt;
 use model::{order::OrderUid, DomainSeparator};
 use orderbook::{
     account_balances::Web3BalanceFetcher,

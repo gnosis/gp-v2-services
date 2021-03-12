@@ -1,5 +1,8 @@
 use contracts::{ERC20Mintable, UniswapV2Factory, UniswapV2Router02};
-use ethcontract::prelude::{Account, Address, Http, PrivateKey, Web3, U256};
+use ethcontract::{
+    futures::StreamExt,
+    prelude::{Account, Address, Http, PrivateKey, Web3, U256},
+};
 use hex_literal::hex;
 use model::{
     order::{OrderBuilder, OrderKind},
