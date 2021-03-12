@@ -98,6 +98,7 @@ impl Driver {
             .expect("couldn't load deployed native token");
         let estimated_prices = self.price_estimator.best_execution_spot_prices(
             tokens, native_token)
+        todo: turn estimated_prices into a map token->price
         */
 
         let mut settlements: Vec<(&Box<dyn Solver>, Settlement)> =
@@ -112,14 +113,14 @@ impl Driver {
                 info!(
                     "{} found solution with objective value: {}",
                     solver,
-                    settlement.objective_value()
+                    settlement.objective_value(/* estimated_prices*/)
                 );
                 Some((solver, settlement))
             })
             .collect();
 
         // Sort by key in descending order
-        settlements.sort_by_key(|(_, settlement)| Reverse(settlement.objective_value()));
+        settlements.sort_by_key(|(_, settlement)| Reverse(settlement.objective_value(/* estimated_prices*/)));
         for (solver, settlement) in settlements {
             info!("{} computed {:?}", solver, settlement);
             if settlement.trades.is_empty() {
