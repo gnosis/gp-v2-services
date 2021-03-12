@@ -85,24 +85,6 @@ impl Driver {
             .chain(amms.into_iter().map(Liquidity::Amm))
             .collect();
 
-        /*
-        // Computes set of traded tokens (limit orders only).
-        let tokens = limit_orders
-            .into_iter()
-            .flat_map(|lo| vec![lo.sell_token, lo.buy_token].iter())
-            .sorted()
-            .dedup();
-
-        web3 = ...
-
-        let native_token = WETH9::deployed(&web3)
-            .await
-            .expect("couldn't load deployed native token");
-        let estimated_prices = self.price_estimator.best_execution_spot_prices(
-            tokens, native_token)
-        todo: turn estimated_prices into a map token->price
-        */
-
         let mut settlements: Vec<(&Box<dyn Solver>, Settlement)> =
             join_all(self.solver.iter().map(|solver| {
                 let liquidity = liquidity.clone();
