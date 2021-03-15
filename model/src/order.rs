@@ -194,7 +194,6 @@ impl OrderCreation {
 }
 
 impl Default for OrderCancellation {
-    // Custom implementation to make sure the default order is valid
     fn default() -> Self {
         let mut result = Self {
             order_uid: OrderUid::default(),
