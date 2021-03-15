@@ -3,14 +3,13 @@ use crate::conversions::*;
 use anyhow::{anyhow, Context, Result};
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, Utc};
-use futures::{stream::TryStreamExt, FutureExt as _, Stream};
+use futures::{stream::TryStreamExt, Stream};
 use model::{
     order::{Order, OrderCreation, OrderKind, OrderMetaData, OrderUid},
     Signature,
 };
 use primitive_types::H160;
-use sqlx::{Connection, Executor};
-use std::convert::TryInto;
+use std::{borrow::Cow, convert::TryInto};
 
 /// Any default value means that this field is unfiltered.
 #[derive(Default)]
@@ -51,52 +50,37 @@ impl DbOrderKind {
 
 impl Database {
     pub async fn insert_order(&self, order: &Order) -> Result<(), InsertionError> {
-        const FETCH: &str = "SELECT uid FROM orders WHERE uid = $1";
-        const INSERT: &str = "\
+        const QUERY: &str = "\
             INSERT INTO orders (
                 uid, owner, creation_timestamp, sell_token, buy_token, sell_amount, buy_amount, \
                 valid_to, app_data, fee_amount, kind, partially_fillable, signature) \
             VALUES ( \
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);";
-        let order = order.clone();
-        self.pool
-            .acquire()
-            .await?
-            .transaction(move |transaction| {
-                async move {
-                    if transaction
-                        .fetch_optional(
-                            sqlx::query(FETCH).bind(order.order_meta_data.uid.0.as_ref()),
-                        )
-                        .await?
-                        .is_some()
-                    {
-                        return Err(InsertionError::DuplicatedRecord);
-                    }
-                    transaction
-                        .execute(
-                            sqlx::query(INSERT)
-                                .bind(order.order_meta_data.uid.0.as_ref())
-                                .bind(order.order_meta_data.owner.as_bytes())
-                                .bind(order.order_meta_data.creation_date)
-                                .bind(order.order_creation.sell_token.as_bytes())
-                                .bind(order.order_creation.buy_token.as_bytes())
-                                .bind(u256_to_big_decimal(&order.order_creation.sell_amount))
-                                .bind(u256_to_big_decimal(&order.order_creation.buy_amount))
-                                .bind(order.order_creation.valid_to)
-                                .bind(order.order_creation.app_data)
-                                .bind(u256_to_big_decimal(&order.order_creation.fee_amount))
-                                .bind(DbOrderKind::from(order.order_creation.kind))
-                                .bind(order.order_creation.partially_fillable)
-                                .bind(order.order_creation.signature.to_bytes().as_ref()),
-                        )
-                        .await
-                        .map_err(InsertionError::DbError)
-                }
-                .boxed()
-            })
+        sqlx::query(QUERY)
+            .bind(order.order_meta_data.uid.0.as_ref())
+            .bind(order.order_meta_data.owner.as_bytes())
+            .bind(order.order_meta_data.creation_date)
+            .bind(order.order_creation.sell_token.as_bytes())
+            .bind(order.order_creation.buy_token.as_bytes())
+            .bind(u256_to_big_decimal(&order.order_creation.sell_amount))
+            .bind(u256_to_big_decimal(&order.order_creation.buy_amount))
+            .bind(order.order_creation.valid_to)
+            .bind(order.order_creation.app_data)
+            .bind(u256_to_big_decimal(&order.order_creation.fee_amount))
+            .bind(DbOrderKind::from(order.order_creation.kind))
+            .bind(order.order_creation.partially_fillable)
+            .bind(order.order_creation.signature.to_bytes().as_ref())
+            .execute(&self.pool)
             .await
             .map(|_| ())
+            .map_err(|err| {
+                if let sqlx::Error::Database(db_err) = &err {
+                    if let Some(Cow::Borrowed("23505")) = db_err.code() {
+                        return InsertionError::DuplicatedRecord;
+                    }
+                }
+                InsertionError::DbError(err)
+            })
     }
 
     pub fn orders<'a>(&'a self, filter: &'a OrderFilter) -> impl Stream<Item = Result<Order>> + 'a {
