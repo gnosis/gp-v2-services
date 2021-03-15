@@ -497,7 +497,7 @@ mod tests {
     }
 
     #[test]
-    fn order_signature_recovery() {
+    fn order_builder_signature_recovery() {
         const PRIVATE_KEY: [u8; 32] =
             hex!("0000000000000000000000000000000000000000000000000000000000000001");
         let sk = SecretKey::from_slice(&PRIVATE_KEY).unwrap();

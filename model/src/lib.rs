@@ -94,7 +94,6 @@ impl Signature {
 
     pub fn validate(&self, domain_separator: &DomainSeparator, digest: &[u8; 32]) -> Option<H160> {
         let v = self.v & 0x1f;
-        // Does it make sense to include just order_uid here?
         let message = self.signing_digest(domain_separator, digest);
         let recovery = Recovery::new(message, v as u64, self.r, self.s);
         let (signature, recovery_id) = recovery.as_signature()?;
