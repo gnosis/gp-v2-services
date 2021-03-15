@@ -240,6 +240,41 @@ paths:
                 $ref: "#/components/schemas/FeeInformation"
         404:
           description: Token non-existent or not connected to native token
+  /api/v1/price/{baseToken}/{quoteToken}:
+    get:
+      description: |
+        The estimated price for selling an optionally specified amount of baseToken or buying that amount of quote token. Price is denominated in quote token.
+        E.g. the price for WETH/USDC (0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2/0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48) might be around 1800 USDC.
+      parameters:
+        - name: baseToken
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/Address"
+        - name: quoteToken
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/Address"
+        - name: amount
+          in: query
+          schema:
+            $ref: "#/components/schemas/TokenAmount"
+            default: "0"
+        - name: kind
+          in: query
+          schema:
+            $ref: "#/components/schemas/OrderType"
+            default: sell
+      responses:
+        200:
+          description: the price denominated in quote token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PriceEstimate"
+        404:
+          description: Token non-existent or no valid price found
 components:
   schemas:
     Address:
@@ -371,6 +406,18 @@ components:
         signature:
           description: "OrderCancellation signed by owner"
           $ref: "#/components/schemas/Signature"
+    PriceEstimate:
+      description: |
+        Provides the information about an estimated price.
+      type: object
+      properties:
+        price:
+          description: The estimated price
+          type: number
+          format: double
+        currency:
+          description: "The currency in which the price is given"
+          $ref: "#/components/schemas/Address"
     Trade:
       description: |
         Trade data such as executed amounts, fees, order id and block number.
@@ -431,11 +478,6 @@ components:
       properties:
         errorType:
           type: string
-          enum:
-            [
-                InvalidSignature,
-                WrongOwner,
-                OrderNotFound,
-            ]
+          enum: [InvalidSignature, WrongOwner, OrderNotFound]
         description:
           type: string
