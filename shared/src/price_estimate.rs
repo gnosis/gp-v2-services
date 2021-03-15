@@ -172,10 +172,9 @@ impl UniswapPriceEstimator {
         .await
     }
 
-    /*
-        Returns a vector of (rational) prices for the given tokens
-        denominated in denominator_token.
-    */
+    // Returns a vector of (rational) prices for the given tokens denominated 
+    // in denominator_token or an error in case there is an error computing any
+    // of the prices in the vector.
     pub async fn best_execution_spot_prices(
         &self,
         tokens: &[H160],
