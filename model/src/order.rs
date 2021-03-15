@@ -571,14 +571,12 @@ mod tests {
     }
 
     pub fn h160_from_public_key(key: PublicKey) -> H160 {
-        let hash = keccak256(
-            &key.serialize_uncompressed()[1..], /* cut '04' */
-        );
+        let hash = keccak256(&key.serialize_uncompressed()[1..] /* cut '04' */);
         H160::from_slice(&hash[12..])
     }
 
     #[test]
-    fn order_signature_recovery() {
+    fn order_builder_signature_recovery() {
         const PRIVATE_KEY: [u8; 32] =
             hex!("0000000000000000000000000000000000000000000000000000000000000001");
         let sk = SecretKey::from_slice(&PRIVATE_KEY).unwrap();
