@@ -110,7 +110,7 @@ impl OrderBuilder {
     pub fn sign_with(mut self, domain_separator: &DomainSeparator, key: SecretKeyRef) -> Self {
         self.0.order_meta_data.owner = key.address();
         self.0.order_meta_data.uid = self.0.order_creation.uid(&key.address());
-        self.0.order_creation.sign_self_with(domain_separator, &key);
+        self.0.order_creation.signature = self.0.order_creation.sign_self_with(domain_separator, &key);
         self
     }
 
