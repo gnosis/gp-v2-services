@@ -1,14 +1,13 @@
+use crate::conversions::big_rational_to_float;
+use crate::uniswap_pool::{Pool, PoolFetching};
+use crate::uniswap_solver::{
+    estimate_buy_amount, estimate_sell_amount, estimate_spot_price, path_candidates,
+    token_path_to_pair_path,
+};
 use anyhow::{anyhow, Result};
 use ethcontract::{H160, U256};
 use model::{order::OrderKind, TokenPair};
-use shared::{
-    conversions::big_rational_to_float,
-    uniswap_pool::{Pool, PoolFetching},
-    uniswap_solver::{
-        estimate_buy_amount, estimate_sell_amount, estimate_spot_price, path_candidates,
-        token_path_to_pair_path,
-    },
-};
+
 use std::{
     cmp::Reverse,
     collections::{HashMap, HashSet},
@@ -26,6 +25,15 @@ pub trait PriceEstimating: Send + Sync {
         amount: U256,
         kind: OrderKind,
     ) -> Result<f64>;
+
+    // Returns the expected gas cost for this given trade
+    async fn estimate_gas(
+        &self,
+        sell_token: H160,
+        buy_token: H160,
+        amount: U256,
+        kind: OrderKind,
+    ) -> Result<U256>;
 }
 
 pub struct UniswapPriceEstimator {
@@ -78,6 +86,35 @@ impl PriceEstimating for UniswapPriceEstimator {
                 Ok(amount.to_f64_lossy() / buy_amount.to_f64_lossy())
             }
         }
+    }
+
+    async fn estimate_gas(
+        &self,
+        sell_token: H160,
+        buy_token: H160,
+        amount: U256,
+        kind: OrderKind,
+    ) -> Result<U256> {
+        if sell_token == buy_token || amount.is_zero() {
+            return Ok(U256::zero());
+        }
+
+        let path = match kind {
+            OrderKind::Buy => {
+                self.best_execution_buy_order(sell_token, buy_token, amount)
+                    .await?
+                    .0
+            }
+            OrderKind::Sell => {
+                self.best_execution_sell_order(sell_token, buy_token, amount)
+                    .await?
+                    .0
+            }
+        };
+        let trades = path.len() - 1;
+        // This could be more accurate by actually simulating the settlement (since different tokens might have more or less expensive transfer costs)
+        // For the standard OZ token the cost is roughly 110k for a direct trade, 170k for a 1 hop trade, 230k for a 2 hop trade.
+        return Ok(U256::from(50_000) + 60_000 * trades);
     }
 }
 
@@ -185,7 +222,7 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
-    use shared::uniswap_pool::{Pool, PoolFetching};
+    use crate::uniswap_pool::{Pool, PoolFetching};
 
     struct FakePoolFetcher(Vec<Pool>);
     #[async_trait::async_trait]
@@ -329,5 +366,44 @@ mod tests {
             .estimate_price(token_a, token_b, 1.into(), OrderKind::Buy)
             .await
             .is_ok());
+    }
+
+    #[tokio::test]
+    async fn gas_estimate_returns_cost_of_best_path() {
+        let token_a = H160::from_low_u64_be(1);
+        let intermediate = H160::from_low_u64_be(2);
+        let token_b = H160::from_low_u64_be(3);
+
+        // Direct trade is better when selling token_b
+        let pools = vec![
+            Pool::uniswap(TokenPair::new(token_a, token_b).unwrap(), (1000, 1000)),
+            Pool::uniswap(TokenPair::new(token_a, intermediate).unwrap(), (900, 1000)),
+            Pool::uniswap(TokenPair::new(intermediate, token_b).unwrap(), (900, 1000)),
+        ];
+
+        let pool_fetcher = Box::new(FakePoolFetcher(pools));
+        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!(intermediate));
+
+        // Trade with intermediate hop
+        for kind in &[OrderKind::Sell, OrderKind::Buy] {
+            assert_eq!(
+                estimator
+                    .estimate_gas(token_a, token_b, 1.into(), *kind)
+                    .await
+                    .unwrap(),
+                170_000.into()
+            );
+        }
+
+        // Direct Trade
+        for kind in &[OrderKind::Sell, OrderKind::Buy] {
+            assert_eq!(
+                estimator
+                    .estimate_gas(token_b, token_a, 1.into(), *kind)
+                    .await
+                    .unwrap(),
+                110_000.into()
+            );
+        }
     }
 }
