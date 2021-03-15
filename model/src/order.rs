@@ -492,9 +492,7 @@ mod tests {
     }
 
     pub fn h160_from_public_key(key: PublicKey) -> H160 {
-        let hash = keccak256(
-            &key.serialize_uncompressed()[1..], /* cut '04' */
-        );
+        let hash = keccak256(&key.serialize_uncompressed()[1..] /* cut '04' */);
         H160::from_slice(&hash[12..])
     }
 
