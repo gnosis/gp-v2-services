@@ -128,8 +128,7 @@ impl Orderbook {
             min_valid_to: now_in_epoch_seconds(),
             exclude_fully_executed: true,
             exclude_invalidated: true,
-            // Irrelevant filter causing uniswap_trade_test to fail.
-            // exclude_insufficient_balance: true,
+            exclude_insufficient_balance: true,
             ..Default::default()
         };
         self.get_orders(&filter).await
