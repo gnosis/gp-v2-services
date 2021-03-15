@@ -218,6 +218,7 @@ mod tests {
 
     #[test]
     fn test_out_amount_with_slippage() {
+        assert_eq!(out_amount_with_slippage(0.into()), 0.into());
         assert_eq!(out_amount_with_slippage(100.into()), 99.into());
         assert_eq!(out_amount_with_slippage(10000.into()), 9990.into());
         assert_eq!(
