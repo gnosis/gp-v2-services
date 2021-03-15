@@ -264,7 +264,6 @@ impl EIP712Signing for OrderCancellation {
 #[serde(rename_all = "camelCase")]
 pub struct OrderMetaData {
     pub creation_date: DateTime<Utc>,
-    pub cancellation_date: Option<DateTime<Utc>>,
     #[serde(with = "h160_hexadecimal")]
     pub owner: H160,
     pub uid: OrderUid,
@@ -285,7 +284,6 @@ impl Default for OrderMetaData {
     fn default() -> Self {
         Self {
             creation_date: DateTime::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc),
-            cancellation_date: None,
             owner: Default::default(),
             uid: Default::default(),
             available_balance: Default::default(),
@@ -396,14 +394,13 @@ mod tests {
     use hex_literal::hex;
     use primitive_types::H256;
     use secp256k1::SecretKey;
-    use serde_json::{json, value::Value::Null};
+    use serde_json::json;
 
     #[test]
     fn deserialization_and_back() {
         let value = json!(
         {
             "creationDate": "1970-01-01T00:00:03Z",
-            "cancellationDate": Null,
             "owner": "0x0000000000000000000000000000000000000001",
             "uid": "0x1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
             "availableBalance": "100",
@@ -426,7 +423,6 @@ mod tests {
         let expected = Order {
             order_meta_data: OrderMetaData {
                 creation_date: DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(3, 0), Utc),
-                cancellation_date: None,
                 owner: H160::from_low_u64_be(1),
                 uid: OrderUid([17u8; 56]),
                 available_balance: Some(100.into()),
