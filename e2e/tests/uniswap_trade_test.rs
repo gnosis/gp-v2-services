@@ -7,11 +7,11 @@ use model::{
 };
 use orderbook::{
     account_balances::Web3BalanceFetcher, database::Database, event_updater::EventUpdater,
-    fee::MinFeeCalculator, orderbook::Orderbook, price_estimate::UniswapPriceEstimator,
+    fee::MinFeeCalculator, orderbook::Orderbook,
 };
 use secp256k1::SecretKey;
 use serde_json::json;
-use shared::uniswap_pool::PoolFetcher;
+use shared::{price_estimate::UniswapPriceEstimator, uniswap_pool::PoolFetcher};
 use solver::{liquidity::uniswap::UniswapLiquidity, orderbook::OrderBookApi};
 use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 use web3::signing::SecretKeyRef;
@@ -129,19 +129,20 @@ async fn test_with_ganache() {
     db.clear().await.unwrap();
     let event_updater = EventUpdater::new(gp_settlement.clone(), db.clone(), None);
 
-    let price_estimator = UniswapPriceEstimator::new(
+    let price_estimator = Arc::new(UniswapPriceEstimator::new(
         Box::new(PoolFetcher {
             factory: uniswap_factory.clone(),
             web3: web3.clone(),
             chain_id,
         }),
         HashSet::new(),
-    );
+    ));
     let fee_calculator = Arc::new(MinFeeCalculator::new(
-        Box::new(price_estimator),
+        price_estimator.clone(),
         Box::new(web3.clone()),
         token_a.address(),
         db.clone(),
+        1.0,
     ));
     let orderbook = Arc::new(Orderbook::new(
         domain_separator,
@@ -213,6 +214,7 @@ async fn test_with_ganache() {
         gp_settlement.clone(),
         uniswap_liquidity,
         create_orderbook_api(),
+        price_estimator,
         vec![Box::new(solver)],
         Box::new(web3),
         Duration::from_secs(1),
