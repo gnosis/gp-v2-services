@@ -52,6 +52,27 @@ pub trait PriceEstimating: Send + Sync {
                     .ok_or_else(|| anyhow!("Cannot convert price ratio to float"))
             })
     }
+
+    // Returns a vector of (rational) prices for the given tokens denominated
+    // in denominator_token or an error in case there is an error computing any
+    // of the prices in the vector.
+    async fn estimate_prices(
+        &self,
+        tokens: &[H160],
+        denominator_token: H160,
+    ) -> Result<Vec<BigRational>> {
+        join_all(tokens.iter().map(|token| async move {
+            if *token != denominator_token {
+                self.estimate_price(*token, denominator_token, U256::zero(), OrderKind::Buy)
+                    .await
+            } else {
+                Ok(num::one())
+            }
+        }))
+        .await
+        .into_iter()
+        .collect()
+    }
 }
 
 pub struct UniswapPriceEstimator {
@@ -190,28 +211,6 @@ impl UniswapPriceEstimator {
             |_, path, pools| estimate_spot_price(path, pools),
         )
         .await
-    }
-
-    // Returns a vector of (rational) prices for the given tokens denominated
-    // in denominator_token or an error in case there is an error computing any
-    // of the prices in the vector.
-    pub async fn best_execution_spot_prices(
-        &self,
-        tokens: &[H160],
-        denominator_token: H160,
-    ) -> Result<Vec<BigRational>> {
-        join_all(tokens.iter().map(|token| async move {
-            if *token != denominator_token {
-                self.best_execution_spot_price(*token, denominator_token)
-                    .await
-                    .map(|t| t.1)
-            } else {
-                Ok(BigRational::from_integer(1.into()))
-            }
-        }))
-        .await
-        .into_iter()
-        .collect()
     }
 
     async fn best_execution<AmountFn, CompareFn, O, Amount>(
@@ -354,7 +353,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn best_execution_spot_prices() {
+    async fn estimate_prices_with_zero_amount() {
         let token_a = H160::from_low_u64_be(1);
         let token_b = H160::from_low_u64_be(2);
         let token_c = H160::from_low_u64_be(3);
@@ -372,7 +371,7 @@ mod tests {
             UniswapPriceEstimator::new(pool_fetcher, hashset!(token_a, token_b, token_c));
 
         let res = estimator
-            .best_execution_spot_prices(&[token_a, token_b, token_c], token_c)
+            .estimate_prices(&[token_a, token_b, token_c], token_c)
             .await;
         assert!(res.is_ok());
         let prices = res.unwrap();
