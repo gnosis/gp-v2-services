@@ -1,4 +1,4 @@
-use crate::conversions::u256_to_big_int;
+use crate::conversions::U256Ext;
 use crate::uniswap_pool::{Pool, PoolFetching};
 use crate::uniswap_solver::{
     estimate_buy_amount, estimate_sell_amount, estimate_spot_price, path_candidates,
@@ -14,8 +14,6 @@ use std::{
     collections::{HashMap, HashSet},
 };
 const MAX_HOPS: usize = 2;
-
-// pub fn as_f64(r: &BigRational)
 
 #[async_trait::async_trait]
 pub trait PriceEstimating: Send + Sync {
@@ -116,18 +114,22 @@ impl PriceEstimating for UniswapPriceEstimator {
                     .best_execution_buy_order(sell_token, buy_token, amount)
                     .await?;
                 Ok(BigRational::new(
-                    u256_to_big_int(&sell_amount),
-                    u256_to_big_int(&amount),
+                    sell_amount.to_big_int(),
+                    amount.to_big_int(),
                 ))
             }
             OrderKind::Sell => {
                 let (_, buy_amount) = self
                     .best_execution_sell_order(sell_token, buy_token, amount)
                     .await?;
-                dbg!(buy_amount);
+                if buy_amount.is_zero() {
+                    return Err(anyhow!(
+                        "Attempt to create a rational with zero denominator."
+                    ));
+                }
                 Ok(BigRational::new(
-                    u256_to_big_int(&amount),
-                    u256_to_big_int(&buy_amount),
+                    amount.to_big_int(),
+                    buy_amount.to_big_int(),
                 ))
             }
         }

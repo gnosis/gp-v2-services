@@ -20,7 +20,7 @@ pub fn u256_to_big_rational(input: &U256) -> BigRational {
 
 // Convenience:
 
-trait U256Ext {
+pub trait U256Ext {
     fn to_big_int(&self) -> BigInt;
     fn to_big_rational(&self) -> BigRational;
 }
