@@ -1436,7 +1436,6 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "ethabi",
- "ethcontract",
  "hex",
  "hex-literal",
  "lazy_static",
