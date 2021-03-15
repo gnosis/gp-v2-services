@@ -13,7 +13,6 @@ use std::{
     cmp::Reverse,
     collections::{HashMap, HashSet},
 };
-
 const MAX_HOPS: usize = 2;
 
 #[async_trait::async_trait]
@@ -172,7 +171,7 @@ impl UniswapPriceEstimator {
         .await
     }
 
-    // Returns a vector of (rational) prices for the given tokens denominated 
+    // Returns a vector of (rational) prices for the given tokens denominated
     // in denominator_token or an error in case there is an error computing any
     // of the prices in the vector.
     pub async fn best_execution_spot_prices(
@@ -180,11 +179,14 @@ impl UniswapPriceEstimator {
         tokens: &[H160],
         denominator_token: H160,
     ) -> Result<Vec<BigRational>> {
-        let res = join_all(
-            tokens
-                .iter()
-                .map(|token| self.best_execution_spot_price(*token, denominator_token)),
-        )
+        let res = join_all(tokens.iter().map(|token| async move {
+            if *token != denominator_token {
+                self.best_execution_spot_price(*token, denominator_token)
+                    .await
+            } else {
+                Ok((vec![*token, *token], BigRational::from_integer(1.into())))
+            }
+        }))
         .await;
         let res: Result<Vec<(Vec<H160>, BigRational)>, anyhow::Error> = res.into_iter().collect();
         res.map(|v| v.into_iter().map(|t| t.1).collect())
@@ -327,6 +329,34 @@ mod tests {
             .estimate_price(token_a, token_b, 0.into(), OrderKind::Sell)
             .await
             .is_ok());
+    }
+
+    #[tokio::test]
+    async fn best_execution_spot_prices() {
+        let token_a = H160::from_low_u64_be(1);
+        let token_b = H160::from_low_u64_be(2);
+        let token_c = H160::from_low_u64_be(3);
+        let pool_ab = Pool::uniswap(
+            TokenPair::new(token_a, token_b).unwrap(),
+            (10u128.pow(30), 10u128.pow(29)),
+        );
+        let pool_bc = Pool::uniswap(
+            TokenPair::new(token_b, token_c).unwrap(),
+            (10u128.pow(30), 10u128.pow(29)),
+        );
+
+        let pool_fetcher = Box::new(FakePoolFetcher(vec![pool_ab, pool_bc]));
+        let estimator =
+            UniswapPriceEstimator::new(pool_fetcher, hashset!(token_a, token_b, token_c));
+
+        let res = estimator
+            .best_execution_spot_prices(&[token_a, token_b, token_c], token_c)
+            .await;
+        assert!(res.is_ok());
+        let prices = res.unwrap();
+        assert!(prices[0] == BigRational::new(1.into(), 100.into()));
+        assert!(prices[1] == BigRational::new(1.into(), 10.into()));
+        assert!(prices[2] == BigRational::new(1.into(), 1.into()));
     }
 
     #[tokio::test]
