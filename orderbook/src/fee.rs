@@ -18,6 +18,7 @@ pub struct MinFeeCalculator {
     native_token: H160,
     measurements: Box<dyn MinFeeStoring>,
     now: Box<dyn Fn() -> DateTime<Utc> + Send + Sync>,
+    discount_factor: f64,
 }
 
 #[async_trait::async_trait]
@@ -58,6 +59,7 @@ impl MinFeeCalculator {
         gas_estimator: Box<dyn GasPriceEstimating>,
         native_token: H160,
         database: Database,
+        discount_factor: f64,
     ) -> Self {
         Self {
             price_estimator,
@@ -65,12 +67,13 @@ impl MinFeeCalculator {
             native_token,
             measurements: Box::new(database),
             now: Box::new(Utc::now),
+            discount_factor,
         }
     }
 }
 
 impl MinFeeCalculator {
-    // Returns the minimum amount of fee required to accept an order selling the specified token
+    // Returns the minimum amount of fee required to accept an order selling the specified order
     // and an expiry date for the estimate.
     // Returns an error if there is some estimation error and Ok(None) if no information about the given
     // token exists
@@ -93,7 +96,10 @@ impl MinFeeCalculator {
             return Ok(Some((past_fee, official_valid_until)));
         }
 
-        let min_fee = match self.compute_min_fee(sell_token).await? {
+        let min_fee = match self
+            .compute_min_fee(sell_token, buy_token, amount, kind)
+            .await?
+        {
             Some(fee) => fee,
             None => return Ok(None),
         };
@@ -112,13 +118,30 @@ impl MinFeeCalculator {
         Ok(Some((min_fee, official_valid_until)))
     }
 
-    async fn compute_min_fee(&self, token: H160) -> Result<Option<U256>> {
+    async fn compute_min_fee(
+        &self,
+        sell_token: H160,
+        buy_token: Option<H160>,
+        amount: Option<U256>,
+        kind: Option<OrderKind>,
+    ) -> Result<Option<U256>> {
         let gas_price = self.gas_estimator.estimate().await?;
-        let fee_in_eth = gas_price * GAS_PER_ORDER;
+        let gas_amount =
+            if let (Some(buy_token), Some(amount), Some(kind)) = (buy_token, amount, kind) {
+                // We only apply the discount to the more sophisticated fee estimation, as the legacy one is already very favorable to the user in most cases
+                self.price_estimator
+                    .estimate_gas(sell_token, buy_token, amount, kind)
+                    .await?
+                    .to_f64_lossy()
+                    * self.discount_factor
+            } else {
+                GAS_PER_ORDER
+            };
+        let fee_in_eth = gas_price * gas_amount;
         let token_price = match self
             .price_estimator
             .estimate_price(
-                token,
+                sell_token,
                 self.native_token,
                 U256::from_f64_lossy(fee_in_eth),
                 model::order::OrderKind::Buy,
@@ -146,7 +169,7 @@ impl MinFeeCalculator {
                 return true;
             }
         }
-        if let Ok(Some(current_fee)) = self.compute_min_fee(sell_token).await {
+        if let Ok(Some(current_fee)) = self.compute_min_fee(sell_token, None, None, None).await {
             return fee >= current_fee;
         }
         false
@@ -232,6 +255,10 @@ mod tests {
         async fn estimate_price(&self, _: H160, _: H160, _: U256, _: OrderKind) -> Result<f64> {
             Ok(self.0)
         }
+
+        async fn estimate_gas(&self, _: H160, _: H160, _: U256, _: OrderKind) -> Result<U256> {
+            Ok(100_000.into())
+        }
     }
 
     struct FakeGasEstimator(Arc<Mutex<f64>>);
@@ -254,6 +281,7 @@ mod tests {
                 native_token: Default::default(),
                 measurements: Box::new(InMemoryFeeStore::default()),
                 now,
+                discount_factor: 1.0,
             }
         }
     }
