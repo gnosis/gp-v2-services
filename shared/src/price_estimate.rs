@@ -179,17 +179,18 @@ impl UniswapPriceEstimator {
         tokens: &[H160],
         denominator_token: H160,
     ) -> Result<Vec<BigRational>> {
-        let res = join_all(tokens.iter().map(|token| async move {
+        join_all(tokens.iter().map(|token| async move {
             if *token != denominator_token {
                 self.best_execution_spot_price(*token, denominator_token)
                     .await
+                    .map(|t| t.1)
             } else {
-                Ok((vec![*token, *token], BigRational::from_integer(1.into())))
+                Ok(BigRational::from_integer(1.into()))
             }
         }))
-        .await;
-        let res: Result<Vec<(Vec<H160>, BigRational)>, anyhow::Error> = res.into_iter().collect();
-        res.map(|v| v.into_iter().map(|t| t.1).collect())
+        .await
+        .into_iter()
+        .collect()
     }
 
     async fn best_execution<AmountFn, CompareFn, O, Amount>(
