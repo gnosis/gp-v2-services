@@ -111,7 +111,8 @@ impl OrderBuilder {
     pub fn sign_with(mut self, domain_separator: &DomainSeparator, key: SecretKeyRef) -> Self {
         self.0.order_meta_data.owner = key.address();
         self.0.order_meta_data.uid = self.0.order_creation.uid(&key.address());
-        self.0.order_creation.sign_self_with(domain_separator, &key);
+        self.0.order_creation.signature =
+            self.0.order_creation.sign_self_with(domain_separator, &key);
         self
     }
 
@@ -390,8 +391,11 @@ impl Default for OrderKind {
 mod tests {
     use super::*;
     use chrono::NaiveDateTime;
+    use ethcontract::prelude::Account;
+    use ethcontract::PrivateKey;
     use hex_literal::hex;
     use primitive_types::H256;
+    use secp256k1::SecretKey;
     use serde_json::{json, value::Value::Null};
 
     #[test]
@@ -569,5 +573,30 @@ mod tests {
         let expected = "0x01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000ff";
         assert_eq!(uid.to_string(), expected);
         assert_eq!(format!("{}", uid), expected);
+    }
+
+    #[test]
+    fn order_signature_recovery() {
+        const PRIVATE_KEY: [u8; 32] =
+            hex!("0000000000000000000000000000000000000000000000000000000000000001");
+        let public_key = Account::Offline(PrivateKey::from_raw(PRIVATE_KEY).unwrap(), None);
+        let order = OrderBuilder::default()
+            .with_sell_token(H160::zero())
+            .with_sell_amount(100.into())
+            .with_buy_token(H160::zero())
+            .with_buy_amount(80.into())
+            .with_valid_to(u32::max_value())
+            .with_kind(OrderKind::Sell)
+            .sign_with(
+                &DomainSeparator::default(),
+                SecretKeyRef::from(&SecretKey::from_slice(&PRIVATE_KEY).unwrap()),
+            )
+            .build();
+
+        let owner = order
+            .order_creation
+            .validate_signature(&DomainSeparator::default())
+            .unwrap();
+        assert_eq!(owner, public_key.address());
     }
 }

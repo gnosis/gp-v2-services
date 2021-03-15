@@ -6,6 +6,7 @@ edition = "2018"
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
 ethabi = "13.0"
+ethcontract = { version = "0.11",  default-features = false }
 hex = { version = "0.4", default-features = false }
 hex-literal = "0.3"
 lazy_static = "1.4"
