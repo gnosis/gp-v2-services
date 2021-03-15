@@ -1,14 +1,9 @@
-use crate::{
-    liquidity::{uniswap::UniswapLiquidity, Liquidity},
-    orderbook::OrderBookApi,
-    settlement::Settlement,
-    settlement_submission,
-    solver::Solver,
-};
+use crate::{liquidity::{LimitOrder, Liquidity, uniswap::UniswapLiquidity}, orderbook::OrderBookApi, settlement::Settlement, settlement_submission, solver::Solver};
 use anyhow::{Context, Result};
 use contracts::GPv2Settlement;
 use futures::future::join_all;
 use gas_estimation::GasPriceEstimating;
+use itertools::Itertools;
 use shared::price_estimate::PriceEstimating;
 use std::{cmp::Reverse, sync::Arc, time::Duration};
 use tracing::info;
@@ -61,6 +56,27 @@ impl Driver {
             }
             tokio::time::delay_for(self.settle_interval).await;
         }
+    }
+
+    async fn collect_prices(&self, limit_orders: &Vec<LimitOrder>) {
+        // Computes set of traded tokens (limit orders only).
+        let tokens = limit_orders
+            .into_iter()
+            .flat_map(|lo| vec![lo.sell_token, lo.buy_token].iter())
+            .sorted()
+            .dedup().collect();
+
+        //web3 = ...
+
+        /*let native_token = WETH9::deployed(&web3)
+            .await
+            .expect("couldn't load deployed native token");*/
+
+        let estimated_prices = self.price_estimator.best_execution_spot_prices(
+            tokens, native_token).await;
+        
+        
+
     }
 
     pub async fn single_run(&mut self) -> Result<()> {

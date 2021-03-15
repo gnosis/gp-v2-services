@@ -151,7 +151,7 @@ impl Settlement {
             .collect();
         let unscaled_obj = self.total_surplus(&clearing_prices)?;
 
-        // scale = nr_tokens / (p_1/ep_1 + ... + p_n/ep_n)
+        // scale = nr_tokens / (p_1/p'_1 + ... + p_n/p'_n)
         let numerator: BigRational = BigRational::from_usize(self.tokens().len()).unwrap();
         let denominator: BigRational =
             clearing_prices
