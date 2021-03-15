@@ -1,4 +1,4 @@
-use crate::conversions::big_rational_to_float;
+use crate::conversions::u256_to_big_int;
 use crate::uniswap_pool::{Pool, PoolFetching};
 use crate::uniswap_solver::{
     estimate_buy_amount, estimate_sell_amount, estimate_spot_price, path_candidates,
@@ -8,8 +8,7 @@ use anyhow::{anyhow, Result};
 use ethcontract::{H160, U256};
 use futures::future::join_all;
 use model::{order::OrderKind, TokenPair};
-use num::BigRational;
-use num::FromPrimitive;
+use num::{BigRational, ToPrimitive};
 use std::{
     cmp::Reverse,
     collections::{HashMap, HashSet},
@@ -45,13 +44,14 @@ pub trait PriceEstimating: Send + Sync {
         amount: U256,
         kind: OrderKind,
     ) -> Result<f64> {
-        self.estimate_price(sell_token, buy_token, amount, kind).await
-            .and_then(|(price)| {
-                    big_rational_to_float(price)
+        self.estimate_price(sell_token, buy_token, amount, kind)
+            .await
+            .and_then(|price| {
+                price
+                    .to_f64()
                     .ok_or_else(|| anyhow!("Cannot convert price ratio to float"))
             })
     }
-
 }
 
 pub struct UniswapPriceEstimator {
@@ -81,7 +81,7 @@ impl PriceEstimating for UniswapPriceEstimator {
         kind: OrderKind,
     ) -> Result<BigRational> {
         if sell_token == buy_token {
-            return Ok(BigRational::new(1.into(), 1.into()));
+            return Ok(num::one());
         }
         if amount.is_zero() {
             return self
@@ -89,19 +89,25 @@ impl PriceEstimating for UniswapPriceEstimator {
                 .await
                 .map(|(_, price)| price);
         }
-
         match kind {
             OrderKind::Buy => {
                 let (_, sell_amount) = self
                     .best_execution_buy_order(sell_token, buy_token, amount)
                     .await?;
-                Ok(BigRational::new(sell_amount, amount))
+                Ok(BigRational::new(
+                    u256_to_big_int(&sell_amount),
+                    u256_to_big_int(&amount),
+                ))
             }
             OrderKind::Sell => {
                 let (_, buy_amount) = self
                     .best_execution_sell_order(sell_token, buy_token, amount)
                     .await?;
-                Ok(amount.to_f64_lossy() / buy_amount.to_f64_lossy())
+                dbg!(buy_amount);
+                Ok(BigRational::new(
+                    u256_to_big_int(&amount),
+                    u256_to_big_int(&buy_amount),
+                ))
             }
         }
     }
@@ -279,21 +285,21 @@ mod tests {
 
         assert_approx_eq!(
             estimator
-                .estimate_price(token_a, token_a, U256::exp10(18), OrderKind::Buy)
+                .estimate_price_as_f64(token_a, token_a, U256::exp10(18), OrderKind::Buy)
                 .await
                 .unwrap(),
             1.0
         );
         assert_approx_eq!(
             estimator
-                .estimate_price(token_a, token_a, U256::exp10(18), OrderKind::Sell)
+                .estimate_price_as_f64(token_a, token_a, U256::exp10(18), OrderKind::Sell)
                 .await
                 .unwrap(),
             1.0
         );
         assert_approx_eq!(
             estimator
-                .estimate_price(token_a, token_b, U256::exp10(18), OrderKind::Buy)
+                .estimate_price_as_f64(token_a, token_b, U256::exp10(18), OrderKind::Buy)
                 .await
                 .unwrap(),
             10.03,
@@ -301,7 +307,7 @@ mod tests {
         );
         assert_approx_eq!(
             estimator
-                .estimate_price(token_a, token_b, U256::exp10(18), OrderKind::Sell)
+                .estimate_price_as_f64(token_a, token_b, U256::exp10(18), OrderKind::Sell)
                 .await
                 .unwrap(),
             10.03,
@@ -309,7 +315,7 @@ mod tests {
         );
         assert_approx_eq!(
             estimator
-                .estimate_price(token_b, token_a, U256::exp10(18), OrderKind::Buy)
+                .estimate_price_as_f64(token_b, token_a, U256::exp10(18), OrderKind::Buy)
                 .await
                 .unwrap(),
             0.1003,
@@ -317,7 +323,7 @@ mod tests {
         );
         assert_approx_eq!(
             estimator
-                .estimate_price(token_b, token_a, U256::exp10(18), OrderKind::Sell)
+                .estimate_price_as_f64(token_b, token_a, U256::exp10(18), OrderKind::Sell)
                 .await
                 .unwrap(),
             0.1003,
@@ -420,11 +426,11 @@ mod tests {
         let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!(base_token));
 
         assert!(estimator
-            .estimate_price(token_a, token_b, 1.into(), OrderKind::Sell)
+            .estimate_price(token_a, token_b, 100.into(), OrderKind::Sell)
             .await
             .is_ok());
         assert!(estimator
-            .estimate_price(token_a, token_b, 1.into(), OrderKind::Buy)
+            .estimate_price(token_a, token_b, 100.into(), OrderKind::Buy)
             .await
             .is_ok());
     }
