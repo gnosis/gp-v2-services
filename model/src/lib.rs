@@ -37,6 +37,7 @@ pub trait EIP712Signing {
         }
     }
 
+    // Returns public key (as an ethereum address - H160) if the signature is well-formed
     fn validate_signature(&self, domain_separator: &DomainSeparator) -> Option<H160> {
         self.signature().validate(domain_separator, &self.digest())
     }

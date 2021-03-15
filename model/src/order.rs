@@ -389,12 +389,11 @@ impl Default for OrderKind {
 mod tests {
     use super::*;
     use chrono::NaiveDateTime;
-    use ethcontract::prelude::Account;
-    use ethcontract::PrivateKey;
     use hex_literal::hex;
     use primitive_types::H256;
-    use secp256k1::SecretKey;
+    use secp256k1::{PublicKey, Secp256k1, SecretKey};
     use serde_json::json;
+    use web3::signing::keccak256;
 
     #[test]
     fn deserialization_and_back() {
@@ -571,11 +570,19 @@ mod tests {
         assert_eq!(format!("{}", uid), expected);
     }
 
+    pub fn h160_from_public_key(key: PublicKey) -> H160 {
+        let hash = keccak256(
+            &key.serialize_uncompressed()[1..], /* cut '04' */
+        );
+        H160::from_slice(&hash[12..])
+    }
+
     #[test]
     fn order_signature_recovery() {
         const PRIVATE_KEY: [u8; 32] =
             hex!("0000000000000000000000000000000000000000000000000000000000000001");
-        let public_key = Account::Offline(PrivateKey::from_raw(PRIVATE_KEY).unwrap(), None);
+        let sk = SecretKey::from_slice(&PRIVATE_KEY).unwrap();
+        let public_key = PublicKey::from_secret_key(&Secp256k1::signing_only(), &sk);
         let order = OrderBuilder::default()
             .with_sell_token(H160::zero())
             .with_sell_amount(100.into())
@@ -583,16 +590,14 @@ mod tests {
             .with_buy_amount(80.into())
             .with_valid_to(u32::max_value())
             .with_kind(OrderKind::Sell)
-            .sign_with(
-                &DomainSeparator::default(),
-                SecretKeyRef::from(&SecretKey::from_slice(&PRIVATE_KEY).unwrap()),
-            )
+            .sign_with(&DomainSeparator::default(), SecretKeyRef::from(&sk))
             .build();
 
         let owner = order
             .order_creation
             .validate_signature(&DomainSeparator::default())
             .unwrap();
-        assert_eq!(owner, public_key.address());
+
+        assert_eq!(owner, h160_from_public_key(public_key));
     }
 }
