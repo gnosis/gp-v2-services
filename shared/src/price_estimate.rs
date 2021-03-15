@@ -9,11 +9,14 @@ use ethcontract::{H160, U256};
 use futures::future::join_all;
 use model::{order::OrderKind, TokenPair};
 use num::BigRational;
+use num::FromPrimitive;
 use std::{
     cmp::Reverse,
     collections::{HashMap, HashSet},
 };
 const MAX_HOPS: usize = 2;
+
+// pub fn as_f64(r: &BigRational)
 
 #[async_trait::async_trait]
 pub trait PriceEstimating: Send + Sync {
@@ -24,7 +27,7 @@ pub trait PriceEstimating: Send + Sync {
         buy_token: H160,
         amount: U256,
         kind: OrderKind,
-    ) -> Result<f64>;
+    ) -> Result<BigRational>;
 
     // Returns the expected gas cost for this given trade
     async fn estimate_gas(
@@ -34,6 +37,21 @@ pub trait PriceEstimating: Send + Sync {
         amount: U256,
         kind: OrderKind,
     ) -> Result<U256>;
+
+    async fn estimate_price_as_f64(
+        &self,
+        sell_token: H160,
+        buy_token: H160,
+        amount: U256,
+        kind: OrderKind,
+    ) -> Result<f64> {
+        self.estimate_price(sell_token, buy_token, amount, kind).await
+            .and_then(|(price)| {
+                    big_rational_to_float(price)
+                    .ok_or_else(|| anyhow!("Cannot convert price ratio to float"))
+            })
+    }
+
 }
 
 pub struct UniswapPriceEstimator {
@@ -61,18 +79,15 @@ impl PriceEstimating for UniswapPriceEstimator {
         buy_token: H160,
         amount: U256,
         kind: OrderKind,
-    ) -> Result<f64> {
+    ) -> Result<BigRational> {
         if sell_token == buy_token {
-            return Ok(1.0);
+            return Ok(BigRational::new(1.into(), 1.into()));
         }
         if amount.is_zero() {
             return self
                 .best_execution_spot_price(sell_token, buy_token)
                 .await
-                .and_then(|(_, price)| {
-                    big_rational_to_float(price)
-                        .ok_or_else(|| anyhow!("Cannot convert price ratio to float"))
-                });
+                .map(|(_, price)| price);
         }
 
         match kind {
@@ -80,7 +95,7 @@ impl PriceEstimating for UniswapPriceEstimator {
                 let (_, sell_amount) = self
                     .best_execution_buy_order(sell_token, buy_token, amount)
                     .await?;
-                Ok(sell_amount.to_f64_lossy() / amount.to_f64_lossy())
+                Ok(BigRational::new(sell_amount, amount))
             }
             OrderKind::Sell => {
                 let (_, buy_amount) = self
