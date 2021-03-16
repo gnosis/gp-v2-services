@@ -141,6 +141,7 @@ impl Inner {
             settlement: self.gpv2_settlement.clone(),
             set_allowance,
             amount_in: input.1,
+            // Apply fixed slippage tolerance in case balances change between solution finding and mining
             amount_out_min: out_amount_with_slippage(output.1),
             token_in: input.0,
             token_out: output.0,
@@ -149,6 +150,7 @@ impl Inner {
 }
 
 impl AmmSettlementHandling for Inner {
+    // Creates the required interaction to convert the given input into output. Applies 0.1% slippage tolerance to the output.
     fn settle(&self, input: (H160, U256), output: (H160, U256)) -> Vec<Box<dyn Interaction>> {
         vec![Box::new(self._settle(input, output))]
     }
