@@ -323,7 +323,7 @@ mod tests {
 
         // Cancel again and verify that cancellation timestamp was not changed.
         let irrelevant_time =
-            DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(1234567890, 1), Utc);
+            DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(1234567890, 1_000_000_000), Utc);
 
         assert_ne!(
             irrelevant_time, cancellation_time,
