@@ -4,7 +4,7 @@ use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use model::order::OrderKind;
 use primitive_types::{H160, U256};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::database::Database;
 use gas_estimation::GasPriceEstimating;
@@ -13,11 +13,12 @@ use shared::price_estimate::PriceEstimating;
 type Measurement = (U256, DateTime<Utc>);
 
 pub struct MinFeeCalculator {
-    price_estimator: Box<dyn PriceEstimating>,
+    price_estimator: Arc<dyn PriceEstimating>,
     gas_estimator: Box<dyn GasPriceEstimating>,
     native_token: H160,
     measurements: Box<dyn MinFeeStoring>,
     now: Box<dyn Fn() -> DateTime<Utc> + Send + Sync>,
+    discount_factor: f64,
 }
 
 #[async_trait::async_trait]
@@ -54,10 +55,11 @@ const PERSISTED_VALIDITY_FOR_FEE_IN_SEC: i64 = 120;
 
 impl MinFeeCalculator {
     pub fn new(
-        price_estimator: Box<dyn PriceEstimating>,
+        price_estimator: Arc<dyn PriceEstimating>,
         gas_estimator: Box<dyn GasPriceEstimating>,
         native_token: H160,
         database: Database,
+        discount_factor: f64,
     ) -> Self {
         Self {
             price_estimator,
@@ -65,6 +67,7 @@ impl MinFeeCalculator {
             native_token,
             measurements: Box::new(database),
             now: Box::new(Utc::now),
+            discount_factor,
         }
     }
 }
@@ -125,10 +128,12 @@ impl MinFeeCalculator {
         let gas_price = self.gas_estimator.estimate().await?;
         let gas_amount =
             if let (Some(buy_token), Some(amount), Some(kind)) = (buy_token, amount, kind) {
+                // We only apply the discount to the more sophisticated fee estimation, as the legacy one is already very favorable to the user in most cases
                 self.price_estimator
                     .estimate_gas(sell_token, buy_token, amount, kind)
                     .await?
                     .to_f64_lossy()
+                    * self.discount_factor
             } else {
                 GAS_PER_ORDER
             };
@@ -267,7 +272,7 @@ mod tests {
     impl MinFeeCalculator {
         fn new_for_test(
             gas_estimator: Box<dyn GasPriceEstimating>,
-            price_estimator: Box<dyn PriceEstimating>,
+            price_estimator: Arc<dyn PriceEstimating>,
             now: Box<dyn Fn() -> DateTime<Utc> + Send + Sync>,
         ) -> Self {
             Self {
@@ -276,6 +281,7 @@ mod tests {
                 native_token: Default::default(),
                 measurements: Box::new(InMemoryFeeStore::default()),
                 now,
+                discount_factor: 1.0,
             }
         }
     }
@@ -286,7 +292,7 @@ mod tests {
         let time = Arc::new(Mutex::new(Utc::now()));
 
         let gas_estimator = Box::new(FakeGasEstimator(gas_price.clone()));
-        let price_estimator = Box::new(FakePriceEstimator(1.0));
+        let price_estimator = Arc::new(FakePriceEstimator(1.0));
         let time_copy = time.clone();
         let now = move || *time_copy.lock().unwrap();
 
@@ -317,7 +323,7 @@ mod tests {
         let gas_price = Arc::new(Mutex::new(100.0));
 
         let gas_estimator = Box::new(FakeGasEstimator(gas_price.clone()));
-        let price_estimator = Box::new(FakePriceEstimator(1.0));
+        let price_estimator = Arc::new(FakePriceEstimator(1.0));
 
         let fee_estimator =
             MinFeeCalculator::new_for_test(gas_estimator, price_estimator, Box::new(Utc::now));
