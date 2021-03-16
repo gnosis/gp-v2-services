@@ -1,3 +1,4 @@
+mod cancel_order;
 mod create_order;
 mod get_fee_info;
 mod get_order_by_uid;

@@ -285,6 +285,11 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_cancel_order() {
+        #[derive(sqlx::FromRow, Debug, PartialEq)]
+        struct CancellationQueryRow {
+            cancellation_timestamp: DateTime<Utc>,
+        }
+
         let db = Database::new("postgresql://").unwrap();
         db.clear().await.unwrap();
         let filter = OrderFilter::default();
@@ -305,8 +310,16 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(db_orders[0].order_meta_data.invalidated, true);
-        // TODO - cancel twice and verify that first cancellation date isn't over written
-        // This will require querying the DB for the cancellation_date.
+
+        let query = "SELECT cancellation_timestamp FROM orders;";
+        let first_cancellation: CancellationQueryRow =
+            sqlx::query_as(query).fetch_one(&db.pool).await.unwrap();
+
+        // Cancel again and verify that cancellation timestamp was not changed.
+        db.cancel_order(&order.order_meta_data.uid).await.unwrap();
+        let second_cancellation: CancellationQueryRow =
+            sqlx::query_as(query).fetch_one(&db.pool).await.unwrap();
+        assert_eq!(first_cancellation, second_cancellation);
     }
 
     #[tokio::test]
