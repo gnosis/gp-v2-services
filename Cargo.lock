@@ -1679,6 +1679,7 @@ dependencies = [
  "maplit",
  "mockall",
  "model",
+ "num",
  "num-bigint 0.3.2",
  "primitive-types",
  "reqwest",
@@ -2414,6 +2415,7 @@ dependencies = [
  "mockall",
  "model",
  "num",
+ "orderbook",
  "primitive-types",
  "reqwest",
  "serde",
@@ -2849,9 +2851,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.2.16"
+version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ab8966ac3ca27126141f7999361cc97dd6fb4b71da04c02044fa9045d98bb96"
+checksum = "705096c6f83bf68ea5d357a6aa01829ddbdac531b357b45abeca842938085baa"
 dependencies = [
  "ansi_term 0.12.1",
  "chrono",
