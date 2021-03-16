@@ -191,8 +191,8 @@ fn buy_order_surplus(
         .checked_div(buy_amount_limit)?
         .checked_mul(sell_token_price)?
         .checked_sub(&executed_amount.checked_mul(buy_token_price)?)?;
-    // Shouldn we simply return 0 when the order fails to satisfy the limit price,
-    // or return None as before when we couldn't distinguish between this case from some numerical issue.
+    // Should we simply return 0 when the order fails to satisfy the limit price,
+    // or return None as before when we couldn't distinguish between this case from some numerical issue?
     if res.is_negative() {
         None
     } else {

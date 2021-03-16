@@ -10,6 +10,7 @@ use contracts::GPv2Settlement;
 use futures::future::join_all;
 use gas_estimation::GasPriceEstimating;
 use itertools::Itertools;
+use maplit::hashmap;
 use num::BigRational;
 use primitive_types::H160;
 use shared::price_estimate::PriceEstimating;
@@ -72,6 +73,9 @@ impl Driver {
         &self,
         limit_orders: &[LimitOrder],
     ) -> Result<HashMap<H160, BigRational>> {
+        if limit_orders.is_empty() {
+            return Ok(hashmap![]);
+        }
         // Computes set of traded tokens (limit orders only).
         let tokens: Vec<H160> = limit_orders
             .iter()
