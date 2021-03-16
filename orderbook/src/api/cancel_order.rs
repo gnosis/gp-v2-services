@@ -22,7 +22,7 @@ pub fn cancel_order_request(
 pub fn cancel_order_response(result: Result<OrderCancellationResult>) -> impl Reply {
     let (body, status_code) = match result {
         Ok(OrderCancellationResult::Cancelled) => {
-            (warp::reply::json(&"Cancelled"), StatusCode::ACCEPTED)
+            (warp::reply::json(&"Cancelled"), StatusCode::OK)
         }
         Ok(OrderCancellationResult::InvalidSignature) => (
             super::error("InvalidSignature", "Likely malformed signature"),
@@ -30,14 +30,14 @@ pub fn cancel_order_response(result: Result<OrderCancellationResult>) -> impl Re
         ),
         Ok(OrderCancellationResult::OrderNotFound) => (
             super::error("OrderNotFound", "order not located in database"),
-            StatusCode::BAD_REQUEST,
+            StatusCode::NOT_FOUND,
         ),
         Ok(OrderCancellationResult::WrongOwner) => (
             super::error(
                 "WrongOwner",
                 "Signature recovery's owner doesn't match order's",
             ),
-            StatusCode::BAD_REQUEST,
+            StatusCode::UNAUTHORIZED,
         ),
         Err(_) => (super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
     };
