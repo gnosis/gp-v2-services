@@ -6,7 +6,6 @@ mod trades;
 use anyhow::Result;
 use sqlx::PgPool;
 
-use chrono::{DateTime, Utc};
 pub use events::*;
 pub use orders::OrderFilter;
 pub use trades::TradeFilter;
@@ -40,10 +39,6 @@ impl Database {
         Ok(Self {
             pool: PgPool::connect_lazy(uri)?,
         })
-    }
-
-    pub async fn now() -> DateTime<Utc> {
-        Utc::now()
     }
 
     /// Delete all data in the database. Only used by tests.

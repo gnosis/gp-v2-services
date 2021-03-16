@@ -304,11 +304,11 @@ mod tests {
             .unwrap();
         assert_eq!(db_orders[0].order_meta_data.invalidated, false);
 
-        let cancellation_time = DateTime::<Utc>::from_utc(
-            NaiveDateTime::from_timestamp(1234567890, 0),
-            Utc,
-        );
-        db.cancel_order(&order.order_meta_data.uid, cancellation_time).await.unwrap();
+        let cancellation_time =
+            DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(1234567890, 0), Utc);
+        db.cancel_order(&order.order_meta_data.uid, cancellation_time)
+            .await
+            .unwrap();
         let db_orders = db
             .orders(&filter)
             .try_collect::<Vec<Order>>()
@@ -322,14 +322,17 @@ mod tests {
         assert_eq!(cancellation_time, first_cancellation.cancellation_timestamp);
 
         // Cancel again and verify that cancellation timestamp was not changed.
-        let irrelevant_time = DateTime::<Utc>::from_utc(
-            NaiveDateTime::from_timestamp(1234567890, 1),
-            Utc,
+        let irrelevant_time =
+            DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(1234567890, 1), Utc);
+
+        assert_ne!(
+            irrelevant_time, cancellation_time,
+            "Expected cancellation times to be different."
         );
 
-        assert_ne!(irrelevant_time, cancellation_time, "Expected cancellation times to be different.");
-
-        db.cancel_order(&order.order_meta_data.uid, irrelevant_time).await.unwrap();
+        db.cancel_order(&order.order_meta_data.uid, irrelevant_time)
+            .await
+            .unwrap();
         let second_cancellation: CancellationQueryRow =
             sqlx::query_as(query).fetch_one(&db.pool).await.unwrap();
         assert_eq!(first_cancellation, second_cancellation);

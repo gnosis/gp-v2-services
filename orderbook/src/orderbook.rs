@@ -6,6 +6,7 @@ use crate::{
     fee::MinFeeCalculator,
 };
 use anyhow::Result;
+use chrono::Utc;
 use contracts::GPv2Settlement;
 use futures::{join, TryStreamExt};
 use model::order::OrderCancellation;
@@ -16,7 +17,6 @@ use model::{
 use shared::time::now_in_epoch_seconds;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use chrono::Utc;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum AddOrderResult {
