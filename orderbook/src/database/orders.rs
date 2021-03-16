@@ -93,7 +93,7 @@ impl Database {
             WHERE uid = $2\
             AND cancellation_timestamp IS NULL;";
         sqlx::query(QUERY)
-            .bind(Utc::now())
+            .bind(Database::now().await)
             .bind(order_uid.0.as_ref())
             .execute(&self.pool)
             .await
