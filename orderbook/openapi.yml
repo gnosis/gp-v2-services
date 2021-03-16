@@ -240,11 +240,11 @@ paths:
                 $ref: "#/components/schemas/FeeInformation"
         404:
           description: Token non-existent or not connected to native token
-  /api/v1/price/{baseToken}/{quoteToken}:
+  /api/v1/markets/{baseToken}-{quoteToken}/price:
     get:
       description: |
         The estimated price for selling an optionally specified amount of baseToken or buying that amount of quote token. Price is denominated in quote token.
-        E.g. the price for WETH/USDC (0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2/0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48) might be around 1800 USDC.
+        E.g. the price for WETH-USDC (0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48) might be around 1800 USDC.
       parameters:
         - name: baseToken
           in: path
