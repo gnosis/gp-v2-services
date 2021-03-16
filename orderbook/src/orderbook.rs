@@ -16,6 +16,7 @@ use model::{
 use shared::time::now_in_epoch_seconds;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use chrono::Utc;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum AddOrderResult {
@@ -109,7 +110,7 @@ impl Orderbook {
                 if signer == order.order_meta_data.owner {
                     // order is already known to exist in DB at this point!
                     self.database
-                        .cancel_order(&order.order_meta_data.uid)
+                        .cancel_order(&order.order_meta_data.uid, Utc::now())
                         .await?;
                     Ok(OrderCancellationResult::Cancelled)
                 } else {
