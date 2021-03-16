@@ -1,10 +1,19 @@
-use crate::{liquidity::{LimitOrder, Liquidity, uniswap::UniswapLiquidity}, orderbook::OrderBookApi, settlement::Settlement, settlement_submission, solver::Solver};
+use crate::{
+    liquidity::{uniswap::UniswapLiquidity, LimitOrder, Liquidity},
+    orderbook::OrderBookApi,
+    settlement::Settlement,
+    settlement_submission,
+    solver::Solver,
+};
 use anyhow::{Context, Result};
 use contracts::GPv2Settlement;
 use futures::future::join_all;
 use gas_estimation::GasPriceEstimating;
 use itertools::Itertools;
+use num::BigRational;
+use primitive_types::H160;
 use shared::price_estimate::PriceEstimating;
+use std::collections::HashMap;
 use std::{cmp::Reverse, sync::Arc, time::Duration};
 use tracing::info;
 
@@ -58,25 +67,30 @@ impl Driver {
         }
     }
 
-    async fn collect_prices(&self, limit_orders: &Vec<LimitOrder>) {
+    // Should this go here or on price_estimate.rs?
+    async fn collect_estimated_prices(
+        &self,
+        limit_orders: &[LimitOrder],
+    ) -> Result<HashMap<H160, BigRational>> {
         // Computes set of traded tokens (limit orders only).
-        let tokens = limit_orders
-            .into_iter()
-            .flat_map(|lo| vec![lo.sell_token, lo.buy_token].iter())
+        let tokens: Vec<H160> = limit_orders
+            .iter()
+            .flat_map(|lo| vec![lo.sell_token, lo.buy_token].into_iter())
             .sorted()
-            .dedup().collect();
+            .dedup()
+            .collect();
 
-        //web3 = ...
+        // For ranking purposes it doesn't matter how the external price vector is scaled.
+        // If we use native_token here instead, should it come as another ctor parameter?
+        let denominator_token: H160 = tokens[0];
 
-        /*let native_token = WETH9::deployed(&web3)
+        let estimated_prices = self
+            .price_estimator
+            .estimate_prices(tokens.as_slice(), denominator_token)
             .await
-            .expect("couldn't load deployed native token");*/
+            .context("failed estimating prices")?;
 
-        let estimated_prices = self.price_estimator.best_execution_spot_prices(
-            tokens, native_token).await;
-        
-        
-
+        Ok(tokens.into_iter().zip(estimated_prices).collect())
     }
 
     pub async fn single_run(&mut self) -> Result<()> {
@@ -96,10 +110,13 @@ impl Driver {
         tracing::debug!("got {} AMMs", amms.len());
 
         let liquidity: Vec<Liquidity> = limit_orders
+            .clone()
             .into_iter()
             .map(Liquidity::Limit)
             .chain(amms.into_iter().map(Liquidity::Amm))
             .collect();
+
+        let estimated_prices = self.collect_estimated_prices(&limit_orders).await?;
 
         let mut settlements: Vec<(&Box<dyn Solver>, Settlement)> =
             join_all(self.solver.iter().map(|solver| {
@@ -113,16 +130,15 @@ impl Driver {
                 info!(
                     "{} found solution with objective value: {}",
                     solver,
-                    settlement.objective_value(/* estimated_prices*/)
+                    settlement.objective_value(&estimated_prices)
                 );
                 Some((solver, settlement))
             })
             .collect();
 
         // Sort by key in descending order
-        settlements.sort_by_key(|(_, settlement)| {
-            Reverse(settlement.objective_value(/* estimated_prices*/))
-        });
+        settlements
+            .sort_by_key(|(_, settlement)| Reverse(settlement.objective_value(&estimated_prices)));
         for (solver, settlement) in settlements {
             info!("{} computed {:?}", solver, settlement);
             if settlement.trades.is_empty() {
