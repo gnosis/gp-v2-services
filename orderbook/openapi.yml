@@ -240,11 +240,10 @@ paths:
                 $ref: "#/components/schemas/FeeInformation"
         404:
           description: Token non-existent or not connected to native token
-  /api/v1/markets/{baseToken}-{quoteToken}/price:
+  /api/v1/markets/{baseToken}-{quoteToken}/{kind}/{amount}:
     get:
       description: |
-        The estimated price for selling an optionally specified amount of baseToken or buying that amount of quote token. Price is denominated in quote token.
-        E.g. the price for WETH-USDC (0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48) might be around 1800 USDC.
+        The estimated amount received for selling a specified amount of baseToken or the estimate amount require to sell for buying that amount of quote token.
       parameters:
         - name: baseToken
           in: path
@@ -257,22 +256,22 @@ paths:
           schema:
             $ref: "#/components/schemas/Address"
         - name: amount
-          in: query
+          in: path
+          required: true
           schema:
             $ref: "#/components/schemas/TokenAmount"
-            default: "0"
         - name: kind
-          in: query
+          in: path
+          required: true
           schema:
             $ref: "#/components/schemas/OrderType"
-            default: sell
       responses:
         200:
           description: the price denominated in quote token
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PriceEstimate"
+                $ref: "#/components/schemas/AmountEstimate"
         404:
           description: Token non-existent or no valid price found
 components:
@@ -406,15 +405,14 @@ components:
         signature:
           description: "OrderCancellation signed by owner"
           $ref: "#/components/schemas/Signature"
-    PriceEstimate:
+    AmountEstimate:
       description: |
         Provides the information about an estimated price.
       type: object
       properties:
-        price:
-          description: The estimated price
-          type: number
-          format: double
+        amount:
+          description: The estimated amount
+          $ref: "#/components/schemas/TokenAmount"
         currency:
           description: "The currency in which the price is given"
           $ref: "#/components/schemas/Address"
