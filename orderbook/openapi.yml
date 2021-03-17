@@ -243,7 +243,7 @@ paths:
   /api/v1/markets/{baseToken}-{quoteToken}/{kind}/{amount}:
     get:
       description: |
-        The estimated amount received for selling a specified amount of baseToken or the estimate amount require to sell for buying that amount of quote token.
+        The estimated amount received for selling a `amount` of baseToken or the amount required to spend for buying `amount` of quote token.
       parameters:
         - name: baseToken
           in: path
@@ -413,8 +413,8 @@ components:
         amount:
           description: The estimated amount
           $ref: "#/components/schemas/TokenAmount"
-        currency:
-          description: "The currency in which the price is given"
+        token:
+          description: "The token in which the amount is given"
           $ref: "#/components/schemas/Address"
     Trade:
       description: |
