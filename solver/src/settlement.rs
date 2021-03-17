@@ -1,13 +1,10 @@
 use crate::encoding;
 use anyhow::Result;
-use model::order::OrderCreation;
+use model::order::{OrderCreation, OrderKind};
 use num::{BigRational, CheckedAdd, CheckedDiv, CheckedMul, CheckedSub, Signed};
 use primitive_types::{H160, U256};
 use shared::conversions::U256Ext;
-use std::{
-    collections::HashMap,
-    io::{Cursor, Write},
-};
+use std::{collections::HashMap, io::{Cursor, Write}};
 
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Trade {
@@ -117,15 +114,30 @@ impl Settlement {
         Ok(cursor.into_inner())
     }
 
-    fn total_surplus(&self, prices: &HashMap<H160, BigRational>) -> Option<BigRational> {
+    fn total_surplus(&self, normalizing_prices: &HashMap<H160, BigRational>) -> Option<BigRational> {
         self.trades.iter().fold(Some(num::zero()), |acc, trade| {
-            let sell_token_external_price = prices
+            let sell_token_clearing_price = self.clearing_prices
+                .get(&trade.order.sell_token)
+                .expect("Solution with trade but without price for sell token")
+                .to_big_rational();
+            let buy_token_clearing_price = self.clearing_prices
+                .get(&trade.order.buy_token)
+                .expect("Solution with trade but without price for buy token")
+                .to_big_rational();
+
+            let sell_token_external_price = normalizing_prices
                 .get(&trade.order.sell_token)
                 .expect("Solution with trade but without price for sell token");
-            let buy_token_external_price = prices
+            let buy_token_external_price = normalizing_prices
                 .get(&trade.order.buy_token)
                 .expect("Solution with trade but without price for buy token");
-            acc?.checked_add(&trade.surplus(sell_token_external_price, buy_token_external_price)?)
+
+            let surplus = &trade.surplus(&sell_token_clearing_price, &buy_token_clearing_price)?;
+            let normalized_surplus = match trade.order.kind {
+                OrderKind::Sell => surplus * buy_token_external_price / buy_token_clearing_price,
+                OrderKind::Buy => surplus * sell_token_external_price / sell_token_clearing_price,
+            };
+            acc?.checked_add(&normalized_surplus)
         })
     }
 
@@ -198,6 +210,7 @@ fn sell_order_surplus(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use model::order::OrderKind;
     use num::FromPrimitive;
 
     #[test]
@@ -233,6 +246,132 @@ mod tests {
     // Helper function to save some repeatition below.
     fn r(u: u128) -> BigRational {
         BigRational::from_u128(u).unwrap()
+    }
+
+    #[test]
+    pub fn objective_value() {
+        let token0 = H160::from_low_u64_be(0);
+        let token1 = H160::from_low_u64_be(1);
+
+        let order0 = OrderCreation {
+            sell_token: token0,
+            buy_token: token1,
+            sell_amount: 10.into(),
+            buy_amount: 9.into(),
+            kind: OrderKind::Sell,
+            ..Default::default()
+        };
+        let order1 = OrderCreation {
+            sell_token: token1,
+            buy_token: token0,
+            sell_amount: 10.into(),
+            buy_amount: 9.into(),
+            kind: OrderKind::Sell,
+            ..Default::default()
+        };
+
+        let trade0 = Trade {
+            order: order0,
+            executed_amount: 10.into(),
+            ..Default::default()
+        };
+        let trade1 = Trade {
+            order: order1,
+            executed_amount: 10.into(),
+            ..Default::default()
+        };
+
+        // Case where external price vector doesn't influence ranking:
+
+        let clearing_prices0 = maplit::hashmap! {token0 => 1.into(), token1 => 1.into()}; 
+        let clearing_prices1 = maplit::hashmap! {token0 => 2.into(), token1 => 2.into()};
+
+        let settlement0 = Settlement {
+            clearing_prices: clearing_prices0,
+            trades: vec![trade0, trade1],
+            ..Default::default()
+        };
+
+        let settlement1 = Settlement {
+            clearing_prices: clearing_prices1,
+            trades: vec![trade0, trade1],
+            ..Default::default()
+        };
+
+        let external_prices =  maplit::hashmap! {token0 => r(1), token1 => r(1)};
+        assert!(settlement0.objective_value(&external_prices) == settlement1.objective_value(&external_prices));
+
+        let external_prices =  maplit::hashmap! {token0 => r(2), token1 => r(1)};
+        assert!(settlement0.objective_value(&external_prices) == settlement1.objective_value(&external_prices));
+
+        // Case where external price vector influences ranking:
+
+        let trade0 = Trade {
+            order: order0,
+            executed_amount: 10.into(),
+            ..Default::default()
+        };
+        let trade1 = Trade {
+            order: order1,
+            executed_amount: 9.into(),
+            ..Default::default()
+        };
+
+        let clearing_prices0 = maplit::hashmap! {token0 => 9.into(), token1 => 10.into()}; 
+
+        // Settlement0 gets the following surpluses:
+        // trade0: 81 - 81 = 0
+        // trade1: 100 - 81 = 19
+        let settlement0 = Settlement {
+            clearing_prices: clearing_prices0,
+            trades: vec![trade0, trade1],
+            ..Default::default()
+        };
+
+        let trade0 = Trade {
+            order: order0,
+            executed_amount: 9.into(),
+            ..Default::default()
+        };
+        let trade1 = Trade {
+            order: order1,
+            executed_amount: 10.into(),
+            ..Default::default()
+        };
+
+        let clearing_prices1 = maplit::hashmap! {token0 => 10.into(), token1 => 9.into()};
+
+        // Settlement1 gets the following surpluses:
+        // trade0: 90 - 72.9 = 17.1
+        // trade1: 100 - 100 = 0
+        let settlement1 = Settlement {
+            clearing_prices: clearing_prices1,
+            trades: vec![trade0, trade1],
+            ..Default::default()
+        };
+
+        // If the external prices of the two tokens is the same, then both settlements are symmetric. 
+        let external_prices =  maplit::hashmap! {token0 => r(1), token1 => r(1)};
+        assert!(settlement0.objective_value(&external_prices) == settlement1.objective_value(&external_prices));        
+
+        // If the external price of the first token is higher, then the first settlement is preferred.
+        let external_prices =  maplit::hashmap! {token0 => r(2), token1 => r(1)};
+
+        // Settlement0 gets the following normalized surpluses:
+        // trade0: 0
+        // trade1: 19 * 2 / 10 = 3.8
+
+        // Surpluses of settlement1 get normalized as:
+        // trade0: 17.1 * 1 / 9 = 1.9
+        // trade1: 0
+
+        assert!(settlement0.objective_value(&external_prices) > settlement1.objective_value(&external_prices));
+
+        // If the external price of the second token is higher, then the second settlement is preferred.
+        // (swaps above normalized surpluses of settlement0 and settlement1)
+        let external_prices =  maplit::hashmap! {token0 => r(1), token1 => r(2)};
+
+        assert!(settlement0.objective_value(&external_prices) < settlement1.objective_value(&external_prices));
     }
 
     #[test]
