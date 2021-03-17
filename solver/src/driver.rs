@@ -144,7 +144,7 @@ impl Driver {
 
         // Sort by key in descending order
         settlements
-            .sort_by_key(|(_, settlement)| Reverse(settlement.objective_value(&estimated_prices)));
+            .sort_by_cached_key(|(_, settlement)| Reverse(settlement.objective_value(&estimated_prices)));
         for (solver, settlement) in settlements {
             info!("{} computed {:?}", solver, settlement);
             if settlement.trades.is_empty() {
