@@ -135,10 +135,9 @@ impl Orderbook {
         // prioritized when a user's balance is too small to cover all of their orders.
         // We can hopefully resolve this when we have a custom struct for orders in the
         // get_solver_orders route and a custom endpoint to query user balances for the frontend.
+        set_available_balances(orders.as_mut_slice(), &balances);
         if filter.exclude_insufficient_balance {
             orders = solvable_orders(orders, &balances);
-        } else {
-            set_available_balances(orders.as_mut_slice(), &balances);
         }
         Ok(orders)
     }
