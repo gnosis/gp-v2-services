@@ -4,7 +4,10 @@ use model::order::{OrderCreation, OrderKind};
 use num::{BigRational, CheckedAdd, CheckedDiv, CheckedMul, CheckedSub, Signed};
 use primitive_types::{H160, U256};
 use shared::conversions::U256Ext;
-use std::{collections::HashMap, io::{Cursor, Write}};
+use std::{
+    collections::HashMap,
+    io::{Cursor, Write},
+};
 
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Trade {
@@ -114,13 +117,18 @@ impl Settlement {
         Ok(cursor.into_inner())
     }
 
-    fn total_surplus(&self, normalizing_prices: &HashMap<H160, BigRational>) -> Option<BigRational> {
+    fn total_surplus(
+        &self,
+        normalizing_prices: &HashMap<H160, BigRational>,
+    ) -> Option<BigRational> {
         self.trades.iter().fold(Some(num::zero()), |acc, trade| {
-            let sell_token_clearing_price = self.clearing_prices
+            let sell_token_clearing_price = self
+                .clearing_prices
                 .get(&trade.order.sell_token)
                 .expect("Solution with trade but without price for sell token")
                 .to_big_rational();
-            let buy_token_clearing_price = self.clearing_prices
+            let buy_token_clearing_price = self
+                .clearing_prices
                 .get(&trade.order.buy_token)
                 .expect("Solution with trade but without price for buy token")
                 .to_big_rational();
@@ -283,7 +291,7 @@ mod tests {
 
         // Case where external price vector doesn't influence ranking:
 
-        let clearing_prices0 = maplit::hashmap! {token0 => 1.into(), token1 => 1.into()}; 
+        let clearing_prices0 = maplit::hashmap! {token0 => 1.into(), token1 => 1.into()};
         let clearing_prices1 = maplit::hashmap! {token0 => 2.into(), token1 => 2.into()};
 
         let settlement0 = Settlement {
@@ -298,11 +306,17 @@ mod tests {
             ..Default::default()
         };
 
-        let external_prices =  maplit::hashmap! {token0 => r(1), token1 => r(1)};
-        assert!(settlement0.objective_value(&external_prices) == settlement1.objective_value(&external_prices));
+        let external_prices = maplit::hashmap! {token0 => r(1), token1 => r(1)};
+        assert!(
+            settlement0.objective_value(&external_prices)
+                == settlement1.objective_value(&external_prices)
+        );
 
-        let external_prices =  maplit::hashmap! {token0 => r(2), token1 => r(1)};
-        assert!(settlement0.objective_value(&external_prices) == settlement1.objective_value(&external_prices));
+        let external_prices = maplit::hashmap! {token0 => r(2), token1 => r(1)};
+        assert!(
+            settlement0.objective_value(&external_prices)
+                == settlement1.objective_value(&external_prices)
+        );
 
         // Case where external price vector influences ranking:
 
@@ -317,7 +331,7 @@ mod tests {
             ..Default::default()
         };
 
-        let clearing_prices0 = maplit::hashmap! {token0 => 9.into(), token1 => 10.into()}; 
+        let clearing_prices0 = maplit::hashmap! {token0 => 9.into(), token1 => 10.into()};
 
         // Settlement0 gets the following surpluses:
         // trade0: 81 - 81 = 0
@@ -350,12 +364,15 @@ mod tests {
             ..Default::default()
         };
 
-        // If the external prices of the two tokens is the same, then both settlements are symmetric. 
-        let external_prices =  maplit::hashmap! {token0 => r(1), token1 => r(1)};
-        assert!(settlement0.objective_value(&external_prices) == settlement1.objective_value(&external_prices));        
+        // If the external prices of the two tokens is the same, then both settlements are symmetric.
+        let external_prices = maplit::hashmap! {token0 => r(1), token1 => r(1)};
+        assert!(
+            settlement0.objective_value(&external_prices)
+                == settlement1.objective_value(&external_prices)
+        );
 
         // If the external price of the first token is higher, then the first settlement is preferred.
-        let external_prices =  maplit::hashmap! {token0 => r(2), token1 => r(1)};
+        let external_prices = maplit::hashmap! {token0 => r(2), token1 => r(1)};
 
         // Settlement0 gets the following normalized surpluses:
         // trade0: 0
@@ -365,13 +382,19 @@ mod tests {
         // trade0: 17.1 * 1 / 9 = 1.9
         // trade1: 0
 
-        assert!(settlement0.objective_value(&external_prices) > settlement1.objective_value(&external_prices));
+        assert!(
+            settlement0.objective_value(&external_prices)
+                > settlement1.objective_value(&external_prices)
+        );
 
         // If the external price of the second token is higher, then the second settlement is preferred.
         // (swaps above normalized surpluses of settlement0 and settlement1)
-        let external_prices =  maplit::hashmap! {token0 => r(1), token1 => r(2)};
+        let external_prices = maplit::hashmap! {token0 => r(1), token1 => r(2)};
 
-        assert!(settlement0.objective_value(&external_prices) < settlement1.objective_value(&external_prices));
+        assert!(
+            settlement0.objective_value(&external_prices)
+                < settlement1.objective_value(&external_prices)
+        );
     }
 
     #[test]
@@ -398,10 +421,16 @@ mod tests {
         );
 
         // No surplus if trade is filled at limit
-        assert_eq!(buy_order_surplus(&r(100), &r(100), &r(50), &r(50), &r(50)), Some(r(0)));
+        assert_eq!(
+            buy_order_surplus(&r(100), &r(100), &r(50), &r(50), &r(50)),
+            Some(r(0))
+        );
 
         // Arithmetic error when limit price not respected
-        assert_eq!(buy_order_surplus(&r(100), &r(100), &r(40), &r(50), &r(50)), None);
+        assert_eq!(
+            buy_order_surplus(&r(100), &r(100), &r(40), &r(50), &r(50)),
+            None
+        );
 
         // Sell Token worth twice as much as buy token. If we were willing to sell at parity, we will
         // have a surplus of 50% of tokens, worth 200 each.
@@ -442,10 +471,16 @@ mod tests {
         );
 
         // No surplus if trade is filled at limit
-        assert_eq!(sell_order_surplus(&r(100), &r(100), &r(50), &r(50), &r(50)), Some(r(0)));
+        assert_eq!(
+            sell_order_surplus(&r(100), &r(100), &r(50), &r(50), &r(50)),
+            Some(r(0))
+        );
 
         // Arithmetic error when limit price not respected
-        assert_eq!(sell_order_surplus(&r(100), &r(100), &r(50), &r(60), &r(50)), None);
+        assert_eq!(
+            sell_order_surplus(&r(100), &r(100), &r(50), &r(60), &r(50)),
+            None
+        );
 
         // Sell token worth twice as much as buy token. If we were willing to buy at parity, we will
         // have a surplus of 100% of buy tokens, worth 100 each.
