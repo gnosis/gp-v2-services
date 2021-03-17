@@ -325,7 +325,7 @@ mod tests {
             .expect_get_balance()
             .return_const(Some(10.into()));
 
-        let orders = vec![
+        let mut orders = vec![
             Order {
                 order_creation: OrderCreation {
                     sell_amount: 3.into(),
@@ -333,24 +333,7 @@ mod tests {
                     ..Default::default()
                 },
                 order_meta_data: OrderMetaData {
-                    creation_date: DateTime::<Utc>::from_utc(
-                        NaiveDateTime::from_timestamp(2, 0),
-                        Utc,
-                    ),
-                    ..Default::default()
-                },
-            },
-            Order {
-                order_creation: OrderCreation {
-                    sell_amount: 1.into(),
-                    fee_amount: 0.into(),
-                    ..Default::default()
-                },
-                order_meta_data: OrderMetaData {
-                    creation_date: DateTime::<Utc>::from_utc(
-                        NaiveDateTime::from_timestamp(0, 0),
-                        Utc,
-                    ),
+                    creation_date: DateTime::from_utc(NaiveDateTime::from_timestamp(2, 0), Utc),
                     ..Default::default()
                 },
             },
@@ -361,18 +344,19 @@ mod tests {
                     ..Default::default()
                 },
                 order_meta_data: OrderMetaData {
-                    creation_date: DateTime::<Utc>::from_utc(
-                        NaiveDateTime::from_timestamp(0, 0),
-                        Utc,
-                    ),
+                    creation_date: DateTime::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc),
                     ..Default::default()
                 },
             },
         ];
 
-        let balances = hashmap! {Default::default() => U256::from(10)};
-        let solvable_orders = solvable_orders(orders.clone(), &balances);
-        // First order has higher uid so it isn't picked.
-        assert_eq!(solvable_orders, orders[1..]);
+        let balances = hashmap! {Default::default() => U256::from(9)};
+        let orders_ = solvable_orders(orders.clone(), &balances);
+        // First order has higher timestamp so it isn't picked.
+        assert_eq!(orders_, orders[1..]);
+        orders[1].order_meta_data.creation_date =
+            DateTime::from_utc(NaiveDateTime::from_timestamp(3, 0), Utc);
+        let orders_ = solvable_orders(orders.clone(), &balances);
+        assert_eq!(orders_, orders[..1]);
     }
 }
