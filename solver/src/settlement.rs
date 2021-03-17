@@ -1,7 +1,7 @@
 use crate::encoding;
 use anyhow::Result;
 use model::order::OrderCreation;
-use num::{BigRational, CheckedAdd, CheckedDiv, CheckedMul, CheckedSub, FromPrimitive, Signed};
+use num::{BigRational, CheckedAdd, CheckedDiv, CheckedMul, CheckedSub, Signed};
 use primitive_types::{H160, U256};
 use shared::conversions::U256Ext;
 use std::{
@@ -130,44 +130,16 @@ impl Settlement {
     }
 
     // Objective is re-computed using external prices.
-    fn objective_value_v1(
+    fn objective_value_recomputed(
         &self,
         external_prices: &HashMap<H160, BigRational>,
     ) -> Option<BigRational> {
         self.total_surplus(external_prices)
     }
 
-    // Objective is scaled by (harmonic) mean of external/found price ratio.
-    #[allow(dead_code)]
-    fn objective_value_v2(
-        &self,
-        external_prices: &HashMap<H160, BigRational>,
-    ) -> Option<BigRational> {
-        let clearing_prices = self
-            .clearing_prices
-            .iter()
-            .map(|tp| (*tp.0, tp.1.to_big_rational()))
-            .collect();
-        let unscaled_obj = self.total_surplus(&clearing_prices)?;
-
-        // scale = nr_tokens / (p_1/p'_1 + ... + p_n/p'_n)
-        let numerator: BigRational = BigRational::from_usize(self.tokens().len()).unwrap();
-        let denominator: BigRational =
-            clearing_prices
-                .iter()
-                .fold(Some(num::zero()), |acc: Option<BigRational>, value| {
-                    let external_price = external_prices.get(value.0)?;
-                    acc?.checked_add(&value.1.checked_div(external_price)?)
-                })?;
-
-        unscaled_obj
-            .checked_mul(&numerator)?
-            .checked_div(&denominator)
-    }
-
     // For now this computes the total surplus of all EOA trades.
     pub fn objective_value(&self, external_prices: &HashMap<H160, BigRational>) -> BigRational {
-        match self.objective_value_v1(&external_prices) {
+        match self.objective_value_recomputed(&external_prices) {
             Some(value) => value,
             None => {
                 tracing::error!("Overflow computing objective value for: {:?}", self);
@@ -226,6 +198,7 @@ fn sell_order_surplus(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use num::FromPrimitive;
 
     #[test]
     pub fn encode_trades_finds_token_index() {
