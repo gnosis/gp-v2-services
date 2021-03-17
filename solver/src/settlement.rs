@@ -257,61 +257,52 @@ mod tests {
         assert!(settlement.encode_trades().is_some());
     }
 
+    // Helper function to save some repeatition below.
+    fn r(u: u128) -> BigRational {
+        BigRational::from_u128(u).unwrap()
+    }
+
     #[test]
     #[allow(clippy::just_underscores_and_digits)]
     fn test_buy_order_surplus() {
         // Two goods are worth the same (100 each). If we were willing to pay up to 60 to receive 50,
         // but ended paying the price (1) we have a surplus of 10 sell units, so a total surplus of 1000.
 
-        // I hope there is a better way :)
-        let _5000 = BigRational::from_u32(5000).unwrap();
-        let _2000 = BigRational::from_u32(2000).unwrap();
-        let _1000 = BigRational::from_u32(1000).unwrap();
-        let _500 = BigRational::from_u32(500).unwrap();
-        let _200 = BigRational::from_u32(200).unwrap();
-        let _100 = BigRational::from_u32(100).unwrap();
-        let _60 = BigRational::from_u32(60).unwrap();
-        let _50 = BigRational::from_u32(50).unwrap();
-        let _40 = BigRational::from_u32(40).unwrap();
-        let _25 = BigRational::from_u32(25).unwrap();
-        let _20 = BigRational::from_u32(20).unwrap();
-        let _0 = BigRational::from_u32(0).unwrap();
-
         assert_eq!(
-            buy_order_surplus(&_100, &_100, &_60, &_50, &_50),
-            Some(_1000)
+            buy_order_surplus(&r(100), &r(100), &r(60), &r(50), &r(50)),
+            Some(r(1000))
         );
 
         // If our trade got only half filled, we only get half the surplus
         assert_eq!(
-            buy_order_surplus(&_100, &_100, &_60, &_50, &_25),
-            Some(_500)
+            buy_order_surplus(&r(100), &r(100), &r(60), &r(50), &r(25)),
+            Some(r(500))
         );
 
         // No surplus if trade is not at all filled
         assert_eq!(
-            buy_order_surplus(&_100, &_100, &_60, &_50, &_0),
-            Some(_0.clone())
+            buy_order_surplus(&r(100), &r(100), &r(60), &r(50), &r(0)),
+            Some(r(0))
         );
 
         // No surplus if trade is filled at limit
-        assert_eq!(buy_order_surplus(&_100, &_100, &_50, &_50, &_50), Some(_0));
+        assert_eq!(buy_order_surplus(&r(100), &r(100), &r(50), &r(50), &r(50)), Some(r(0)));
 
         // Arithmetic error when limit price not respected
-        assert_eq!(buy_order_surplus(&_100, &_100, &_40, &_50, &_50), None);
+        assert_eq!(buy_order_surplus(&r(100), &r(100), &r(40), &r(50), &r(50)), None);
 
         // Sell Token worth twice as much as buy token. If we were willing to sell at parity, we will
         // have a surplus of 50% of tokens, worth 200 each.
         assert_eq!(
-            buy_order_surplus(&_200, &_100, &_50, &_50, &_50),
-            Some(_5000)
+            buy_order_surplus(&r(200), &r(100), &r(50), &r(50), &r(50)),
+            Some(r(5000))
         );
 
         // Buy Token worth twice as much as sell token. If we were willing to sell at 3:1, we will
         // have a surplus of 20 sell tokens, worth 100 each.
         assert_eq!(
-            buy_order_surplus(&_100, &_200, &_60, &_20, &_20),
-            Some(_2000)
+            buy_order_surplus(&r(100), &r(200), &r(60), &r(20), &r(20)),
+            Some(r(2000))
         );
     }
 
@@ -321,54 +312,41 @@ mod tests {
         // Two goods are worth the same (100 each). If we were willing to receive as little as 40,
         // but ended paying the price (1) we have a surplus of 10 bought units, so a total surplus of 1000.
 
-        let _5000 = BigRational::from_u32(5000).unwrap();
-        let _2000 = BigRational::from_u32(2000).unwrap();
-        let _1000 = BigRational::from_u32(1000).unwrap();
-        let _500 = BigRational::from_u32(500).unwrap();
-        let _200 = BigRational::from_u32(200).unwrap();
-        let _100 = BigRational::from_u32(100).unwrap();
-        let _60 = BigRational::from_u32(60).unwrap();
-        let _50 = BigRational::from_u32(50).unwrap();
-        let _40 = BigRational::from_u32(40).unwrap();
-        let _25 = BigRational::from_u32(25).unwrap();
-        let _20 = BigRational::from_u32(20).unwrap();
-        let _0 = BigRational::from_u32(0).unwrap();
-
         assert_eq!(
-            sell_order_surplus(&_100, &_100, &_50, &_40, &_50),
-            Some(_1000)
+            sell_order_surplus(&r(100), &r(100), &r(50), &r(40), &r(50)),
+            Some(r(1000))
         );
 
         // If our trade got only half filled, we only get half the surplus
         assert_eq!(
-            sell_order_surplus(&_100, &_100, &_50, &_40, &_25),
-            Some(_500)
+            sell_order_surplus(&r(100), &r(100), &r(50), &r(40), &r(25)),
+            Some(r(500))
         );
 
         // No surplus if trade is not at all filled
         assert_eq!(
-            sell_order_surplus(&_100, &_100, &_50, &_40, &_0),
-            Some(_0.clone())
+            sell_order_surplus(&r(100), &r(100), &r(50), &r(40), &r(0)),
+            Some(r(0))
         );
 
         // No surplus if trade is filled at limit
-        assert_eq!(sell_order_surplus(&_100, &_100, &_50, &_50, &_50), Some(_0));
+        assert_eq!(sell_order_surplus(&r(100), &r(100), &r(50), &r(50), &r(50)), Some(r(0)));
 
         // Arithmetic error when limit price not respected
-        assert_eq!(sell_order_surplus(&_100, &_100, &_50, &_60, &_50), None);
+        assert_eq!(sell_order_surplus(&r(100), &r(100), &r(50), &r(60), &r(50)), None);
 
         // Sell token worth twice as much as buy token. If we were willing to buy at parity, we will
         // have a surplus of 100% of buy tokens, worth 100 each.
         assert_eq!(
-            sell_order_surplus(&_200, &_100, &_50, &_50, &_50),
-            Some(_5000)
+            sell_order_surplus(&r(200), &r(100), &r(50), &r(50), &r(50)),
+            Some(r(5000))
         );
 
         // Buy Token worth twice as much as sell token. If we were willing to buy at 3:1, we will
         // have a surplus of 10 sell tokens, worth 200 each.
         assert_eq!(
-            buy_order_surplus(&_100, &_200, &_60, &_20, &_20),
-            Some(_2000)
+            buy_order_surplus(&r(100), &r(200), &r(60), &r(20), &r(20)),
+            Some(r(2000))
         );
     }
 }
