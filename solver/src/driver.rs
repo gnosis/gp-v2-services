@@ -22,7 +22,6 @@ use tracing::info;
 // protect against a gas estimator giving bogus results that would drain all our funds.
 const GAS_PRICE_CAP: f64 = 500e9;
 
-#[allow(dead_code)]
 pub struct Driver {
     settlement_contract: GPv2Settlement,
     orderbook: OrderBookApi,
@@ -32,6 +31,7 @@ pub struct Driver {
     gas_price_estimator: Box<dyn GasPriceEstimating>,
     target_confirm_time: Duration,
     settle_interval: Duration,
+    native_token: H160,
 }
 
 impl Driver {
@@ -45,6 +45,7 @@ impl Driver {
         gas_price_estimator: Box<dyn GasPriceEstimating>,
         target_confirm_time: Duration,
         settle_interval: Duration,
+        native_token: H160,
     ) -> Self {
         Self {
             settlement_contract,
@@ -55,6 +56,7 @@ impl Driver {
             gas_price_estimator,
             target_confirm_time,
             settle_interval,
+            native_token,
         }
     }
 
@@ -84,9 +86,9 @@ impl Driver {
             .dedup()
             .collect();
 
-        // For ranking purposes it doesn't matter how the external price vector is scaled.
-        // If we use native_token here instead, should it come as another ctor parameter?
-        let denominator_token: H160 = tokens[0];
+        // For ranking purposes it doesn't matter how the external price vector is scaled,
+        // but native_token is used here anyway for better logging/debugging.
+        let denominator_token: H160 = self.native_token;
 
         let estimated_prices = self
             .price_estimator
