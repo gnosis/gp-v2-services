@@ -73,11 +73,10 @@ At this point the database should be running and reachable. You can test connect
 psql postgresql://localhost/
 ```
 
-Finally we need to apply schema (set up in the `database` folder`).
+Finally we need to apply schema (set up in the `database` folder).
 
 * Docker
 ```sh
-# Finally for all methods to test that the server is reachable and to set the schema for the tests.
 docker build --tag gp-v2-migrations -f docker/Dockerfile.migration .
 # If you are running postgres in locally, your URL is `localhost` instead of `host.docker.internal`
 docker run -ti -e FLYWAY_URL="jdbc:postgresql://host.docker.internal/?user="$USER"&password=" -v $PWD/database/sql:/flyway/sql gp-v2-migrations migrate
