@@ -22,6 +22,21 @@ use tracing::info;
 // protect against a gas estimator giving bogus results that would drain all our funds.
 const GAS_PRICE_CAP: f64 = 500e9;
 
+
+#[macro_export]
+macro_rules! chain {
+    ( $first_x:expr, $( $further_x:expr ),+ ) => {
+        {
+            use std::iter::once;
+            let temp_iter = once($first_x);
+            $(
+                let temp_iter = temp_iter.chain(once($further_x));
+            )*
+            temp_iter
+        }
+    };
+}
+
 pub struct Driver {
     settlement_contract: GPv2Settlement,
     orderbook: OrderBookApi,
@@ -81,7 +96,8 @@ impl Driver {
         // Computes set of traded tokens (limit orders only).
         let tokens: Vec<H160> = limit_orders
             .iter()
-            .flat_map(|lo| vec![lo.sell_token, lo.buy_token].into_iter())
+            // .flat_map(|lo| vec![lo.sell_token, lo.buy_token].into_iter())
+            .flat_map(|lo| chain![lo.sell_token, lo.buy_token])
             .sorted()
             .dedup()
             .collect();
