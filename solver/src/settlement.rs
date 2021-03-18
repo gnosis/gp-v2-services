@@ -149,17 +149,9 @@ impl Settlement {
         })
     }
 
-    // Objective is re-computed using external prices.
-    fn objective_value_recomputed(
-        &self,
-        external_prices: &HashMap<H160, BigRational>,
-    ) -> Option<BigRational> {
-        self.total_surplus(external_prices)
-    }
-
     // For now this computes the total surplus of all EOA trades.
     pub fn objective_value(&self, external_prices: &HashMap<H160, BigRational>) -> BigRational {
-        match self.objective_value_recomputed(&external_prices) {
+        match self.total_surplus(&external_prices) {
             Some(value) => value,
             None => {
                 tracing::error!("Overflow computing objective value for: {:?}", self);
