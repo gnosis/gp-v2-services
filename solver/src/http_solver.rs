@@ -18,7 +18,6 @@ use std::{
 
 // TODO: exclude partially fillable orders
 // TODO: set settlement.fee_factor
-// TODO: find correct ordering for uniswap trades
 // TODO: gather real token decimals and store them in a cache
 // TODO: special rounding for the prices we get from the solver?
 
@@ -31,6 +30,13 @@ pub struct SolverConfig {
 }
 
 impl SolverConfig {
+    pub fn new(max_nr_exec_orders: u32, time_limit: u32) -> Self {
+        SolverConfig {
+            max_nr_exec_orders,
+            time_limit,
+        }
+    }
+
     fn add_to_query(&self, url: &mut Url) {
         url.query_pairs_mut()
             .append_pair(
@@ -277,6 +283,10 @@ fn remove_orders_without_native_connection(
 #[async_trait::async_trait]
 impl Solver for HttpSolver {
     async fn solve(&self, liquidity: Vec<Liquidity>) -> Result<Option<Settlement>> {
+        let has_limit_orders = liquidity.iter().any(|l| matches!(l, Liquidity::Limit(_)));
+        if !has_limit_orders {
+            return Ok(None);
+        };
         let (model, context) = self.prepare_model(liquidity);
         let settled = self.send(&model).await?;
         tracing::trace!(?settled);
