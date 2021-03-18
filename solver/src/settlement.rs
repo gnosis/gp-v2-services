@@ -367,7 +367,7 @@ mod tests {
         // trade0: 0
         // trade1: 19 * 2 / 10 = 3.8
 
-        // Surpluses of settlement1 get normalized as:
+        // Settlement1 gets the following normalized surpluses:
         // trade0: 17.1 * 1 / 9 = 1.9
         // trade1: 0
 
