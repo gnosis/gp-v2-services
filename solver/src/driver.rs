@@ -22,7 +22,6 @@ use tracing::info;
 // protect against a gas estimator giving bogus results that would drain all our funds.
 const GAS_PRICE_CAP: f64 = 500e9;
 
-
 #[macro_export]
 macro_rules! chain {
     ( $first_x:expr, $( $further_x:expr ),* ) => {
