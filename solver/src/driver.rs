@@ -1,5 +1,6 @@
+use crate::chain;
 use crate::{
-    liquidity::{uniswap::UniswapLiquidity, Liquidity},
+    liquidity::{uniswap::UniswapLiquidity, LimitOrder, Liquidity},
     orderbook::OrderBookApi,
     settlement::Settlement,
     settlement_submission,
@@ -9,7 +10,11 @@ use anyhow::{Context, Result};
 use contracts::GPv2Settlement;
 use futures::future::join_all;
 use gas_estimation::GasPriceEstimating;
+use itertools::Itertools;
+use num::BigRational;
+use primitive_types::H160;
 use shared::price_estimate::PriceEstimating;
+use std::collections::HashMap;
 use std::{cmp::Reverse, sync::Arc, time::Duration};
 use tracing::info;
 
@@ -17,7 +22,6 @@ use tracing::info;
 // protect against a gas estimator giving bogus results that would drain all our funds.
 const GAS_PRICE_CAP: f64 = 500e9;
 
-#[allow(dead_code)]
 pub struct Driver {
     settlement_contract: GPv2Settlement,
     orderbook: OrderBookApi,
@@ -27,6 +31,7 @@ pub struct Driver {
     gas_price_estimator: Box<dyn GasPriceEstimating>,
     target_confirm_time: Duration,
     settle_interval: Duration,
+    native_token: H160,
 }
 
 impl Driver {
@@ -40,6 +45,7 @@ impl Driver {
         gas_price_estimator: Box<dyn GasPriceEstimating>,
         target_confirm_time: Duration,
         settle_interval: Duration,
+        native_token: H160,
     ) -> Self {
         Self {
             settlement_contract,
@@ -50,6 +56,7 @@ impl Driver {
             gas_price_estimator,
             target_confirm_time,
             settle_interval,
+            native_token,
         }
     }
 
@@ -63,14 +70,61 @@ impl Driver {
         }
     }
 
+    async fn collect_estimated_prices(
+        &self,
+        limit_orders: &[LimitOrder],
+    ) -> HashMap<H160, BigRational> {
+        // Computes set of traded tokens (limit orders only).
+        let tokens: Vec<H160> = limit_orders
+            .iter()
+            // .flat_map(|lo| vec![lo.sell_token, lo.buy_token].into_iter())
+            .flat_map(|lo| chain![lo.sell_token, lo.buy_token])
+            .sorted()
+            .dedup()
+            .collect();
+
+        // For ranking purposes it doesn't matter how the external price vector is scaled,
+        // but native_token is used here anyway for better logging/debugging.
+        let denominator_token: H160 = self.native_token;
+
+        let estimated_prices = self
+            .price_estimator
+            .estimate_prices(tokens.as_slice(), denominator_token)
+            .await;
+
+        tokens
+            .into_iter()
+            .zip(estimated_prices)
+            .filter_map(|(token, price)| match price {
+                Ok(price) => Some((token, price)),
+                Err(err) => {
+                    tracing::warn!("failed to estimate price for token {}: {:?}", token, err);
+                    None
+                }
+            })
+            .collect()
+    }
+
     pub async fn single_run(&mut self) -> Result<()> {
         tracing::debug!("starting single run");
-        let limit_orders = self
+        let mut limit_orders = self
             .orderbook
             .get_liquidity()
             .await
             .context("failed to get orderbook")?;
         tracing::debug!("got {} orders", limit_orders.len());
+
+        let estimated_prices = self.collect_estimated_prices(&limit_orders).await;
+        let original_length = limit_orders.len();
+        limit_orders.retain(|lo| {
+            [lo.sell_token, lo.buy_token]
+                .iter()
+                .all(|token| estimated_prices.contains_key(token))
+        });
+        let removed_orders = original_length - limit_orders.len();
+        if removed_orders > 0 {
+            tracing::debug!("pruned {} orders", removed_orders);
+        }
 
         let amms = self
             .uniswap_liquidity
@@ -92,20 +146,25 @@ impl Driver {
             }))
             .await
             .into_iter()
-            .filter_map(|(solver, settlement)| {
-                let settlement = settlement.ok()??;
-                info!(
-                    "{} found solution with objective value: {}",
-                    solver,
-                    settlement.objective_value(/* estimated_prices*/)
-                );
-                Some((solver, settlement))
+            .filter_map(|(solver, settlement)| match settlement {
+                Ok(settlement) => settlement.map(|settlement| (solver, settlement)),
+                Err(err) => {
+                    tracing::error!("solver {} error: {:?}", solver, err);
+                    None
+                }
             })
             .collect();
+        for (solver, settlement) in settlements.iter() {
+            info!(
+                "{} found solution with objective value: {}",
+                solver,
+                settlement.objective_value(&estimated_prices)
+            );
+        }
 
         // Sort by key in descending order
-        settlements.sort_by_key(|(_, settlement)| {
-            Reverse(settlement.objective_value(/* estimated_prices*/))
+        settlements.sort_by_cached_key(|(_, settlement)| {
+            Reverse(settlement.objective_value(&estimated_prices))
         });
         for (solver, settlement) in settlements {
             info!("{} computed {:?}", solver, settlement);
