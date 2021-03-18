@@ -71,7 +71,6 @@ impl Driver {
         }
     }
 
-    // Should this go here or on price_estimate.rs?
     async fn collect_estimated_prices(
         &self,
         limit_orders: &[LimitOrder],
@@ -117,14 +116,13 @@ impl Driver {
             .context("failed to get uniswap pools")?;
         tracing::debug!("got {} AMMs", amms.len());
 
+        let estimated_prices = self.collect_estimated_prices(&limit_orders).await?;
+
         let liquidity: Vec<Liquidity> = limit_orders
-            .clone()
             .into_iter()
             .map(Liquidity::Limit)
             .chain(amms.into_iter().map(Liquidity::Amm))
             .collect();
-
-        let estimated_prices = self.collect_estimated_prices(&limit_orders).await?;
 
         let mut settlements: Vec<(&Box<dyn Solver>, Settlement)> =
             join_all(self.solver.iter().map(|solver| {
