@@ -1,7 +1,7 @@
 use crate::encoding;
 use anyhow::Result;
 use model::order::{OrderCreation, OrderKind};
-use num::{BigRational, CheckedAdd, CheckedDiv, CheckedMul, CheckedSub, Signed};
+use num::{BigRational, Signed, Zero};
 use primitive_types::{H160, U256};
 use shared::conversions::U256Ext;
 use std::{
@@ -145,7 +145,7 @@ impl Settlement {
                 OrderKind::Sell => surplus * buy_token_external_price / buy_token_clearing_price,
                 OrderKind::Buy => surplus * sell_token_external_price / sell_token_clearing_price,
             };
-            acc?.checked_add(&normalized_surplus)
+            Some(acc? + normalized_surplus)
         })
     }
 
@@ -170,13 +170,11 @@ fn buy_order_surplus(
     buy_amount_limit: &BigRational,
     executed_amount: &BigRational,
 ) -> Option<BigRational> {
-    let res = executed_amount
-        .checked_mul(sell_amount_limit)?
-        .checked_div(buy_amount_limit)?
-        .checked_mul(sell_token_price)?
-        .checked_sub(&executed_amount.checked_mul(buy_token_price)?)?;
-    // Should we simply return 0 when the order fails to satisfy the limit price,
-    // or return None as before when we couldn't distinguish between this case from some numerical issue?
+    if buy_amount_limit.is_zero() {
+        return None;
+    }
+    let res = executed_amount * sell_amount_limit / buy_amount_limit * sell_token_price
+        - (executed_amount * buy_token_price);
     if res.is_negative() {
         None
     } else {
@@ -194,12 +192,11 @@ fn sell_order_surplus(
     buy_amount_limit: &BigRational,
     executed_amount: &BigRational,
 ) -> Option<BigRational> {
-    let res = executed_amount.checked_mul(sell_token_price)?.checked_sub(
-        &executed_amount
-            .checked_mul(buy_amount_limit)?
-            .checked_div(sell_amount_limit)?
-            .checked_mul(buy_token_price)?,
-    )?;
+    if sell_amount_limit.is_zero() {
+        return None;
+    }
+    let res = executed_amount * sell_token_price
+        - (executed_amount * buy_amount_limit / sell_amount_limit * buy_token_price);
     if res.is_negative() {
         None
     } else {
