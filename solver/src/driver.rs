@@ -1,3 +1,4 @@
+use crate::chain;
 use crate::{
     liquidity::{uniswap::UniswapLiquidity, LimitOrder, Liquidity},
     orderbook::OrderBookApi,
@@ -21,20 +22,6 @@ use tracing::info;
 // There is no economic viability calculation yet so we're using an arbitrary very high cap to
 // protect against a gas estimator giving bogus results that would drain all our funds.
 const GAS_PRICE_CAP: f64 = 500e9;
-
-#[macro_export]
-macro_rules! chain {
-    ( $first_x:expr, $( $further_x:expr ),* ) => {
-        {
-            use std::iter::once;
-            let temp_iter = once($first_x);
-            $(
-                let temp_iter = temp_iter.chain(once($further_x));
-            )*
-            temp_iter
-        }
-    };
-}
 
 pub struct Driver {
     settlement_contract: GPv2Settlement,
