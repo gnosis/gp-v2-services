@@ -25,7 +25,7 @@ const GAS_PRICE_CAP: f64 = 500e9;
 
 #[macro_export]
 macro_rules! chain {
-    ( $first_x:expr, $( $further_x:expr ),+ ) => {
+    ( $first_x:expr, $( $further_x:expr ),* ) => {
         {
             use std::iter::once;
             let temp_iter = once($first_x);
