@@ -40,7 +40,10 @@ pub fn create(
             SolverType::MIP => Box::new(HttpSolver::new(
                 mip_solver_url.clone(),
                 None,
-                SolverConfig::new(100, 100),
+                SolverConfig {
+                    max_nr_exec_orders: 100,
+                    time_limit: 30,
+                },
                 native_token,
             )),
         })

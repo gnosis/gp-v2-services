@@ -24,19 +24,12 @@ use std::{
 /// The configuration passed as url parameters to the solver.
 #[derive(Debug, Default)]
 pub struct SolverConfig {
-    max_nr_exec_orders: u32,
-    time_limit: u32,
+    pub max_nr_exec_orders: u32,
+    pub time_limit: u32,
     // TODO: add more parameters that we want to set
 }
 
 impl SolverConfig {
-    pub fn new(max_nr_exec_orders: u32, time_limit: u32) -> Self {
-        SolverConfig {
-            max_nr_exec_orders,
-            time_limit,
-        }
-    }
-
     fn add_to_query(&self, url: &mut Url) {
         url.query_pairs_mut()
             .append_pair(
