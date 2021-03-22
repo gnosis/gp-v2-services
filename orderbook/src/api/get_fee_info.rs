@@ -48,7 +48,7 @@ pub fn get_fee_info_response(result: Result<Option<(U256, DateTime<Utc>)>>) -> i
             StatusCode::NOT_FOUND,
         )),
         Err(err) => {
-            tracing::warn!(?err, "get_fee error");
+            tracing::error!(?err, "get_fee error");
             Ok(reply::with_status(
                 super::internal_error(),
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -109,7 +109,7 @@ pub fn legacy_get_fee_info_response(result: Result<Option<(U256, DateTime<Utc>)>
             StatusCode::NOT_FOUND,
         )),
         Err(err) => {
-            tracing::warn!(?err, "get_fee error");
+            tracing::error!(?err, "get_fee error");
             Ok(reply::with_status(
                 super::internal_error(),
                 StatusCode::INTERNAL_SERVER_ERROR,
