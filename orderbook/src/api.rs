@@ -66,13 +66,9 @@ fn error(error_type: &str, description: impl AsRef<str>) -> Json {
 }
 
 fn internal_error() -> Json {
-    internal_error_with_description("")
-}
-
-fn internal_error_with_description(description: &str) -> Json {
     json(&Error {
         error_type: "InternalServerError",
-        description,
+        description: "",
     })
 }
 

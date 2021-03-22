@@ -44,13 +44,13 @@ pub fn get_fee_info_response(result: Result<Option<(U256, DateTime<Utc>)>>) -> i
             Ok(reply::with_status(reply::json(&fee_info), StatusCode::OK))
         }
         Ok(None) => Ok(reply::with_status(
-            super::error("NotFound", "Token was not found"),
+            super::error("NotFound", "Fee path for given Token pair was not found"),
             StatusCode::NOT_FOUND,
         )),
         Err(err) => {
             tracing::warn!(?err, "get_fee error");
             Ok(reply::with_status(
-                super::internal_error_with_description(&err.to_string()),
+                super::internal_error(),
                 StatusCode::INTERNAL_SERVER_ERROR,
             ))
         }
@@ -111,7 +111,7 @@ pub fn legacy_get_fee_info_response(result: Result<Option<(U256, DateTime<Utc>)>
         Err(err) => {
             tracing::warn!(?err, "get_fee error");
             Ok(reply::with_status(
-                super::internal_error_with_description(&err.to_string()),
+                super::internal_error(),
                 StatusCode::INTERNAL_SERVER_ERROR,
             ))
         }
