@@ -1,9 +1,12 @@
 use anyhow::Result;
+use async_trait::async_trait;
+use contracts::ERC20;
+use ethcontract::{Http, Web3, H160};
 use std::collections::HashMap;
-use ethcontract::{H160, Http, Web3};
-use contracts::{ERC20};
-use tokio::sync::Mutex;
 use std::sync::Arc;
+use tokio::sync::Mutex;
+
+use mockall::*;
 
 #[cfg_attr(test, derive(Eq, PartialEq))]
 #[derive(Copy, Clone, Debug)]
@@ -17,8 +20,8 @@ pub struct TokenInfoFetcher {
     //pub chain_id: u64,
 }
 
-
-#[async_trait::async_trait]
+#[automock]
+#[async_trait]
 pub trait TokenInfoFetching: Send + Sync {
     /// Retrieves some token information from a token address.
     async fn get_token_info(&self, address: &H160) -> Result<TokenInfo>;
@@ -39,16 +42,15 @@ pub trait TokenInfoFetching: Send + Sync {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl TokenInfoFetching for TokenInfoFetcher {
     async fn get_token_info(&self, address: &H160) -> Result<TokenInfo> {
         let web3 = Web3::new(self.web3.transport().clone());
         let erc20 = ERC20::at(&web3, *address);
         let decimals = erc20.methods().decimals().call().await?;
-        Ok(TokenInfo {decimals})
+        Ok(TokenInfo { decimals })
     }
 }
-
 
 pub struct CachedTokenInfoFetcher {
     inner: Box<dyn TokenInfoFetching>,
@@ -64,7 +66,7 @@ impl CachedTokenInfoFetcher {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl TokenInfoFetching for CachedTokenInfoFetcher {
     async fn get_token_info(&self, address: &H160) -> Result<TokenInfo> {
         let mut cache = self.cache.lock().await;

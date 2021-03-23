@@ -11,9 +11,11 @@ use ::model::order::OrderKind;
 use anyhow::{ensure, Context, Result};
 use primitive_types::H160;
 use reqwest::{header::HeaderValue, Client, Url};
+use shared::token_info::TokenInfoFetching;
 use std::{
     collections::{HashMap, HashSet},
     fmt,
+    sync::Arc,
 };
 
 // TODO: exclude partially fillable orders
@@ -46,6 +48,7 @@ pub struct HttpSolver {
     api_key: Option<String>,
     config: SolverConfig,
     native_token: H160,
+    token_info_fetcher: Arc<dyn TokenInfoFetching>,
 }
 
 impl HttpSolver {
@@ -54,6 +57,7 @@ impl HttpSolver {
         api_key: Option<String>,
         config: SolverConfig,
         native_token: H160,
+        token_info_fetcher: &Arc<dyn TokenInfoFetching>,
     ) -> Self {
         // Unwrap because we cannot handle client creation failing.
         let client = Client::builder().build().unwrap();
@@ -63,6 +67,7 @@ impl HttpSolver {
             api_key,
             config,
             native_token,
+            token_info_fetcher: token_info_fetcher.clone(),
         }
     }
 
@@ -91,11 +96,27 @@ impl HttpSolver {
             .collect()
     }
 
-    fn token_models(&self, tokens: &HashMap<String, H160>) -> HashMap<String, TokenInfoModel> {
-        tokens
+    async fn token_models(
+        &self,
+        tokens: &HashMap<String, H160>,
+    ) -> Result<HashMap<String, TokenInfoModel>> {
+        let addresses: Vec<H160> = tokens.values().into_iter().cloned().collect();
+        let token_infos = self
+            .token_info_fetcher
+            .get_token_infos(addresses.as_slice())
+            .await?;
+        Ok(tokens
             .iter()
-            .map(|(index, _)| (index.clone(), TokenInfoModel { decimals: 18 }))
-            .collect()
+            .map(|(index, address)| {
+                let token_info = token_infos.get(address).unwrap();
+                (
+                    index.clone(),
+                    TokenInfoModel {
+                        decimals: token_info.decimals as u32,
+                    },
+                )
+            })
+            .collect())
     }
 
     fn map_orders_for_solver(&self, orders: Vec<LimitOrder>) -> HashMap<String, LimitOrder> {
@@ -158,7 +179,10 @@ impl HttpSolver {
             .collect()
     }
 
-    fn prepare_model(&self, liquidity: Vec<Liquidity>) -> (BatchAuctionModel, SettlementContext) {
+    async fn prepare_model(
+        &self,
+        liquidity: Vec<Liquidity>,
+    ) -> Result<(BatchAuctionModel, SettlementContext)> {
         // To send an instance to the solver we need to identify tokens and orders through strings.
         // In order to map back and forth we store the original tokens, orders and the models for
         // via the same mapping.
@@ -174,7 +198,7 @@ impl HttpSolver {
         let limit_orders = self.map_orders_for_solver(orders.0);
         let amm_orders = self.map_amms_for_solver(orders.1);
         let model = BatchAuctionModel {
-            tokens: self.token_models(&tokens),
+            tokens: self.token_models(&tokens).await?,
             orders: self.order_models(&limit_orders),
             uniswaps: self.amm_models(&amm_orders),
         };
@@ -183,7 +207,7 @@ impl HttpSolver {
             limit_orders,
             amm_orders,
         };
-        (model, context)
+        Ok((model, context))
     }
 
     async fn send(&self, model: &BatchAuctionModel) -> Result<SettledBatchAuctionModel> {
@@ -280,7 +304,7 @@ impl Solver for HttpSolver {
         if !has_limit_orders {
             return Ok(None);
         };
-        let (model, context) = self.prepare_model(liquidity);
+        let (model, context) = self.prepare_model(liquidity).await?;
         let settled = self.send(&model).await?;
         tracing::trace!(?settled);
         settlement::convert_settlement(settled, context).map(Some)
@@ -300,7 +324,10 @@ mod tests {
         AmmOrder, LimitOrder, MockAmmSettlementHandling, MockLimitOrderSettlementHandling,
     };
     use ::model::TokenPair;
+    use maplit::hashmap;
     use num::rational::Ratio;
+    use shared::token_info::MockTokenInfoFetching;
+    use shared::token_info::TokenInfo;
     use std::sync::Arc;
 
     // cargo test real_solver -- --ignored --nocapture
@@ -313,6 +340,18 @@ mod tests {
             .init();
         let url = std::env::var("GP_V2_OPTIMIZER_URL")
             .unwrap_or_else(|_| "http://localhost:8000".to_string());
+
+        let mut mock_token_info_fetcher = MockTokenInfoFetching::new();
+        mock_token_info_fetcher
+            .expect_get_token_infos()
+            .return_once(move |_| {
+                Ok(hashmap! {
+                    H160::zero() => TokenInfo { decimals: 18},
+                    H160::from_low_u64_be(1) => TokenInfo { decimals: 18},
+                })
+            });
+        let mock_token_info_fetcher: Arc<dyn TokenInfoFetching> = Arc::new(mock_token_info_fetcher);
+
         let solver = HttpSolver::new(
             url.parse().unwrap(),
             None,
@@ -321,6 +360,7 @@ mod tests {
                 time_limit: 100,
             },
             H160::zero(),
+            &mock_token_info_fetcher,
         );
         let base = |x: u128| x * 10u128.pow(18);
         let orders = vec![
@@ -340,7 +380,7 @@ mod tests {
                 settlement_handling: Arc::new(MockAmmSettlementHandling::new()),
             }),
         ];
-        let (model, _context) = solver.prepare_model(orders);
+        let (model, _context) = solver.prepare_model(orders).await.unwrap();
         let settled = solver.send(&model).await.unwrap();
         dbg!(&settled);
 
