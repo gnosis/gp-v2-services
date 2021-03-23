@@ -2,14 +2,14 @@ use crate::api::extract_payload;
 use crate::orderbook::{OrderCancellationResult, Orderbook};
 use anyhow::Result;
 use model::order::{OrderCancellation, OrderUid};
-use std::{convert::Infallible, sync::Arc};
-use warp::{hyper::StatusCode, Filter, Rejection, Reply};
 use model::Signature;
 use serde::{Deserialize, Serialize};
+use std::{convert::Infallible, sync::Arc};
+use warp::{hyper::StatusCode, Filter, Rejection, Reply};
 
 #[derive(Deserialize, Serialize)]
 struct CancellationPayload {
-    signature: Signature
+    signature: Signature,
 }
 
 pub fn cancel_order_request(
@@ -17,11 +17,9 @@ pub fn cancel_order_request(
     warp::path!("orders" / OrderUid)
         .and(warp::delete())
         .and(extract_payload())
-        .map(|uid, payload: CancellationPayload| {
-            OrderCancellation {
-                order_uid: uid,
-                signature: payload.signature,
-            }
+        .map(|uid, payload: CancellationPayload| OrderCancellation {
+            order_uid: uid,
+            signature: payload.signature,
         })
 }
 
@@ -78,8 +76,8 @@ mod tests {
             .method("DELETE")
             .header("content-type", "application/json")
             .json(&CancellationPayload {
-                signature: cancellation.signature
-            } );
+                signature: cancellation.signature,
+            });
         let result = request.filter(&filter).await.unwrap();
         assert_eq!(result, cancellation);
     }
