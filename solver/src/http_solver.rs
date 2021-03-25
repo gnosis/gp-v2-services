@@ -11,7 +11,7 @@ use ::model::order::OrderKind;
 use anyhow::{ensure, Context, Result};
 use primitive_types::H160;
 use reqwest::{header::HeaderValue, Client, Url};
-use shared::token_info::TokenInfoFetching;
+use shared::token_info::{TokenInfo, TokenInfoFetching};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -99,24 +99,22 @@ impl HttpSolver {
     async fn token_models(
         &self,
         tokens: &HashMap<String, H160>,
-    ) -> Result<HashMap<String, TokenInfoModel>> {
-        let addresses: Vec<H160> = tokens.values().into_iter().cloned().collect();
-        let token_infos = self
-            .token_info_fetcher
-            .get_token_infos(addresses.as_slice())
-            .await?;
-        Ok(tokens
+        token_infos: &HashMap<H160, Result<TokenInfo>>,
+    ) -> HashMap<String, TokenInfoModel> {
+        tokens
             .iter()
-            .map(|(index, address)| {
-                let token_info = token_infos.get(address).unwrap();
-                (
-                    index.clone(),
-                    TokenInfoModel {
-                        decimals: token_info.decimals as u32,
-                    },
-                )
+            .filter_map(|(index, address)| {
+                let token_info_result = token_infos.get(address)?;
+                token_info_result.as_ref().map_or(None, |ti| {
+                    Some((
+                        index.clone(),
+                        TokenInfoModel {
+                            decimals: ti.decimals as u32,
+                        },
+                    ))
+                })
             })
-            .collect())
+            .collect()
     }
 
     fn map_orders_for_solver(&self, orders: Vec<LimitOrder>) -> HashMap<String, LimitOrder> {
@@ -187,7 +185,15 @@ impl HttpSolver {
         // In order to map back and forth we store the original tokens, orders and the models for
         // via the same mapping.
         let tokens = self.map_tokens_for_solver(liquidity.as_slice());
+
+        let addresses: Vec<H160> = tokens.values().into_iter().cloned().collect();
+        let token_infos = self
+            .token_info_fetcher
+            .get_token_infos(addresses.as_slice())
+            .await;
+
         let mut orders = split_liquidity(liquidity);
+
         // For the solver to run correctly we need to be sure that there are no isolated islands of
         // tokens without connection between them.
         remove_orders_without_native_connection(
@@ -198,7 +204,7 @@ impl HttpSolver {
         let limit_orders = self.map_orders_for_solver(orders.0);
         let amm_orders = self.map_amms_for_solver(orders.1);
         let model = BatchAuctionModel {
-            tokens: self.token_models(&tokens).await?,
+            tokens: self.token_models(&tokens, &token_infos).await,
             orders: self.order_models(&limit_orders),
             uniswaps: self.amm_models(&amm_orders),
         };
@@ -345,10 +351,10 @@ mod tests {
         mock_token_info_fetcher
             .expect_get_token_infos()
             .return_once(move |_| {
-                Ok(hashmap! {
-                    H160::zero() => TokenInfo { decimals: 18},
-                    H160::from_low_u64_be(1) => TokenInfo { decimals: 18},
-                })
+                hashmap! {
+                    H160::zero() => Ok(TokenInfo { decimals: 18}),
+                    H160::from_low_u64_be(1) => Ok(TokenInfo { decimals: 18}),
+                }
             });
         let mock_token_info_fetcher: Arc<dyn TokenInfoFetching> = Arc::new(mock_token_info_fetcher);
 
