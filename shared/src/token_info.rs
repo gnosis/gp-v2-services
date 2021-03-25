@@ -50,7 +50,12 @@ impl TokenInfoFetching for TokenInfoFetcher {
                 if (decimals.is_err()) {
                     tracing::trace!("Failed to fetch token info for token {}", address);
                 }
-                (*address, TokenInfo { decimals: decimals.ok() })
+                (
+                    *address,
+                    TokenInfo {
+                        decimals: decimals.ok(),
+                    },
+                )
             })
             .collect()
     }
@@ -83,15 +88,75 @@ impl TokenInfoFetching for CachedTokenInfoFetcher {
             .collect();
 
         // Fetch token infos not yet in cache.
-        let fetched = self.inner.get_token_infos(to_fetch.as_slice()).await;
+        if !to_fetch.is_empty() {
+            let fetched = self.inner.get_token_infos(to_fetch.as_slice()).await;
 
-        // Add token infos to cache.
-        cache.extend(fetched);
+            // Add valid token infos to cache.
+            cache.extend(
+                fetched
+                    .iter()
+                    .filter(|(_, token_info)| token_info.decimals.is_some()),
+            );
+        };
 
         // Return token infos from the cache.
         addresses
             .iter()
-            .map(|address| (*address, cache[address]))
+            .map(|address| {
+                if cache.contains_key(address) {
+                    (*address, cache[address])
+                } else {
+                    (*address, TokenInfo { decimals: None })
+                }
+            })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use maplit::hashmap;
+
+    #[tokio::test]
+    async fn cached_token_info_fetcher() {
+        let address0 = H160::zero();
+        let address1 = H160::from_low_u64_be(1);
+
+        let mut mock_token_info_fetcher = MockTokenInfoFetching::new();
+        mock_token_info_fetcher
+            .expect_get_token_infos()
+            .times(1)
+            .return_once(move |_| {
+                hashmap! {
+                    address0 => TokenInfo { decimals: Some(18)},
+                }
+            });
+        mock_token_info_fetcher
+            .expect_get_token_infos()
+            .times(2)
+            .returning(|_| {
+                hashmap! {
+                    H160::from_low_u64_be(1) => TokenInfo { decimals: None},
+                }
+            });
+        let cached_token_info_fetcher =
+            CachedTokenInfoFetcher::new(Box::new(mock_token_info_fetcher));
+
+        // Fetching a cached item should work.
+        let token_infos = cached_token_info_fetcher.get_token_infos(&[address0]).await;
+        assert!(token_infos.contains_key(&address0) && token_infos[&address0].decimals == Some(18));
+
+        // Should panic because of the times(1) constraint above, unless the cache is working as expected.
+        cached_token_info_fetcher
+            .get_token_infos(&[H160::zero()])
+            .await;
+
+        // Fetching an item that is unavailable should work.
+        let token_infos = cached_token_info_fetcher.get_token_infos(&[address1]).await;
+        assert!(token_infos.contains_key(&address1) && token_infos[&address1].decimals == None);
+
+        // Should try to refetch the item thus satisfying the times(2) constraint above.
+        cached_token_info_fetcher.get_token_infos(&[address1]).await;
     }
 }
