@@ -108,7 +108,7 @@ impl HttpSolver {
                 (
                     index.clone(),
                     TokenInfoModel {
-                        decimals: ti.decimals.map(|d|d as u32),
+                        decimals: ti.decimals.map(|d| d as u32),
                     },
                 )
             })
