@@ -41,9 +41,11 @@ impl Order {
         order_creation: OrderCreation,
         domain: &DomainSeparator,
     ) -> Option<Self> {
-        let owner = order_creation
-            .signature
-            .validate(domain, &order_creation.hash_struct())?;
+        let owner = order_creation.signature.validate(
+            order_creation.signing_scheme,
+            domain,
+            &order_creation.hash_struct(),
+        )?;
         Some(Self {
             order_meta_data: OrderMetaData {
                 creation_date: chrono::offset::Utc::now(),
@@ -110,12 +112,21 @@ impl OrderBuilder {
         self
     }
 
+    pub fn with_signing_scheme(mut self, signing_scheme: SigningScheme) -> Self {
+        self.0.order_creation.signing_scheme = signing_scheme;
+        self
+    }
+
     /// Sets owner, uid, signature.
     pub fn sign_with(mut self, domain: &DomainSeparator, key: SecretKeyRef) -> Self {
         self.0.order_meta_data.owner = key.address();
         self.0.order_meta_data.uid = self.0.order_creation.uid(domain, &key.address());
-        self.0.order_creation.signature =
-            Signature::sign(domain, &self.0.order_creation.hash_struct(), key);
+        self.0.order_creation.signature = Signature::sign(
+            self.0.order_creation.signing_scheme,
+            domain,
+            &self.0.order_creation.hash_struct(),
+            key,
+        );
         self
     }
 
@@ -168,6 +179,7 @@ impl Default for OrderCreation {
             signature: Default::default(),
         };
         result.signature = Signature::sign(
+            result.signing_scheme,
             &DomainSeparator::default(),
             &result.hash_struct(),
             SecretKeyRef::new(&ONE_KEY),
@@ -230,6 +242,7 @@ impl OrderCreation {
 pub struct OrderCancellation {
     pub order_uid: OrderUid,
     pub signature: Signature,
+    pub signing_scheme: SigningScheme,
 }
 
 impl Default for OrderCancellation {
@@ -237,8 +250,10 @@ impl Default for OrderCancellation {
         let mut result = Self {
             order_uid: OrderUid::default(),
             signature: Default::default(),
+            signing_scheme: SigningScheme::Eip712,
         };
         result.signature = Signature::sign(
+            result.signing_scheme,
             &DomainSeparator::default(),
             &result.hash_struct(),
             SecretKeyRef::new(&ONE_KEY),
@@ -262,7 +277,7 @@ impl OrderCancellation {
 
     pub fn validate(&self, domain_separator: &DomainSeparator) -> Option<H160> {
         self.signature
-            .validate(domain_separator, &self.hash_struct())
+            .validate(self.signing_scheme, domain_separator, &self.hash_struct())
     }
 }
 
@@ -477,35 +492,44 @@ mod tests {
     // from the test `should recover signing address for all supported ECDSA-based schemes` in
     // https://github.com/gnosis/gp-v2-contracts/blob/main/test/GPv2Signing.test.ts .
     #[test]
-    fn order_creation_signature_typed_data() {
+    fn order_creation_signature() {
         let domain_separator = DomainSeparator(hex!(
             "74e0b11bd18120612556bae4578cfd3a254d7e2495f543c569a92ff5794d9b09"
         ));
-        let order = OrderCreation {
-            sell_token: hex!("0101010101010101010101010101010101010101").into(),
-            buy_token: hex!("0202020202020202020202020202020202020202").into(),
-            receiver: Some(hex!("0303030303030303030303030303030303030303").into()),
-            sell_amount: hex!("0246ddf97976680000").as_ref().into(),
-            buy_amount: hex!("b98bc829a6f90000").as_ref().into(),
-            valid_to: 4294967295,
-            app_data: hex!("0000000000000000000000000000000000000000000000000000000000000000"),
-            fee_amount: hex!("0de0b6b3a7640000").as_ref().into(),
-            kind: OrderKind::Sell,
-            partially_fillable: false,
-            signature: Signature::from_bytes(&hex!("32f1261f1a30c4f9b3e7d17f572ded5c5f4077edce0c105d82c87fd63ae1f9a93bc8e28b1fe390fa45af8217e90c7cf506996c06cdeae9d18f51444e3520d17c1c")),
-            signing_scheme: SigningScheme::Eip712,
-        };
+        let expected_owner = H160(hex!("70997970C51812dc3A010C7d01b50e0d17dc79C8"));
+        let expected_uid = OrderUid(hex!("f308e6d59020614692e6d60e53689343e8aa9a3e21670da7e3153aecc5500e6a70997970c51812dc3a010c7d01b50e0d17dc79c8ffffffff"));
 
-        let expected_owner = hex!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
-        let owner = order
-            .signature
-            .validate(&domain_separator, &order.hash_struct())
-            .unwrap();
-        assert_eq!(owner, expected_owner.into());
+        let eip712_signature =hex!("32f1261f1a30c4f9b3e7d17f572ded5c5f4077edce0c105d82c87fd63ae1f9a93bc8e28b1fe390fa45af8217e90c7cf506996c06cdeae9d18f51444e3520d17c1c");
+        let ethsign_signature = hex!("cca651a8260b08f318ffd8cd397919368a604836d17322cc4a7ab18eb9d8186e2f73a5b9d6a4a19816771caa776e0a37506d8f3ad2cc2327d4c3709eb66058031c");
 
-        let expected_uid = hex!("f308e6d59020614692e6d60e53689343e8aa9a3e21670da7e3153aecc5500e6a70997970c51812dc3a010c7d01b50e0d17dc79c8ffffffff");
-        let uid = order.uid(&domain_separator, &owner);
-        assert_eq!(uid, OrderUid(expected_uid));
+        for (signing_scheme, signature) in &[
+            (SigningScheme::Eip712, eip712_signature),
+            (SigningScheme::EthSign, ethsign_signature),
+        ] {
+            let order = OrderCreation {
+                sell_token: hex!("0101010101010101010101010101010101010101").into(),
+                buy_token: hex!("0202020202020202020202020202020202020202").into(),
+                receiver: Some(hex!("0303030303030303030303030303030303030303").into()),
+                sell_amount: hex!("0246ddf97976680000").as_ref().into(),
+                buy_amount: hex!("b98bc829a6f90000").as_ref().into(),
+                valid_to: 4294967295,
+                app_data: hex!("0000000000000000000000000000000000000000000000000000000000000000"),
+                fee_amount: hex!("0de0b6b3a7640000").as_ref().into(),
+                kind: OrderKind::Sell,
+                partially_fillable: false,
+                signature: Signature::from_bytes(&signature),
+                signing_scheme: *signing_scheme,
+            };
+
+            let uid = order.uid(&domain_separator, &expected_owner);
+            assert_eq!(uid, expected_uid);
+
+            let owner = order
+                .signature
+                .validate(*signing_scheme, &domain_separator, &order.hash_struct())
+                .unwrap();
+            assert_eq!(owner, expected_owner);
+        }
     }
 
     // from the test `should recover signing address for all supported signing schemes` in
@@ -515,18 +539,24 @@ mod tests {
         let domain_separator = DomainSeparator(hex!(
             "f8a1143d44c67470a791201b239ff6b0ecc8910aa9682bebd08145f5fd84722b"
         ));
-        let cancellation = OrderCancellation {
-            order_uid: OrderUid([42u8; 56]),
-            signature: Signature {
-                v: 0x1b,
-                r: hex!("3691438f224f2ce0bd15bf803479a0c07cfadc11ec69de0ee95f0edf82c9285f").into(),
-                s: hex!("177006a7caeafe8214bd8f51ddb8b0c5a94158dc94c605d9af6c412f80575bf3").into(),
-            },
-        };
 
-        let expected_owner = hex!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
-        let owner = cancellation.validate(&domain_separator).unwrap();
-        assert_eq!(owner, expected_owner.into());
+        let expected_owner = H160(hex!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"));
+
+        let eip712_signature = hex!("f2c69310a4dbcd78feabfd802df296ca4650681e01872f667251916ed3e9a2e14928382316607594a77c620e4bc4536e6fe145ee993a5ccc38fda929e86830231b");
+        let ethsign_signature = hex!("5fef0aed159777403f964da946b2b6c7d2ca6a931f009328c17ed481bf5fe25b46c8da3dfdca2657c9e6e7fbd3a1abbf52ee0ccaf610395fb2445256f5d24eb41b");
+
+        for (signing_scheme, signature) in &[
+            (SigningScheme::Eip712, eip712_signature),
+            (SigningScheme::EthSign, ethsign_signature),
+        ] {
+            let cancellation = OrderCancellation {
+                order_uid: OrderUid(hex!("2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a")),
+                signature: Signature::from_bytes(&signature),
+                signing_scheme: *signing_scheme,
+            };
+            let owner = cancellation.validate(&domain_separator).unwrap();
+            assert_eq!(owner, expected_owner);
+        }
     }
 
     #[test]
@@ -569,6 +599,7 @@ mod tests {
             .order_creation
             .signature
             .validate(
+                order.order_creation.signing_scheme,
                 &DomainSeparator::default(),
                 &order.order_creation.hash_struct(),
             )

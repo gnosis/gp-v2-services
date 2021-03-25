@@ -53,18 +53,21 @@ impl DbOrderKind {
 #[sqlx(rename_all = "lowercase")]
 pub enum DbSigningScheme {
     Eip712,
+    EthSign,
 }
 
 impl DbSigningScheme {
     pub fn from(signing_scheme: SigningScheme) -> Self {
         match signing_scheme {
             SigningScheme::Eip712 => Self::Eip712,
+            SigningScheme::EthSign => Self::EthSign,
         }
     }
 
     fn into(self) -> SigningScheme {
         match self {
             Self::Eip712 => SigningScheme::Eip712,
+            Self::EthSign => SigningScheme::EthSign,
         }
     }
 }
@@ -281,40 +284,42 @@ mod tests {
     #[ignore]
     async fn postgres_order_roundtrip() {
         let db = Database::new("postgresql://").unwrap();
-        db.clear().await.unwrap();
-        let filter = OrderFilter::default();
-        assert!(db.orders(&filter).boxed().next().await.is_none());
-        let order = Order {
-            order_meta_data: OrderMetaData {
-                creation_date: DateTime::<Utc>::from_utc(
-                    NaiveDateTime::from_timestamp(1234567890, 0),
-                    Utc,
-                ),
-                ..Default::default()
-            },
-            order_creation: OrderCreation {
-                sell_token: H160::from_low_u64_be(1),
-                buy_token: H160::from_low_u64_be(2),
-                receiver: Some(H160::from_low_u64_be(6)),
-                sell_amount: 3.into(),
-                buy_amount: U256::MAX,
-                valid_to: u32::MAX,
-                app_data: [4; 32],
-                fee_amount: 5.into(),
-                kind: OrderKind::Sell,
-                partially_fillable: true,
-                signature: Default::default(),
-                signing_scheme: SigningScheme::Eip712,
-            },
-        };
-        db.insert_order(&order).await.unwrap();
-        assert_eq!(
-            db.orders(&filter)
-                .try_collect::<Vec<Order>>()
-                .await
-                .unwrap(),
-            vec![order]
-        );
+        for signing_scheme in &[SigningScheme::Eip712, SigningScheme::EthSign] {
+            db.clear().await.unwrap();
+            let filter = OrderFilter::default();
+            assert!(db.orders(&filter).boxed().next().await.is_none());
+            let order = Order {
+                order_meta_data: OrderMetaData {
+                    creation_date: DateTime::<Utc>::from_utc(
+                        NaiveDateTime::from_timestamp(1234567890, 0),
+                        Utc,
+                    ),
+                    ..Default::default()
+                },
+                order_creation: OrderCreation {
+                    sell_token: H160::from_low_u64_be(1),
+                    buy_token: H160::from_low_u64_be(2),
+                    receiver: Some(H160::from_low_u64_be(6)),
+                    sell_amount: 3.into(),
+                    buy_amount: U256::MAX,
+                    valid_to: u32::MAX,
+                    app_data: [4; 32],
+                    fee_amount: 5.into(),
+                    kind: OrderKind::Sell,
+                    partially_fillable: true,
+                    signature: Default::default(),
+                    signing_scheme: *signing_scheme,
+                },
+            };
+            db.insert_order(&order).await.unwrap();
+            assert_eq!(
+                db.orders(&filter)
+                    .try_collect::<Vec<Order>>()
+                    .await
+                    .unwrap(),
+                vec![order]
+            );
+        }
     }
 
     #[tokio::test]
