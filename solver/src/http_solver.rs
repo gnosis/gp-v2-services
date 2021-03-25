@@ -104,11 +104,11 @@ impl HttpSolver {
         tokens
             .iter()
             .map(|(index, address)| {
-                let ti = token_infos[address];
+                let token_info = token_infos[address];
                 (
                     index.clone(),
                     TokenInfoModel {
-                        decimals: ti.decimals.map(|d| d as u32),
+                        decimals: token_info.decimals.map(|d| d as u32),
                     },
                 )
             })

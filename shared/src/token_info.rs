@@ -46,11 +46,11 @@ impl TokenInfoFetching for TokenInfoFetcher {
         addresses
             .iter()
             .zip(join_all(futures).await.into_iter())
-            .map(|r| {
-                if (r.1.is_err()) {
-                    tracing::trace!("Failed to fetch token info for token {}", r.0);
+            .map(|(address, decimals)| {
+                if (decimals.is_err()) {
+                    tracing::trace!("Failed to fetch token info for token {}", address);
                 }
-                (*r.0, TokenInfo { decimals: r.1.ok() })
+                (*address, TokenInfo { decimals: decimals.ok() })
             })
             .collect()
     }
