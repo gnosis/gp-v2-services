@@ -149,7 +149,7 @@ mod tests {
 
         // Should panic because of the times(1) constraint above, unless the cache is working as expected.
         cached_token_info_fetcher
-            .get_token_infos(&[H160::zero()])
+            .get_token_infos(&[address0])
             .await;
 
         // Fetching an item that is unavailable should work.
