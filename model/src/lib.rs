@@ -20,6 +20,7 @@ use web3::types::Recovery;
 #[serde(rename_all = "lowercase")]
 pub enum SigningScheme {
     Eip712,
+    EthSign,
 }
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Default, Hash)]
@@ -35,6 +36,24 @@ fn hashed_eip712_message(domain_separator: &DomainSeparator, struct_hash: &[u8; 
     message[2..34].copy_from_slice(&domain_separator.0);
     message[34..66].copy_from_slice(struct_hash);
     signing::keccak256(&message)
+}
+
+fn hashed_ethsign_message(domain_separator: &DomainSeparator, struct_hash: &[u8; 32]) -> [u8; 32] {
+    let mut message = [0u8; 60];
+    message[..28].copy_from_slice(b"\x19Ethereum Signed Message:\n32");
+    message[28..].copy_from_slice(&hashed_eip712_message(domain_separator, struct_hash));
+    signing::keccak256(&message)
+}
+
+fn hashed_signing_message(
+    signing_scheme: SigningScheme,
+    domain_separator: &DomainSeparator,
+    struct_hash: &[u8; 32],
+) -> [u8; 32] {
+    match signing_scheme {
+        SigningScheme::Eip712 => hashed_eip712_message(domain_separator, struct_hash),
+        SigningScheme::EthSign => hashed_ethsign_message(domain_separator, struct_hash),
+    }
 }
 
 impl Signature {
@@ -57,21 +76,23 @@ impl Signature {
 
     pub fn validate(
         &self,
+        signing_scheme: SigningScheme,
         domain_separator: &DomainSeparator,
         struct_hash: &[u8; 32],
     ) -> Option<H160> {
-        let message = hashed_eip712_message(domain_separator, struct_hash);
+        let message = hashed_signing_message(signing_scheme, domain_separator, struct_hash);
         let recovery = Recovery::new(message, self.v as u64, self.r, self.s);
         let (signature, recovery_id) = recovery.as_signature()?;
         signing::recover(&message, &signature, recovery_id).ok()
     }
 
     pub fn sign(
+        signing_scheme: SigningScheme,
         domain_separator: &DomainSeparator,
         struct_hash: &[u8; 32],
         key: SecretKeyRef,
     ) -> Self {
-        let message = hashed_eip712_message(domain_separator, struct_hash);
+        let message = hashed_signing_message(signing_scheme, domain_separator, struct_hash);
         // Unwrap because the only error is for invalid messages which we don't create.
         let signature = key.sign(&message, None).unwrap();
         Self {

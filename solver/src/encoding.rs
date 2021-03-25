@@ -42,14 +42,16 @@ pub fn encode_trade(
 
 fn order_flags(order: &OrderCreation) -> U256 {
     let mut result = 0u8;
-    if matches!(order.kind, OrderKind::Buy) {
-        result |= 0b00000001;
+    result |= match order.kind {
+        OrderKind::Sell => 0,
+        OrderKind::Buy => 0b1,
     };
     if order.partially_fillable {
-        result |= 0b00000010;
+        result |= 0b10;
     };
     result |= match order.signing_scheme {
         SigningScheme::Eip712 => 0,
+        SigningScheme::EthSign => 0b100,
     };
     result.into()
 }

@@ -419,6 +419,8 @@ components:
         signature:
           description: "OrderCancellation signed by owner"
           $ref: "#/components/schemas/Signature"
+        signingScheme:
+          $ref: "#/components/schemas/SigningScheme"
     AmountEstimate:
       description: |
         Provides the information about an estimated price.
@@ -474,7 +476,7 @@ components:
     SigningScheme:
       description: How was the order signed?
       type: string
-      enum: [eip712]
+      enum: [eip712, ethsign]
     OrderPostError:
       type: object
       properties:
