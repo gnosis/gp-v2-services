@@ -99,20 +99,18 @@ impl HttpSolver {
     async fn token_models(
         &self,
         tokens: &HashMap<String, H160>,
-        token_infos: &HashMap<H160, Result<TokenInfo>>,
+        token_infos: &HashMap<H160, TokenInfo>,
     ) -> HashMap<String, TokenInfoModel> {
         tokens
             .iter()
-            .filter_map(|(index, address)| {
-                let token_info_result = token_infos.get(address)?;
-                token_info_result.as_ref().map_or(None, |ti| {
-                    Some((
-                        index.clone(),
-                        TokenInfoModel {
-                            decimals: ti.decimals as u32,
-                        },
-                    ))
-                })
+            .map(|(index, address)| {
+                let ti = token_infos[address];
+                (
+                    index.clone(),
+                    TokenInfoModel {
+                        decimals: ti.decimals.map(|d|d as u32),
+                    },
+                )
             })
             .collect()
     }
@@ -352,8 +350,8 @@ mod tests {
             .expect_get_token_infos()
             .return_once(move |_| {
                 hashmap! {
-                    H160::zero() => Ok(TokenInfo { decimals: 18}),
-                    H160::from_low_u64_be(1) => Ok(TokenInfo { decimals: 18}),
+                    H160::zero() => TokenInfo { decimals: Some(18)},
+                    H160::from_low_u64_be(1) => TokenInfo { decimals: Some(18)},
                 }
             });
         let mock_token_info_fetcher: Arc<dyn TokenInfoFetching> = Arc::new(mock_token_info_fetcher);
