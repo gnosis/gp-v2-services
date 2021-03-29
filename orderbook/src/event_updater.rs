@@ -143,7 +143,7 @@ impl EventUpdater {
                 };
                 Ok(match data {
                     ContractEvent::Trade(event) => Some(convert_trade(&event, &meta)?),
-                    ContractEvent::Settlement(event) => Some(convert_settlement(&event, &meta)?),
+                    ContractEvent::Settlement(event) => Some(convert_settlement(&event, &meta)),
                     // TODO: handle new events
                     ContractEvent::Interaction(_) => None,
                     ContractEvent::OrderInvalidated(_) => None,
@@ -173,11 +173,11 @@ fn convert_trade(trade: &ContractTrade, meta: &EventMetadata) -> Result<(DbEvent
 fn convert_settlement(
     settlement: &ContractSettlement,
     meta: &EventMetadata,
-) -> Result<(DbEventIndex, DbEvent)> {
+) -> (DbEventIndex, DbEvent) {
     let event = DbSettlement {
         solver: settlement.solver,
     };
-    Ok((event_meta_to_index(meta), DbEvent::Settlement(event)))
+    (event_meta_to_index(meta), DbEvent::Settlement(event))
 }
 
 // Converts EventMetaData to DbEventIndex struct
