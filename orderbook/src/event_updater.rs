@@ -158,6 +158,7 @@ fn convert_trade(trade: &ContractTrade, meta: &EventMetadata) -> Result<(DbEvent
     let index = DbEventIndex {
         block_number: meta.block_number,
         log_index: meta.log_index as u64,
+        transaction_hash: meta.transaction_hash,
     };
     let event = DbTrade {
         order_uid,

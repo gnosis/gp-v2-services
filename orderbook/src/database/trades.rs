@@ -1,4 +1,4 @@
-use crate::conversions::{big_decimal_to_big_uint, h160_from_vec};
+use crate::conversions::{big_decimal_to_big_uint, h160_from_vec, h256_from_vec};
 use crate::database::Database;
 use anyhow::{anyhow, Context, Result};
 use bigdecimal::BigDecimal;
@@ -27,8 +27,15 @@ impl Database {
                 t.sell_amount - t.fee_amount as sell_amount_before_fees,\
                 o.owner, \
                 o.buy_token, \
-                o.sell_token \
+                o.sell_token, \
+                s.tx_hash \
             FROM trades t \
+            JOIN settlements s \
+            ON t.block_number = s.block_number
+            AND t.log_index < (
+                SELECT MIN(log_index) FROM settlements s2
+                WHERE t.block_number = s2.block_number
+            )
             JOIN orders o \
             ON o.uid = t.order_uid \
             WHERE \
@@ -58,6 +65,7 @@ struct TradesQueryRow {
     owner: Vec<u8>,
     buy_token: Vec<u8>,
     sell_token: Vec<u8>,
+    tx_hash: Vec<u8>,
 }
 
 impl TradesQueryRow {
@@ -81,6 +89,7 @@ impl TradesQueryRow {
         let owner = h160_from_vec(self.owner)?;
         let buy_token = h160_from_vec(self.buy_token)?;
         let sell_token = h160_from_vec(self.sell_token)?;
+        let tx_hash = h256_from_vec(self.tx_hash)?;
         Ok(Trade {
             block_number,
             log_index,
@@ -91,6 +100,7 @@ impl TradesQueryRow {
             owner,
             buy_token,
             sell_token,
+            tx_hash,
         })
     }
 }
@@ -100,6 +110,7 @@ mod tests {
 
     use super::*;
     use crate::database::{Event, EventIndex, Trade as DbTrade};
+    use ethcontract::H256;
     use model::order::{Order, OrderCreation, OrderMetaData};
     use model::trade::Trade;
     use std::collections::HashSet;
@@ -115,19 +126,22 @@ mod tests {
         return (owners, order_ids);
     }
 
-    async fn add_trade(db: &Database, owner: H160, order_uid: OrderUid, log_index: u64) -> Trade {
+    async fn add_trade(
+        db: &Database,
+        owner: H160,
+        order_uid: OrderUid,
+        event_index: EventIndex,
+    ) -> Trade {
         let trade = Trade {
-            block_number: 0,
-            log_index,
+            block_number: event_index.block_number,
+            log_index: event_index.log_index,
+            tx_hash: event_index.transaction_hash,
             order_uid,
             owner,
             ..Default::default()
         };
         db.insert_events(vec![(
-            EventIndex {
-                block_number: 0,
-                log_index,
-            },
+            event_index,
             Event::Trade(DbTrade {
                 order_uid,
                 ..Default::default()
@@ -142,7 +156,7 @@ mod tests {
         db: &Database,
         owner: H160,
         order_uid: OrderUid,
-        log_index: u64,
+        event_index: EventIndex,
     ) -> Trade {
         let order = Order {
             order_meta_data: OrderMetaData {
@@ -155,7 +169,7 @@ mod tests {
             },
         };
         db.insert_order(&order).await.unwrap();
-        add_trade(db, owner, order_uid, log_index).await
+        add_trade(db, owner, order_uid, event_index).await
     }
 
     async fn assert_trades(db: &Database, filter: &TradeFilter, expected: &[Trade]) {
@@ -175,11 +189,20 @@ mod tests {
         db.clear().await.unwrap();
         let (owners, order_ids) = generate_owners_and_order_ids(2, 2).await;
         assert_trades(&db, &TradeFilter::default(), &[]).await;
-
-        let trade_a = add_order_and_trade(&db, owners[0], order_ids[0], 0).await;
+        let event_index_a = EventIndex {
+            block_number: 0,
+            log_index: 0,
+            transaction_hash: H256::from_low_u64_be(1),
+        };
+        let trade_a = add_order_and_trade(&db, owners[0], order_ids[0], event_index_a).await;
         assert_trades(&db, &TradeFilter::default(), &[trade_a.clone()]).await;
 
-        let trade_b = add_order_and_trade(&db, owners[0], order_ids[1], 1).await;
+        let event_index_b = EventIndex {
+            block_number: 1,
+            log_index: 0,
+            transaction_hash: H256::from_low_u64_be(2),
+        };
+        let trade_b = add_order_and_trade(&db, owners[0], order_ids[1], event_index_b).await;
         assert_trades(&db, &TradeFilter::default(), &[trade_a, trade_b]).await;
     }
 
@@ -190,8 +213,19 @@ mod tests {
         db.clear().await.unwrap();
         let (owners, order_ids) = generate_owners_and_order_ids(3, 2).await;
 
-        let trade_0 = add_order_and_trade(&db, owners[0], order_ids[0], 0).await;
-        let trade_1 = add_order_and_trade(&db, owners[1], order_ids[1], 1).await;
+        let event_index_0 = EventIndex {
+            block_number: 0,
+            log_index: 0,
+            transaction_hash: Default::default(),
+        };
+        let trade_0 = add_order_and_trade(&db, owners[0], order_ids[0], event_index_0).await;
+
+        let event_index_1 = EventIndex {
+            block_number: 0,
+            log_index: 1,
+            transaction_hash: Default::default(),
+        };
+        let trade_1 = add_order_and_trade(&db, owners[1], order_ids[1], event_index_1).await;
 
         assert_trades(
             &db,
@@ -232,8 +266,19 @@ mod tests {
 
         let (owners, order_ids) = generate_owners_and_order_ids(2, 3).await;
 
-        let trade_0 = add_order_and_trade(&db, owners[0], order_ids[0], 0).await;
-        let trade_1 = add_order_and_trade(&db, owners[1], order_ids[1], 1).await;
+        let event_index_0 = EventIndex {
+            block_number: 0,
+            log_index: 0,
+            transaction_hash: Default::default(),
+        };
+        let trade_0 = add_order_and_trade(&db, owners[0], order_ids[0], event_index_0).await;
+
+        let event_index_1 = EventIndex {
+            block_number: 0,
+            log_index: 1,
+            transaction_hash: Default::default(),
+        };
+        let trade_1 = add_order_and_trade(&db, owners[1], order_ids[1], event_index_1).await;
 
         assert_trades(
             &db,
@@ -273,7 +318,13 @@ mod tests {
         db.clear().await.unwrap();
 
         let (owners, order_ids) = generate_owners_and_order_ids(1, 1).await;
-        add_trade(&db, owners[0], order_ids[0], 0).await;
+
+        let event_index = EventIndex {
+            block_number: 0,
+            log_index: 0,
+            transaction_hash: Default::default(),
+        };
+        add_trade(&db, owners[0], order_ids[0], event_index).await;
         // Trade exists in DB but no matching order
         assert_trades(
             &db,
