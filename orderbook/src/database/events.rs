@@ -7,7 +7,7 @@ use model::order::OrderUid;
 use sqlx::{Connection, Executor, Postgres, Transaction};
 use std::convert::TryInto;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct EventIndex {
     pub block_number: u64,
     pub log_index: u64,
