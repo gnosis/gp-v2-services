@@ -30,7 +30,7 @@ impl Database {
                 o.sell_token, \
                 s.tx_hash \
             FROM trades t \
-            JOIN settlements s \
+            LEFT OUTER JOIN settlements s \
             ON t.block_number = s.block_number
             AND t.log_index < (
                 SELECT MIN(log_index) FROM settlements s2
@@ -65,7 +65,7 @@ struct TradesQueryRow {
     owner: Vec<u8>,
     buy_token: Vec<u8>,
     sell_token: Vec<u8>,
-    tx_hash: Vec<u8>,
+    tx_hash: Option<Vec<u8>>,
 }
 
 impl TradesQueryRow {
@@ -89,7 +89,10 @@ impl TradesQueryRow {
         let owner = h160_from_vec(self.owner)?;
         let buy_token = h160_from_vec(self.buy_token)?;
         let sell_token = h160_from_vec(self.sell_token)?;
-        let tx_hash = h256_from_vec(self.tx_hash)?;
+        let tx_hash = match self.tx_hash {
+            Some(hash) => h256_from_vec(hash).ok(),
+            None => None,
+        };
         Ok(Trade {
             block_number,
             log_index,
@@ -135,7 +138,7 @@ mod tests {
         let trade = Trade {
             block_number: event_index.block_number,
             log_index: event_index.log_index,
-            tx_hash: event_index.transaction_hash,
+            tx_hash: None,
             order_uid,
             owner,
             ..Default::default()

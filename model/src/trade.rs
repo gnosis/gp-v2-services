@@ -22,7 +22,7 @@ pub struct Trade {
     pub buy_token: H160,
     pub sell_token: H160,
     // Settlement Data
-    pub tx_hash: H256,
+    pub tx_hash: Option<H256>,
 }
 
 #[cfg(test)]
@@ -55,7 +55,7 @@ mod tests {
             owner: H160::from_low_u64_be(1),
             buy_token: H160::from_low_u64_be(9),
             sell_token: H160::from_low_u64_be(10),
-            tx_hash: H256::from_low_u64_be(64),
+            tx_hash: Some(H256::from_low_u64_be(64)),
         };
 
         let deserialized: Trade = serde_json::from_value(value.clone()).unwrap();

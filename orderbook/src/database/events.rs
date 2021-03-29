@@ -18,6 +18,7 @@ pub struct EventIndex {
 pub enum Event {
     Trade(Trade),
     Invalidation(Invalidation),
+    Settlement(Settlement),
 }
 
 #[derive(Debug, Default)]
@@ -31,6 +32,11 @@ pub struct Trade {
 #[derive(Debug, Default)]
 pub struct Invalidation {
     pub order_uid: OrderUid,
+}
+
+#[derive(Debug, Default)]
+pub struct Settlement {
+    pub solver: H160,
 }
 
 impl Database {
@@ -114,6 +120,7 @@ async fn insert_events(
         match event {
             Event::Trade(event) => insert_trade(transaction, index, event).await?,
             Event::Invalidation(event) => insert_invalidation(transaction, index, event).await?,
+            Event::Settlement(event) => insert_settlement(transaction, index, event).await?,
         };
     }
     Ok(())
@@ -154,32 +161,23 @@ async fn insert_trade(
                 .bind(u256_to_big_decimal(&event.fee_amount)),
         )
         .await?;
-    // TODO: Temporarily insert_settlement here with the limited information we have
-    insert_settlement(transaction, index).await?;
     Ok(())
 }
 
 async fn insert_settlement(
     transaction: &mut Transaction<'_, Postgres>,
     index: &EventIndex,
-    // TODO - Add settlement event here
-    // event: &Settlement
+    event: &Settlement,
 ) -> Result<(), sqlx::Error> {
     const QUERY: &str = "\
-        INSERT INTO settlements (tx_hash, block_number, log_index, solver) \
-        VALUES ($1, $2, $3, $4) \
-        ON CONFLICT DO NOTHING;";
+        INSERT INTO settlements (tx_hash, block_number, log_index, solver) VALUES ($1, $2, $3, $4)";
     transaction
         .execute(
             sqlx::query(QUERY)
                 .bind(index.transaction_hash.as_bytes())
                 .bind(index.block_number as i64)
-                // TODO - use the actual log index from correct event
-                //.bind(index.log_index as i64)
-                .bind(i64::MAX)
-                // TODO - Use the SettlementEvent to include solver.
-                // .bind(event.solver)
-                .bind(H160::default().as_bytes()),
+                .bind(index.log_index as i64)
+                .bind(event.solver.as_bytes()),
         )
         .await?;
     Ok(())
