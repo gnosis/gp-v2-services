@@ -1,7 +1,7 @@
 use super::Database;
 use crate::conversions::*;
 use anyhow::{Context, Result};
-use ethcontract::U256;
+use ethcontract::{H160, H256, U256};
 use futures::FutureExt;
 use model::order::OrderUid;
 use sqlx::{Connection, Executor, Postgres, Transaction};
@@ -11,6 +11,7 @@ use std::convert::TryInto;
 pub struct EventIndex {
     pub block_number: u64,
     pub log_index: u64,
+    pub transaction_hash: H256,
 }
 
 #[derive(Debug)]
@@ -153,6 +154,34 @@ async fn insert_trade(
                 .bind(u256_to_big_decimal(&event.fee_amount)),
         )
         .await?;
+    // TODO: Temporarily insert_settlement here with the limited information we have
+    insert_settlement(transaction, index).await?;
+    Ok(())
+}
+
+async fn insert_settlement(
+    transaction: &mut Transaction<'_, Postgres>,
+    index: &EventIndex,
+    // TODO - Add settlement event here
+    // event: &Settlement
+) -> Result<(), sqlx::Error> {
+    const QUERY: &str = "\
+        INSERT INTO settlements (tx_hash, block_number, log_index, solver) \
+        VALUES ($1, $2, $3, $4) \
+        ON CONFLICT DO NOTHING;";
+    transaction
+        .execute(
+            sqlx::query(QUERY)
+                .bind(index.transaction_hash.as_bytes())
+                .bind(index.block_number as i64)
+                // TODO - use the actual log index from correct event
+                //.bind(index.log_index as i64)
+                .bind(i64::MAX)
+                // TODO - Use the SettlementEvent to include solver.
+                // .bind(event.solver)
+                .bind(H160::default().as_bytes()),
+        )
+        .await?;
     Ok(())
 }
 
@@ -172,6 +201,7 @@ mod tests {
             EventIndex {
                 block_number: 1,
                 log_index: 0,
+                transaction_hash: H256::default(),
             },
             Event::Invalidation(Invalidation::default()),
         )])
@@ -183,6 +213,7 @@ mod tests {
             EventIndex {
                 block_number: 2,
                 log_index: 0,
+                transaction_hash: H256::default(),
             },
             Event::Trade(Trade::default()),
         )])
@@ -196,6 +227,7 @@ mod tests {
                 EventIndex {
                     block_number: 3,
                     log_index: 0,
+                    transaction_hash: H256::default(),
                 },
                 Event::Invalidation(Invalidation::default()),
             )],
@@ -206,5 +238,25 @@ mod tests {
 
         db.replace_events(2, vec![]).await.unwrap();
         assert_eq!(db.block_number_of_most_recent_event().await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn postgres_insert_settlement() {
+        let db = Database::new("postgresql://").unwrap();
+        db.clear().await.unwrap();
+
+        // insert_settlement is not public so we must test it indirectly via its call site.
+        // TODO - change this when settlements are inserted directly from Settlement events.
+        db.insert_events(vec![(
+            EventIndex {
+                block_number: 2,
+                log_index: 0,
+                transaction_hash: H256::default(),
+            },
+            Event::Trade(Trade::default()),
+        )])
+        .await
+        .unwrap();
     }
 }
