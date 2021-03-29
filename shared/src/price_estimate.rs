@@ -7,14 +7,17 @@ use crate::uniswap_solver::{
 use anyhow::{anyhow, Result};
 use ethcontract::{H160, U256};
 use futures::future::join_all;
+use mockall::*;
 use model::{order::OrderKind, TokenPair};
 use num::{BigRational, ToPrimitive};
 use std::{
     cmp::Reverse,
     collections::{HashMap, HashSet},
 };
+
 const MAX_HOPS: usize = 2;
 
+#[automock]
 #[async_trait::async_trait]
 pub trait PriceEstimating: Send + Sync {
     // Price is given in how much of sell_token needs to be sold for one buy_token.
