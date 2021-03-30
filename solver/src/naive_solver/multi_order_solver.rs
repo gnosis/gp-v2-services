@@ -229,8 +229,8 @@ fn compute_uniswap_out(shortage: &TokenContext, excess: &TokenContext) -> BigRat
     let numerator_subtrahend = 1000
         * (u256_to_big_int(&shortage.sell_volume) - u256_to_big_int(&shortage.buy_volume))
         * u256_to_big_int(&excess.reserve);
-    let denominator = (1000 * u256_to_big_int(&excess.reserve))
-        + (997 * (u256_to_big_int(&excess.sell_volume) - u256_to_big_int(&excess.buy_volume)));
+    let denominator = 1000 * u256_to_big_int(&excess.reserve)
+        + 997 * (u256_to_big_int(&excess.sell_volume) - u256_to_big_int(&excess.buy_volume));
     BigRational::new(numerator_minuend - numerator_subtrahend, denominator)
 }
 
