@@ -5,7 +5,12 @@ use self::retry::{CancelSender, SettlementSender};
 use crate::settlement::Settlement;
 use anyhow::{anyhow, Context, Result};
 use contracts::GPv2Settlement;
-use ethcontract::{dyns::DynTransport, transaction::TransactionBuilder, Web3};
+use ethcontract::{
+    dyns::DynTransport,
+    errors::{ExecutionError, MethodError},
+    transaction::TransactionBuilder,
+    Web3,
+};
 use gas_estimation::GasPriceEstimating;
 use gas_price_stream::gas_price_stream;
 use primitive_types::{H160, U256};
@@ -97,15 +102,26 @@ async fn simulate_settlement(
     let result = method.call().await;
     match &result {
         Ok(_) => Ok(()),
-        Err(_) => {
-            let tenderly_link = tenderly_link(&contract.raw_instance().web3(), tx)
-                .await
-                .unwrap_or_else(|err| format!("Unable to create simulation link due to: {}", err));
-            result
-                .map(|_| ())
-                .context(format!("Settle simulation failed. Link: {}", tenderly_link))
+        Err(err) => {
+            let context = if is_smart_contract_error(err) {
+                let tenderly_link = tenderly_link(&contract.raw_instance().web3(), tx)
+                    .await
+                    .unwrap_or_else(|err| {
+                        format!("Unable to create simulation link due to: {}", err)
+                    });
+                format!("Settle simulation failed. Link: {}", tenderly_link)
+            } else {
+                "Settle simulation failed.".into()
+            };
+            result.map(|_| ()).context(context)
         }
     }
+}
+
+fn is_smart_contract_error(error: &MethodError) -> bool {
+    matches!(error.inner, ExecutionError::Failure(_))
+        || matches!(error.inner, ExecutionError::Revert(_))
+        || matches!(error.inner, ExecutionError::InvalidOpcode)
 }
 
 // Creates a simulation link in the gp-v2 tenderly workspace
