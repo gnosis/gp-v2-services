@@ -9,6 +9,7 @@ use crate::{
 };
 use ::model::order::OrderKind;
 use anyhow::{ensure, Context, Result};
+use futures::join;
 use num::{BigRational, ToPrimitive};
 use primitive_types::H160;
 use reqwest::{header::HeaderValue, Client, Url};
@@ -198,20 +199,16 @@ impl HttpSolver {
         let tokens = self.map_tokens_for_solver(liquidity.as_slice());
 
         let addresses: Vec<H160> = tokens.values().into_iter().cloned().collect();
-        let token_infos = self
-            .token_info_fetcher
-            .get_token_infos(addresses.as_slice())
-            .await;
 
-        let price_estimates: HashMap<H160, Result<BigRational>> = addresses
-            .iter()
-            .cloned()
-            .zip(
-                self.price_estimator
-                    .estimate_prices(addresses.as_slice(), addresses[0])
-                    .await,
-            )
-            .collect();
+        let (token_infos, price_estimates) = join!(
+            self.token_info_fetcher
+                .get_token_infos(addresses.as_slice()),
+            self.price_estimator
+                .estimate_prices(addresses.as_slice(), addresses[0]),
+        );
+
+        let price_estimates: HashMap<H160, Result<BigRational>> =
+            addresses.iter().cloned().zip(price_estimates).collect();
 
         let mut orders = split_liquidity(liquidity);
 
