@@ -4,7 +4,7 @@ use crate::{
 };
 use liquidity::{AmmOrder, LimitOrder};
 use model::order::OrderKind;
-use num::BigRational;
+use num::{BigInt, BigRational, Zero};
 use primitive_types::U256;
 use shared::conversions::{big_rational_to_u256, u256_to_big_int, U256Ext};
 use std::collections::HashMap;
@@ -229,8 +229,12 @@ fn compute_uniswap_out(shortage: &TokenContext, excess: &TokenContext) -> BigRat
     let numerator_subtrahend = 1000
         * (u256_to_big_int(&shortage.sell_volume) - u256_to_big_int(&shortage.buy_volume))
         * u256_to_big_int(&excess.reserve);
-    let denominator = 1000 * u256_to_big_int(&excess.reserve)
+    let denominator: BigInt = 1000 * u256_to_big_int(&excess.reserve)
         + 997 * (u256_to_big_int(&excess.sell_volume) - u256_to_big_int(&excess.buy_volume));
+    assert!(
+        !denominator.is_zero(),
+        "reserve values cannot be zero (it's impossible to fully drain a pool)"
+    );
     BigRational::new(numerator_minuend - numerator_subtrahend, denominator)
 }
 
