@@ -21,6 +21,7 @@ pub enum Liquidity {
 /// Basic limit sell and buy orders
 #[derive(Clone)]
 pub struct LimitOrder {
+    pub id: String,
     pub sell_token: H160,
     pub buy_token: H160,
     pub sell_amount: U256,

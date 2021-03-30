@@ -296,7 +296,7 @@ impl Default for OrderMetaData {
 }
 
 // uid as 56 bytes: 32 for orderDigest, 20 for ownerAddress and 4 for validTo
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub struct OrderUid(pub [u8; 56]);
 
 impl FromStr for OrderUid {
@@ -309,15 +309,26 @@ impl FromStr for OrderUid {
     }
 }
 
-impl Display for OrderUid {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl From<&OrderUid> for String {
+    fn from(uid: &OrderUid) -> Self {
         let mut bytes = [0u8; 2 + 56 * 2];
         bytes[..2].copy_from_slice(b"0x");
         // Unwrap because the length is always correct.
-        hex::encode_to_slice(&self.0, &mut bytes[2..]).unwrap();
+        hex::encode_to_slice(uid.0, &mut bytes[2..]).unwrap();
         // Unwrap because the string is always valid utf8.
-        let str = std::str::from_utf8(&bytes).unwrap();
-        f.write_str(str)
+        std::str::from_utf8(&bytes).unwrap().to_owned()
+    }
+}
+
+impl Display for OrderUid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&String::from(self))
+    }
+}
+
+impl fmt::Debug for OrderUid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self)
     }
 }
 
