@@ -1,4 +1,4 @@
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{ensure, Result};
 use num::BigInt;
 use num::{bigint::Sign, Zero};
 use num::{BigRational, ToPrimitive as _};
