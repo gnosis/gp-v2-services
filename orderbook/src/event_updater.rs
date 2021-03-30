@@ -176,6 +176,7 @@ fn convert_settlement(
 ) -> (DbEventIndex, DbEvent) {
     let event = DbSettlement {
         solver: settlement.solver,
+        transaction_hash: meta.transaction_hash,
     };
     (event_meta_to_index(meta), DbEvent::Settlement(event))
 }
@@ -185,7 +186,6 @@ fn event_meta_to_index(meta: &EventMetadata) -> DbEventIndex {
     DbEventIndex {
         block_number: meta.block_number,
         log_index: meta.log_index as u64,
-        transaction_hash: meta.transaction_hash,
     }
 }
 

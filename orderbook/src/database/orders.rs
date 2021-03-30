@@ -261,7 +261,6 @@ mod tests {
 
     use super::*;
     use chrono::NaiveDateTime;
-    use ethcontract::H256;
     use futures::StreamExt;
     use num_bigint::BigUint;
     use primitive_types::U256;
@@ -545,7 +544,6 @@ mod tests {
             EventIndex {
                 block_number: 0,
                 log_index: 0,
-                transaction_hash: H256::default(),
             },
             Event::Trade(Trade {
                 order_uid: order.order_meta_data.uid,
@@ -565,7 +563,6 @@ mod tests {
             EventIndex {
                 block_number: 1,
                 log_index: 0,
-                transaction_hash: H256::default(),
             },
             Event::Trade(Trade {
                 order_uid: order.order_meta_data.uid,
@@ -586,7 +583,6 @@ mod tests {
             EventIndex {
                 block_number: 2,
                 log_index: 0,
-                transaction_hash: H256::default(),
             },
             Event::Trade(Trade {
                 order_uid: order.order_meta_data.uid,
@@ -636,7 +632,6 @@ mod tests {
                 EventIndex {
                     block_number: i,
                     log_index: 0,
-                    transaction_hash: H256::default(),
                 },
                 Event::Trade(Trade {
                     order_uid: order.order_meta_data.uid,

@@ -28,14 +28,15 @@ impl Database {
                 o.owner, \
                 o.buy_token, \
                 o.sell_token, \
-                s.tx_hash \
+                settlement.tx_hash \
             FROM trades t \
-            LEFT OUTER JOIN settlements s \
-            ON t.block_number = s.block_number
-            AND t.log_index < (
-                SELECT MIN(log_index) FROM settlements s2
-                WHERE t.block_number = s2.block_number
-            )
+            LEFT OUTER JOIN LATERAL ( \
+                SELECT tx_hash FROM settlements s \
+                WHERE s.block_number = t.block_number \
+                AND   s.log_index > t.log_index \
+                ORDER BY s.log_index ASC \
+                LIMIT 1 \
+            ) AS settlement ON true \
             JOIN orders o \
             ON o.uid = t.order_uid \
             WHERE \
@@ -89,7 +90,7 @@ impl TradesQueryRow {
         let owner = h160_from_vec(self.owner)?;
         let buy_token = h160_from_vec(self.buy_token)?;
         let sell_token = h160_from_vec(self.sell_token)?;
-        let tx_hash = self.tx_hash.map(|hash| h256_from_vec(hash)).transpose()?;
+        let tx_hash = self.tx_hash.map(h256_from_vec).transpose()?;
         Ok(Trade {
             block_number,
             log_index,
@@ -131,12 +132,12 @@ mod tests {
         owner: H160,
         order_uid: OrderUid,
         event_index: EventIndex,
-        settlement_index: Option<EventIndex>,
+        tx_hash: Option<H256>,
     ) -> Trade {
         let trade = Trade {
             block_number: event_index.block_number,
             log_index: event_index.log_index,
-            tx_hash: settlement_index.map(|index| index.transaction_hash),
+            tx_hash,
             order_uid,
             owner,
             ..Default::default()
@@ -158,7 +159,7 @@ mod tests {
         owner: H160,
         order_uid: OrderUid,
         event_index: EventIndex,
-        settlement_index: Option<EventIndex>,
+        tx_hash: Option<H256>,
     ) -> Trade {
         let order = Order {
             order_meta_data: OrderMetaData {
@@ -171,7 +172,7 @@ mod tests {
             },
         };
         db.insert_order(&order).await.unwrap();
-        add_trade(db, owner, order_uid, event_index, settlement_index).await
+        add_trade(db, owner, order_uid, event_index, tx_hash).await
     }
 
     async fn assert_trades(db: &Database, filter: &TradeFilter, expected: &[Trade]) {
@@ -195,7 +196,6 @@ mod tests {
         let event_index_a = EventIndex {
             block_number: 0,
             log_index: 0,
-            transaction_hash: Default::default(),
         };
         let trade_a = add_order_and_trade(&db, owners[0], order_ids[0], event_index_a, None).await;
         assert_trades(&db, &TradeFilter::default(), &[trade_a.clone()]).await;
@@ -203,7 +203,6 @@ mod tests {
         let event_index_b = EventIndex {
             block_number: 1,
             log_index: 0,
-            transaction_hash: Default::default(),
         };
         let trade_b = add_order_and_trade(&db, owners[0], order_ids[1], event_index_b, None).await;
         assert_trades(&db, &TradeFilter::default(), &[trade_a, trade_b]).await;
@@ -219,14 +218,12 @@ mod tests {
         let event_index_0 = EventIndex {
             block_number: 0,
             log_index: 0,
-            transaction_hash: Default::default(),
         };
         let trade_0 = add_order_and_trade(&db, owners[0], order_ids[0], event_index_0, None).await;
 
         let event_index_1 = EventIndex {
             block_number: 0,
             log_index: 1,
-            transaction_hash: Default::default(),
         };
         let trade_1 = add_order_and_trade(&db, owners[1], order_ids[1], event_index_1, None).await;
 
@@ -272,14 +269,12 @@ mod tests {
         let event_index_0 = EventIndex {
             block_number: 0,
             log_index: 0,
-            transaction_hash: Default::default(),
         };
         let trade_0 = add_order_and_trade(&db, owners[0], order_ids[0], event_index_0, None).await;
 
         let event_index_1 = EventIndex {
             block_number: 0,
             log_index: 1,
-            transaction_hash: Default::default(),
         };
         let trade_1 = add_order_and_trade(&db, owners[1], order_ids[1], event_index_1, None).await;
 
@@ -325,7 +320,6 @@ mod tests {
         let event_index = EventIndex {
             block_number: 0,
             log_index: 0,
-            transaction_hash: Default::default(),
         };
         add_trade(&db, owners[0], order_ids[0], event_index, None).await;
         // Trade exists in DB but no matching order
@@ -359,16 +353,15 @@ mod tests {
         let (owners, order_ids) = generate_owners_and_order_ids(2, 2).await;
         assert_trades(&db, &TradeFilter::default(), &[]).await;
 
-        let settlement_hash = H256::from_low_u64_be(1);
-        let settlement_event_index = EventIndex {
-            block_number: 0,
-            log_index: 4,
-            transaction_hash: settlement_hash,
-        };
+        let settlement_hash = H256::from_low_u64_be(2);
         db.insert_events(vec![(
-            settlement_event_index,
+            EventIndex {
+                block_number: 0,
+                log_index: 4,
+            },
             Event::Settlement(DbSettlement {
                 solver: H160::from_low_u64_be(2),
+                transaction_hash: settlement_hash,
             }),
         )])
         .await
@@ -377,14 +370,13 @@ mod tests {
         let event_index_a = EventIndex {
             block_number: 0,
             log_index: 0,
-            transaction_hash: Default::default(),
         };
         let trade_a = add_order_and_trade(
             &db,
             owners[0],
             order_ids[0],
             event_index_a,
-            Option::from(settlement_event_index),
+            Option::from(settlement_hash),
         )
         .await;
         assert_trades(&db, &TradeFilter::default(), &[trade_a.clone()]).await;
@@ -392,14 +384,13 @@ mod tests {
         let event_index_b = EventIndex {
             block_number: 0,
             log_index: 1,
-            transaction_hash: Default::default(),
         };
         let trade_b = add_order_and_trade(
             &db,
             owners[0],
             order_ids[1],
             event_index_b,
-            Option::from(settlement_event_index),
+            Option::from(settlement_hash),
         )
         .await;
         assert_trades(&db, &TradeFilter::default(), &[trade_a, trade_b]).await;
@@ -416,17 +407,16 @@ mod tests {
         let trade_event_index_a = EventIndex {
             block_number: 0,
             log_index: 0,
-            transaction_hash: Default::default(),
         };
-        let settlement_event_index_a = EventIndex {
-            block_number: 0,
-            log_index: 1,
-            transaction_hash: H256::from_low_u64_be(1),
-        };
+        let settlement_hash_a = H256::from_low_u64_be(2);
         db.insert_events(vec![(
-            settlement_event_index_a,
+            EventIndex {
+                block_number: 0,
+                log_index: 1,
+            },
             Event::Settlement(DbSettlement {
-                solver: H160::from_low_u64_be(2),
+                solver: H160::from_low_u64_be(1),
+                transaction_hash: settlement_hash_a,
             }),
         )])
         .await
@@ -435,17 +425,16 @@ mod tests {
         let trade_event_index_b = EventIndex {
             block_number: 0,
             log_index: 2,
-            transaction_hash: Default::default(),
         };
-        let settlement_event_index_b = EventIndex {
-            block_number: 0,
-            log_index: 3,
-            transaction_hash: H256::from_low_u64_be(3),
-        };
+        let settlement_hash_b = H256::from_low_u64_be(4);
         db.insert_events(vec![(
-            settlement_event_index_b,
+            EventIndex {
+                block_number: 0,
+                log_index: 3,
+            },
             Event::Settlement(DbSettlement {
-                solver: H160::from_low_u64_be(4),
+                solver: H160::from_low_u64_be(3),
+                transaction_hash: settlement_hash_b,
             }),
         )])
         .await
@@ -456,19 +445,19 @@ mod tests {
             owners[0],
             order_ids[0],
             trade_event_index_a,
-            Option::from(settlement_event_index_a),
+            Option::from(settlement_hash_a),
         )
         .await;
-        // assert_trades(&db, &TradeFilter::default(), &[trade_a.clone()]).await;
+        assert_trades(&db, &TradeFilter::default(), &[trade_a.clone()]).await;
 
         let trade_b = add_order_and_trade(
             &db,
             owners[0],
             order_ids[1],
             trade_event_index_b,
-            Option::from(settlement_event_index_b),
+            Option::from(settlement_hash_b),
         )
         .await;
-        // assert_trades(&db, &TradeFilter::default(), &[trade_a, trade_b]).await;
+        assert_trades(&db, &TradeFilter::default(), &[trade_a, trade_b]).await;
     }
 }

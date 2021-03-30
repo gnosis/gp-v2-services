@@ -11,7 +11,6 @@ use std::convert::TryInto;
 pub struct EventIndex {
     pub block_number: u64,
     pub log_index: u64,
-    pub transaction_hash: H256,
 }
 
 #[derive(Debug)]
@@ -37,6 +36,7 @@ pub struct Invalidation {
 #[derive(Debug, Default)]
 pub struct Settlement {
     pub solver: H160,
+    pub transaction_hash: H256,
 }
 
 impl Database {
@@ -44,6 +44,7 @@ impl Database {
         const QUERY: &str = "\
             SELECT GREATEST( \
                 (SELECT COALESCE(MAX(block_number), 0) FROM trades), \
+                (SELECT COALESCE(MAX(block_number), 0) FROM settlements), \
                 (SELECT COALESCE(MAX(block_number), 0) FROM invalidations));";
         let block_number: i64 = sqlx::query_scalar(QUERY)
             .fetch_one(&self.pool)
@@ -104,6 +105,11 @@ async fn delete_events(
     const QUERY_TRADE: &str = "DELETE FROM trades WHERE block_number >= $1;";
     transaction
         .execute(sqlx::query(QUERY_TRADE).bind(delete_from_block_number as i64))
+        .await?;
+
+    const QUERY_SETTLEMENTS: &str = "DELETE FROM settlements WHERE block_number >= $1;";
+    transaction
+        .execute(sqlx::query(QUERY_SETTLEMENTS).bind(delete_from_block_number as i64))
         .await?;
 
     Ok(())
@@ -174,7 +180,7 @@ async fn insert_settlement(
     transaction
         .execute(
             sqlx::query(QUERY)
-                .bind(index.transaction_hash.as_bytes())
+                .bind(event.transaction_hash.as_bytes())
                 .bind(index.block_number as i64)
                 .bind(index.log_index as i64)
                 .bind(event.solver.as_bytes()),
@@ -199,7 +205,6 @@ mod tests {
             EventIndex {
                 block_number: 1,
                 log_index: 0,
-                transaction_hash: H256::default(),
             },
             Event::Invalidation(Invalidation::default()),
         )])
@@ -211,7 +216,6 @@ mod tests {
             EventIndex {
                 block_number: 2,
                 log_index: 0,
-                transaction_hash: H256::default(),
             },
             Event::Trade(Trade::default()),
         )])
@@ -225,7 +229,6 @@ mod tests {
                 EventIndex {
                     block_number: 3,
                     log_index: 0,
-                    transaction_hash: H256::default(),
                 },
                 Event::Invalidation(Invalidation::default()),
             )],
@@ -236,25 +239,23 @@ mod tests {
 
         db.replace_events(2, vec![]).await.unwrap();
         assert_eq!(db.block_number_of_most_recent_event().await.unwrap(), 0);
-    }
 
-    #[tokio::test]
-    #[ignore]
-    async fn postgres_insert_settlement() {
-        let db = Database::new("postgresql://").unwrap();
-        db.clear().await.unwrap();
-
-        // insert_settlement is not public so we must test it indirectly via its call site.
-        // TODO - change this when settlements are inserted directly from Settlement events.
         db.insert_events(vec![(
             EventIndex {
-                block_number: 2,
-                log_index: 0,
-                transaction_hash: H256::default(),
+                block_number: 1,
+                log_index: 2,
             },
-            Event::Trade(Trade::default()),
+            Event::Settlement(Settlement {
+                solver: H160::from_low_u64_be(3),
+                transaction_hash: H256::from_low_u64_be(4),
+            }),
         )])
         .await
         .unwrap();
+
+        assert_eq!(db.block_number_of_most_recent_event().await.unwrap(), 1);
+
+        db.replace_events(1, vec![]).await.unwrap();
+        assert_eq!(db.block_number_of_most_recent_event().await.unwrap(), 0);
     }
 }
