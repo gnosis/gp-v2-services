@@ -468,7 +468,7 @@ components:
           description: "Total amount of buyToken received in this trade."
           $ref: "#/components/schemas/TokenAmount"
         transactionHash:
-          description: "Hash of the corresponding settlement transaction containing the trade"
+          description: "Hash of the corresponding settlement transaction containing the trade (if available)."
           $ref: "#/components/schemas/TransactionHash"
     UID:
       description: |

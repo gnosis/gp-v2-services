@@ -376,7 +376,7 @@ mod tests {
             owners[0],
             order_ids[0],
             event_index_a,
-            Option::from(settlement_hash),
+            Some(settlement_hash),
         )
         .await;
         assert_trades(&db, &TradeFilter::default(), &[trade_a.clone()]).await;
@@ -390,7 +390,7 @@ mod tests {
             owners[0],
             order_ids[1],
             event_index_b,
-            Option::from(settlement_hash),
+            Some(settlement_hash),
         )
         .await;
         assert_trades(&db, &TradeFilter::default(), &[trade_a, trade_b]).await;
@@ -445,7 +445,7 @@ mod tests {
             owners[0],
             order_ids[0],
             trade_event_index_a,
-            Option::from(settlement_hash_a),
+            Some(settlement_hash_a),
         )
         .await;
         assert_trades(&db, &TradeFilter::default(), &[trade_a.clone()]).await;
@@ -455,7 +455,7 @@ mod tests {
             owners[0],
             order_ids[1],
             trade_event_index_b,
-            Option::from(settlement_hash_b),
+            Some(settlement_hash_b),
         )
         .await;
         assert_trades(&db, &TradeFilter::default(), &[trade_a, trade_b]).await;
