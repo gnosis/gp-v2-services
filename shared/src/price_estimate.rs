@@ -7,7 +7,7 @@ use crate::uniswap_solver::{
 use anyhow::{anyhow, Result};
 use ethcontract::{H160, U256};
 use futures::future::join_all;
-use mockall::*;
+use mockall::automock;
 use model::{order::OrderKind, TokenPair};
 use num::{BigRational, ToPrimitive};
 use std::{
