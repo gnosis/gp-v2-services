@@ -393,7 +393,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn test_computing_objective_value_with_zero_prices() {
         // Test if passing a clearing price of zero to the objective value function does
@@ -412,7 +411,7 @@ mod tests {
         };
 
         let trade = Trade {
-            order: order,
+            order,
             executed_amount: 10.into(),
             ..Default::default()
         };
@@ -420,7 +419,7 @@ mod tests {
         let clearing_prices = maplit::hashmap! {token0 => 1.into(), token1 => 0.into()};
 
         let settlement = Settlement {
-            clearing_prices: clearing_prices,
+            clearing_prices,
             trades: vec![trade],
             ..Default::default()
         };
