@@ -140,10 +140,12 @@ impl Settlement {
                 .get(&trade.order.buy_token)
                 .expect("Solution with trade but without price for buy token");
 
-            if trade.order.kind == OrderKind::Sell && buy_token_clearing_price.is_zero() {
-                return None;
+            if match trade.order.kind {
+                OrderKind::Sell => &buy_token_clearing_price,
+                OrderKind::Buy => &sell_token_clearing_price,
             }
-            if trade.order.kind == OrderKind::Buy && sell_token_clearing_price.is_zero() {
+            .is_zero()
+            {
                 return None;
             }
 
