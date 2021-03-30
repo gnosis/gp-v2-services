@@ -355,7 +355,7 @@ mod tests {
     use ::model::TokenPair;
     use maplit::hashmap;
     use num::rational::Ratio;
-    use shared::price_estimate::MockPriceEstimating;
+    use shared::price_estimate::FakePriceEstimator;
     use shared::token_info::MockTokenInfoFetching;
     use shared::token_info::TokenInfo;
     use std::sync::Arc;
@@ -382,12 +382,8 @@ mod tests {
             });
         let mock_token_info_fetcher: Arc<dyn TokenInfoFetching> = Arc::new(mock_token_info_fetcher);
 
-        let mut mock_price_estimation = MockPriceEstimating::new();
-        mock_price_estimation
-            .expect_estimate_prices()
-            .return_once(move |_, _| vec![Ok(num::one()), Ok(num::one())]);
-        let mock_price_estimation: Arc<dyn PriceEstimating> = Arc::new(mock_price_estimation);
-
+        let mock_price_estimation: Arc<dyn PriceEstimating> =
+            Arc::new(FakePriceEstimator(num::one()));
         let solver = HttpSolver::new(
             url.parse().unwrap(),
             None,

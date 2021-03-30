@@ -7,7 +7,6 @@ use crate::uniswap_solver::{
 use anyhow::{anyhow, Result};
 use ethcontract::{H160, U256};
 use futures::future::join_all;
-use mockall::automock;
 use model::{order::OrderKind, TokenPair};
 use num::{BigRational, ToPrimitive};
 use std::{
@@ -17,7 +16,6 @@ use std::{
 
 const MAX_HOPS: usize = 2;
 
-#[automock]
 #[async_trait::async_trait]
 pub trait PriceEstimating: Send + Sync {
     // Price is given in how much of sell_token needs to be sold for one buy_token.
@@ -257,6 +255,18 @@ impl UniswapPriceEstimator {
                 ))
             })?,
         ))
+    }
+}
+
+pub struct FakePriceEstimator(pub BigRational);
+#[async_trait::async_trait]
+impl PriceEstimating for FakePriceEstimator {
+    async fn estimate_price(&self, _: H160, _: H160, _: U256, _: OrderKind) -> Result<BigRational> {
+        Ok(self.0.clone())
+    }
+
+    async fn estimate_gas(&self, _: H160, _: H160, _: U256, _: OrderKind) -> Result<U256> {
+        Ok(100_000.into())
     }
 }
 
