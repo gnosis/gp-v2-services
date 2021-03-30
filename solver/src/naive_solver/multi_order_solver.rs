@@ -6,7 +6,7 @@ use liquidity::{AmmOrder, LimitOrder};
 use model::order::OrderKind;
 use num::BigRational;
 use primitive_types::U256;
-use shared::conversions::{big_rational_to_u256, u256_to_big_int};
+use shared::conversions::{big_rational_to_u256, u256_to_big_int, U256Ext};
 use std::collections::HashMap;
 use web3::types::Address;
 
@@ -246,8 +246,7 @@ fn compute_uniswap_in(
     excess: &TokenContext,
 ) -> BigRational {
     BigRational::from_integer(1000.into()) * out.clone() * u256_to_big_int(&excess.reserve)
-        / (BigRational::from_integer(997.into())
-            * (BigRational::from(u256_to_big_int(&shortage.reserve)) - out))
+        / (BigRational::from_integer(997.into()) * (shortage.reserve.to_big_rational() - out))
 }
 
 ///
