@@ -393,7 +393,7 @@ mod tests {
                 block_number: 0,
                 log_index: 0,
             },
-            Some(settlement.transaction_hash.clone()),
+            Some(settlement.transaction_hash),
         )
         .await;
         assert_trades(&db, &TradeFilter::default(), &[trade_a.clone()]).await;
@@ -442,7 +442,7 @@ mod tests {
                 block_number: 0,
                 log_index: 0,
             },
-            Some(settlement.transaction_hash.clone()),
+            Some(settlement.transaction_hash),
         )
         .await;
 
