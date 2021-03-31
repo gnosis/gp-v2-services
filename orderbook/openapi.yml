@@ -355,6 +355,7 @@ components:
             An optional address to receive the proceeds of the trade instead of the
             owner (i.e. the order signer).
           $ref: "#/components/schemas/Address"
+          nullable: true
         sellAmount:
           description: "Amount of sellToken to be sold in atoms"
           $ref: "#/components/schemas/TokenAmount"
@@ -412,6 +413,7 @@ components:
         availableBalance:
           description: "Amount of sellToken available for the settlement contract to spend on behalf of the owner. Null if API was unable to fetch balance."
           $ref: "#/components/schemas/TokenAmount"
+          nullable: true
         executedSellAmount:
           description: "The total amount of sellToken that has been executed for this order including fees."
           $ref: "#/components/schemas/BigUint"
