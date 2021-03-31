@@ -499,16 +499,16 @@ components:
         transactionHash:
           description: "Hash of the corresponding settlement transaction containing the trade (if available)."
           $ref: "#/components/schemas/TransactionHash"
-        required:
-          - blockNumber
-          - logIndex
-          - orderUid
-          - owner
-          - sellToken
-          - buyToken
-          - sellAmount
-          - sellAmountBeforeFees
-          - buyAmount
+      required:
+        - blockNumber
+        - logIndex
+        - orderUid
+        - owner
+        - sellToken
+        - buyToken
+        - sellAmount
+        - sellAmountBeforeFees
+        - buyAmount
     UID:
       description: |
         Unique identifier for the order: 56 bytes encoded as hex with `0x` prefix.
