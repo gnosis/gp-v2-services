@@ -355,7 +355,6 @@ components:
             An optional address to receive the proceeds of the trade instead of the
             owner (i.e. the order signer).
           $ref: "#/components/schemas/Address"
-          nullable: true
         sellAmount:
           description: "Amount of sellToken to be sold in atoms"
           $ref: "#/components/schemas/TokenAmount"
