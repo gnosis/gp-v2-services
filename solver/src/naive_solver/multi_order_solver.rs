@@ -276,7 +276,10 @@ fn is_valid_solution(solution: &Settlement) -> bool {
 #[cfg(test)]
 mod tests {
     use liquidity::tests::{CapturingAmmSettlementHandler, CapturingLimitOrderSettlementHandler};
-    use model::{order::OrderCreation, TokenPair};
+    use model::{
+        order::{Order, OrderCreation},
+        TokenPair,
+    };
     use num::rational::Ratio;
 
     use super::*;
@@ -298,6 +301,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "0".to_string(),
             },
             LimitOrder {
                 sell_token: token_b,
@@ -307,6 +311,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "1".to_string(),
             },
         ];
 
@@ -354,6 +359,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "0".to_string(),
             },
             LimitOrder {
                 sell_token: token_a,
@@ -363,6 +369,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "1".to_string(),
             },
         ];
 
@@ -406,6 +413,7 @@ mod tests {
                 kind: OrderKind::Buy,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "0".to_string(),
             },
             LimitOrder {
                 sell_token: token_b,
@@ -415,6 +423,7 @@ mod tests {
                 kind: OrderKind::Buy,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "1".to_string(),
             },
         ];
 
@@ -462,6 +471,7 @@ mod tests {
                 kind: OrderKind::Buy,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "0".to_string(),
             },
             LimitOrder {
                 sell_token: token_b,
@@ -471,6 +481,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "1".to_string(),
             },
         ];
 
@@ -522,6 +533,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "0".to_string(),
             },
             LimitOrder {
                 sell_token: token_b,
@@ -531,6 +543,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "1".to_string(),
             },
         ];
 
@@ -558,46 +571,58 @@ mod tests {
         let token_b = Address::from_low_u64_be(1);
         let orders = vec![
             // Unreasonable order a -> b
-            OrderCreation {
-                sell_token: token_a,
-                buy_token: token_b,
-                sell_amount: to_wei(1),
-                buy_amount: to_wei(1000),
-                kind: OrderKind::Sell,
-                partially_fillable: false,
+            Order {
+                order_creation: OrderCreation {
+                    sell_token: token_a,
+                    buy_token: token_b,
+                    sell_amount: to_wei(1),
+                    buy_amount: to_wei(1000),
+                    kind: OrderKind::Sell,
+                    partially_fillable: false,
+                    ..Default::default()
+                },
                 ..Default::default()
             }
             .into(),
             // Reasonable order a -> b
-            OrderCreation {
-                sell_token: token_a,
-                buy_token: token_b,
-                sell_amount: to_wei(1000),
-                buy_amount: to_wei(1000),
-                kind: OrderKind::Sell,
-                partially_fillable: false,
+            Order {
+                order_creation: OrderCreation {
+                    sell_token: token_a,
+                    buy_token: token_b,
+                    sell_amount: to_wei(1000),
+                    buy_amount: to_wei(1000),
+                    kind: OrderKind::Sell,
+                    partially_fillable: false,
+                    ..Default::default()
+                },
                 ..Default::default()
             }
             .into(),
             // Reasonable order b -> a
-            OrderCreation {
-                sell_token: token_b,
-                buy_token: token_a,
-                sell_amount: to_wei(1000),
-                buy_amount: to_wei(1000),
-                kind: OrderKind::Sell,
-                partially_fillable: false,
+            Order {
+                order_creation: OrderCreation {
+                    sell_token: token_b,
+                    buy_token: token_a,
+                    sell_amount: to_wei(1000),
+                    buy_amount: to_wei(1000),
+                    kind: OrderKind::Sell,
+                    partially_fillable: false,
+                    ..Default::default()
+                },
                 ..Default::default()
             }
             .into(),
             // Unreasonable order b -> a
-            OrderCreation {
-                sell_token: token_b,
-                buy_token: token_a,
-                sell_amount: to_wei(2),
-                buy_amount: to_wei(1000),
-                kind: OrderKind::Sell,
-                partially_fillable: false,
+            Order {
+                order_creation: OrderCreation {
+                    sell_token: token_b,
+                    buy_token: token_a,
+                    sell_amount: to_wei(2),
+                    buy_amount: to_wei(1000),
+                    kind: OrderKind::Sell,
+                    partially_fillable: false,
+                    ..Default::default()
+                },
                 ..Default::default()
             }
             .into(),
@@ -629,6 +654,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "0".to_string(),
             },
             LimitOrder {
                 sell_token: token_b,
@@ -638,6 +664,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "1".to_string(),
             },
         ];
 
@@ -777,6 +804,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "0".into(),
             },
             LimitOrder {
                 sell_token: token_b,
@@ -786,6 +814,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "1".into(),
             },
         ];
 
@@ -805,23 +834,29 @@ mod tests {
         let token_a = Address::from_low_u64_be(0);
         let token_b = Address::from_low_u64_be(1);
         let orders = vec![
-            OrderCreation {
-                sell_token: token_a,
-                buy_token: token_b,
-                sell_amount: 70145218378783248142575u128.into(),
-                buy_amount: 70123226323u128.into(),
-                kind: OrderKind::Sell,
-                partially_fillable: false,
+            Order {
+                order_creation: OrderCreation {
+                    sell_token: token_a,
+                    buy_token: token_b,
+                    sell_amount: 70145218378783248142575u128.into(),
+                    buy_amount: 70123226323u128.into(),
+                    kind: OrderKind::Sell,
+                    partially_fillable: false,
+                    ..Default::default()
+                },
                 ..Default::default()
             }
             .into(),
-            OrderCreation {
-                sell_token: token_a,
-                buy_token: token_b,
-                sell_amount: 900_000_000_000_000u128.into(),
-                buy_amount: 100.into(),
-                kind: OrderKind::Sell,
-                partially_fillable: false,
+            Order {
+                order_creation: OrderCreation {
+                    sell_token: token_a,
+                    buy_token: token_b,
+                    sell_amount: 900_000_000_000_000u128.into(),
+                    buy_amount: 100.into(),
+                    kind: OrderKind::Sell,
+                    partially_fillable: false,
+                    ..Default::default()
+                },
                 ..Default::default()
             }
             .into(),
