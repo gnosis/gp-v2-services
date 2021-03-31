@@ -512,6 +512,7 @@ components:
         - sellAmount
         - sellAmountBeforeFees
         - buyAmount
+        - transactionHash
     UID:
       description: |
         Unique identifier for the order: 56 bytes encoded as hex with `0x` prefix.
