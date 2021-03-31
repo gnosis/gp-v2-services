@@ -4,7 +4,7 @@ use crate::{
 };
 use liquidity::{AmmOrder, LimitOrder};
 use model::order::OrderKind;
-use num::{rational::Ratio, BigInt, BigRational, Zero};
+use num::{rational::Ratio, BigInt, BigRational};
 use primitive_types::U256;
 use shared::conversions::{big_rational_to_u256, u256_to_big_int, RatioExt, U256Ext};
 use std::collections::HashMap;
