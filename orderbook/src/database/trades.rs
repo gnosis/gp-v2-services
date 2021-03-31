@@ -345,55 +345,120 @@ mod tests {
     }
 
     // Testing Trades with settlements
+    async fn add_settlement(
+        db: &Database,
+        event_index: EventIndex,
+        solver: H160,
+        transaction_hash: H256,
+    ) -> DbSettlement {
+        db.insert_events(vec![(
+            event_index,
+            Event::Settlement(DbSettlement {
+                solver,
+                transaction_hash,
+            }),
+        )])
+        .await
+        .unwrap();
+        DbSettlement {
+            solver,
+            transaction_hash,
+        }
+    }
+
     #[tokio::test]
     #[ignore]
-    async fn postgres_trades_with_same_settlement() {
+    async fn postgres_trades_having_same_settlement_with_and_without_orders() {
         let db = Database::new("postgresql://").unwrap();
         db.clear().await.unwrap();
         let (owners, order_ids) = generate_owners_and_order_ids(2, 2).await;
         assert_trades(&db, &TradeFilter::default(), &[]).await;
 
-        let settlement_hash = H256::from_low_u64_be(2);
-        db.insert_events(vec![(
+        let settlement = add_settlement(
+            &db,
             EventIndex {
                 block_number: 0,
                 log_index: 4,
             },
-            Event::Settlement(DbSettlement {
-                solver: H160::from_low_u64_be(2),
-                transaction_hash: settlement_hash,
-            }),
-        )])
-        .await
-        .unwrap();
+            H160::default(),
+            H256::from_low_u64_be(1),
+        )
+        .await;
 
-        let event_index_a = EventIndex {
-            block_number: 0,
-            log_index: 0,
-        };
         let trade_a = add_order_and_trade(
             &db,
             owners[0],
             order_ids[0],
-            event_index_a,
-            Some(settlement_hash),
+            EventIndex {
+                block_number: 0,
+                log_index: 0,
+            },
+            Some(settlement.transaction_hash.clone()),
         )
         .await;
         assert_trades(&db, &TradeFilter::default(), &[trade_a.clone()]).await;
 
-        let event_index_b = EventIndex {
-            block_number: 0,
-            log_index: 1,
-        };
         let trade_b = add_order_and_trade(
             &db,
             owners[0],
             order_ids[1],
-            event_index_b,
-            Some(settlement_hash),
+            EventIndex {
+                block_number: 0,
+                log_index: 1,
+            },
+            Some(settlement.transaction_hash),
         )
         .await;
         assert_trades(&db, &TradeFilter::default(), &[trade_a, trade_b]).await;
+
+        // TODO - drop orders and make last assertion again.
+        // Then remove test postgres_trades_with_same_settlement_no_orders
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn postgres_trades_with_same_settlement_no_orders() {
+        let db = Database::new("postgresql://").unwrap();
+        db.clear().await.unwrap();
+        let (owners, order_ids) = generate_owners_and_order_ids(2, 2).await;
+        assert_trades(&db, &TradeFilter::default(), &[]).await;
+
+        let settlement = add_settlement(
+            &db,
+            EventIndex {
+                block_number: 0,
+                log_index: 4,
+            },
+            H160::default(),
+            H256::from_low_u64_be(1),
+        )
+        .await;
+
+        add_trade(
+            &db,
+            owners[0],
+            order_ids[0],
+            EventIndex {
+                block_number: 0,
+                log_index: 0,
+            },
+            Some(settlement.transaction_hash.clone()),
+        )
+        .await;
+
+        add_trade(
+            &db,
+            owners[0],
+            order_ids[1],
+            EventIndex {
+                block_number: 0,
+                log_index: 1,
+            },
+            Some(settlement.transaction_hash),
+        )
+        .await;
+        // Trades query returns nothing when there are no corresponding orders.
+        assert_trades(&db, &TradeFilter::default(), &[]).await;
     }
 
     #[tokio::test]
@@ -404,48 +469,36 @@ mod tests {
         let (owners, order_ids) = generate_owners_and_order_ids(2, 2).await;
         assert_trades(&db, &TradeFilter::default(), &[]).await;
 
-        let trade_event_index_a = EventIndex {
-            block_number: 0,
-            log_index: 0,
-        };
-        let settlement_hash_a = H256::from_low_u64_be(2);
-        db.insert_events(vec![(
+        let settlement_a = add_settlement(
+            &db,
             EventIndex {
                 block_number: 0,
                 log_index: 1,
             },
-            Event::Settlement(DbSettlement {
-                solver: H160::from_low_u64_be(1),
-                transaction_hash: settlement_hash_a,
-            }),
-        )])
-        .await
-        .unwrap();
-
-        let trade_event_index_b = EventIndex {
-            block_number: 0,
-            log_index: 2,
-        };
-        let settlement_hash_b = H256::from_low_u64_be(4);
-        db.insert_events(vec![(
+            H160::default(),
+            H256::from_low_u64_be(1),
+        )
+        .await;
+        let settlement_b = add_settlement(
+            &db,
             EventIndex {
                 block_number: 0,
                 log_index: 3,
             },
-            Event::Settlement(DbSettlement {
-                solver: H160::from_low_u64_be(3),
-                transaction_hash: settlement_hash_b,
-            }),
-        )])
-        .await
-        .unwrap();
+            H160::default(),
+            H256::from_low_u64_be(2),
+        )
+        .await;
 
         let trade_a = add_order_and_trade(
             &db,
             owners[0],
             order_ids[0],
-            trade_event_index_a,
-            Some(settlement_hash_a),
+            EventIndex {
+                block_number: 0,
+                log_index: 0,
+            },
+            Some(settlement_a.transaction_hash),
         )
         .await;
         assert_trades(&db, &TradeFilter::default(), &[trade_a.clone()]).await;
@@ -454,8 +507,11 @@ mod tests {
             &db,
             owners[0],
             order_ids[1],
-            trade_event_index_b,
-            Some(settlement_hash_b),
+            EventIndex {
+                block_number: 0,
+                log_index: 2,
+            },
+            Some(settlement_b.transaction_hash),
         )
         .await;
         assert_trades(&db, &TradeFilter::default(), &[trade_a, trade_b]).await;

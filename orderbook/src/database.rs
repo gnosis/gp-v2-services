@@ -57,4 +57,10 @@ impl Database {
             .await?;
         Ok(())
     }
+
+    pub async fn drop_orders(&self) -> Result<()> {
+        use sqlx::Executor;
+        self.pool.execute(sqlx::query("TRUNCATE orders;")).await?;
+        Ok(())
+    }
 }
