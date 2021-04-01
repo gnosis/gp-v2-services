@@ -32,12 +32,11 @@ where
         }
         self.inner
             .send(id, request)
-            .map(move |response| {
-                match &response {
+            .inspect(move |response| {
+                match response {
                     Ok(value) => tracing::debug!("[id:{}] received response: '{}'", id, value),
                     Err(err) => tracing::debug!("[id:{}] returned an error: '{}'", id, err),
                 };
-                response
             })
             .boxed()
     }
@@ -69,8 +68,8 @@ where
         );
         self.inner
             .send_batch(requests.clone())
-            .map(move |response| {
-                match &response {
+            .inspect(move |response| {
+                match response {
                     Ok(responses) => tracing::debug!(
                         "[batch_id:{}] received response:\n{}",
                         batch_id,
@@ -90,7 +89,6 @@ where
                         tracing::debug!("[batch_id:{}] returned an error: '{}'", batch_id, err)
                     }
                 };
-                response
             })
             .boxed()
     }
