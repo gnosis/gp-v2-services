@@ -349,6 +349,7 @@ components:
             owner (i.e. the order signer).
           $ref: "#/components/schemas/Address"
           nullable: true
+          required: false
         sellAmount:
           description: "Amount of sellToken to be sold in atoms"
           $ref: "#/components/schemas/TokenAmount"
