@@ -2,15 +2,15 @@ use crate::{
     liquidity,
     settlement::{Interaction, Settlement, Trade},
 };
-use anyhow::{anyhow, Result};
 use liquidity::{AmmOrder, LimitOrder};
 use model::order::OrderKind;
-use num::{bigint::Sign, BigInt};
+use num::{rational::Ratio, BigInt, BigRational};
 use primitive_types::U256;
+use shared::conversions::{big_rational_to_u256, u256_to_big_int, RatioExt, U256Ext};
 use std::collections::HashMap;
 use web3::types::Address;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct TokenContext {
     address: Address,
     reserve: U256,
@@ -18,21 +18,21 @@ struct TokenContext {
     sell_volume: U256,
 }
 
-// TODO use concrete fee from AMMOrder
 impl TokenContext {
-    pub fn is_excess_after_fees(&self, deficit: &TokenContext) -> bool {
-        1000 * u256_to_bigint(&self.reserve)
-            * (u256_to_bigint(&deficit.sell_volume) - u256_to_bigint(&deficit.buy_volume))
-            < 997
-                * u256_to_bigint(&deficit.reserve)
-                * (u256_to_bigint(&self.sell_volume) - u256_to_bigint(&self.buy_volume))
+    pub fn is_excess_after_fees(&self, deficit: &TokenContext, fee: Ratio<u32>) -> bool {
+        fee.denom()
+            * u256_to_big_int(&self.reserve)
+            * (u256_to_big_int(&deficit.sell_volume) - u256_to_big_int(&deficit.buy_volume))
+            < (fee.denom() - fee.numer())
+                * u256_to_big_int(&deficit.reserve)
+                * (u256_to_big_int(&self.sell_volume) - u256_to_big_int(&self.buy_volume))
     }
 
     pub fn is_excess_before_fees(&self, deficit: &TokenContext) -> bool {
-        u256_to_bigint(&self.reserve)
-            * (u256_to_bigint(&deficit.sell_volume) - u256_to_bigint(&deficit.buy_volume))
-            < u256_to_bigint(&deficit.reserve)
-                * (u256_to_bigint(&self.sell_volume) - u256_to_bigint(&self.buy_volume))
+        u256_to_big_int(&self.reserve)
+            * (u256_to_big_int(&deficit.sell_volume) - u256_to_big_int(&deficit.buy_volume))
+            < u256_to_big_int(&deficit.reserve)
+                * (u256_to_big_int(&self.sell_volume) - u256_to_big_int(&self.buy_volume))
     }
 }
 
@@ -43,9 +43,11 @@ pub fn solve(
     let mut orders: Vec<LimitOrder> = orders.collect();
     while !orders.is_empty() {
         let (context_a, context_b) = split_into_contexts(orders.clone().into_iter(), pool);
-        let solution = solve_orders(orders.clone().into_iter(), &pool, &context_a, &context_b)?;
-        if is_valid_solution(&solution) {
-            return Some(solution);
+        if let Some(valid_solution) =
+            solve_orders(orders.clone().into_iter(), &pool, &context_a, &context_b)
+                .filter(is_valid_solution)
+        {
+            return Some(valid_solution);
         } else {
             // remove order with worst limit price that is selling excess token (to make it less excessive) and try again
             let excess_token = if context_a.is_excess_before_fees(&context_b) {
@@ -82,9 +84,9 @@ fn solve_orders(
     context_a: &TokenContext,
     context_b: &TokenContext,
 ) -> Option<Settlement> {
-    if context_a.is_excess_after_fees(&context_b) {
+    if context_a.is_excess_after_fees(&context_b, pool.fee) {
         solve_with_uniswap(orders, pool, &context_b, &context_a)
-    } else if context_b.is_excess_after_fees(&context_a) {
+    } else if context_b.is_excess_after_fees(&context_a, pool.fee) {
         solve_with_uniswap(orders, pool, &context_a, &context_b)
     } else {
         Some(solve_without_uniswap(orders, &context_a, &context_b))
@@ -121,8 +123,11 @@ fn solve_with_uniswap(
     shortage: &TokenContext,
     excess: &TokenContext,
 ) -> Option<Settlement> {
-    let uniswap_out = compute_uniswap_out(&shortage, &excess);
-    let uniswap_in = compute_uniswap_in(uniswap_out, &shortage, &excess)?;
+    let uniswap_out = compute_uniswap_out(&shortage, &excess, pool.fee)?;
+    let uniswap_in = compute_uniswap_in(uniswap_out.clone(), &shortage, &excess, pool.fee);
+
+    let uniswap_out = big_rational_to_u256(&uniswap_out).ok()?;
+    let uniswap_in = big_rational_to_u256(&uniswap_in).ok()?;
 
     let (trades, mut interactions) = fully_matched(orders);
     interactions.extend(pool.settlement_handling.settle(
@@ -215,32 +220,40 @@ fn split_into_contexts(
 /// computes the exact out_amount required from Uniswap to perfectly match demand and supply at the effective Uniswap price (the one used for that in/out swap).
 ///
 /// The derivation of this formula is described in https://docs.google.com/document/d/1jS22wxbCqo88fGsqEMZgRQgiAcHlPqxoMw3CJTHst6c/edit
-/// It assumes GP fee (φ) to be 1 and Uniswap fee (Φ) to be 0.997
+/// It assumes GP fee (φ) to be 1
 ///
-fn compute_uniswap_out(shortage: &TokenContext, excess: &TokenContext) -> U256 {
-    let numerator_minuend = 997
-        * (u256_to_bigint(&excess.sell_volume) - u256_to_bigint(&excess.buy_volume))
-        * u256_to_bigint(&shortage.reserve);
-    let numerator_subtrahend = 1000
-        * (u256_to_bigint(&shortage.sell_volume) - u256_to_bigint(&shortage.buy_volume))
-        * u256_to_bigint(&excess.reserve);
-    let denominator = (1000 * u256_to_bigint(&excess.reserve))
-        + (997 * (u256_to_bigint(&excess.sell_volume) - u256_to_bigint(&excess.buy_volume)));
-    bigint_to_u256(&((numerator_minuend - numerator_subtrahend) / denominator))
-        .expect("uniswap_out should always be U256 compatible if excess is chosen correctly")
+fn compute_uniswap_out(
+    shortage: &TokenContext,
+    excess: &TokenContext,
+    amm_fee: Ratio<u32>,
+) -> Option<BigRational> {
+    let numerator_minuend = (amm_fee.denom() - amm_fee.numer())
+        * (u256_to_big_int(&excess.sell_volume) - u256_to_big_int(&excess.buy_volume))
+        * u256_to_big_int(&shortage.reserve);
+    let numerator_subtrahend = amm_fee.denom()
+        * (u256_to_big_int(&shortage.sell_volume) - u256_to_big_int(&shortage.buy_volume))
+        * u256_to_big_int(&excess.reserve);
+    let denominator: BigInt = amm_fee.denom() * u256_to_big_int(&excess.reserve)
+        + (amm_fee.denom() - amm_fee.numer())
+            * (u256_to_big_int(&excess.sell_volume) - u256_to_big_int(&excess.buy_volume));
+    BigRational::new_checked(numerator_minuend - numerator_subtrahend, denominator).ok()
 }
 
 ///
 /// Given the desired amount to receive and the state of the pool, this computes the required amount
 /// of tokens to be sent to the pool.
 /// Taken from: https://github.com/Uniswap/uniswap-v2-periphery/blob/4123f93278b60bcf617130629c69d4016f9e7584/contracts/libraries/UniswapV2Library.sol#L53
+/// Not adding + 1 in the end, because we are working with rationals and thus don't round up.
 ///
-fn compute_uniswap_in(out: U256, shortage: &TokenContext, excess: &TokenContext) -> Option<U256> {
-    U256::from(1000)
-        .checked_mul(out)?
-        .checked_mul(excess.reserve)?
-        .checked_div(U256::from(997).checked_mul(shortage.reserve.checked_sub(out)?)?)?
-        .checked_add(U256::from(1))
+fn compute_uniswap_in(
+    out: BigRational,
+    shortage: &TokenContext,
+    excess: &TokenContext,
+    amm_fee: Ratio<u32>,
+) -> BigRational {
+    U256::from(*amm_fee.denom()).to_big_rational() * out.clone() * u256_to_big_int(&excess.reserve)
+        / (U256::from(amm_fee.denom() - amm_fee.numer()).to_big_rational()
+            * (shortage.reserve.to_big_rational() - out))
 }
 
 ///
@@ -267,27 +280,13 @@ fn is_valid_solution(solution: &Settlement) -> bool {
     true
 }
 
-fn u256_to_bigint(input: &U256) -> BigInt {
-    let mut bytes = [0; 32];
-    input.to_big_endian(&mut bytes);
-    BigInt::from_bytes_be(Sign::Plus, &bytes)
-}
-
-fn bigint_to_u256(input: &BigInt) -> Result<U256> {
-    let (sign, bytes) = input.to_bytes_be();
-    if sign == Sign::Minus {
-        return Err(anyhow!("Negative BigInt to U256 conversion"));
-    }
-    if bytes.len() > 32 {
-        return Err(anyhow!("BigInt too big for U256 conversion"));
-    }
-    Ok(U256::from_big_endian(&bytes))
-}
-
 #[cfg(test)]
 mod tests {
     use liquidity::tests::{CapturingAmmSettlementHandler, CapturingLimitOrderSettlementHandler};
-    use model::{order::OrderCreation, TokenPair};
+    use model::{
+        order::{Order, OrderCreation},
+        TokenPair,
+    };
     use num::rational::Ratio;
 
     use super::*;
@@ -309,6 +308,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "0".to_string(),
             },
             LimitOrder {
                 sell_token: token_b,
@@ -318,6 +318,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "1".to_string(),
             },
         ];
 
@@ -365,6 +366,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "0".to_string(),
             },
             LimitOrder {
                 sell_token: token_a,
@@ -374,6 +376,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "1".to_string(),
             },
         ];
 
@@ -417,6 +420,7 @@ mod tests {
                 kind: OrderKind::Buy,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "0".to_string(),
             },
             LimitOrder {
                 sell_token: token_b,
@@ -426,6 +430,7 @@ mod tests {
                 kind: OrderKind::Buy,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "1".to_string(),
             },
         ];
 
@@ -473,6 +478,7 @@ mod tests {
                 kind: OrderKind::Buy,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "0".to_string(),
             },
             LimitOrder {
                 sell_token: token_b,
@@ -482,6 +488,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "1".to_string(),
             },
         ];
 
@@ -533,6 +540,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "0".to_string(),
             },
             LimitOrder {
                 sell_token: token_b,
@@ -542,6 +550,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "1".to_string(),
             },
         ];
 
@@ -569,46 +578,58 @@ mod tests {
         let token_b = Address::from_low_u64_be(1);
         let orders = vec![
             // Unreasonable order a -> b
-            OrderCreation {
-                sell_token: token_a,
-                buy_token: token_b,
-                sell_amount: to_wei(1),
-                buy_amount: to_wei(1000),
-                kind: OrderKind::Sell,
-                partially_fillable: false,
+            Order {
+                order_creation: OrderCreation {
+                    sell_token: token_a,
+                    buy_token: token_b,
+                    sell_amount: to_wei(1),
+                    buy_amount: to_wei(1000),
+                    kind: OrderKind::Sell,
+                    partially_fillable: false,
+                    ..Default::default()
+                },
                 ..Default::default()
             }
             .into(),
             // Reasonable order a -> b
-            OrderCreation {
-                sell_token: token_a,
-                buy_token: token_b,
-                sell_amount: to_wei(1000),
-                buy_amount: to_wei(1000),
-                kind: OrderKind::Sell,
-                partially_fillable: false,
+            Order {
+                order_creation: OrderCreation {
+                    sell_token: token_a,
+                    buy_token: token_b,
+                    sell_amount: to_wei(1000),
+                    buy_amount: to_wei(1000),
+                    kind: OrderKind::Sell,
+                    partially_fillable: false,
+                    ..Default::default()
+                },
                 ..Default::default()
             }
             .into(),
             // Reasonable order b -> a
-            OrderCreation {
-                sell_token: token_b,
-                buy_token: token_a,
-                sell_amount: to_wei(1000),
-                buy_amount: to_wei(1000),
-                kind: OrderKind::Sell,
-                partially_fillable: false,
+            Order {
+                order_creation: OrderCreation {
+                    sell_token: token_b,
+                    buy_token: token_a,
+                    sell_amount: to_wei(1000),
+                    buy_amount: to_wei(1000),
+                    kind: OrderKind::Sell,
+                    partially_fillable: false,
+                    ..Default::default()
+                },
                 ..Default::default()
             }
             .into(),
             // Unreasonable order b -> a
-            OrderCreation {
-                sell_token: token_b,
-                buy_token: token_a,
-                sell_amount: to_wei(2),
-                buy_amount: to_wei(1000),
-                kind: OrderKind::Sell,
-                partially_fillable: false,
+            Order {
+                order_creation: OrderCreation {
+                    sell_token: token_b,
+                    buy_token: token_a,
+                    sell_amount: to_wei(2),
+                    buy_amount: to_wei(1000),
+                    kind: OrderKind::Sell,
+                    partially_fillable: false,
+                    ..Default::default()
+                },
                 ..Default::default()
             }
             .into(),
@@ -640,6 +661,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "0".to_string(),
             },
             LimitOrder {
                 sell_token: token_b,
@@ -649,6 +671,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "1".to_string(),
             },
         ];
 
@@ -783,6 +806,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "0".into(),
             },
             LimitOrder {
                 sell_token: token_b,
@@ -792,6 +816,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 partially_fillable: false,
                 settlement_handling: CapturingLimitOrderSettlementHandler::arc(),
+                id: "1".into(),
             },
         ];
 
@@ -804,5 +829,53 @@ mod tests {
         };
         // This line should not panic.
         solve(orders.into_iter(), &pool);
+    }
+
+    #[test]
+    fn reserves_are_too_small() {
+        let token_a = Address::from_low_u64_be(0);
+        let token_b = Address::from_low_u64_be(1);
+        let orders = vec![
+            Order {
+                order_creation: OrderCreation {
+                    sell_token: token_a,
+                    buy_token: token_b,
+                    sell_amount: 70145218378783248142575u128.into(),
+                    buy_amount: 70123226323u128.into(),
+                    kind: OrderKind::Sell,
+                    partially_fillable: false,
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+            .into(),
+            Order {
+                order_creation: OrderCreation {
+                    sell_token: token_a,
+                    buy_token: token_b,
+                    sell_amount: 900_000_000_000_000u128.into(),
+                    buy_amount: 100.into(),
+                    kind: OrderKind::Sell,
+                    partially_fillable: false,
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+            .into(),
+        ];
+        // Reserves are much smaller than buy amount
+        let pool = AmmOrder {
+            tokens: TokenPair::new(token_a, token_b).unwrap(),
+            reserves: (25000075, 2500007500),
+            fee: Ratio::new(3, 1000),
+            settlement_handling: CapturingAmmSettlementHandler::arc(),
+        };
+
+        // The first order by itself should not be matchable.
+        assert!(solve(orders[0..1].to_vec().into_iter(), &pool).is_none());
+
+        // Only the second order should match
+        let result = solve(orders.into_iter(), &pool).unwrap();
+        assert_eq!(result.trades.len(), 1);
     }
 }
