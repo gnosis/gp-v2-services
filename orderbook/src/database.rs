@@ -57,4 +57,10 @@ impl Database {
             .await?;
         Ok(())
     }
+
+    pub async fn drop_table(&self, table_name: &str) -> Result<()> {
+        use sqlx::Executor;
+        self.pool.execute(sqlx::query(format!("TRUNCATE {};", table_name).as_str())).await?;
+        Ok(())
+    }
 }

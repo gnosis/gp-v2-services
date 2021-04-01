@@ -411,53 +411,8 @@ mod tests {
         .await;
         assert_trades(&db, &TradeFilter::default(), &[trade_a, trade_b]).await;
 
-        // TODO - drop orders and make last assertion again.
-        // Then remove test postgres_trades_with_same_settlement_no_orders
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn postgres_trades_with_same_settlement_no_orders() {
-        let db = Database::new("postgresql://").unwrap();
-        db.clear().await.unwrap();
-        let (owners, order_ids) = generate_owners_and_order_ids(2, 2).await;
-        assert_trades(&db, &TradeFilter::default(), &[]).await;
-
-        let settlement = add_settlement(
-            &db,
-            EventIndex {
-                block_number: 0,
-                log_index: 4,
-            },
-            H160::default(),
-            H256::from_low_u64_be(1),
-        )
-        .await;
-
-        add_trade(
-            &db,
-            owners[0],
-            order_ids[0],
-            EventIndex {
-                block_number: 0,
-                log_index: 0,
-            },
-            Some(settlement.transaction_hash),
-        )
-        .await;
-
-        add_trade(
-            &db,
-            owners[0],
-            order_ids[1],
-            EventIndex {
-                block_number: 0,
-                log_index: 1,
-            },
-            Some(settlement.transaction_hash),
-        )
-        .await;
-        // Trades query returns nothing when there are no corresponding orders.
+        // No trades returned without corresponding orders.
+        db.drop_table("orders").await.unwrap();
         assert_trades(&db, &TradeFilter::default(), &[]).await;
     }
 
