@@ -44,7 +44,7 @@ impl Database {
     /// Delete all data in the database. Only used by tests.
     pub async fn clear(&self) -> Result<()> {
         use sqlx::Executor;
-        self.pool.execute(sqlx::query("TRUNCATE orders;")).await?;
+        self.drop_orders().await?;
         self.pool.execute(sqlx::query("TRUNCATE trades;")).await?;
         self.pool
             .execute(sqlx::query("TRUNCATE invalidations;"))
@@ -58,7 +58,7 @@ impl Database {
         Ok(())
     }
 
-    pub async fn drop_orders(&self, table_name: &str) -> Result<()> {
+    pub async fn drop_orders(&self) -> Result<()> {
         use sqlx::Executor;
         self.pool.execute(sqlx::query("TRUNCATE orders;")).await?;
         Ok(())
