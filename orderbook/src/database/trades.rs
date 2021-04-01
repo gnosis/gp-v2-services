@@ -412,7 +412,7 @@ mod tests {
         assert_trades(&db, &TradeFilter::default(), &[trade_a, trade_b]).await;
 
         // No trades returned without corresponding orders.
-        db.drop_table("orders").await.unwrap();
+        db.drop_orders().await.unwrap();
         assert_trades(&db, &TradeFilter::default(), &[]).await;
     }
 
