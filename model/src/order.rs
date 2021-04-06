@@ -41,20 +41,37 @@ impl Order {
         order_creation: OrderCreation,
         domain: &DomainSeparator,
     ) -> Option<Self> {
+        fn construct_order(
+            owner: H160,
+            order_creation: OrderCreation,
+            domain: &DomainSeparator,
+        ) -> Order {
+            Order {
+                order_meta_data: OrderMetaData {
+                    creation_date: chrono::offset::Utc::now(),
+                    owner,
+                    uid: order_creation.uid(domain, &owner),
+                    ..Default::default()
+                },
+                order_creation,
+            }
+        }
         let owner = order_creation.signature.validate(
             order_creation.signing_scheme,
             domain,
             &order_creation.hash_struct(),
         )?;
-        Some(Self {
-            order_meta_data: OrderMetaData {
-                creation_date: chrono::offset::Utc::now(),
-                owner,
-                uid: order_creation.uid(domain, &owner),
-                ..Default::default()
-            },
-            order_creation,
-        })
+        // This little statement will catch when the recovered owner is not as intended,
+        // but result in return of invalid signature.
+        match order_creation.from {
+            Some(from) => {
+                if from == owner {
+                    return Some(construct_order(owner, order_creation, domain));
+                }
+                return None;
+            }
+            None => Some(construct_order(owner, order_creation, domain)),
+        }
     }
 }
 
@@ -159,6 +176,7 @@ pub struct OrderCreation {
     pub partially_fillable: bool,
     pub signature: Signature,
     pub signing_scheme: SigningScheme,
+    pub from: Option<H160>,
 }
 
 impl Default for OrderCreation {
@@ -177,6 +195,7 @@ impl Default for OrderCreation {
             partially_fillable: Default::default(),
             signing_scheme: SigningScheme::Eip712,
             signature: Default::default(),
+            from: Default::default(),
         };
         result.signature = Signature::sign(
             result.signing_scheme,
@@ -423,6 +442,7 @@ mod tests {
     use primitive_types::H256;
     use secp256k1::{PublicKey, Secp256k1, SecretKey};
     use serde_json::json;
+    use serde_json::value::Value::Null;
     use web3::signing::keccak256;
 
     #[test]
@@ -450,6 +470,7 @@ mod tests {
             "partiallyFillable": false,
             "signature": "0x0200000000000000000000000000000000000000000000000000000000000003040000000000000000000000000000000000000000000000000000000000000501",
             "signingScheme": "eip712",
+            "from": Null,
         });
         let expected = Order {
             order_meta_data: OrderMetaData {
@@ -486,6 +507,7 @@ mod tests {
                     .unwrap(),
                 },
                 signing_scheme: SigningScheme::Eip712,
+                from: None,
             },
         };
         let deserialized: Order = serde_json::from_value(value.clone()).unwrap();
@@ -525,6 +547,7 @@ mod tests {
                 partially_fillable: false,
                 signature: Signature::from_bytes(&signature),
                 signing_scheme: *signing_scheme,
+                from: None,
             };
 
             let uid = order.uid(&domain_separator, &expected_owner);

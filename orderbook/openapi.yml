@@ -384,6 +384,8 @@ components:
           $ref: "#/components/schemas/Signature"
         signingScheme:
           $ref: "#/components/schemas/SigningScheme"
+        from:
+          $ref: "#/components/schemas/Address"
       required:
         - sellToken
         - buyToken

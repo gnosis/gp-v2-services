@@ -248,6 +248,7 @@ impl OrdersQueryRow {
                     .map_err(|_| anyhow!("signature has wrong length"))?,
             ),
             signing_scheme: self.signing_scheme.into(),
+            from: None,
         };
         Ok(Order {
             order_meta_data,
@@ -309,6 +310,7 @@ mod tests {
                     partially_fillable: true,
                     signature: Default::default(),
                     signing_scheme: *signing_scheme,
+                    from: None,
                 },
             };
             db.insert_order(&order).await.unwrap();

@@ -80,6 +80,7 @@ impl Orderbook {
         }
         let order = match Order::from_order_creation(order, &self.domain_separator) {
             Some(order) => order,
+            // Could Probably return a result with special Error to distinguish between Invalid signature and incorrect owner.
             None => return Ok(AddOrderResult::InvalidSignature),
         };
         self.balance_fetcher
