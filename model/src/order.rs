@@ -70,7 +70,7 @@ impl Order {
                 }
                 None
             }
-            None => Some(construct_order(owner, order_creation, domain))
+            None => Some(construct_order(owner, order_creation, domain)),
         }
     }
 }
