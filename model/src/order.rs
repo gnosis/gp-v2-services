@@ -68,9 +68,9 @@ impl Order {
                 if from == owner {
                     return Some(construct_order(owner, order_creation, domain));
                 }
-                return None;
+                None
             }
-            None => Some(construct_order(owner, order_creation, domain)),
+            None => Some(construct_order(owner, order_creation, domain))
         }
     }
 }
