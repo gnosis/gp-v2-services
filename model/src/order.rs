@@ -164,6 +164,7 @@ pub struct OrderCreation {
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct OrderCreationPayload {
+    #[serde(flatten)]
     pub order_creation: OrderCreation,
     pub from: Option<H160>,
 }
