@@ -1,6 +1,7 @@
 use contracts::{ERC20Mintable, UniswapV2Factory, UniswapV2Router02};
 use ethcontract::prelude::{Account, Address, Http, PrivateKey, Web3, U256};
 use hex_literal::hex;
+use model::order::OrderCreationPayload;
 use model::{
     order::{OrderBuilder, OrderKind},
     DomainSeparator, SigningScheme,
@@ -188,7 +189,7 @@ async fn test_with_ganache() {
         .order_creation;
     let placement = client
         .post(&format!("{}{}", API_HOST, ORDER_PLACEMENT_ENDPOINT))
-        .body(json!(order_a).to_string())
+        .body(json!(OrderCreationPayload::from(order_a)).to_string())
         .send()
         .await;
     assert_eq!(placement.unwrap().status(), 201);
@@ -209,7 +210,7 @@ async fn test_with_ganache() {
         .order_creation;
     let placement = client
         .post(&format!("{}{}", API_HOST, ORDER_PLACEMENT_ENDPOINT))
-        .body(json!(order_b).to_string())
+        .body(json!(OrderCreationPayload::from(order_b)).to_string())
         .send()
         .await;
     assert_eq!(placement.unwrap().status(), 201);
