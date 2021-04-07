@@ -40,7 +40,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/OrderCreation"
+              $ref: "#/components/schemas/OrderCreationPayload"
     get:
       summary: Get existing orders.
       description: |
@@ -384,8 +384,6 @@ components:
           $ref: "#/components/schemas/Signature"
         signingScheme:
           $ref: "#/components/schemas/SigningScheme"
-        from:
-          $ref: "#/components/schemas/Address"
       required:
         - sellToken
         - buyToken
@@ -398,6 +396,18 @@ components:
         - partiallyFillable
         - signature
         - signingScheme
+    OrderCreationPayload:
+      description: |
+        An OrderCreation object accompanied by an optional "from" address to be
+        cross-checked with owner from signature recovery before insertion.
+      type: object
+      properties:
+        orderCreation:
+          $ref: "#/components/schemas/OrderCreation"
+        from:
+          $ref: "#/components/schemas/Address"
+      required:
+        - orderCreation
     OrderMetaData:
       description: |
         Extra order data that is returned to users when querying orders

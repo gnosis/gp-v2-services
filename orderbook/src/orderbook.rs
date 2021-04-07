@@ -9,7 +9,7 @@ use anyhow::Result;
 use chrono::Utc;
 use contracts::GPv2Settlement;
 use futures::{join, TryStreamExt};
-use model::order::OrderCancellation;
+use model::order::{OrderCancellation, OrderCreationPayload};
 use model::{
     order::{Order, OrderCreation, OrderUid},
     DomainSeparator,
@@ -25,6 +25,7 @@ use tokio::sync::Mutex;
 #[derive(Debug, Eq, PartialEq)]
 pub enum AddOrderResult {
     Added(OrderUid),
+    WrongOwner(H160),
     DuplicatedOrder,
     InvalidSignature,
     Forbidden,
@@ -67,7 +68,8 @@ impl Orderbook {
         }
     }
 
-    pub async fn add_order(&self, order: OrderCreation) -> Result<AddOrderResult> {
+    pub async fn add_order(&self, payload: OrderCreationPayload) -> Result<AddOrderResult> {
+        let order = payload.order_creation;
         if !has_future_valid_to(shared::time::now_in_epoch_seconds(), &order) {
             return Ok(AddOrderResult::PastValidTo);
         }
@@ -79,8 +81,15 @@ impl Orderbook {
             return Ok(AddOrderResult::InsufficientFee);
         }
         let order = match Order::from_order_creation(order, &self.domain_separator) {
-            Some(order) => order,
-            // Could Probably return a result with special Error to distinguish between Invalid signature and incorrect owner.
+            Some(order) => match payload.from {
+                Some(from) => {
+                    if from != order.order_meta_data.owner {
+                        return Ok(AddOrderResult::WrongOwner(order.order_meta_data.owner));
+                    }
+                    order
+                }
+                None => order,
+            },
             None => return Ok(AddOrderResult::InvalidSignature),
         };
         self.balance_fetcher
