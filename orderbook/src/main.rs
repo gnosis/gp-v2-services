@@ -123,9 +123,17 @@ async fn main() {
     .await
     .expect("failed to create gas price estimator");
 
+    let deny_tokens = HashSet::from_iter(args.shared.token_filter);
     let mut base_tokens = HashSet::from_iter(args.shared.base_tokens);
     // We should always use the native token as a base token.
     base_tokens.insert(native_token.address());
+    assert!(
+        deny_tokens
+            .intersection(&base_tokens)
+            .collect::<HashSet<_>>()
+            .is_empty(),
+        "Overlapping base and deny tokens not allowed!"
+    );
 
     let current_block_stream = current_block_stream(web3.clone()).await.unwrap();
     let pool_fetcher = CachedPoolFetcher::new(
@@ -139,6 +147,7 @@ async fn main() {
     let price_estimator = Arc::new(UniswapPriceEstimator::new(
         Box::new(pool_fetcher),
         base_tokens,
+        deny_tokens.clone(),
     ));
     let fee_calculator = Arc::new(MinFeeCalculator::new(
         price_estimator.clone(),
@@ -154,6 +163,7 @@ async fn main() {
         event_updater,
         Box::new(balance_fetcher),
         fee_calculator.clone(),
+        deny_tokens,
     ));
     check_database_connection(orderbook.as_ref()).await;
 

@@ -15,6 +15,14 @@ pub fn create_order_request() -> impl Filter<Extract = (OrderCreation,), Error =
 pub fn create_order_response(result: Result<AddOrderResult>) -> impl Reply {
     let (body, status_code) = match result {
         Ok(AddOrderResult::Added(uid)) => (warp::reply::json(&uid), StatusCode::CREATED),
+        Ok(AddOrderResult::BuyTokenDenied(token)) => (
+            super::error("TokenDenied", format!("Buy Token {}", token)),
+            StatusCode::BAD_REQUEST,
+        ),
+        Ok(AddOrderResult::SellTokenDenied(token)) => (
+            super::error("TokenDenied", format!("Sell Token {}", token)),
+            StatusCode::BAD_REQUEST,
+        ),
         Ok(AddOrderResult::DuplicatedOrder) => (
             super::error("DuplicatedOrder", "order already exists"),
             StatusCode::BAD_REQUEST,

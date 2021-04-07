@@ -539,6 +539,8 @@ components:
               PastValidTo,
               InsufficientFunds,
               InsufficientFee,
+              BuyTokenDenied,
+              SellTokenDenied,
             ]
         description:
           type: string

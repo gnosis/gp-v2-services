@@ -146,6 +146,7 @@ async fn test_with_ganache() {
     let price_estimator = Arc::new(UniswapPriceEstimator::new(
         Box::new(pool_fetcher),
         HashSet::new(),
+        HashSet::new(),
     ));
     let native_token = token_a.address();
     let fee_calculator = Arc::new(MinFeeCalculator::new(
@@ -161,6 +162,7 @@ async fn test_with_ganache() {
         event_updater,
         Box::new(Web3BalanceFetcher::new(web3.clone(), gp_allowance)),
         fee_calculator.clone(),
+        HashSet::new(),
     ));
 
     orderbook::serve_task(

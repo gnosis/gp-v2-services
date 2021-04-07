@@ -75,14 +75,30 @@ pub trait PriceEstimating: Send + Sync {
 pub struct UniswapPriceEstimator {
     pool_fetcher: Box<dyn PoolFetching>,
     base_tokens: HashSet<H160>,
+    deny_tokens: HashSet<H160>,
 }
 
 impl UniswapPriceEstimator {
-    pub fn new(pool_fetcher: Box<dyn PoolFetching>, base_tokens: HashSet<H160>) -> Self {
+    pub fn new(
+        pool_fetcher: Box<dyn PoolFetching>,
+        base_tokens: HashSet<H160>,
+        deny_tokens: HashSet<H160>,
+    ) -> Self {
         Self {
             pool_fetcher,
             base_tokens,
+            deny_tokens,
         }
+    }
+    /// Deny List Validation for price estimation.
+    fn token_validation(&self, buy_token: &H160, sell_token: &H160) -> Result<()> {
+        if self.deny_tokens.contains(&sell_token) {
+            return Err(anyhow!("Sell Token {} Denied!", sell_token));
+        }
+        if self.deny_tokens.contains(&buy_token) {
+            return Err(anyhow!("Buy Token {} Denied!", buy_token));
+        }
+        Ok(())
     }
 }
 
@@ -98,6 +114,7 @@ impl PriceEstimating for UniswapPriceEstimator {
         amount: U256,
         kind: OrderKind,
     ) -> Result<BigRational> {
+        self.token_validation(&buy_token, &sell_token)?;
         if sell_token == buy_token {
             return Ok(num::one());
         }
@@ -141,6 +158,7 @@ impl PriceEstimating for UniswapPriceEstimator {
         amount: U256,
         kind: OrderKind,
     ) -> Result<U256> {
+        self.token_validation(&buy_token, &sell_token)?;
         if sell_token == buy_token || amount.is_zero() {
             return Ok(U256::zero());
         }
@@ -297,7 +315,7 @@ mod tests {
         );
 
         let pool_fetcher = Box::new(FakePoolFetcher(vec![pool]));
-        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!());
+        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!(), hashset!());
 
         assert_approx_eq!(
             estimator
@@ -357,7 +375,7 @@ mod tests {
         );
 
         let pool_fetcher = Box::new(FakePoolFetcher(vec![pool]));
-        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!());
+        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!(), hashset!());
 
         assert!(estimator
             .estimate_price(token_a, token_b, 0.into(), OrderKind::Buy)
@@ -384,8 +402,11 @@ mod tests {
         );
 
         let pool_fetcher = Box::new(FakePoolFetcher(vec![pool_ab, pool_bc]));
-        let estimator =
-            UniswapPriceEstimator::new(pool_fetcher, hashset!(token_a, token_b, token_c));
+        let estimator = UniswapPriceEstimator::new(
+            pool_fetcher,
+            hashset!(token_a, token_b, token_c),
+            hashset!(),
+        );
 
         let prices = estimator
             .estimate_prices(&[token_a, token_b, token_c], token_c)
@@ -403,12 +424,39 @@ mod tests {
         let token_a = H160::from_low_u64_be(1);
         let token_b = H160::from_low_u64_be(2);
         let pool_fetcher = Box::new(FakePoolFetcher(vec![]));
-        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!());
+        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!(), hashset!());
 
         assert!(estimator
             .estimate_price(token_a, token_b, 1.into(), OrderKind::Buy)
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn return_error_if_token_denied() {
+        let token_a = H160::from_low_u64_be(1);
+        let token_b = H160::from_low_u64_be(2);
+        let pool_ab = Pool::uniswap(
+            TokenPair::new(token_a, token_b).unwrap(),
+            (10u128.pow(30), 10u128.pow(29)),
+        );
+        let pool_fetcher = Box::new(FakePoolFetcher(vec![pool_ab]));
+        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!(), hashset!(token_a));
+
+        let result = estimator
+            .estimate_price(token_a, token_b, 1.into(), OrderKind::Buy)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            format!("Sell Token {} Denied!", token_a),
+            result.to_string()
+        );
+        let result = estimator
+            .estimate_price(token_b, token_a, 1.into(), OrderKind::Buy)
+            .await
+            .unwrap_err();
+        assert_eq!(format!("Buy Token {} Denied!", token_a), result.to_string());
     }
 
     #[tokio::test]
@@ -418,7 +466,7 @@ mod tests {
         let pool = Pool::uniswap(TokenPair::new(token_a, token_b).unwrap(), (0, 10));
 
         let pool_fetcher = Box::new(FakePoolFetcher(vec![pool]));
-        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!());
+        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!(), hashset!());
 
         assert!(estimator
             .estimate_price(token_a, token_b, 1.into(), OrderKind::Buy)
@@ -440,7 +488,7 @@ mod tests {
         );
 
         let pool_fetcher = Box::new(FakePoolFetcher(vec![pool]));
-        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!(base_token));
+        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!(base_token), hashset!());
 
         assert!(estimator
             .estimate_price(token_a, token_b, 100.into(), OrderKind::Sell)
@@ -466,7 +514,8 @@ mod tests {
         ];
 
         let pool_fetcher = Box::new(FakePoolFetcher(pools));
-        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!(intermediate));
+        let estimator =
+            UniswapPriceEstimator::new(pool_fetcher, hashset!(intermediate), hashset!());
 
         // Trade with intermediate hop
         for kind in &[OrderKind::Sell, OrderKind::Buy] {

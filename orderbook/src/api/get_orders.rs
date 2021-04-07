@@ -24,6 +24,8 @@ struct Query {
     include_invalidated: bool,
     #[serde(default)]
     include_insufficient_balance: bool,
+    #[serde(default)]
+    include_denied_tokens: bool,
 }
 
 impl Query {
@@ -37,6 +39,7 @@ impl Query {
             exclude_fully_executed: !self.include_fully_executed,
             exclude_invalidated: !self.include_invalidated,
             exclude_insufficient_balance: !self.include_insufficient_balance,
+            exclude_deny_list: !self.include_denied_tokens,
             uid: None,
         }
     }
