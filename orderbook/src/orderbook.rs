@@ -81,17 +81,12 @@ impl Orderbook {
             return Ok(AddOrderResult::InsufficientFee);
         }
         let order = match Order::from_order_creation(order, &self.domain_separator) {
-            Some(order) => match payload.from {
-                Some(from) => {
-                    if from != order.order_meta_data.owner {
-                        return Ok(AddOrderResult::WrongOwner(order.order_meta_data.owner));
-                    }
-                    order
-                }
-                None => order,
-            },
+            Some(order) => order,
             None => return Ok(AddOrderResult::InvalidSignature),
         };
+        if matches!(payload.from, Some(from) if from != order.order_meta_data.owner) {
+            return Ok(AddOrderResult::WrongOwner(order.order_meta_data.owner));
+        }
         self.balance_fetcher
             .register(order.order_meta_data.owner, order.order_creation.sell_token)
             .await;
