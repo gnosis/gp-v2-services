@@ -551,6 +551,7 @@ components:
               PastValidTo,
               InsufficientFunds,
               InsufficientFee,
+              WrongOwner,
             ]
         description:
           type: string
