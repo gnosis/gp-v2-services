@@ -7,7 +7,8 @@ mod get_orders;
 mod get_solvable_orders;
 mod get_trades;
 
-use crate::database::Database;
+use crate::metrics::{end_request, Metrics};
+use crate::{database::Database, metrics::start_request};
 use crate::{fee::MinFeeCalculator, orderbook::Orderbook};
 use anyhow::Error as anyhowError;
 use hex::{FromHex, FromHexError};
@@ -20,7 +21,7 @@ use std::{convert::Infallible, str::FromStr, sync::Arc};
 use warp::{
     hyper::StatusCode,
     reply::{json, with_status, Json, WithStatus},
-    Filter, Rejection, Reply,
+    wrap_fn, Filter, Rejection, Reply,
 };
 
 pub fn handle_all_routes(
@@ -28,6 +29,7 @@ pub fn handle_all_routes(
     orderbook: Arc<Orderbook>,
     fee_calculator: Arc<MinFeeCalculator>,
     price_estimator: Arc<dyn PriceEstimating>,
+    metrics: Arc<Metrics>,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
     let create_order = create_order::create_order(orderbook.clone());
     let get_orders = get_orders::get_orders(orderbook.clone());
@@ -54,6 +56,7 @@ pub fn handle_all_routes(
                 .or(cancel_order)
                 .or(get_amount_estimate),
         )
+        .with(wrap_fn(|f| wrap_metrics(f, metrics.clone())))
         .recover(handle_rejection)
         .with(cors)
 }
@@ -61,6 +64,20 @@ pub fn handle_all_routes(
 // We turn Rejection into Reply to workaround warp not setting CORS headers on rejections.
 async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> {
     Ok(err.default_response())
+}
+
+fn wrap_metrics<F, T>(
+    filter: F,
+    metrics: Arc<Metrics>,
+) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone
+where
+    F: Filter<Extract = (T,), Error = Rejection> + Clone + Send + Sync + 'static,
+    T: warp::Reply,
+{
+    warp::any()
+        .and(start_request())
+        .and(filter)
+        .map(move |timer, reply| end_request(metrics.clone(), timer, reply))
 }
 
 #[derive(Serialize)]
