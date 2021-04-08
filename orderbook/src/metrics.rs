@@ -33,16 +33,38 @@ impl Reply for MetricsReply {
     }
 }
 
+// Wrapper struct to annotate a reply with a handler label for logging purposes
+pub struct LabelledReply {
+    inner: Box<dyn Reply>,
+    label: &'static str,
+}
+
+impl LabelledReply {
+    pub fn new(inner: impl Reply + 'static, label: &'static str) -> Self {
+        Self {
+            inner: Box::new(inner),
+            label,
+        }
+    }
+}
+
+impl Reply for LabelledReply {
+    fn into_response(self) -> Response {
+        self.inner.into_response()
+    }
+}
+
 pub fn start_request() -> impl Filter<Extract = (Instant,), Error = Infallible> + Clone {
     warp::any().map(Instant::now)
 }
 
-pub fn end_request(metrics: Arc<Metrics>, timer: Instant, reply: impl Reply) -> impl Reply {
-    let response = reply.into_response();
+pub fn end_request(metrics: Arc<Metrics>, timer: Instant, reply: LabelledReply) -> impl Reply {
+    let LabelledReply { inner, label } = reply;
+    let response = inner.into_response();
     let elapsed = timer.elapsed().as_secs_f64();
     metrics
         .requests
-        .with_label_values(&[response.status().as_str(), "TODO"])
+        .with_label_values(&[response.status().as_str(), label])
         .observe(elapsed);
     MetricsReply { response }
 }
