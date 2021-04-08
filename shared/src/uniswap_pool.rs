@@ -90,7 +90,7 @@ impl Pool {
                 self.tokens.get().1,
             )
         } else {
-            assert!(base_token == self.tokens.get().1, "Token not part of pool");
+            assert_eq!(base_token, self.tokens.get().1, "Token not part of pool");
             (
                 BigInt::from(self.reserves.1),
                 BigInt::from(self.reserves.0),
