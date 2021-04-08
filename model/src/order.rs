@@ -169,15 +169,6 @@ pub struct OrderCreationPayload {
     pub from: Option<H160>,
 }
 
-impl From<OrderCreation> for OrderCreationPayload {
-    fn from(order_creation: OrderCreation) -> Self {
-        Self {
-            order_creation,
-            from: None,
-        }
-    }
-}
-
 impl Default for OrderCreation {
     // Custom implementation to make sure the default order is valid
     fn default() -> Self {
