@@ -10,6 +10,7 @@ use crate::{
 use ::model::order::OrderKind;
 use anyhow::{ensure, Context, Result};
 use futures::join;
+use gas_estimation::GasPriceEstimating;
 use num::{BigRational, ToPrimitive};
 use primitive_types::H160;
 use reqwest::{header::HeaderValue, Client, Url};
@@ -23,9 +24,11 @@ use std::{
     sync::Arc,
 };
 
+const GAS_PER_ORDER: u128 = 37676;
+const GAS_PER_UNISWAP: u128 = 64687;
+
 // TODO: exclude partially fillable orders
 // TODO: set settlement.fee_factor
-// TODO: gather real token decimals and store them in a cache
 // TODO: special rounding for the prices we get from the solver?
 
 /// The configuration passed as url parameters to the solver.
@@ -55,6 +58,7 @@ pub struct HttpSolver {
     native_token: H160,
     token_info_fetcher: Arc<dyn TokenInfoFetching>,
     price_estimator: Arc<dyn PriceEstimating>,
+    gas_price_estimator: Arc<dyn GasPriceEstimating>,
 }
 
 impl HttpSolver {
@@ -63,8 +67,9 @@ impl HttpSolver {
         api_key: Option<String>,
         config: SolverConfig,
         native_token: H160,
-        token_info_fetcher: &Arc<dyn TokenInfoFetching>,
-        price_estimator: &Arc<dyn PriceEstimating>,
+        token_info_fetcher: Arc<dyn TokenInfoFetching>,
+        price_estimator: Arc<dyn PriceEstimating>,
+        gas_price_estimator: Arc<dyn GasPriceEstimating>,
     ) -> Self {
         // Unwrap because we cannot handle client creation failing.
         let client = Client::builder().build().unwrap();
@@ -74,8 +79,9 @@ impl HttpSolver {
             api_key,
             config,
             native_token,
-            token_info_fetcher: token_info_fetcher.clone(),
-            price_estimator: price_estimator.clone(),
+            token_info_fetcher,
+            price_estimator,
+            gas_price_estimator,
         }
     }
 
@@ -137,7 +143,13 @@ impl HttpSolver {
             .collect()
     }
 
-    fn order_models(&self, orders: &HashMap<String, LimitOrder>) -> HashMap<String, OrderModel> {
+    async fn order_models(
+        &self,
+        orders: &HashMap<String, LimitOrder>,
+    ) -> HashMap<String, OrderModel> {
+        let order_cost = self.order_cost().await;
+        // Q: Should we abort if we can't estimate order cost, or should we use some default value?
+        let order_cost = order_cost.unwrap_or(0);
         orders
             .iter()
             .map(|(index, order)| {
@@ -151,7 +163,7 @@ impl HttpSolver {
                     // TODO: map order fee and fixed cost
                     fee: 0.0,
                     cost: CostModel {
-                        amount: 0,
+                        amount: order_cost,
                         token: self.token_to_string(&self.native_token),
                     },
                 };
@@ -168,7 +180,10 @@ impl HttpSolver {
             .collect()
     }
 
-    fn amm_models(&self, amms: &HashMap<String, AmmOrder>) -> HashMap<String, UniswapModel> {
+    async fn amm_models(&self, amms: &HashMap<String, AmmOrder>) -> HashMap<String, UniswapModel> {
+        let uniswap_cost = self.uniswap_cost().await;
+        // Q: Should we abort if we can't estimate order cost, or should we use some default value?
+        let uniswap_cost = uniswap_cost.unwrap_or(0);
         amms.iter()
             .map(|(index, amm)| {
                 let uniswap = UniswapModel {
@@ -177,9 +192,8 @@ impl HttpSolver {
                     balance1: amm.reserves.0,
                     balance2: amm.reserves.1,
                     fee: *amm.fee.numer() as f64 / *amm.fee.denom() as f64,
-                    // TODO: map uniswap fixed cost
                     cost: CostModel {
-                        amount: 0,
+                        amount: uniswap_cost,
                         token: self.token_to_string(&self.native_token),
                     },
                     mandatory: true,
@@ -221,12 +235,15 @@ impl HttpSolver {
         );
         let limit_orders = self.map_orders_for_solver(orders.0);
         let amm_orders = self.map_amms_for_solver(orders.1);
+        let token_models = self
+            .token_models(&tokens, &token_infos, &price_estimates)
+            .await;
+        let order_models = self.order_models(&limit_orders).await;
+        let uniswap_models = self.amm_models(&amm_orders).await;
         let model = BatchAuctionModel {
-            tokens: self
-                .token_models(&tokens, &token_infos, &price_estimates)
-                .await,
-            orders: self.order_models(&limit_orders),
-            uniswaps: self.amm_models(&amm_orders),
+            tokens: token_models,
+            orders: order_models,
+            uniswaps: uniswap_models,
         };
         let context = SettlementContext {
             tokens,
@@ -271,6 +288,22 @@ impl HttpSolver {
         );
         serde_json::from_str(text.as_str())
             .with_context(|| format!("failed to decode response json, {}", context()))
+    }
+
+    async fn order_cost(&self) -> Result<u128> {
+        // Q: should we use estimate_with_limits below instead?
+        // Q: are the units (gwei) correct?
+        let gas_price_gwei = self.gas_price_estimator.estimate().await? * 1e9;
+
+        Ok(gas_price_gwei as u128 * GAS_PER_ORDER)
+    }
+
+    async fn uniswap_cost(&self) -> Result<u128> {
+        // Q: should we use estimate_with_limits below instead?
+        // Q: are the units (gwei) correct?
+        let gas_price_gwei = self.gas_price_estimator.estimate().await? * 1e9;
+
+        Ok(gas_price_gwei as u128 * GAS_PER_UNISWAP)
     }
 }
 
@@ -352,10 +385,11 @@ mod tests {
     use ::model::TokenPair;
     use maplit::hashmap;
     use num::rational::Ratio;
+    use shared::gas_price_estimation::FakeGasPriceEstimator;
     use shared::price_estimate::FakePriceEstimator;
     use shared::token_info::MockTokenInfoFetching;
     use shared::token_info::TokenInfo;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     // cargo test real_solver -- --ignored --nocapture
     // set the env variable GP_V2_OPTIMIZER_URL to use a non localhost optimizer
@@ -381,6 +415,10 @@ mod tests {
 
         let mock_price_estimation: Arc<dyn PriceEstimating> =
             Arc::new(FakePriceEstimator(num::one()));
+
+        let gas_price = Arc::new(Mutex::new(100.0));
+        let mock_gas_price_estimation = Arc::new(FakeGasPriceEstimator(gas_price.clone()));
+
         let solver = HttpSolver::new(
             url.parse().unwrap(),
             None,
@@ -389,8 +427,9 @@ mod tests {
                 time_limit: 100,
             },
             H160::zero(),
-            &mock_token_info_fetcher,
-            &mock_price_estimation,
+            mock_token_info_fetcher,
+            mock_price_estimation,
+            mock_gas_price_estimation,
         );
         let base = |x: u128| x * 10u128.pow(18);
         let orders = vec![

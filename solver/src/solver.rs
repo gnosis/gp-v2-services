@@ -9,6 +9,7 @@ use crate::{
 };
 use anyhow::Result;
 use ethcontract::H160;
+use gas_estimation::GasPriceEstimating;
 use reqwest::Url;
 use shared::{price_estimate::PriceEstimating, token_info::TokenInfoFetching};
 use structopt::clap::arg_enum;
@@ -34,6 +35,7 @@ pub fn create(
     mip_solver_url: Url,
     token_info_fetcher: Arc<dyn TokenInfoFetching>,
     price_estimator: Arc<dyn PriceEstimating>,
+    gas_price_estimator: Arc<dyn GasPriceEstimating>,
 ) -> Vec<Box<dyn Solver>> {
     solvers
         .into_iter()
@@ -48,8 +50,9 @@ pub fn create(
                     time_limit: 30,
                 },
                 native_token,
-                &token_info_fetcher,
-                &price_estimator,
+                token_info_fetcher.clone(),
+                price_estimator.clone(),
+                gas_price_estimator.clone(),
             )),
         })
         .collect()
