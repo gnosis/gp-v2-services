@@ -1,6 +1,6 @@
 ![pull request](https://github.com/gnosis/gp-v2-services/workflows/pull%20request/badge.svg) ![deploy](https://github.com/gnosis/gp-v2-services/workflows/deploy/badge.svg)
 
-# gp-v2-services
+# GPv2 Services
 
 This repository contains backend code for [Gnosis Protocol V2](https://docs.gnosis.io/protocol/) written in Rust.
 
@@ -13,6 +13,7 @@ They can also use the API to estimate fee amounts and limit prices before placin
 Solvers also interact with the order book by querying a list of open orders that they can attempt to settle.
 
 The api is documented with [openapi](https://protocol-rinkeby.dev.gnosisdev.com/api/).
+A simple example script that uses the API to place random orders can be found in [this repo](https://github.com/gnosis/gp-v2-trading-bot)
 
 The order book service itself uses PostgreSQL as a backend to persist orders.
 In addition to connecting the http api to the database it also checks order validity based on the block time, trade events, erc20 funding and approval so that solvers can query only valid orders.
