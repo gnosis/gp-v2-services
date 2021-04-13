@@ -20,7 +20,7 @@ In addition to connecting the http api to the database it also checks order vali
 
 ## Solver
 
-The `solver` crate is responsible for submitting on chain settlements based on the orders it gets from the order book and other liquidity sources like uniswap or Balancer pools.
+The `solver` crate is responsible for submitting on chain settlements based on the orders it gets from the order book and other liquidity sources like Balancer or Uniswap pools.
 
 It implements a few settlement strategies directly in Rust:
 
