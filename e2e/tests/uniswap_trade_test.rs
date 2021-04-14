@@ -146,7 +146,6 @@ async fn test_with_ganache() {
     let price_estimator = Arc::new(UniswapPriceEstimator::new(
         Box::new(pool_fetcher),
         HashSet::new(),
-        HashSet::new(),
     ));
     let native_token = token_a.address();
     let fee_calculator = Arc::new(MinFeeCalculator::new(

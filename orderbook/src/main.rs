@@ -10,6 +10,7 @@ use orderbook::{
     orderbook::Orderbook,
     serve_task, verify_deployed_contract_constants,
 };
+use shared::uniswap_pool::FilteredPoolFetcher;
 use shared::{
     current_block::{current_block_stream, CurrentBlockStream},
     price_estimate::UniswapPriceEstimator,
@@ -136,7 +137,7 @@ async fn main() {
     );
 
     let current_block_stream = current_block_stream(web3.clone()).await.unwrap();
-    let pool_fetcher = CachedPoolFetcher::new(
+    let cached_pool_fetcher = CachedPoolFetcher::new(
         Box::new(PoolFetcher {
             factory: uniswap_factory,
             web3,
@@ -144,6 +145,7 @@ async fn main() {
         }),
         current_block_stream.clone(),
     );
+    let pool_fetcher = FilteredPoolFetcher::new(Box::new(cached_pool_fetcher), deny_tokens.clone());
     let price_estimator = Arc::new(UniswapPriceEstimator::new(
         Box::new(pool_fetcher),
         base_tokens,

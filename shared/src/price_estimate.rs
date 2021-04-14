@@ -277,7 +277,7 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
-    use crate::uniswap_pool::{Pool, PoolFetching};
+    use crate::uniswap_pool::{FilteredPoolFetcher, Pool, PoolFetching};
 
     struct FakePoolFetcher(Vec<Pool>);
     #[async_trait::async_trait]
@@ -297,7 +297,7 @@ mod tests {
         );
 
         let pool_fetcher = Box::new(FakePoolFetcher(vec![pool]));
-        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!(), hashset!());
+        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!());
 
         assert_approx_eq!(
             estimator
@@ -357,7 +357,7 @@ mod tests {
         );
 
         let pool_fetcher = Box::new(FakePoolFetcher(vec![pool]));
-        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!(), hashset!());
+        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!());
 
         assert!(estimator
             .estimate_price(token_a, token_b, 0.into(), OrderKind::Buy)
@@ -384,11 +384,8 @@ mod tests {
         );
 
         let pool_fetcher = Box::new(FakePoolFetcher(vec![pool_ab, pool_bc]));
-        let estimator = UniswapPriceEstimator::new(
-            pool_fetcher,
-            hashset!(token_a, token_b, token_c),
-            hashset!(),
-        );
+        let estimator =
+            UniswapPriceEstimator::new(pool_fetcher, hashset!(token_a, token_b, token_c));
 
         let prices = estimator
             .estimate_prices(&[token_a, token_b, token_c], token_c)
@@ -406,7 +403,7 @@ mod tests {
         let token_a = H160::from_low_u64_be(1);
         let token_b = H160::from_low_u64_be(2);
         let pool_fetcher = Box::new(FakePoolFetcher(vec![]));
-        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!(), hashset!());
+        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!());
 
         assert!(estimator
             .estimate_price(token_a, token_b, 1.into(), OrderKind::Buy)
@@ -422,8 +419,9 @@ mod tests {
             TokenPair::new(token_a, token_b).unwrap(),
             (10u128.pow(30), 10u128.pow(29)),
         );
-        let pool_fetcher = Box::new(FakePoolFetcher(vec![pool_ab]));
-        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!(), hashset!(token_a));
+        let pool_fetcher =
+            FilteredPoolFetcher::new(Box::new(FakePoolFetcher(vec![pool_ab])), hashset!(token_a));
+        let estimator = UniswapPriceEstimator::new(Box::new(pool_fetcher), hashset!());
 
         let result = estimator
             .estimate_price(token_a, token_b, 1.into(), OrderKind::Buy)
@@ -448,7 +446,7 @@ mod tests {
         let pool = Pool::uniswap(TokenPair::new(token_a, token_b).unwrap(), (0, 10));
 
         let pool_fetcher = Box::new(FakePoolFetcher(vec![pool]));
-        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!(), hashset!());
+        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!());
 
         assert!(estimator
             .estimate_price(token_a, token_b, 1.into(), OrderKind::Buy)
@@ -470,7 +468,7 @@ mod tests {
         );
 
         let pool_fetcher = Box::new(FakePoolFetcher(vec![pool]));
-        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!(base_token), hashset!());
+        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!(base_token));
 
         assert!(estimator
             .estimate_price(token_a, token_b, 100.into(), OrderKind::Sell)
@@ -496,8 +494,7 @@ mod tests {
         ];
 
         let pool_fetcher = Box::new(FakePoolFetcher(pools));
-        let estimator =
-            UniswapPriceEstimator::new(pool_fetcher, hashset!(intermediate), hashset!());
+        let estimator = UniswapPriceEstimator::new(pool_fetcher, hashset!(intermediate));
 
         // Trade with intermediate hop
         for kind in &[OrderKind::Sell, OrderKind::Buy] {

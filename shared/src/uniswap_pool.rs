@@ -29,13 +29,22 @@ pub trait PoolFetching: Send + Sync {
     async fn fetch(&self, token_pairs: HashSet<TokenPair>) -> Vec<Pool>;
 }
 
-pub struct FilteredPoolFetching {
+pub struct FilteredPoolFetcher {
     inner: Box<dyn PoolFetching>,
     token_filter: HashSet<H160>,
 }
 
+impl FilteredPoolFetcher {
+    pub fn new(inner: Box<dyn PoolFetching>, token_filter: HashSet<H160>) -> Self {
+        Self {
+            inner,
+            token_filter,
+        }
+    }
+}
+
 #[async_trait::async_trait]
-impl PoolFetching for FilteredPoolFetching {
+impl PoolFetching for FilteredPoolFetcher {
     async fn fetch(&self, token_pairs: HashSet<TokenPair>) -> Vec<Pool> {
         let filtered_pairs = token_pairs
             .into_iter()
