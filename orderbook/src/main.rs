@@ -147,7 +147,6 @@ async fn main() {
     let price_estimator = Arc::new(UniswapPriceEstimator::new(
         Box::new(pool_fetcher),
         base_tokens,
-        deny_tokens.clone(),
     ));
     let fee_calculator = Arc::new(MinFeeCalculator::new(
         price_estimator.clone(),

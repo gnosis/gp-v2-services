@@ -146,8 +146,6 @@ async fn main() {
             chain_id,
         }),
         base_tokens.clone(),
-        // No need to provide denied tokens here, since they won't make it this far
-        HashSet::new(),
     ));
     let token_info_fetcher = Arc::new(CachedTokenInfoFetcher::new(Box::new(TokenInfoFetcher {
         web3: web3.clone(),

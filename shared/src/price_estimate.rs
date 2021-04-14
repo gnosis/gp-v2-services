@@ -75,19 +75,13 @@ pub trait PriceEstimating: Send + Sync {
 pub struct UniswapPriceEstimator {
     pool_fetcher: Box<dyn PoolFetching>,
     base_tokens: HashSet<H160>,
-    deny_tokens: HashSet<H160>,
 }
 
 impl UniswapPriceEstimator {
-    pub fn new(
-        pool_fetcher: Box<dyn PoolFetching>,
-        base_tokens: HashSet<H160>,
-        deny_tokens: HashSet<H160>,
-    ) -> Self {
+    pub fn new(pool_fetcher: Box<dyn PoolFetching>, base_tokens: HashSet<H160>) -> Self {
         Self {
             pool_fetcher,
             base_tokens,
-            deny_tokens,
         }
     }
 }

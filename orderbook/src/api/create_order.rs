@@ -21,6 +21,7 @@ pub fn create_order_response(result: Result<AddOrderResult>) -> impl Reply {
         ),
         Ok(AddOrderResult::SellTokenDenied(token)) => (
             super::error("TokenDenied", format!("Sell token denied {}", token)),
+            StatusCode::BAD_REQUEST,
         ),
         Ok(AddOrderResult::WrongOwner(owner)) => (
             super::error(
