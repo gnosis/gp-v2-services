@@ -23,8 +23,10 @@ use std::{
     sync::Arc,
 };
 
-const GAS_PER_ORDER: u128 = 37676;
-const GAS_PER_UNISWAP: u128 = 64687;
+// Estimates from multivariate linear regression here:
+// https://docs.google.com/spreadsheets/d/13UeUQ9DA4bHlcy9-i8d4nSLlCxSfjcXpTelvXYzyJzQ/edit?usp=sharing
+const GAS_PER_ORDER: u128 = 66315;
+const GAS_PER_UNISWAP: u128 = 94696;
 
 // TODO: exclude partially fillable orders
 // TODO: set settlement.fee_factor
