@@ -282,8 +282,12 @@ mod tests {
     struct FakePoolFetcher(Vec<Pool>);
     #[async_trait::async_trait]
     impl PoolFetching for FakePoolFetcher {
-        async fn fetch(&self, _: HashSet<TokenPair>) -> Vec<Pool> {
-            self.0.clone()
+        async fn fetch(&self, token_pairs: HashSet<TokenPair>) -> Vec<Pool> {
+            self.0
+                .clone()
+                .into_iter()
+                .filter(|pool| token_pairs.contains(&pool.tokens))
+                .collect()
         }
     }
 
@@ -427,16 +431,24 @@ mod tests {
             .estimate_price(token_a, token_b, 1.into(), OrderKind::Buy)
             .await
             .unwrap_err();
-
         assert_eq!(
-            format!("Sell Token {} Denied!", token_a),
+            format!(
+                "No valid path found between {:#x} and {:#x}",
+                token_a, token_b
+            ),
             result.to_string()
         );
         let result = estimator
             .estimate_price(token_b, token_a, 1.into(), OrderKind::Buy)
             .await
             .unwrap_err();
-        assert_eq!(format!("Buy Token {} Denied!", token_a), result.to_string());
+        assert_eq!(
+            format!(
+                "No valid path found between {:#x} and {:#x}",
+                token_b, token_a
+            ),
+            result.to_string()
+        );
     }
 
     #[tokio::test]
