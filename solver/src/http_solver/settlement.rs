@@ -125,7 +125,6 @@ fn match_prepared_and_settled_amms(
     settled_orders
         .into_iter()
         .filter(|(_, settled)| !(settled.balance_update1 == 0 && settled.balance_update2 == 0))
-        // .sorted_by_key(|su| {&su.1.exec_plan})  // How to make this work?
         .sorted_by(|a, b| a.1.exec_plan.cmp(&b.1.exec_plan))
         .map(|(index, settled)| {
             let prepared = prepared_orders
@@ -146,7 +145,6 @@ fn match_prepared_and_settled_amms(
             } else {
                 return Err(anyhow!("invalid uniswap update {:?}", settled));
             };
-            // TODO: handle execution plan.
             Ok(ExecutedAmm {
                 order: prepared,
                 input,
@@ -215,7 +213,10 @@ mod tests {
     };
     use maplit::hashmap;
     use mockall::predicate::eq;
-    use model::{order::OrderCreation, TokenPair};
+    use model::{
+        order::{Order, OrderCreation},
+        TokenPair,
+    };
     use std::sync::Arc;
 
     #[derive(Debug)]
@@ -236,11 +237,14 @@ mod tests {
         limit_handling.expect_settle().returning(move |_| {
             (
                 Some(Trade {
-                    order: OrderCreation {
-                        sell_token: t0,
-                        buy_token: t1,
-                        sell_amount: 1.into(),
-                        buy_amount: 2.into(),
+                    order: Order {
+                        order_creation: OrderCreation {
+                            sell_token: t0,
+                            buy_token: t1,
+                            sell_amount: 1.into(),
+                            buy_amount: 2.into(),
+                            ..Default::default()
+                        },
                         ..Default::default()
                     },
                     ..Default::default()

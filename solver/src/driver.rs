@@ -1,4 +1,4 @@
-use crate::chain;
+use crate::{chain, metrics::SolverMetrics};
 use crate::{
     liquidity::{uniswap::UniswapLiquidity, LimitOrder, Liquidity},
     orderbook::OrderBookApi,
@@ -15,8 +15,11 @@ use num::BigRational;
 use primitive_types::H160;
 use shared::price_estimate::PriceEstimating;
 use std::collections::HashMap;
-use std::{cmp::Reverse, sync::Arc, time::Duration};
-use tracing::info;
+use std::{
+    cmp::Reverse,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 // There is no economic viability calculation yet so we're using an arbitrary very high cap to
 // protect against a gas estimator giving bogus results that would drain all our funds.
@@ -32,8 +35,9 @@ pub struct Driver {
     target_confirm_time: Duration,
     settle_interval: Duration,
     native_token: H160,
+    min_order_age: Duration,
+    metrics: Arc<dyn SolverMetrics>,
 }
-
 impl Driver {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -46,17 +50,21 @@ impl Driver {
         target_confirm_time: Duration,
         settle_interval: Duration,
         native_token: H160,
+        min_order_age: Duration,
+        metrics: Arc<dyn SolverMetrics>,
     ) -> Self {
         Self {
             settlement_contract,
-            orderbook,
             uniswap_liquidity,
+            orderbook,
             price_estimator,
             solver,
             gas_price_estimator,
             target_confirm_time,
             settle_interval,
             native_token,
+            min_order_age,
+            metrics,
         }
     }
 
@@ -152,10 +160,19 @@ impl Driver {
             .chain(amms.into_iter().map(Liquidity::Amm))
             .collect();
 
-        let mut settlements: Vec<(&Box<dyn Solver>, Settlement)> =
+        self.metrics.liquidity_fetched(&liquidity);
+
+        let mut settlements: Vec<(String, Settlement)> =
             join_all(self.solver.iter().map(|solver| {
                 let liquidity = liquidity.clone();
-                async move { (solver, solver.solve(liquidity).await) }
+                let metrics = &self.metrics;
+                async move {
+                    let label = format!("{}", solver);
+                    let start_time = Instant::now();
+                    let settlement = solver.solve(liquidity).await;
+                    metrics.settlement_computed(&label, start_time);
+                    (label, settlement)
+                }
             }))
             .await
             .into_iter()
@@ -168,7 +185,7 @@ impl Driver {
             })
             .collect();
         for (solver, settlement) in settlements.iter() {
-            info!(
+            tracing::info!(
                 "{} found solution with objective value: {}",
                 solver,
                 settlement.objective_value(&estimated_prices)
@@ -179,12 +196,32 @@ impl Driver {
         settlements.sort_by_cached_key(|(_, settlement)| {
             Reverse(settlement.objective_value(&estimated_prices))
         });
+        let settle_orders_older_than =
+            chrono::offset::Utc::now() - chrono::Duration::from_std(self.min_order_age).unwrap();
         for (solver, settlement) in settlements {
-            info!("{} computed {:?}", solver, settlement);
+            tracing::info!("{} computed {:?}", solver, settlement);
+
             if settlement.trades.is_empty() {
-                info!("Skipping empty settlement");
+                tracing::info!("Skipping empty settlement");
                 continue;
             }
+
+            // If all orders are younger than self.min_order_age skip settlement. Orders will still
+            // be settled once they have been in the order book for longer. This makes coincidence
+            // of wants more likely.
+            let should_be_settled_immediately = settlement
+                .trades
+                .iter()
+                .any(|trade| trade.order.order_meta_data.creation_date <= settle_orders_older_than);
+            if !should_be_settled_immediately {
+                tracing::info!(
+                    "Skipping settlement because no trade is older than {}s",
+                    self.min_order_age.as_secs()
+                );
+                continue;
+            }
+
+            let trades = settlement.trades.clone();
             match settlement_submission::submit(
                 &self.settlement_contract,
                 self.gas_price_estimator.as_ref(),
@@ -199,6 +236,9 @@ impl Driver {
                     // Decide what is handled by orderbook service and what by us.
                     // We likely want to at least mark orders we know we have settled so that we don't
                     // attempt to settle them again when they are still in the orderbook.
+                    trades
+                        .iter()
+                        .for_each(|trade| self.metrics.order_settled(&trade.order));
                     break;
                 }
                 Err(err) => tracing::error!("{} Failed to submit settlement: {:?}", solver, err),

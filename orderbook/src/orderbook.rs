@@ -9,7 +9,7 @@ use anyhow::Result;
 use chrono::Utc;
 use contracts::GPv2Settlement;
 use futures::{join, TryStreamExt};
-use model::order::OrderCancellation;
+use model::order::{OrderCancellation, OrderCreationPayload};
 use model::{
     order::{Order, OrderCreation, OrderUid},
     DomainSeparator,
@@ -25,6 +25,7 @@ use tokio::sync::Mutex;
 #[derive(Debug, Eq, PartialEq)]
 pub enum AddOrderResult {
     Added(OrderUid),
+    WrongOwner(H160),
     DuplicatedOrder,
     InvalidSignature,
     Forbidden,
@@ -72,7 +73,8 @@ impl Orderbook {
         }
     }
 
-    pub async fn add_order(&self, order: OrderCreation) -> Result<AddOrderResult> {
+    pub async fn add_order(&self, payload: OrderCreationPayload) -> Result<AddOrderResult> {
+        let order = payload.order_creation;
         if self.deny_tokens.contains(&order.buy_token) {
             return Ok(AddOrderResult::BuyTokenDenied(order.buy_token));
         }
@@ -93,9 +95,14 @@ impl Orderbook {
             Some(order) => order,
             None => return Ok(AddOrderResult::InvalidSignature),
         };
-        self.balance_fetcher
-            .register(order.order_meta_data.owner, order.order_creation.sell_token)
-            .await;
+        if matches!(payload.from, Some(from) if from != order.order_meta_data.owner) {
+            return Ok(AddOrderResult::WrongOwner(order.order_meta_data.owner));
+        }
+
+        if !new_order_has_balance(&order, self.balance_fetcher.as_ref()).await {
+            return Ok(AddOrderResult::InsufficientFunds);
+        }
+
         match self.database.insert_order(&order).await {
             Ok(()) => Ok(AddOrderResult::Added(order.order_meta_data.uid)),
             Err(InsertionError::DuplicatedRecord) => Ok(AddOrderResult::DuplicatedOrder),
@@ -255,6 +262,28 @@ fn solvable_orders(mut orders: Vec<Order>, balances: &HashMap<(H160, H160), U256
     result
 }
 
+async fn new_order_has_balance(order: &Order, balance_fetcher: &dyn BalanceFetching) -> bool {
+    balance_fetcher
+        .register(order.order_meta_data.owner, order.order_creation.sell_token)
+        .await;
+    let owner = order.order_meta_data.owner;
+    let token = order.order_creation.sell_token;
+    balance_fetcher.register(owner, token).await;
+    let minimum_balance = if order.order_creation.partially_fillable {
+        1.into()
+    } else {
+        order
+            .order_creation
+            .sell_amount
+            .saturating_add(order.order_creation.fee_amount)
+    };
+    let balance = balance_fetcher.get_balance(owner, token);
+    match balance {
+        Some(balance) => balance >= minimum_balance,
+        None => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,7 +292,7 @@ mod tests {
     use ethcontract::H160;
     use maplit::hashmap;
     use mockall::{predicate::eq, Sequence};
-    use model::order::{OrderCreation, OrderMetaData};
+    use model::order::{OrderBuilder, OrderCreation, OrderMetaData};
 
     #[tokio::test]
     async fn track_and_get_balances_() {
@@ -372,5 +401,61 @@ mod tests {
             DateTime::from_utc(NaiveDateTime::from_timestamp(3, 0), Utc);
         let orders_ = solvable_orders(orders.clone(), &balances);
         assert_eq!(orders_, orders[..1]);
+    }
+
+    #[tokio::test]
+    async fn new_order_has_balance_true_fillkill() {
+        let order = OrderBuilder::default()
+            .with_fee_amount(2.into())
+            .with_sell_amount(3.into())
+            .build();
+        let mut balance_fetcher = MockBalanceFetching::new();
+        balance_fetcher.expect_register().return_const(());
+        balance_fetcher
+            .expect_get_balance()
+            .return_const(Some(5.into()));
+        assert!(new_order_has_balance(&order, &balance_fetcher).await);
+    }
+
+    #[tokio::test]
+    async fn new_order_has_balance_true_partially_fillable() {
+        let order = OrderBuilder::default()
+            .with_fee_amount(2.into())
+            .with_sell_amount(3.into())
+            .with_partially_fillable(true)
+            .build();
+        let mut balance_fetcher = MockBalanceFetching::new();
+        balance_fetcher.expect_register().return_const(());
+        balance_fetcher
+            .expect_get_balance()
+            .return_const(Some(1.into()));
+        assert!(new_order_has_balance(&order, &balance_fetcher).await);
+    }
+
+    #[tokio::test]
+    async fn new_order_has_balance_false_fillkill() {
+        let order = OrderBuilder::default()
+            .with_fee_amount(2.into())
+            .with_sell_amount(3.into())
+            .build();
+        let mut balance_fetcher = MockBalanceFetching::new();
+        balance_fetcher.expect_register().return_const(());
+        balance_fetcher
+            .expect_get_balance()
+            .return_const(Some(4.into()));
+        assert!(!new_order_has_balance(&order, &balance_fetcher).await);
+    }
+
+    #[tokio::test]
+    async fn new_order_has_balance_false_balance_unavailable() {
+        let order = OrderBuilder::default()
+            .with_fee_amount(2.into())
+            .with_sell_amount(3.into())
+            .with_partially_fillable(true)
+            .build();
+        let mut balance_fetcher = MockBalanceFetching::new();
+        balance_fetcher.expect_register().return_const(());
+        balance_fetcher.expect_get_balance().return_const(None);
+        assert!(!new_order_has_balance(&order, &balance_fetcher).await);
     }
 }

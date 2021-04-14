@@ -1,13 +1,17 @@
 use contracts::WETH9;
 use ethcontract::{Account, PrivateKey};
+use prometheus::Registry;
 use reqwest::Url;
 use shared::{
+    metrics::serve_metrics,
     price_estimate::UniswapPriceEstimator,
     token_info::{CachedTokenInfoFetcher, TokenInfoFetcher},
     transport::LoggingTransport,
     uniswap_pool::PoolFetcher,
 };
-use solver::{driver::Driver, liquidity::uniswap::UniswapLiquidity, solver::SolverType};
+use solver::{
+    driver::Driver, liquidity::uniswap::UniswapLiquidity, metrics::Metrics, solver::SolverType,
+};
 use std::iter::FromIterator as _;
 use std::{collections::HashSet, sync::Arc, time::Duration};
 use structopt::StructOpt;
@@ -51,7 +55,7 @@ struct Arguments {
     #[structopt(
         long,
         env = "SETTLE_INTERVAL",
-        default_value = "30",
+        default_value = "10",
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
     settle_interval: Duration,
@@ -66,6 +70,26 @@ struct Arguments {
         use_delimiter = true,
     )]
     solvers: Vec<SolverType>,
+
+    /// A settlement must contain at least one order older than this duration for it to be applied.
+    /// Larger values delay individual settlements more but have a higher coincidence of wants
+    /// chance.
+    #[structopt(
+        long,
+        env = "MIN_ORDER_AGE",
+        default_value = "60",
+        parse(try_from_str = shared::arguments::duration_from_seconds),
+    )]
+    min_order_age: Duration,
+
+    /// The port at which we serve our metrics
+    #[structopt(
+        long,
+        env = "METRICS_PORT",
+        default_value = "9587",
+        case_insensitive = true
+    )]
+    metrics_port: u16,
 }
 
 #[tokio::main]
@@ -73,6 +97,10 @@ async fn main() {
     let args = Arguments::from_args();
     shared::tracing::initialize(args.shared.log_filter.as_str());
     tracing::info!("running solver with {:#?}", args);
+
+    let registry = Registry::default();
+    let metrics = Arc::new(Metrics::new(&registry).expect("Couldn't register metrics"));
+
     // TODO: custom transport that allows setting timeout
     let transport = LoggingTransport::new(
         web3::transports::Http::new(args.shared.node_url.as_str())
@@ -149,6 +177,10 @@ async fn main() {
         args.target_confirm_time,
         args.settle_interval,
         native_token_contract.address(),
+        args.min_order_age,
+        metrics,
     );
+
+    serve_metrics(registry, ([0, 0, 0, 0], args.metrics_port).into());
     driver.run_forever().await;
 }

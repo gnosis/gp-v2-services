@@ -1,12 +1,12 @@
 use crate::api::extract_payload;
 use crate::orderbook::{AddOrderResult, Orderbook};
 use anyhow::Result;
-use model::order::OrderCreation;
+use model::order::OrderCreationPayload;
 use std::{convert::Infallible, sync::Arc};
 use warp::{hyper::StatusCode, Filter, Rejection, Reply};
 
-pub fn create_order_request() -> impl Filter<Extract = (OrderCreation,), Error = Rejection> + Clone
-{
+pub fn create_order_request(
+) -> impl Filter<Extract = (OrderCreationPayload,), Error = Rejection> + Clone {
     warp::path!("orders")
         .and(warp::post())
         .and(extract_payload())
@@ -21,6 +21,15 @@ pub fn create_order_response(result: Result<AddOrderResult>) -> impl Reply {
         ),
         Ok(AddOrderResult::SellTokenDenied(token)) => (
             super::error("TokenDenied", format!("Sell token denied {}", token)),
+        ),
+        Ok(AddOrderResult::WrongOwner(owner)) => (
+            super::error(
+                "WrongOwner",
+                format!(
+                    "Address recovered from signature {} does not match from address",
+                    owner
+                ),
+            ),
             StatusCode::BAD_REQUEST,
         ),
         Ok(AddOrderResult::DuplicatedOrder) => (
@@ -65,12 +74,12 @@ pub fn create_order_response(result: Result<AddOrderResult>) -> impl Reply {
 pub fn create_order(
     orderbook: Arc<Orderbook>,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
-    create_order_request().and_then(move |order| {
+    create_order_request().and_then(move |order_payload| {
         let orderbook = orderbook.clone();
         async move {
-            let result = orderbook.add_order(order).await;
+            let result = orderbook.add_order(order_payload).await;
             if let Err(err) = &result {
-                tracing::error!(?err, ?order, "add_order error");
+                tracing::error!(?err, ?order_payload, "add_order error");
             }
             Result::<_, Infallible>::Ok(create_order_response(result))
         }
@@ -81,21 +90,21 @@ pub fn create_order(
 mod tests {
     use super::*;
     use crate::api::response_body;
-    use model::order::OrderUid;
+    use model::order::{OrderCreationPayload, OrderUid};
     use serde_json::json;
     use warp::test::request;
 
     #[tokio::test]
     async fn create_order_request_ok() {
         let filter = create_order_request();
-        let order = OrderCreation::default();
+        let order_payload = OrderCreationPayload::default();
         let request = request()
             .path("/orders")
             .method("POST")
             .header("content-type", "application/json")
-            .json(&order);
+            .json(&order_payload);
         let result = request.filter(&filter).await.unwrap();
-        assert_eq!(result, order);
+        assert_eq!(result, order_payload);
     }
 
     #[tokio::test]
