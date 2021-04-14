@@ -90,16 +90,6 @@ impl UniswapPriceEstimator {
             deny_tokens,
         }
     }
-    /// Deny List Validation for price estimation.
-    fn token_validation(&self, buy_token: &H160, sell_token: &H160) -> Result<()> {
-        if self.deny_tokens.contains(&sell_token) {
-            return Err(anyhow!("Sell Token {} Denied!", sell_token));
-        }
-        if self.deny_tokens.contains(&buy_token) {
-            return Err(anyhow!("Buy Token {} Denied!", buy_token));
-        }
-        Ok(())
-    }
 }
 
 #[async_trait::async_trait]
@@ -114,7 +104,6 @@ impl PriceEstimating for UniswapPriceEstimator {
         amount: U256,
         kind: OrderKind,
     ) -> Result<BigRational> {
-        self.token_validation(&buy_token, &sell_token)?;
         if sell_token == buy_token {
             return Ok(num::one());
         }
@@ -158,7 +147,6 @@ impl PriceEstimating for UniswapPriceEstimator {
         amount: U256,
         kind: OrderKind,
     ) -> Result<U256> {
-        self.token_validation(&buy_token, &sell_token)?;
         if sell_token == buy_token || amount.is_zero() {
             return Ok(U256::zero());
         }
