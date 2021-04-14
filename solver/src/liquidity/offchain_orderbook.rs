@@ -1,5 +1,5 @@
 use crate::orderbook::OrderBookApi;
-use crate::settlement::{Interaction, Trade};
+use crate::settlement::{Trade, UnwrapInteraction};
 use anyhow::{Context, Result};
 use contracts::WETH9;
 use model::order::Order;
@@ -46,10 +46,10 @@ pub fn normalize_limit_order(order: Order, native_token: WETH9) -> LimitOrder {
 }
 
 impl LimitOrderSettlementHandling for OrderSettlementHandling {
-    fn settle(&self, executed_amount: U256) -> (Option<Trade>, Vec<Box<dyn Interaction>>) {
+    fn settle(&self, executed_amount: U256) -> (Option<Trade>, Option<Box<dyn UnwrapInteraction>>) {
         (
             Some(Trade::matched(self.order.clone(), executed_amount)),
-            Vec::new(),
+            None,
         )
     }
 }

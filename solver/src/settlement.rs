@@ -1,10 +1,11 @@
 use crate::encoding::{self, EncodedInteraction, EncodedTrade};
-use anyhow::Result;
 use model::order::{Order, OrderKind};
 use num::{BigRational, Signed, Zero};
 use primitive_types::{H160, U256};
 use shared::conversions::U256Ext;
-use std::collections::HashMap;
+#[cfg(test)]
+use std::fmt::{self, Formatter};
+use std::{collections::HashMap, fmt::Debug};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Trade {
@@ -59,22 +60,105 @@ impl Trade {
     }
 }
 
-pub trait Interaction: std::fmt::Debug + Send {
+#[cfg_attr(test, mockall::automock)]
+pub trait Interaction: Debug + Send {
     // TODO: not sure if this should return a result.
-    // Write::write returns a result but we know we write to a vector in memory so we know it will
-    // never fail. Then the question becomes whether interactions should be allowed to fail encoding
-    // for other reasons.
     fn encode(&self) -> Vec<EncodedInteraction>;
+}
+
+#[cfg(test)]
+impl Debug for MockInteraction {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        f.write_str("MockInteraction")
+    }
+}
+
+pub trait UnwrapInteraction: Interaction {
+    fn token_address(&self) -> H160;
+    fn amount(&self) -> U256;
+
+    fn increase_amount(&mut self, amount: U256);
+}
+
+#[cfg(test)]
+mockall::mock! {
+    // Will create a `MockUnwrapInteraction` type.
+    UnwrapInteraction {}
+
+    impl Interaction for UnwrapInteraction {
+        fn encode(&self) -> Vec<EncodedInteraction>;
+    }
+    impl UnwrapInteraction for UnwrapInteraction {
+        fn token_address(&self) -> H160;
+        fn amount(&self) -> U256;
+        fn increase_amount(&mut self, amount: U256);
+    }
+}
+
+#[cfg(test)]
+impl Debug for MockUnwrapInteraction {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        f.write_str("MockUnwrapInteraction")
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct SettlementInteractions {
+    amm_interactions: Vec<Box<dyn Interaction>>,
+    unwrap_interactions: HashMap<H160, Box<dyn UnwrapInteraction>>,
+}
+
+impl SettlementInteractions {
+    #[cfg(test)]
+    pub fn total_count(&self) -> usize {
+        self.amm_interactions.len() + self.unwrap_interactions.len()
+    }
+
+    pub fn push_amm_interactions(
+        &mut self,
+        interactions: impl IntoIterator<Item = Box<dyn Interaction>>,
+    ) {
+        self.amm_interactions.extend(interactions);
+    }
+
+    pub fn push_unwrap_interactions(
+        &mut self,
+        interactions: impl IntoIterator<Item = Box<dyn UnwrapInteraction>>,
+    ) {
+        for interaction in interactions {
+            self.unwrap_interactions
+                .entry(interaction.token_address())
+                .and_modify(|unwrap| unwrap.increase_amount(interaction.amount()))
+                .or_insert(interaction);
+        }
+    }
+
+    fn encode(&self) -> [Vec<EncodedInteraction>; 3] {
+        let intra_interactions = std::iter::empty()
+            .chain(
+                self.amm_interactions
+                    .iter()
+                    .flat_map(|interaction| interaction.encode()),
+            )
+            .chain(
+                // Always include unwrap interactions last as they aren't part
+                // of the execution plan, and only need to be done right before
+                // the trade proceeds are paid out.
+                self.unwrap_interactions
+                    .values()
+                    .flat_map(|interaction| interaction.encode()),
+            )
+            .collect();
+
+        [Vec::new(), intra_interactions, Vec::new()]
+    }
 }
 
 #[derive(Debug, Default)]
 pub struct Settlement {
     pub clearing_prices: HashMap<H160, U256>,
-    pub fee_factor: U256,
     pub trades: Vec<Trade>,
-    pub pre_interactions: Vec<Box<dyn Interaction>>,
-    pub intra_interactions: Vec<Box<dyn Interaction>>,
-    pub post_interactions: Vec<Box<dyn Interaction>>,
+    pub interactions: SettlementInteractions,
 }
 
 impl Settlement {
@@ -105,18 +189,8 @@ impl Settlement {
             .collect()
     }
 
-    pub fn encode_interactions(&self) -> Result<[Vec<EncodedInteraction>; 3]> {
-        let encode = |interactions: &[Box<dyn Interaction>]| {
-            interactions
-                .iter()
-                .flat_map(|interaction| interaction.encode())
-                .collect()
-        };
-        Ok([
-            encode(&self.pre_interactions),
-            encode(&self.intra_interactions),
-            encode(&self.post_interactions),
-        ])
+    pub fn encode_interactions(&self) -> [Vec<EncodedInteraction>; 3] {
+        self.interactions.encode()
     }
 
     fn total_surplus(
@@ -218,6 +292,7 @@ fn sell_order_surplus(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mockall::predicate;
     use model::order::{OrderCreation, OrderKind};
     use num::FromPrimitive;
 
@@ -407,6 +482,76 @@ mod tests {
             settlement0.objective_value(&external_prices)
                 < settlement1.objective_value(&external_prices)
         );
+    }
+
+    #[test]
+    fn pushing_amm_interactions() {
+        let mut interactions = SettlementInteractions::default();
+        interactions.push_amm_interactions(vec![
+            Box::new(MockInteraction::new()) as Box<dyn Interaction>,
+            Box::new(MockInteraction::new()),
+        ]);
+        interactions.push_amm_interactions(vec![
+            Box::new(MockInteraction::new()) as Box<dyn Interaction>
+        ]);
+
+        assert_eq!(interactions.total_count(), 3);
+    }
+
+    #[test]
+    fn pushing_unwrap_interactions_for_different_tokens() {
+        let mut interactions = SettlementInteractions::default();
+
+        let mut unwrap_token1 = MockUnwrapInteraction::new();
+        unwrap_token1
+            .expect_token_address()
+            .returning(|| H160([1; 20]));
+        interactions
+            .push_unwrap_interactions(Some(Box::new(unwrap_token1) as Box<dyn UnwrapInteraction>));
+
+        let mut unwrap_token2 = MockUnwrapInteraction::new();
+        unwrap_token2
+            .expect_token_address()
+            .returning(|| H160([2; 20]));
+        interactions
+            .push_unwrap_interactions(Some(Box::new(unwrap_token2) as Box<dyn UnwrapInteraction>));
+
+        assert_eq!(interactions.total_count(), 2);
+    }
+
+    #[test]
+    fn pushing_unwrap_interactions_for_same_token() {
+        let mut interactions = SettlementInteractions::default();
+
+        let token = H160([0xba; 20]);
+        let second_amount = U256::from(0x1337);
+
+        let mut first_unwrap_token = MockUnwrapInteraction::new();
+        first_unwrap_token
+            .expect_token_address()
+            .returning(move || token);
+        // The amount of the first token isn't read, so we don't need to mock it.
+        first_unwrap_token
+            .expect_increase_amount()
+            .times(1)
+            .with(predicate::eq(second_amount))
+            .returning(|_| ());
+        interactions.push_unwrap_interactions(vec![
+            Box::new(first_unwrap_token) as Box<dyn UnwrapInteraction>
+        ]);
+
+        let mut second_unwrap_token = MockUnwrapInteraction::new();
+        second_unwrap_token
+            .expect_token_address()
+            .returning(move || token);
+        second_unwrap_token
+            .expect_amount()
+            .returning(move || second_amount);
+        interactions.push_unwrap_interactions(vec![
+            Box::new(second_unwrap_token) as Box<dyn UnwrapInteraction>
+        ]);
+
+        assert_eq!(interactions.total_count(), 1);
     }
 
     #[test]

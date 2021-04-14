@@ -15,7 +15,7 @@ use std::{
 
 use crate::{
     liquidity::{uniswap::MAX_HOPS, AmmOrder, LimitOrder, Liquidity},
-    settlement::Settlement,
+    settlement::{Settlement, SettlementInteractions},
     solver::Solver,
 };
 pub struct UniswapSolver {
@@ -146,17 +146,21 @@ impl Solution {
             model::order::OrderKind::Buy => order.buy_amount,
             model::order::OrderKind::Sell => order.sell_amount,
         };
-        let (trade, mut interactions) = order.settlement_handling.settle(matched_amount);
+
+        let mut interactions = SettlementInteractions::default();
+
+        let (trade, unwrap_interaction) = order.settlement_handling.settle(matched_amount);
+        interactions.push_unwrap_interactions(unwrap_interaction);
 
         let (mut sell_amount, mut sell_token) = (self.executed_sell_amount, order.sell_token);
         for pool in self.path {
             let (buy_amount, buy_token) = pool
                 .get_amount_out(sell_token, sell_amount)
-                .expect("Path was found, so amount must be caluclatable");
+                .expect("Path was found, so amount must be calculatable");
             let amm = amm_map
                 .get(&pool.tokens)
                 .expect("Path was found so AMM must exist");
-            interactions.extend(
+            interactions.push_amm_interactions(
                 amm.settlement_handling
                     .settle((sell_token, sell_amount), (buy_token, buy_amount)),
             );
@@ -168,11 +172,8 @@ impl Solution {
                 order.sell_token => self.executed_buy_amount,
                 order.buy_token => self.executed_sell_amount,
             },
-            fee_factor: U256::zero(),
             trades: trade.into_iter().collect(),
-            intra_interactions: interactions,
-            pre_interactions: Vec::new(),
-            post_interactions: Vec::new(),
+            interactions,
         }
     }
 }

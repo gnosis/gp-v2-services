@@ -1,7 +1,7 @@
 use model::{order::OrderKind, TokenPair};
 use num::rational::Ratio;
 use primitive_types::{H160, U256};
-use settlement::{Interaction, Trade};
+use settlement::{Interaction, Trade, UnwrapInteraction};
 use std::sync::Arc;
 use strum_macros::{AsStaticStr, EnumVariantNames};
 
@@ -50,7 +50,7 @@ impl From<Order> for LimitOrder {
 /// Specifies how a limit order fulfillment translates into Trade and Interactions for the settlement
 #[cfg_attr(test, automock)]
 pub trait LimitOrderSettlementHandling: Send + Sync {
-    fn settle(&self, executed_amount: U256) -> (Option<Trade>, Vec<Box<dyn Interaction>>);
+    fn settle(&self, executed_amount: U256) -> (Option<Trade>, Option<Box<dyn UnwrapInteraction>>);
 }
 
 /// 2 sided constant product automated market maker with equal reserve value and a trading fee (e.g. Uniswap, Sushiswap)
@@ -91,9 +91,12 @@ pub mod tests {
     }
 
     impl LimitOrderSettlementHandling for CapturingLimitOrderSettlementHandler {
-        fn settle(&self, executed_amount: U256) -> (Option<Trade>, Vec<Box<dyn Interaction>>) {
+        fn settle(
+            &self,
+            executed_amount: U256,
+        ) -> (Option<Trade>, Option<Box<dyn UnwrapInteraction>>) {
             self.calls.lock().unwrap().push(executed_amount);
-            (None, Vec::new())
+            (None, None)
         }
     }
 

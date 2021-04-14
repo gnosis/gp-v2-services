@@ -1,6 +1,6 @@
 use crate::{
     liquidity,
-    settlement::{Interaction, Settlement, Trade},
+    settlement::{Settlement, SettlementInteractions, Trade},
 };
 use liquidity::{AmmOrder, LimitOrder};
 use model::order::OrderKind;
@@ -108,8 +108,7 @@ fn solve_without_uniswap(
             context_b.address => context_a.reserve,
         },
         trades,
-        intra_interactions: interactions,
-        ..Default::default()
+        interactions,
     }
 }
 
@@ -130,7 +129,7 @@ fn solve_with_uniswap(
     let uniswap_in = big_rational_to_u256(&uniswap_in).ok()?;
 
     let (trades, mut interactions) = fully_matched(orders);
-    interactions.extend(pool.settlement_handling.settle(
+    interactions.push_amm_interactions(pool.settlement_handling.settle(
         (excess.address, uniswap_in),
         (shortage.address, uniswap_out),
     ));
@@ -140,26 +139,25 @@ fn solve_with_uniswap(
             excess.address => uniswap_out,
         },
         trades,
-        intra_interactions: interactions,
-        ..Default::default()
+        interactions,
     })
 }
 
 fn fully_matched(
     orders: impl Iterator<Item = LimitOrder> + Clone,
-) -> (Vec<Trade>, Vec<Box<dyn Interaction>>) {
+) -> (Vec<Trade>, SettlementInteractions) {
     let mut trades = Vec::new();
-    let mut interactions = Vec::new();
+    let mut interactions = SettlementInteractions::default();
     for order in orders {
         let executed_amount = match order.kind {
             model::order::OrderKind::Buy => order.buy_amount,
             model::order::OrderKind::Sell => order.sell_amount,
         };
-        let (trade, trade_interactions) = order.settlement_handling.settle(executed_amount);
+        let (trade, unwrap_interaction) = order.settlement_handling.settle(executed_amount);
         if let Some(trade) = trade {
             trades.push(trade)
         }
-        interactions.extend(trade_interactions);
+        interactions.push_unwrap_interactions(unwrap_interaction);
     }
     (trades, interactions)
 }

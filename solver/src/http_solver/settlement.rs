@@ -78,18 +78,20 @@ impl IntermediateSettlement {
     fn into_settlement(self) -> Settlement {
         let mut settlement = Settlement::default();
         for order in self.executed_limit_orders.iter() {
-            let (trade, interactions) = order
+            let (trade, unwrap_interaction) = order
                 .order
                 .settlement_handling
                 .settle(order.executed_amount());
             if let Some(trade) = trade {
                 settlement.trades.push(trade);
             }
-            settlement.intra_interactions.extend(interactions);
+            settlement
+                .interactions
+                .push_unwrap_interactions(unwrap_interaction);
         }
         for amm in self.executed_amms.iter() {
             let interactions = amm.order.settlement_handling.settle(amm.input, amm.output);
-            settlement.intra_interactions.extend(interactions);
+            settlement.interactions.push_amm_interactions(interactions);
         }
         settlement.clearing_prices = self.prices;
         settlement
@@ -209,7 +211,7 @@ mod tests {
         encoding::EncodedInteraction,
         http_solver::model::{ExecutedOrderModel, UpdatedUniswapModel},
         liquidity::{MockAmmSettlementHandling, MockLimitOrderSettlementHandling},
-        settlement::{Interaction, Trade},
+        settlement::{Interaction, Trade, UnwrapInteraction},
     };
     use maplit::hashmap;
     use mockall::predicate::eq;
@@ -225,6 +227,16 @@ mod tests {
         fn encode(&self) -> Vec<EncodedInteraction> {
             Vec::new()
         }
+    }
+
+    impl UnwrapInteraction for NoopInteraction {
+        fn token_address(&self) -> H160 {
+            H160::default()
+        }
+        fn amount(&self) -> U256 {
+            U256::default()
+        }
+        fn increase_amount(&mut self, _amount: U256) {}
     }
 
     #[test]
@@ -249,7 +261,7 @@ mod tests {
                     },
                     ..Default::default()
                 }),
-                vec![Box::new(NoopInteraction)],
+                Some(Box::new(NoopInteraction)),
             )
         });
         let limit_order = LimitOrder {
@@ -307,6 +319,6 @@ mod tests {
             hashmap! { t0 => 10.into(), t1 => 11.into() }
         );
         assert_eq!(settlement.trades.len(), 1);
-        assert_eq!(settlement.intra_interactions.len(), 2);
+        assert_eq!(settlement.interactions.total_count(), 2);
     }
 }

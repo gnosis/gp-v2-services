@@ -1,6 +1,9 @@
-use crate::{encoding::EncodedInteraction, settlement::Interaction};
+use crate::{
+    encoding::EncodedInteraction,
+    settlement::{Interaction, UnwrapInteraction},
+};
 use contracts::WETH9;
-use primitive_types::U256;
+use primitive_types::{H160, U256};
 
 #[derive(Debug)]
 pub struct UnwrapWethInteraction {
@@ -13,6 +16,25 @@ impl Interaction for UnwrapWethInteraction {
         let method = self.weth.withdraw(self.amount);
         let calldata = method.tx.data.expect("no calldata").0;
         vec![(self.weth.address(), 0.into(), calldata)]
+    }
+}
+
+impl UnwrapInteraction for UnwrapWethInteraction {
+    fn token_address(&self) -> H160 {
+        self.weth.address()
+    }
+
+    fn amount(&self) -> U256 {
+        self.amount
+    }
+
+    fn increase_amount(&mut self, amount: U256) {
+        // We are OK with panicking on overflow in this situation as the the
+        // native wrapped token for all our supported networks is trusted.
+        self.amount = self
+            .amount
+            .checked_add(amount)
+            .expect("no one is that rich");
     }
 }
 
@@ -41,5 +63,15 @@ mod tests {
         let withdraw_signature = hex!("2e1a7d4d");
         assert_eq!(call[0..4], withdraw_signature);
         assert_eq!(U256::from_big_endian(&call[4..36]), amount);
+    }
+
+    #[test]
+    #[should_panic]
+    fn panics_when_overflow_on_increase_amount() {
+        let mut unwrap = UnwrapWethInteraction {
+            weth: WETH9::at(&dummy_web3::dummy_web3(), H160([0x42; 20])),
+            amount: U256::max_value(),
+        };
+        unwrap.increase_amount(1.into());
     }
 }

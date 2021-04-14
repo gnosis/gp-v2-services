@@ -86,9 +86,7 @@ fn encode_settlement(settlement: &Settlement) -> Result<EncodedSettlement> {
     Ok(EncodedSettlement {
         tokens: settlement.tokens(),
         clearing_prices: settlement.clearing_prices(),
-        encoded_interactions: settlement
-            .encode_interactions()
-            .context("interaction encoding failed")?,
+        encoded_interactions: settlement.encode_interactions(),
         encoded_trades: settlement
             .encode_trades()
             .ok_or_else(|| anyhow!("trade encoding failed"))?,
