@@ -150,15 +150,13 @@ async fn main() {
     let token_info_fetcher = Arc::new(CachedTokenInfoFetcher::new(Box::new(TokenInfoFetcher {
         web3: web3.clone(),
     })));
-    let gas_price_estimator = Arc::new(
-        shared::gas_price_estimation::create_priority_estimator(
-            &reqwest::Client::new(),
-            &web3,
-            args.shared.gas_estimators.as_slice(),
-        )
-        .await
-        .expect("failed to create gas price estimator"),
-    );
+    let gas_price_estimator = shared::gas_price_estimation::create_priority_estimator(
+        &reqwest::Client::new(),
+        &web3,
+        args.shared.gas_estimators.as_slice(),
+    )
+    .await
+    .expect("failed to create gas price estimator");
     let solver = solver::solver::create(
         args.solvers,
         base_tokens,
@@ -166,7 +164,6 @@ async fn main() {
         args.mip_solver_url,
         token_info_fetcher,
         price_estimator.clone(),
-        gas_price_estimator.clone(),
     );
     let mut driver = Driver::new(
         settlement_contract,
@@ -174,7 +171,7 @@ async fn main() {
         orderbook_api,
         price_estimator,
         solver,
-        gas_price_estimator,
+        Box::new(gas_price_estimator),
         args.target_confirm_time,
         args.settle_interval,
         native_token_contract.address(),

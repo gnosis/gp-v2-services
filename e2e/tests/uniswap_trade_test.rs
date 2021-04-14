@@ -230,7 +230,7 @@ async fn test_with_ganache() {
         create_orderbook_api(),
         price_estimator,
         vec![Box::new(solver)],
-        Arc::new(web3),
+        Box::new(web3),
         Duration::from_secs(1),
         Duration::from_secs(30),
         native_token,

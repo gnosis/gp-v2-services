@@ -10,7 +10,6 @@ use crate::{
 use ::model::order::OrderKind;
 use anyhow::{ensure, Context, Result};
 use futures::join;
-use gas_estimation::GasPriceEstimating;
 use num::{BigRational, ToPrimitive};
 use primitive_types::H160;
 use reqwest::{header::HeaderValue, Client, Url};
@@ -58,7 +57,6 @@ pub struct HttpSolver {
     native_token: H160,
     token_info_fetcher: Arc<dyn TokenInfoFetching>,
     price_estimator: Arc<dyn PriceEstimating>,
-    gas_price_estimator: Arc<dyn GasPriceEstimating>,
 }
 
 impl HttpSolver {
@@ -69,7 +67,6 @@ impl HttpSolver {
         native_token: H160,
         token_info_fetcher: Arc<dyn TokenInfoFetching>,
         price_estimator: Arc<dyn PriceEstimating>,
-        gas_price_estimator: Arc<dyn GasPriceEstimating>,
     ) -> Self {
         // Unwrap because we cannot handle client creation failing.
         let client = Client::builder().build().unwrap();
@@ -81,7 +78,6 @@ impl HttpSolver {
             native_token,
             token_info_fetcher,
             price_estimator,
-            gas_price_estimator,
         }
     }
 
@@ -146,10 +142,9 @@ impl HttpSolver {
     async fn order_models(
         &self,
         orders: &HashMap<String, LimitOrder>,
+        gas_price: f64,
     ) -> HashMap<String, OrderModel> {
-        let order_cost = self.order_cost().await;
-        // Q: Should we abort if we can't estimate order cost, or should we use some default value?
-        let order_cost = order_cost.unwrap_or(0);
+        let order_cost = self.order_cost(gas_price).await;
         orders
             .iter()
             .map(|(index, order)| {
@@ -180,10 +175,12 @@ impl HttpSolver {
             .collect()
     }
 
-    async fn amm_models(&self, amms: &HashMap<String, AmmOrder>) -> HashMap<String, UniswapModel> {
-        let uniswap_cost = self.uniswap_cost().await;
-        // Q: Should we abort if we can't estimate order cost, or should we use some default value?
-        let uniswap_cost = uniswap_cost.unwrap_or(0);
+    async fn amm_models(
+        &self,
+        amms: &HashMap<String, AmmOrder>,
+        gas_price: f64,
+    ) -> HashMap<String, UniswapModel> {
+        let uniswap_cost = self.uniswap_cost(gas_price).await;
         amms.iter()
             .map(|(index, amm)| {
                 let uniswap = UniswapModel {
@@ -206,6 +203,7 @@ impl HttpSolver {
     async fn prepare_model(
         &self,
         liquidity: Vec<Liquidity>,
+        gas_price: f64,
     ) -> Result<(BatchAuctionModel, SettlementContext)> {
         // To send an instance to the solver we need to identify tokens and orders through strings.
         // In order to map back and forth we store the original tokens, orders and the models for
@@ -238,8 +236,8 @@ impl HttpSolver {
         let token_models = self
             .token_models(&tokens, &token_infos, &price_estimates)
             .await;
-        let order_models = self.order_models(&limit_orders).await;
-        let uniswap_models = self.amm_models(&amm_orders).await;
+        let order_models = self.order_models(&limit_orders, gas_price).await;
+        let uniswap_models = self.amm_models(&amm_orders, gas_price).await;
         let model = BatchAuctionModel {
             tokens: token_models,
             orders: order_models,
@@ -290,20 +288,12 @@ impl HttpSolver {
             .with_context(|| format!("failed to decode response json, {}", context()))
     }
 
-    async fn order_cost(&self) -> Result<u128> {
-        // Q: should we use estimate_with_limits below instead?
-        // Q: are the units (gwei) correct?
-        let gas_price_gwei = self.gas_price_estimator.estimate().await? * 1e9;
-
-        Ok(gas_price_gwei as u128 * GAS_PER_ORDER)
+    async fn order_cost(&self, gas_price: f64) -> u128 {
+        gas_price as u128 * GAS_PER_ORDER
     }
 
-    async fn uniswap_cost(&self) -> Result<u128> {
-        // Q: should we use estimate_with_limits below instead?
-        // Q: are the units (gwei) correct?
-        let gas_price_gwei = self.gas_price_estimator.estimate().await? * 1e9;
-
-        Ok(gas_price_gwei as u128 * GAS_PER_UNISWAP)
+    async fn uniswap_cost(&self, gas_price: f64) -> u128 {
+        gas_price as u128 * GAS_PER_UNISWAP
     }
 }
 
@@ -358,12 +348,12 @@ fn remove_orders_without_native_connection(
 
 #[async_trait::async_trait]
 impl Solver for HttpSolver {
-    async fn solve(&self, liquidity: Vec<Liquidity>) -> Result<Option<Settlement>> {
+    async fn solve(&self, liquidity: Vec<Liquidity>, gas_price: f64) -> Result<Option<Settlement>> {
         let has_limit_orders = liquidity.iter().any(|l| matches!(l, Liquidity::Limit(_)));
         if !has_limit_orders {
             return Ok(None);
         };
-        let (model, context) = self.prepare_model(liquidity).await?;
+        let (model, context) = self.prepare_model(liquidity, gas_price).await?;
         let settled = self.send(&model).await?;
         tracing::trace!(?settled);
         settlement::convert_settlement(settled, context).map(Some)
@@ -385,11 +375,10 @@ mod tests {
     use ::model::TokenPair;
     use maplit::hashmap;
     use num::rational::Ratio;
-    use shared::gas_price_estimation::FakeGasPriceEstimator;
     use shared::price_estimate::FakePriceEstimator;
     use shared::token_info::MockTokenInfoFetching;
     use shared::token_info::TokenInfo;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
     // cargo test real_solver -- --ignored --nocapture
     // set the env variable GP_V2_OPTIMIZER_URL to use a non localhost optimizer
@@ -416,8 +405,7 @@ mod tests {
         let mock_price_estimation: Arc<dyn PriceEstimating> =
             Arc::new(FakePriceEstimator(num::one()));
 
-        let gas_price = Arc::new(Mutex::new(100.0));
-        let mock_gas_price_estimation = Arc::new(FakeGasPriceEstimator(gas_price.clone()));
+        let gas_price = 100.;
 
         let solver = HttpSolver::new(
             url.parse().unwrap(),
@@ -429,7 +417,6 @@ mod tests {
             H160::zero(),
             mock_token_info_fetcher,
             mock_price_estimation,
-            mock_gas_price_estimation,
         );
         let base = |x: u128| x * 10u128.pow(18);
         let orders = vec![
@@ -450,7 +437,7 @@ mod tests {
                 settlement_handling: Arc::new(MockAmmSettlementHandling::new()),
             }),
         ];
-        let (model, _context) = solver.prepare_model(orders).await.unwrap();
+        let (model, _context) = solver.prepare_model(orders, gas_price).await.unwrap();
         let settled = solver.send(&model).await.unwrap();
         dbg!(&settled);
 

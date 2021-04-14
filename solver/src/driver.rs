@@ -31,7 +31,7 @@ pub struct Driver {
     uniswap_liquidity: UniswapLiquidity,
     price_estimator: Arc<dyn PriceEstimating>,
     solver: Vec<Box<dyn Solver>>,
-    gas_price_estimator: Arc<dyn GasPriceEstimating>,
+    gas_price_estimator: Box<dyn GasPriceEstimating>,
     target_confirm_time: Duration,
     settle_interval: Duration,
     native_token: H160,
@@ -46,7 +46,7 @@ impl Driver {
         orderbook: OrderBookApi,
         price_estimator: Arc<dyn PriceEstimating>,
         solver: Vec<Box<dyn Solver>>,
-        gas_price_estimator: Arc<dyn GasPriceEstimating>,
+        gas_price_estimator: Box<dyn GasPriceEstimating>,
         target_confirm_time: Duration,
         settle_interval: Duration,
         native_token: H160,
@@ -162,6 +162,13 @@ impl Driver {
 
         self.metrics.liquidity_fetched(&liquidity);
 
+        let gas_price = self
+            .gas_price_estimator
+            .estimate()
+            .await
+            .context("failed to estimate gas price")?;
+        tracing::debug!("solving with gas price of {}", gas_price);
+
         let mut settlements: Vec<(String, Settlement)> =
             join_all(self.solver.iter().map(|solver| {
                 let liquidity = liquidity.clone();
@@ -169,7 +176,7 @@ impl Driver {
                 async move {
                     let label = format!("{}", solver);
                     let start_time = Instant::now();
-                    let settlement = solver.solve(liquidity).await;
+                    let settlement = solver.solve(liquidity, gas_price).await;
                     metrics.settlement_computed(&label, start_time);
                     (label, settlement)
                 }

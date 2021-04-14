@@ -9,14 +9,13 @@ use crate::{
 };
 use anyhow::Result;
 use ethcontract::H160;
-use gas_estimation::GasPriceEstimating;
 use reqwest::Url;
 use shared::{price_estimate::PriceEstimating, token_info::TokenInfoFetching};
 use structopt::clap::arg_enum;
 
 #[async_trait::async_trait]
 pub trait Solver: Display {
-    async fn solve(&self, orders: Vec<Liquidity>) -> Result<Option<Settlement>>;
+    async fn solve(&self, orders: Vec<Liquidity>, gas_price: f64) -> Result<Option<Settlement>>;
 }
 
 arg_enum! {
@@ -35,7 +34,6 @@ pub fn create(
     mip_solver_url: Url,
     token_info_fetcher: Arc<dyn TokenInfoFetching>,
     price_estimator: Arc<dyn PriceEstimating>,
-    gas_price_estimator: Arc<dyn GasPriceEstimating>,
 ) -> Vec<Box<dyn Solver>> {
     solvers
         .into_iter()
@@ -52,7 +50,6 @@ pub fn create(
                 native_token,
                 token_info_fetcher.clone(),
                 price_estimator.clone(),
-                gas_price_estimator.clone(),
             )),
         })
         .collect()
