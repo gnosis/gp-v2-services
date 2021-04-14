@@ -87,9 +87,9 @@ paths:
           schema:
             type: boolean
             default: false
-        - name: includeDeniedTokens
+        - name: includeUnsupportedTokens
           in: query
-          description: Should the orders containing denied tokens be included?
+          description: Should the orders containing unsupported tokens be included?
           schema:
             type: boolean
             default: false
@@ -554,8 +554,7 @@ components:
               PastValidTo,
               InsufficientFunds,
               InsufficientFee,
-              BuyTokenDenied,
-              SellTokenDenied,
+              UnsupportedToken,
               WrongOwner,
             ]
         description:

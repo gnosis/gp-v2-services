@@ -48,8 +48,8 @@ pub struct Arguments {
     pub base_tokens: Vec<H160>,
 
     /// List of token addresses to be ignored throughout service
-    #[structopt(long, env = "TOKEN_FILTER", use_delimiter = true)]
-    pub token_filter: Vec<H160>,
+    #[structopt(long, env = "UNSUPPORTED_TOKENS", use_delimiter = true)]
+    pub unsupported_tokens: Vec<H160>,
 }
 
 pub fn duration_from_seconds(s: &str) -> Result<Duration, ParseFloatError> {

@@ -31,14 +31,14 @@ pub trait PoolFetching: Send + Sync {
 
 pub struct FilteredPoolFetcher {
     inner: Box<dyn PoolFetching>,
-    token_filter: HashSet<H160>,
+    unsupported_tokens: HashSet<H160>,
 }
 
 impl FilteredPoolFetcher {
-    pub fn new(inner: Box<dyn PoolFetching>, token_filter: HashSet<H160>) -> Self {
+    pub fn new(inner: Box<dyn PoolFetching>, unsupported_tokens: HashSet<H160>) -> Self {
         Self {
             inner,
-            token_filter,
+            unsupported_tokens,
         }
     }
 }
@@ -48,7 +48,7 @@ impl PoolFetching for FilteredPoolFetcher {
     async fn fetch(&self, token_pairs: HashSet<TokenPair>) -> Vec<Pool> {
         let filtered_pairs = token_pairs
             .into_iter()
-            .filter(|pair| !self.token_filter.iter().any(|t| pair.contains(t)))
+            .filter(|pair| !self.unsupported_tokens.iter().any(|t| pair.contains(t)))
             .collect();
         self.inner.fetch(filtered_pairs).await
     }

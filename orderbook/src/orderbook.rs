@@ -33,8 +33,7 @@ pub enum AddOrderResult {
     PastValidTo,
     InsufficientFunds,
     InsufficientFee,
-    BuyTokenDenied(H160),
-    SellTokenDenied(H160),
+    UnsupportedToken(H160),
 }
 
 #[derive(Debug)]
@@ -51,7 +50,7 @@ pub struct Orderbook {
     event_updater: Mutex<EventUpdater>,
     balance_fetcher: Box<dyn BalanceFetching>,
     fee_validator: Arc<MinFeeCalculator>,
-    deny_tokens: HashSet<H160>,
+    unsupported_tokens: HashSet<H160>,
 }
 
 impl Orderbook {
@@ -61,7 +60,7 @@ impl Orderbook {
         event_updater: EventUpdater,
         balance_fetcher: Box<dyn BalanceFetching>,
         fee_validator: Arc<MinFeeCalculator>,
-        deny_tokens: HashSet<H160>,
+        unsupported_tokens: HashSet<H160>,
     ) -> Self {
         Self {
             domain_separator,
@@ -69,17 +68,17 @@ impl Orderbook {
             event_updater: Mutex::new(event_updater),
             balance_fetcher,
             fee_validator,
-            deny_tokens,
+            unsupported_tokens,
         }
     }
 
     pub async fn add_order(&self, payload: OrderCreationPayload) -> Result<AddOrderResult> {
         let order = payload.order_creation;
-        if self.deny_tokens.contains(&order.buy_token) {
-            return Ok(AddOrderResult::BuyTokenDenied(order.buy_token));
+        if self.unsupported_tokens.contains(&order.buy_token) {
+            return Ok(AddOrderResult::UnsupportedToken(order.buy_token));
         }
-        if self.deny_tokens.contains(&order.sell_token) {
-            return Ok(AddOrderResult::SellTokenDenied(order.sell_token));
+        if self.unsupported_tokens.contains(&order.sell_token) {
+            return Ok(AddOrderResult::UnsupportedToken(order.sell_token));
         }
         if !has_future_valid_to(shared::time::now_in_epoch_seconds(), &order) {
             return Ok(AddOrderResult::PastValidTo);
@@ -157,8 +156,8 @@ impl Orderbook {
         if filter.exclude_insufficient_balance {
             orders = solvable_orders(orders, &balances);
         }
-        if filter.exclude_deny_list {
-            orders.retain(|order| !order.contains_token_from(&self.deny_tokens));
+        if filter.exclude_unsupported_tokens {
+            orders.retain(|order| !order.contains_token_from(&self.unsupported_tokens));
         }
         Ok(orders)
     }
@@ -169,7 +168,7 @@ impl Orderbook {
             exclude_fully_executed: true,
             exclude_invalidated: true,
             exclude_insufficient_balance: true,
-            exclude_deny_list: true,
+            exclude_unsupported_tokens: true,
             ..Default::default()
         };
         self.get_orders(&filter).await
