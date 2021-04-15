@@ -168,7 +168,7 @@ impl BalanceFetching for Web3BalanceFetcher {
         let block = Some(BlockId::Number(BlockNumber::Latest));
         let response = self.web3.eth().call(call_request, block).await;
         response
-            .map(|bytes| is_empty_or_nonzero(bytes.0.as_slice()))
+            .map(|bytes| is_empty_or_truthy(bytes.0.as_slice()))
             .unwrap_or(false)
     }
 }
