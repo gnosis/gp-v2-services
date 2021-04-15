@@ -174,10 +174,11 @@ impl BalanceFetching for Web3BalanceFetcher {
 }
 
 fn is_empty_or_nonzero(bytes: &[u8]) -> bool {
-    if bytes.is_empty() {
-        return true;
+    match bytes.len() {
+        0 => true,
+        32 => bytes.iter().any(|byte| *byte > 0),
+        _ => false,
     }
-    bytes.iter().any(|byte| *byte > 0)
 }
 
 #[cfg(test)]
@@ -242,7 +243,8 @@ mod tests {
             .await
             .expect("MintableERC20 deployment failed");
 
-        let fetcher = Web3BalanceFetcher::new(web3, allowance_target.address(), H160::zero());
+        let fetcher =
+            Web3BalanceFetcher::new(web3, allowance_target.address(), H160::from_low_u64_be(1));
 
         // Not available until registered
         assert_eq!(fetcher.get_balance(trader.address(), token.address()), None,);
