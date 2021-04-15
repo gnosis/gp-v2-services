@@ -5,10 +5,16 @@ info:
 servers:
   - url: https://protocol-mainnet.dev.gnosisdev.com
     description: Mainnet (Staging)
+  - url: https://protocol-mainnet.gnosis.io
+    description: Mainnet (Prod)
   - url: https://protocol-rinkeby.dev.gnosisdev.com
     description: Rinkeby (Staging)
+  - url: https://protocol-rinkeby.gnosis.io
+    description: Rinkeby (Prod)
   - url: https://protocol-xdai.dev.gnosisdev.com
     description: xDai (Staging)
+  - url: https://protocol-xdai.gnosis.io
+    description: xDai (Prod)
   - url: http://localhost:8080
     description: Local
 paths:
@@ -78,6 +84,12 @@ paths:
         - name: includeInsufficientBalance
           in: query
           description: Should fill or kill orders that are not sufficiently funded be included?
+          schema:
+            type: boolean
+            default: false
+        - name: includeUnsupportedTokens
+          in: query
+          description: Should the orders containing unsupported tokens be included?
           schema:
             type: boolean
             default: false
@@ -542,6 +554,7 @@ components:
               PastValidTo,
               InsufficientFunds,
               InsufficientFee,
+              UnsupportedToken,
               WrongOwner,
             ]
         description:
