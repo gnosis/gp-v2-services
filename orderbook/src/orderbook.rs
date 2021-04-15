@@ -33,6 +33,7 @@ pub enum AddOrderResult {
     PastValidTo,
     InsufficientFunds,
     InsufficientFee,
+    UnsupportedToken(H160),
 }
 
 #[derive(Debug)]
@@ -49,6 +50,7 @@ pub struct Orderbook {
     event_updater: Mutex<EventUpdater>,
     balance_fetcher: Box<dyn BalanceFetching>,
     fee_validator: Arc<MinFeeCalculator>,
+    unsupported_tokens: HashSet<H160>,
 }
 
 impl Orderbook {
@@ -58,6 +60,7 @@ impl Orderbook {
         event_updater: EventUpdater,
         balance_fetcher: Box<dyn BalanceFetching>,
         fee_validator: Arc<MinFeeCalculator>,
+        unsupported_tokens: HashSet<H160>,
     ) -> Self {
         Self {
             domain_separator,
@@ -65,11 +68,18 @@ impl Orderbook {
             event_updater: Mutex::new(event_updater),
             balance_fetcher,
             fee_validator,
+            unsupported_tokens,
         }
     }
 
     pub async fn add_order(&self, payload: OrderCreationPayload) -> Result<AddOrderResult> {
         let order = payload.order_creation;
+        if self.unsupported_tokens.contains(&order.buy_token) {
+            return Ok(AddOrderResult::UnsupportedToken(order.buy_token));
+        }
+        if self.unsupported_tokens.contains(&order.sell_token) {
+            return Ok(AddOrderResult::UnsupportedToken(order.sell_token));
+        }
         if !has_future_valid_to(shared::time::now_in_epoch_seconds(), &order) {
             return Ok(AddOrderResult::PastValidTo);
         }
@@ -87,14 +97,32 @@ impl Orderbook {
         if matches!(payload.from, Some(from) if from != order.order_meta_data.owner) {
             return Ok(AddOrderResult::WrongOwner(order.order_meta_data.owner));
         }
-        self.balance_fetcher
-            .register(order.order_meta_data.owner, order.order_creation.sell_token)
-            .await;
-        match self.database.insert_order(&order).await {
-            Ok(()) => Ok(AddOrderResult::Added(order.order_meta_data.uid)),
-            Err(InsertionError::DuplicatedRecord) => Ok(AddOrderResult::DuplicatedOrder),
-            Err(InsertionError::DbError(err)) => Err(err.into()),
+
+        let min_balance = match minimum_balance(&order) {
+            Some(amount) => amount,
+            None => return Ok(AddOrderResult::InsufficientFunds),
+        };
+        if !self
+            .balance_fetcher
+            .can_transfer(
+                order.order_creation.sell_token,
+                order.order_meta_data.owner,
+                min_balance,
+            )
+            .await
+        {
+            return Ok(AddOrderResult::InsufficientFunds);
         }
+
+        match self.database.insert_order(&order).await {
+            Err(InsertionError::DuplicatedRecord) => return Ok(AddOrderResult::DuplicatedOrder),
+            Err(InsertionError::DbError(err)) => return Err(err.into()),
+            _ => (),
+        }
+        self.balance_fetcher
+            .register(order.order_creation.sell_token, order.order_meta_data.owner)
+            .await;
+        Ok(AddOrderResult::Added(order.order_meta_data.uid))
     }
 
     pub async fn cancel_order(
@@ -144,6 +172,9 @@ impl Orderbook {
         if filter.exclude_insufficient_balance {
             orders = solvable_orders(orders, &balances);
         }
+        if filter.exclude_unsupported_tokens {
+            orders.retain(|order| !order.contains_token_from(&self.unsupported_tokens));
+        }
         Ok(orders)
     }
 
@@ -153,6 +184,7 @@ impl Orderbook {
             exclude_fully_executed: true,
             exclude_invalidated: true,
             exclude_insufficient_balance: true,
+            exclude_unsupported_tokens: true,
             ..Default::default()
         };
         self.get_orders(&filter).await
@@ -243,6 +275,19 @@ fn solvable_orders(mut orders: Vec<Order>, balances: &HashMap<(H160, H160), U256
         }
     }
     result
+}
+
+// Mininum balance user must have in sell token for order to be accepted. None if no balance is
+// sufficient.
+fn minimum_balance(order: &Order) -> Option<U256> {
+    if order.order_creation.partially_fillable {
+        Some(U256::from(1))
+    } else {
+        order
+            .order_creation
+            .sell_amount
+            .checked_add(order.order_creation.fee_amount)
+    }
 }
 
 #[cfg(test)]
