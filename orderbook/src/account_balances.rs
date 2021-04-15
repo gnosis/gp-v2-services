@@ -173,7 +173,7 @@ impl BalanceFetching for Web3BalanceFetcher {
     }
 }
 
-fn is_empty_or_nonzero(bytes: &[u8]) -> bool {
+fn is_empty_or_truthy(bytes: &[u8]) -> bool {
     match bytes.len() {
         0 => true,
         32 => bytes.iter().any(|byte| *byte > 0),
