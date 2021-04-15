@@ -5,6 +5,7 @@ use futures::future::{join3, join_all};
 use primitive_types::{H160, U256};
 use shared::Web3;
 use std::{collections::HashMap, sync::Mutex};
+use web3::types::{BlockId, BlockNumber, CallRequest};
 
 const MAX_BATCH_SIZE: usize = 100;
 
@@ -153,14 +154,30 @@ impl BalanceFetching for Web3BalanceFetcher {
 
     async fn can_transfer(&self, token: H160, from: H160, amount: U256) -> bool {
         let instance = ERC20::at(&self.web3, token);
-        instance
+        let calldata = instance
             .transfer_from(from, self.settlement_contract, amount)
-            .view()
-            .from(self.allowance_manager)
-            .call()
-            .await
+            .tx
+            .data
+            .unwrap();
+        let call_request = CallRequest {
+            from: Some(self.allowance_manager),
+            to: Some(token),
+            data: Some(calldata),
+            ..Default::default()
+        };
+        let block = Some(BlockId::Number(BlockNumber::Latest));
+        let response = self.web3.eth().call(call_request, block).await;
+        response
+            .map(|bytes| is_empty_or_nonzero(bytes.0.as_slice()))
             .unwrap_or(false)
     }
+}
+
+fn is_empty_or_nonzero(bytes: &[u8]) -> bool {
+    if bytes.is_empty() {
+        return true;
+    }
+    bytes.iter().any(|byte| *byte > 0)
 }
 
 #[cfg(test)]
