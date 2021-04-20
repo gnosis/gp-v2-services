@@ -11,7 +11,7 @@ use orderbook::{
     serve_task, verify_deployed_contract_constants,
 };
 use shared::{
-    amm_resource::UniswapPairProvider,
+    amm_pair_provider::UniswapPairProvider,
     current_block::{current_block_stream, CurrentBlockStream},
     pool_fetching::{CachedPoolFetcher, FilteredPoolFetcher, PoolFetcher},
     price_estimate::UniswapPriceEstimator,

@@ -1,4 +1,4 @@
-pub mod amm_resource;
+pub mod amm_pair_provider;
 pub mod arguments;
 pub mod conversions;
 pub mod current_block;

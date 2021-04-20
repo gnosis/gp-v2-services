@@ -3,7 +3,7 @@ use ethcontract::{Account, PrivateKey};
 use prometheus::Registry;
 use reqwest::Url;
 use shared::{
-    amm_resource::UniswapPairProvider,
+    amm_pair_provider::UniswapPairProvider,
     metrics::serve_metrics,
     pool_fetching::PoolFetcher,
     price_estimate::UniswapPriceEstimator,

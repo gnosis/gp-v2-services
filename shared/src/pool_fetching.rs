@@ -8,7 +8,7 @@ use num::{rational::Ratio, BigInt, BigRational, Zero};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::amm_resource::AmmPairProvider;
+use crate::amm_pair_provider::AmmPairProvider;
 use crate::current_block::{Block, CurrentBlockStream};
 
 const MAX_BATCH_SIZE: usize = 100;

@@ -15,7 +15,7 @@ use orderbook::{
 use secp256k1::SecretKey;
 use serde_json::json;
 use shared::{
-    amm_resource::UniswapPairProvider,
+    amm_pair_provider::UniswapPairProvider,
     current_block::current_block_stream,
     pool_fetching::{CachedPoolFetcher, PoolFetcher},
     price_estimate::UniswapPriceEstimator,

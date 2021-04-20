@@ -17,7 +17,7 @@ use crate::interactions::UniswapInteraction;
 use crate::settlement::SettlementEncoder;
 
 use super::{AmmOrder, AmmOrderExecution, LimitOrder, SettlementHandling};
-use shared::amm_resource::AmmPairProvider;
+use shared::amm_pair_provider::AmmPairProvider;
 
 pub struct UniswapLiquidity {
     inner: Arc<Inner>,
