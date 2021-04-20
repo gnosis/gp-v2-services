@@ -19,16 +19,16 @@ const HONEYSWAP_PAIR_INIT_CODE: [u8; 32] =
     hex!("3f88503e8580ab941773b59034fb4b2a63e86dbc031b3633a925533ad3ed2b93");
 const MAX_BATCH_SIZE: usize = 100;
 
-pub trait AmmResource: Send + Sync + 'static {
+pub trait AmmPairProvider: Send + Sync + 'static {
     fn pair_address(&self, pair: &TokenPair) -> H160;
 }
 
-pub struct UniswapResource {
+pub struct UniswapPairProvider {
     pub factory: UniswapV2Factory,
     pub chain_id: u64,
 }
 
-impl AmmResource for UniswapResource {
+impl AmmPairProvider for UniswapPairProvider {
     fn pair_address(&self, pair: &TokenPair) -> H160 {
         let init_hash = match self.chain_id {
             100 => HONEYSWAP_PAIR_INIT_CODE,
@@ -238,7 +238,7 @@ impl PoolFetching for CachedPoolFetcher {
 }
 
 pub struct PoolFetcher {
-    pub resource: Arc<dyn AmmResource>,
+    pub pair_provider: Arc<dyn AmmPairProvider>,
     pub web3: Web3,
 }
 
@@ -249,7 +249,7 @@ impl PoolFetching for PoolFetcher {
         let futures = token_pairs
             .into_iter()
             .map(|pair| {
-                let uniswap_pair_address = self.resource.pair_address(&pair);
+                let uniswap_pair_address = self.pair_provider.pair_address(&pair);
                 let pair_contract = UniswapV2Pair::at(&self.web3, uniswap_pair_address);
 
                 // Fetch ERC20 token balances of the pools to sanity check with reserves

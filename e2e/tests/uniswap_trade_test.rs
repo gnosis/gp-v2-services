@@ -14,12 +14,11 @@ use orderbook::{
 };
 use secp256k1::SecretKey;
 use serde_json::json;
-use shared::uniswap_pool::UniswapResource;
 use shared::{
     current_block::current_block_stream,
     price_estimate::UniswapPriceEstimator,
     transport::LoggingTransport,
-    uniswap_pool::{CachedPoolFetcher, PoolFetcher},
+    uniswap_pool::{CachedPoolFetcher, PoolFetcher, UniswapPairProvider},
     Web3,
 };
 use solver::{liquidity::uniswap::UniswapLiquidity, metrics::NoopMetrics, orderbook::OrderBookApi};
@@ -140,13 +139,13 @@ async fn test_with_ganache() {
     let event_updater = EventUpdater::new(gp_settlement.clone(), db.clone(), None);
 
     let current_block_stream = current_block_stream(web3.clone()).await.unwrap();
-    let resource = Arc::new(UniswapResource {
+    let pair_provider = Arc::new(UniswapPairProvider {
         factory: uniswap_factory.clone(),
         chain_id,
     });
     let pool_fetcher = CachedPoolFetcher::new(
         Box::new(PoolFetcher {
-            resource,
+            pair_provider,
             web3: web3.clone(),
         }),
         current_block_stream,
@@ -226,15 +225,15 @@ async fn test_with_ganache() {
         .send()
         .await;
     assert_eq!(placement.unwrap().status(), 201);
-
-    // Drive solution
-    let uniswap_resource = Arc::new(UniswapResource {
+    let pair_provider = Arc::new(UniswapPairProvider {
         factory: uniswap_factory.clone(),
         chain_id,
     });
+
+    // Drive solution
     let uniswap_liquidity = UniswapLiquidity::new(
         IUniswapLikeRouter::at(&web3, uniswap_router.address()),
-        uniswap_resource.clone(),
+        pair_provider.clone(),
         gp_settlement.clone(),
         HashSet::new(),
         web3.clone(),
