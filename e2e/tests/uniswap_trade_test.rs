@@ -22,7 +22,9 @@ use shared::{
     transport::LoggingTransport,
     Web3,
 };
-use solver::{liquidity::uniswap::UniswapLikeLiquidity, metrics::NoopMetrics, orderbook::OrderBookApi};
+use solver::{
+    liquidity::uniswap::UniswapLikeLiquidity, metrics::NoopMetrics, orderbook::OrderBookApi,
+};
 use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 use web3::signing::SecretKeyRef;
 
