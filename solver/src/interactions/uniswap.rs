@@ -45,7 +45,6 @@ impl UniswapInteraction {
     }
 
     fn web3(&self) -> web3::Web3<ethcontract::transport::DynTransport> {
-        // TODO - This is a cheeky way of fetching web3
         self.settlement.raw_instance().web3()
     }
 }
