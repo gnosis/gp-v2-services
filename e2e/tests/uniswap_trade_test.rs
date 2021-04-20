@@ -14,12 +14,12 @@ use orderbook::{
 };
 use secp256k1::SecretKey;
 use serde_json::json;
-use shared::uniswap_pool::UniswapResource;
 use shared::{
+    amm_resource::UniswapResource,
     current_block::current_block_stream,
+    pool_fetching::{CachedPoolFetcher, PoolFetcher},
     price_estimate::UniswapPriceEstimator,
     transport::LoggingTransport,
-    uniswap_pool::{CachedPoolFetcher, PoolFetcher},
     Web3,
 };
 use solver::{liquidity::uniswap::UniswapLiquidity, metrics::NoopMetrics, orderbook::OrderBookApi};

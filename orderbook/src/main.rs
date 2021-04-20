@@ -10,12 +10,13 @@ use orderbook::{
     orderbook::Orderbook,
     serve_task, verify_deployed_contract_constants,
 };
-use shared::uniswap_pool::{FilteredPoolFetcher, UniswapResource};
 use shared::{
+    amm_resource::UniswapResource,
     current_block::{current_block_stream, CurrentBlockStream},
+    pool_fetching::FilteredPoolFetcher,
+    pool_fetching::{CachedPoolFetcher, PoolFetcher},
     price_estimate::UniswapPriceEstimator,
     transport::LoggingTransport,
-    uniswap_pool::{CachedPoolFetcher, PoolFetcher},
 };
 use std::{collections::HashSet, iter::FromIterator as _, net::SocketAddr, sync::Arc};
 use structopt::StructOpt;

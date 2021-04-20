@@ -2,13 +2,13 @@ use contracts::{IUniswapLikeRouter, WETH9};
 use ethcontract::{Account, PrivateKey};
 use prometheus::Registry;
 use reqwest::Url;
-use shared::uniswap_pool::UniswapResource;
 use shared::{
+    amm_resource::UniswapResource,
     metrics::serve_metrics,
+    pool_fetching::PoolFetcher,
     price_estimate::UniswapPriceEstimator,
     token_info::{CachedTokenInfoFetcher, TokenInfoFetcher},
     transport::LoggingTransport,
-    uniswap_pool::PoolFetcher,
 };
 use solver::{
     driver::Driver, liquidity::uniswap::UniswapLiquidity, metrics::Metrics, solver::SolverType,
