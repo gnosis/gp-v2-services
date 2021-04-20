@@ -13,8 +13,7 @@ impl UnwrapWethInteraction {
     /// Tries to merge the specified unwrap with the current one, returning
     /// `true` if the merge was successful, and `false` otherwise.
     ///
-    /// Returns an error
-    /// contracts.
+    /// Returns an error on arithmetic overflow.
     pub fn merge(&mut self, other: &Self) -> Result<bool> {
         let tokens_match = self.weth.address() == other.weth.address();
         if tokens_match {
