@@ -1,6 +1,6 @@
 use crate::{
     encoding::{self, EncodedInteraction, EncodedSettlement, EncodedTrade},
-    liquidity::LiquidityModel,
+    liquidity::Settleable,
 };
 use anyhow::{anyhow, Result};
 use model::order::{Order, OrderKind};
@@ -217,7 +217,7 @@ impl Settlement {
     /// .
     pub fn with_liquidity<L>(&mut self, liquidity: &L, execution: L::Execution) -> Result<()>
     where
-        L: LiquidityModel,
+        L: Settleable,
     {
         liquidity
             .settlement_handling()

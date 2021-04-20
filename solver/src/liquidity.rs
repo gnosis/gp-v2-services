@@ -19,20 +19,21 @@ pub enum Liquidity {
     Amm(AmmOrder),
 }
 
-/// A trait associating some liquidity model to how it is executed. This allows
+/// A trait associating some liquidity model to how it is executed and encoded
+/// in a settlement (through a `SettlementHandling` reference). This allows
 /// different liquidity types to be modeled the same way.
-pub trait LiquidityModel {
+pub trait Settleable {
     type Execution;
 
     fn settlement_handling(&self) -> &dyn SettlementHandling<Self>;
 }
 
 /// Specifies how a liquidity exectution gets encoded into a settlement.
-pub trait SettlementHandling<Model>: Send + Sync
+pub trait SettlementHandling<L>: Send + Sync
 where
-    Model: LiquidityModel,
+    L: Settleable,
 {
-    fn encode(&self, execution: Model::Execution, encoder: &mut SettlementEncoder) -> Result<()>;
+    fn encode(&self, execution: L::Execution, encoder: &mut SettlementEncoder) -> Result<()>;
 }
 
 /// Basic limit sell and buy orders
@@ -59,7 +60,7 @@ impl LimitOrder {
     }
 }
 
-impl LiquidityModel for LimitOrder {
+impl Settleable for LimitOrder {
     type Execution = U256;
 
     fn settlement_handling(&self) -> &dyn SettlementHandling<Self> {
@@ -94,7 +95,7 @@ pub struct AmmOrderExecution {
     pub output: (H160, U256),
 }
 
-impl LiquidityModel for AmmOrder {
+impl Settleable for AmmOrder {
     type Execution = AmmOrderExecution;
 
     fn settlement_handling(&self) -> &dyn SettlementHandling<Self> {
@@ -107,18 +108,18 @@ pub mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    pub struct CapturingSettlementHandler<Model>
+    pub struct CapturingSettlementHandler<L>
     where
-        Model: LiquidityModel,
+        L: Settleable,
     {
-        pub calls: Mutex<Vec<Model::Execution>>,
+        pub calls: Mutex<Vec<L::Execution>>,
     }
 
     // Manual implementation seems to be needed as `derive(Default)` adds an
-    // uneeded `Model::Execution: Default` type bound.
-    impl<Model> Default for CapturingSettlementHandler<Model>
+    // uneeded `L::Execution: Default` type bound.
+    impl<L> Default for CapturingSettlementHandler<L>
     where
-        Model: LiquidityModel,
+        L: Settleable,
     {
         fn default() -> Self {
             Self {
@@ -127,26 +128,26 @@ pub mod tests {
         }
     }
 
-    impl<Model> CapturingSettlementHandler<Model>
+    impl<L> CapturingSettlementHandler<L>
     where
-        Model: LiquidityModel,
-        Model::Execution: Clone,
+        L: Settleable,
+        L::Execution: Clone,
     {
         pub fn arc() -> Arc<Self> {
             Arc::new(Default::default())
         }
 
-        pub fn calls(&self) -> Vec<Model::Execution> {
+        pub fn calls(&self) -> Vec<L::Execution> {
             self.calls.lock().unwrap().clone()
         }
     }
 
-    impl<Model> SettlementHandling<Model> for CapturingSettlementHandler<Model>
+    impl<L> SettlementHandling<L> for CapturingSettlementHandler<L>
     where
-        Model: LiquidityModel,
-        Model::Execution: Send + Sync,
+        L: Settleable,
+        L::Execution: Send + Sync,
     {
-        fn encode(&self, execution: Model::Execution, _: &mut SettlementEncoder) -> Result<()> {
+        fn encode(&self, execution: L::Execution, _: &mut SettlementEncoder) -> Result<()> {
             self.calls.lock().unwrap().push(execution);
             Ok(())
         }
