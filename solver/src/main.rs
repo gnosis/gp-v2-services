@@ -1,7 +1,8 @@
-use contracts::WETH9;
+use contracts::{IUniswapLikeRouter, WETH9};
 use ethcontract::{Account, PrivateKey};
 use prometheus::Registry;
 use reqwest::Url;
+use shared::uniswap_pool::UniswapResource;
 use shared::{
     metrics::serve_metrics,
     price_estimate::UniswapPriceEstimator,
@@ -134,19 +135,21 @@ async fn main() {
     let mut base_tokens = HashSet::from_iter(args.shared.base_tokens);
     // We should always use the native token as a base token.
     base_tokens.insert(native_token_contract.address());
+    let uniswap_resource = Arc::new(UniswapResource {
+        factory: uniswap_factory,
+        chain_id,
+    });
     let uniswap_liquidity = UniswapLiquidity::new(
-        uniswap_factory.clone(),
-        uniswap_router.clone(),
+        IUniswapLikeRouter::at(&web3, uniswap_router.address()),
+        uniswap_resource.clone(),
         settlement_contract.clone(),
         base_tokens.clone(),
         web3.clone(),
-        chain_id,
     );
     let price_estimator = Arc::new(UniswapPriceEstimator::new(
         Box::new(PoolFetcher {
-            factory: uniswap_factory,
+            resource: uniswap_resource,
             web3: web3.clone(),
-            chain_id,
         }),
         base_tokens.clone(),
     ));
