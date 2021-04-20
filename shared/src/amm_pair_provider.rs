@@ -1,4 +1,4 @@
-use contracts::{UniswapV2Factory, SushiswapV2Factory};
+use contracts::{SushiswapV2Factory, UniswapV2Factory};
 use ethcontract::H160;
 use hex_literal::hex;
 use model::TokenPair;
@@ -100,7 +100,7 @@ mod tests {
             H160::from_slice(&hex!("6810e776880c02933d47db1b9fc05908e5386b96")),
             H160::from_slice(&hex!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")),
         )
-            .unwrap();
+        .unwrap();
         assert_eq!(
             pair_address(&pair, mainnet_factory, SUSHI_PAIR_INIT_CODE),
             H160::from_slice(&hex!("41328fdba556c8c969418ccccb077b7b8d932aa5"))
