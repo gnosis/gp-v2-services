@@ -1,12 +1,15 @@
-use contracts::UniswapV2Factory;
+use contracts::{UniswapV2Factory, SushiswapV2Factory};
 use ethcontract::H160;
 use hex_literal::hex;
 use model::TokenPair;
 use web3::signing::keccak256;
+
 const UNISWAP_PAIR_INIT_CODE: [u8; 32] =
     hex!("96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f");
 const HONEYSWAP_PAIR_INIT_CODE: [u8; 32] =
     hex!("3f88503e8580ab941773b59034fb4b2a63e86dbc031b3633a925533ad3ed2b93");
+const SUSHI_PAIR_INIT_CODE: [u8; 32] =
+    hex!("e18a34eb0e04b04f7a0ac29a6e80748dca96319b42c54d679cb821dca90c6303");
 
 pub trait AmmPairProvider: Send + Sync + 'static {
     fn pair_address(&self, pair: &TokenPair) -> H160;
@@ -24,6 +27,17 @@ impl AmmPairProvider for UniswapPairProvider {
             _ => UNISWAP_PAIR_INIT_CODE,
         };
         pair_address(pair, self.factory.address(), init_hash)
+    }
+}
+
+pub struct SushiswapPairProvider {
+    pub factory: SushiswapV2Factory,
+    pub chain_id: u64,
+}
+
+impl AmmPairProvider for SushiswapPairProvider {
+    fn pair_address(&self, pair: &TokenPair) -> H160 {
+        pair_address(pair, self.factory.address(), SUSHI_PAIR_INIT_CODE)
     }
 }
 
@@ -75,6 +89,21 @@ mod tests {
         assert_eq!(
             pair_address(&pair, mainnet_factory, HONEYSWAP_PAIR_INIT_CODE),
             H160::from_slice(&hex!("4505b262dc053998c10685dc5f9098af8ae5c8ad"))
+        );
+    }
+
+    #[test]
+    fn test_create2_sushiswap() {
+        // https://sushiswap.vision/pair/0x41328fdba556c8c969418ccccb077b7b8d932aa5
+        let mainnet_factory = H160::from_slice(&hex!("C0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac"));
+        let pair = TokenPair::new(
+            H160::from_slice(&hex!("6810e776880c02933d47db1b9fc05908e5386b96")),
+            H160::from_slice(&hex!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")),
+        )
+            .unwrap();
+        assert_eq!(
+            pair_address(&pair, mainnet_factory, SUSHI_PAIR_INIT_CODE),
+            H160::from_slice(&hex!("41328fdba556c8c969418ccccb077b7b8d932aa5"))
         );
     }
 }
