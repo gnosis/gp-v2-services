@@ -17,7 +17,7 @@ use crate::interactions::UniswapInteraction;
 use crate::settlement::SettlementEncoder;
 
 use super::{AmmOrder, AmmOrderExecution, LimitOrder, SettlementHandling};
-use shared::amm_resource::AmmResource;
+use shared::amm_resource::AmmPairProvider;
 
 pub struct UniswapLiquidity {
     inner: Arc<Inner>,
@@ -36,7 +36,7 @@ struct Inner {
 impl UniswapLiquidity {
     pub fn new(
         router: IUniswapLikeRouter,
-        resource: Arc<dyn AmmResource>,
+        pair_provider: Arc<dyn AmmPairProvider>,
         gpv2_settlement: GPv2Settlement,
         base_tokens: HashSet<H160>,
         web3: Web3,
@@ -48,7 +48,10 @@ impl UniswapLiquidity {
                 allowances: Mutex::new(HashMap::new()),
             }),
             web3: web3.clone(),
-            pool_fetcher: PoolFetcher { resource, web3 },
+            pool_fetcher: PoolFetcher {
+                pair_provider,
+                web3,
+            },
             base_tokens,
         }
     }

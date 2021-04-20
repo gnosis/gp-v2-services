@@ -11,10 +11,9 @@ use orderbook::{
     serve_task, verify_deployed_contract_constants,
 };
 use shared::{
-    amm_resource::UniswapResource,
+    amm_resource::UniswapPairProvider,
     current_block::{current_block_stream, CurrentBlockStream},
-    pool_fetching::FilteredPoolFetcher,
-    pool_fetching::{CachedPoolFetcher, PoolFetcher},
+    pool_fetching::{CachedPoolFetcher, FilteredPoolFetcher, PoolFetcher},
     price_estimate::UniswapPriceEstimator,
     transport::LoggingTransport,
 };
@@ -96,7 +95,7 @@ async fn main() {
         .await
         .expect("Could not get chainId")
         .as_u64();
-    let uniswap_resource = UniswapResource {
+    let uniswap_pair_provider = UniswapPairProvider {
         factory: uniswap_factory,
         chain_id,
     };
@@ -145,7 +144,7 @@ async fn main() {
     let current_block_stream = current_block_stream(web3.clone()).await.unwrap();
     let cached_pool_fetcher = CachedPoolFetcher::new(
         Box::new(PoolFetcher {
-            resource: Arc::new(uniswap_resource),
+            pair_provider: Arc::new(uniswap_pair_provider),
             web3,
         }),
         current_block_stream.clone(),

@@ -8,7 +8,7 @@ use num::{rational::Ratio, BigInt, BigRational, Zero};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::amm_resource::AmmResource;
+use crate::amm_resource::AmmPairProvider;
 use crate::current_block::{Block, CurrentBlockStream};
 
 const MAX_BATCH_SIZE: usize = 100;
@@ -213,7 +213,7 @@ impl PoolFetching for CachedPoolFetcher {
 }
 
 pub struct PoolFetcher {
-    pub resource: Arc<dyn AmmResource>,
+    pub pair_provider: Arc<dyn AmmPairProvider>,
     pub web3: Web3,
 }
 
@@ -224,7 +224,7 @@ impl PoolFetching for PoolFetcher {
         let futures = token_pairs
             .into_iter()
             .map(|pair| {
-                let uniswap_pair_address = self.resource.pair_address(&pair);
+                let uniswap_pair_address = self.pair_provider.pair_address(&pair);
                 let pair_contract = UniswapV2Pair::at(&self.web3, uniswap_pair_address);
 
                 // Fetch ERC20 token balances of the pools to sanity check with reserves

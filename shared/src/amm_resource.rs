@@ -8,16 +8,16 @@ const UNISWAP_PAIR_INIT_CODE: [u8; 32] =
 const HONEYSWAP_PAIR_INIT_CODE: [u8; 32] =
     hex!("3f88503e8580ab941773b59034fb4b2a63e86dbc031b3633a925533ad3ed2b93");
 
-pub trait AmmResource: Send + Sync + 'static {
+pub trait AmmPairProvider: Send + Sync + 'static {
     fn pair_address(&self, pair: &TokenPair) -> H160;
 }
 
-pub struct UniswapResource {
+pub struct UniswapPairProvider {
     pub factory: UniswapV2Factory,
     pub chain_id: u64,
 }
 
-impl AmmResource for UniswapResource {
+impl AmmPairProvider for UniswapPairProvider {
     fn pair_address(&self, pair: &TokenPair) -> H160 {
         let init_hash = match self.chain_id {
             100 => HONEYSWAP_PAIR_INIT_CODE,
