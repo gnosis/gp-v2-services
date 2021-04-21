@@ -192,8 +192,7 @@ async fn main() {
         price_estimator.clone(),
     );
     let liquidity_collector = LiquidityCollector {
-        uniswap_liquidity,
-        sushiswap_liquidity,
+        uniswap_like_liquidity: vec![uniswap_liquidity, sushiswap_liquidity],
         orderbook_api,
     };
     let mut driver = Driver::new(

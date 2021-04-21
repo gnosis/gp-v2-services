@@ -1,7 +1,4 @@
-use contracts::{
-    ERC20Mintable, IUniswapLikeRouter, SushiswapV2Factory, SushiswapV2Router02, UniswapV2Factory,
-    UniswapV2Router02, WETH9,
-};
+use contracts::{ERC20Mintable, IUniswapLikeRouter, UniswapV2Factory, UniswapV2Router02, WETH9};
 use ethcontract::{
     prelude::{Account, Address, Http, PrivateKey, U256},
     H160,
@@ -17,7 +14,6 @@ use orderbook::{
 };
 use secp256k1::SecretKey;
 use serde_json::json;
-use shared::amm_pair_provider::SushiswapPairProvider;
 use shared::{
     amm_pair_provider::UniswapPairProvider,
     current_block::current_block_stream,
@@ -84,13 +80,6 @@ async fn test_with_ganache() {
     let uniswap_router = UniswapV2Router02::deployed(&web3)
         .await
         .expect("Failed to load deployed UniswapRouter");
-    let sushiswap_factory = SushiswapV2Factory::deployed(&web3)
-        .await
-        .expect("Failed to load deployed SushiswapFactory");
-    let sushiswap_router = SushiswapV2Router02::deployed(&web3)
-        .await
-        .expect("Failed to load deployed SushiswapRouter");
-
     let gp_settlement = solver::get_settlement_contract(&web3, solver.clone())
         .await
         .expect("Failed to load deployed GPv2Settlement");
@@ -135,8 +124,6 @@ async fn test_with_ganache() {
             U256::max_value(),
         )
     );
-    // TODO - Create and fund sushiswap pool.
-    // TODO - Adapt unit test so that tA -> tB -> tC involves both pools
 
     // Approve GPv2 for trading
     tx!(trader_a, token_a.approve(gp_allowance, to_wei(100)));
@@ -245,9 +232,6 @@ async fn test_with_ganache() {
         factory: uniswap_factory.clone(),
         chain_id,
     });
-    let sushiswap_pair_provider = Arc::new(SushiswapPairProvider {
-        factory: sushiswap_factory.clone(),
-    });
 
     // Drive solution
     let uniswap_liquidity = UniswapLikeLiquidity::new(
@@ -257,17 +241,9 @@ async fn test_with_ganache() {
         HashSet::new(),
         web3.clone(),
     );
-    let sushiswap_liquidity = UniswapLikeLiquidity::new(
-        IUniswapLikeRouter::at(&web3, sushiswap_router.address()),
-        sushiswap_pair_provider.clone(),
-        gp_settlement.clone(),
-        HashSet::new(),
-        web3.clone(),
-    );
     let solver = solver::naive_solver::NaiveSolver {};
     let liquidity_collector = LiquidityCollector {
-        uniswap_liquidity,
-        sushiswap_liquidity,
+        uniswap_like_liquidity: vec![uniswap_liquidity],
         orderbook_api: create_orderbook_api(&web3),
     };
     let mut driver = solver::driver::Driver::new(
