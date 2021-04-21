@@ -2,6 +2,7 @@ use contracts::{IUniswapLikeRouter, WETH9};
 use ethcontract::{Account, PrivateKey};
 use prometheus::Registry;
 use reqwest::Url;
+use shared::amm_pair_provider::SushiswapPairProvider;
 use shared::{
     amm_pair_provider::UniswapPairProvider,
     metrics::serve_metrics,
@@ -17,7 +18,6 @@ use solver::{
 use std::iter::FromIterator as _;
 use std::{collections::HashSet, sync::Arc, time::Duration};
 use structopt::StructOpt;
-use shared::amm_pair_provider::SushiswapPairProvider;
 
 #[derive(Debug, StructOpt)]
 struct Arguments {
