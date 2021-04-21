@@ -1,14 +1,13 @@
-use crate::{chain, liquidity_collector::LiquidityCollector, metrics::SolverMetrics};
 use crate::{liquidity::Liquidity, settlement::Settlement, settlement_submission, solver::Solver};
+use crate::{liquidity_collector::LiquidityCollector, metrics::SolverMetrics};
 use anyhow::{Context, Result};
 use contracts::GPv2Settlement;
 use futures::future::join_all;
 use gas_estimation::GasPriceEstimating;
-use itertools::Itertools;
 use num::BigRational;
 use primitive_types::H160;
 use shared::price_estimate::PriceEstimating;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::{
     cmp::Reverse,
     sync::Arc,
@@ -74,21 +73,14 @@ impl Driver {
         liquidity: &[Liquidity],
     ) -> HashMap<H160, BigRational> {
         // Computes set of traded tokens (limit orders only).
-        let tokens: Vec<H160> = liquidity
-            .iter()
-            // .flat_map(|lo| vec![lo.sell_token, lo.buy_token].into_iter())
-            .flat_map(|liquidity| {
-                let iter: Box<dyn Iterator<Item = H160>> = match liquidity {
-                    Liquidity::Limit(limit_order) => {
-                        Box::new(chain![limit_order.sell_token, limit_order.buy_token])
-                    }
-                    _ => Box::new(std::iter::empty()),
-                };
-                iter
-            })
-            .sorted()
-            .dedup()
-            .collect();
+        let mut tokens = HashSet::new();
+        for liquid in liquidity {
+            if let Liquidity::Limit(limit_order) = liquid {
+                tokens.insert(limit_order.sell_token);
+                tokens.insert(limit_order.buy_token);
+            }
+        }
+        let tokens = tokens.drain().collect::<Vec<_>>();
 
         // For ranking purposes it doesn't matter how the external price vector is scaled,
         // but native_token is used here anyway for better logging/debugging.
@@ -96,7 +88,7 @@ impl Driver {
 
         let estimated_prices = self
             .price_estimator
-            .estimate_prices(tokens.as_slice(), denominator_token)
+            .estimate_prices(&tokens, denominator_token)
             .await;
 
         tokens
