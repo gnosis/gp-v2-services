@@ -80,6 +80,7 @@ impl Driver {
                 tokens.insert(limit_order.buy_token);
             }
         }
+        let tokens = tokens.drain().collect::<Vec<_>>();
 
         // For ranking purposes it doesn't matter how the external price vector is scaled,
         // but native_token is used here anyway for better logging/debugging.
@@ -87,7 +88,7 @@ impl Driver {
 
         let estimated_prices = self
             .price_estimator
-            .estimate_prices(&tokens.drain().collect::<Vec<_>>(), denominator_token)
+            .estimate_prices(&tokens, denominator_token)
             .await;
 
         tokens
