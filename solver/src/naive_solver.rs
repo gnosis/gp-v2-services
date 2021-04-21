@@ -19,15 +19,14 @@ impl Solver for NaiveSolver {
         liquidity: Vec<Liquidity>,
         _gas_price: f64,
     ) -> Result<Option<Settlement>> {
-        let mut limit_orders = Vec::new();
         let uniswaps = extract_deepest_amm_liquidity(&liquidity);
-        for liquidity in liquidity {
-            match liquidity {
-                Liquidity::Limit(order) => limit_orders.push(order),
-                Liquidity::Amm(_) => continue,
-            }
-        }
-        Ok(settle(limit_orders.into_iter(), uniswaps).await)
+        let limit_orders = liquidity
+            .into_iter()
+            .filter_map(|liquidity| match liquidity {
+                Liquidity::Limit(order) => Some(order),
+                _ => None,
+            });
+        Ok(settle(limit_orders, uniswaps).await)
     }
 }
 
