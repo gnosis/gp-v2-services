@@ -6,6 +6,7 @@ use crate::{
 
 pub struct LiquidityCollector {
     pub uniswap_liquidity: UniswapLikeLiquidity,
+    pub sushiswap_liquidity: UniswapLikeLiquidity,
     pub orderbook_api: OrderBookApi,
 }
 

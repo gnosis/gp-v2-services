@@ -17,6 +17,7 @@ use solver::{
 use std::iter::FromIterator as _;
 use std::{collections::HashSet, sync::Arc, time::Duration};
 use structopt::StructOpt;
+use shared::amm_pair_provider::SushiswapPairProvider;
 
 #[derive(Debug, StructOpt)]
 struct Arguments {
@@ -147,6 +148,24 @@ async fn main() {
         base_tokens.clone(),
         web3.clone(),
     );
+    // Setup Sushiswap Liquidity artifacts
+    let sushiswap_router = contracts::SushiswapV2Router02::deployed(&web3)
+        .await
+        .expect("couldn't load deployed sushiswap router");
+    let sushiswap_factory = contracts::SushiswapV2Factory::deployed(&web3)
+        .await
+        .expect("couldn't load deployed sushiswap router");
+    let sushiswap_pair_provider = Arc::new(SushiswapPairProvider {
+        factory: sushiswap_factory,
+    });
+    let sushiswap_liquidity = UniswapLikeLiquidity::new(
+        IUniswapLikeRouter::at(&web3, sushiswap_router.address()),
+        sushiswap_pair_provider.clone(),
+        settlement_contract.clone(),
+        base_tokens.clone(),
+        web3.clone(),
+    );
+
     let price_estimator = Arc::new(UniswapPriceEstimator::new(
         Box::new(PoolFetcher {
             pair_provider: uniswap_pair_provider,
@@ -174,6 +193,7 @@ async fn main() {
     );
     let liquidity_collector = LiquidityCollector {
         uniswap_liquidity,
+        sushiswap_liquidity,
         orderbook_api,
     };
     let mut driver = Driver::new(
