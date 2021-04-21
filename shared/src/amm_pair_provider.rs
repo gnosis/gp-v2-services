@@ -105,5 +105,32 @@ mod tests {
             pair_address(&pair, mainnet_factory, SUSHI_PAIR_INIT_CODE),
             H160::from_slice(&hex!("41328fdba556c8c969418ccccb077b7b8d932aa5"))
         );
+        // Rinkeby & xDai
+        let rinkeby_and_xdai_factory =
+            H160::from_slice(&hex!("c35DADB65012eC5796536bD9864eD8773aBc74C4"));
+
+        let xdai_pair = TokenPair::new(
+            H160::from_slice(&hex!("6a023ccd1ff6f2045c3309768ead9e68f978f6e1")),
+            H160::from_slice(&hex!("d3d47d5578e55c880505dc40648f7f9307c3e7a8")),
+        )
+        .unwrap();
+        assert_eq!(
+            pair_address(&xdai_pair, rinkeby_and_xdai_factory, SUSHI_PAIR_INIT_CODE),
+            H160::from_slice(&hex!("3d0af734a22bfce7122dbc6f37464714557ef41f"))
+        );
+
+        let rinkeby_pair = TokenPair::new(
+            H160::from_slice(&hex!("b98Dd87589e460425Cfb5b535d2402E57579Bf40")),
+            H160::from_slice(&hex!("d0593E8bafB8Ec2e70ceb1882617a42cfDFbfEbF")),
+        )
+        .unwrap();
+        assert_eq!(
+            pair_address(
+                &rinkeby_pair,
+                rinkeby_and_xdai_factory,
+                SUSHI_PAIR_INIT_CODE
+            ),
+            H160::from_slice(&hex!("7e22b2c7469789cf11e59fc8ddd56cf6109e0dd1"))
+        );
     }
 }
