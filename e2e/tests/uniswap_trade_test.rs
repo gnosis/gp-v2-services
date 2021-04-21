@@ -135,6 +135,8 @@ async fn test_with_ganache() {
             U256::max_value(),
         )
     );
+    // TODO - Create and fund sushiswap pool.
+    // TODO - Adapt unit test so that tA -> tB -> tC involves both pools
 
     // Approve GPv2 for trading
     tx!(trader_a, token_a.approve(gp_allowance, to_wei(100)));
