@@ -4,6 +4,7 @@ use crate::{
     liquidity::{AmmOrder, LimitOrder, Liquidity},
     settlement::Settlement,
     solver::Solver,
+    uniswap_solver::extract_deepest_amm_liquidity,
 };
 use anyhow::Result;
 use model::TokenPair;
@@ -19,17 +20,11 @@ impl Solver for NaiveSolver {
         _gas_price: f64,
     ) -> Result<Option<Settlement>> {
         let mut limit_orders = Vec::new();
-        let mut uniswaps = HashMap::new();
+        let uniswaps = extract_deepest_amm_liquidity(&liquidity);
         for liquidity in liquidity {
             match liquidity {
                 Liquidity::Limit(order) => limit_orders.push(order),
-                Liquidity::Amm(uniswap) => {
-                    let pair = uniswap.tokens;
-                    uniswaps.insert(
-                        TokenPair::new(pair.get().0, pair.get().1).expect("Invalid Pair"),
-                        uniswap,
-                    );
-                }
+                Liquidity::Amm(_) => continue,
             }
         }
         Ok(settle(limit_orders.into_iter(), uniswaps).await)
