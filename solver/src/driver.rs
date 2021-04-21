@@ -1,11 +1,5 @@
-use crate::{chain, metrics::SolverMetrics};
-use crate::{
-    liquidity::{uniswap::UniswapLikeLiquidity, LimitOrder, Liquidity},
-    orderbook::OrderBookApi,
-    settlement::Settlement,
-    settlement_submission,
-    solver::Solver,
-};
+use crate::{chain, liquidity_collector::LiquidityCollector, metrics::SolverMetrics};
+use crate::{liquidity::Liquidity, settlement::Settlement, settlement_submission, solver::Solver};
 use anyhow::{Context, Result};
 use contracts::GPv2Settlement;
 use futures::future::join_all;
@@ -27,8 +21,7 @@ const GAS_PRICE_CAP: f64 = 500e9;
 
 pub struct Driver {
     settlement_contract: GPv2Settlement,
-    orderbook: OrderBookApi,
-    uniswap_liquidity: UniswapLikeLiquidity,
+    liquidity_collector: LiquidityCollector,
     price_estimator: Arc<dyn PriceEstimating>,
     solver: Vec<Box<dyn Solver>>,
     gas_price_estimator: Box<dyn GasPriceEstimating>,
@@ -42,8 +35,7 @@ impl Driver {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         settlement_contract: GPv2Settlement,
-        uniswap_liquidity: UniswapLikeLiquidity,
-        orderbook: OrderBookApi,
+        liquidity_collector: LiquidityCollector,
         price_estimator: Arc<dyn PriceEstimating>,
         solver: Vec<Box<dyn Solver>>,
         gas_price_estimator: Box<dyn GasPriceEstimating>,
@@ -55,8 +47,7 @@ impl Driver {
     ) -> Self {
         Self {
             settlement_contract,
-            uniswap_liquidity,
-            orderbook,
+            liquidity_collector,
             price_estimator,
             solver,
             gas_price_estimator,
@@ -80,13 +71,21 @@ impl Driver {
 
     async fn collect_estimated_prices(
         &self,
-        limit_orders: &[LimitOrder],
+        liquidity: &[Liquidity],
     ) -> HashMap<H160, BigRational> {
         // Computes set of traded tokens (limit orders only).
-        let tokens: Vec<H160> = limit_orders
+        let tokens: Vec<H160> = liquidity
             .iter()
             // .flat_map(|lo| vec![lo.sell_token, lo.buy_token].into_iter())
-            .flat_map(|lo| chain![lo.sell_token, lo.buy_token])
+            .flat_map(|liquidity| {
+                let iter: Box<dyn Iterator<Item = H160>> = match liquidity {
+                    Liquidity::Limit(limit_order) => {
+                        Box::new(chain![limit_order.sell_token, limit_order.buy_token])
+                    }
+                    _ => Box::new(std::iter::empty()),
+                };
+                iter
+            })
             .sorted()
             .dedup()
             .collect();
@@ -115,50 +114,28 @@ impl Driver {
 
     pub async fn single_run(&mut self) -> Result<()> {
         tracing::debug!("starting single run");
-        let limit_orders = self
-            .orderbook
-            .get_liquidity()
-            .await
-            .context("failed to get orderbook")?;
-        tracing::debug!("got {} orders", limit_orders.len());
+        let liquidity = self.liquidity_collector.get_liquidity().await?;
 
-        let estimated_prices = self.collect_estimated_prices(&limit_orders).await;
-        let (limit_orders, removed_orders): (Vec<_>, Vec<_>) =
-            limit_orders.into_iter().partition(|lo| {
-                [lo.sell_token, lo.buy_token]
-                    .iter()
-                    .all(|token| estimated_prices.contains_key(token))
-            });
+        let estimated_prices = self.collect_estimated_prices(&liquidity).await;
+        // Filter limit orders for which we don't have price estimates as they cannot be considered for the objective criterion
+        let (liquidity, removed_orders): (Vec<_>, Vec<_>) =
+            liquidity
+                .into_iter()
+                .partition(|liquidity| match liquidity {
+                    Liquidity::Limit(limit_order) => {
+                        [limit_order.sell_token, limit_order.buy_token]
+                            .iter()
+                            .all(|token| estimated_prices.contains_key(token))
+                    }
+                    Liquidity::Amm(_) => true,
+                });
         if !removed_orders.is_empty() {
             tracing::debug!(
                 "pruned {} orders: {:?}",
                 removed_orders.len(),
-                removed_orders
-                    .iter()
-                    .map(|order| &order.id)
-                    .collect::<Vec<_>>()
+                removed_orders,
             );
         }
-        tracing::debug!(
-            "Using orders: {:?}",
-            limit_orders
-                .iter()
-                .map(|order| &order.id)
-                .collect::<Vec<_>>()
-        );
-
-        let amms = self
-            .uniswap_liquidity
-            .get_liquidity(limit_orders.iter())
-            .await
-            .context("failed to get uniswap pools")?;
-        tracing::debug!("got {} AMMs", amms.len());
-
-        let liquidity: Vec<Liquidity> = limit_orders
-            .into_iter()
-            .map(Liquidity::Limit)
-            .chain(amms.into_iter().map(Liquidity::Amm))
-            .collect();
 
         self.metrics.liquidity_fetched(&liquidity);
 
