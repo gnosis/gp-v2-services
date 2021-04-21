@@ -32,7 +32,6 @@ impl AmmPairProvider for UniswapPairProvider {
 
 pub struct SushiswapPairProvider {
     pub factory: SushiswapV2Factory,
-    pub chain_id: u64,
 }
 
 impl AmmPairProvider for SushiswapPairProvider {
