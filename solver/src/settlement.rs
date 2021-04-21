@@ -134,17 +134,16 @@ impl SettlementEncoder {
         self.execution_plan.push(Box::new(interaction));
     }
 
-    pub fn add_unwrap(&mut self, unwrap: UnwrapWethInteraction) -> Result<()> {
+    pub fn add_unwrap(&mut self, unwrap: UnwrapWethInteraction) {
         for existing_unwrap in self.unwraps.iter_mut() {
-            if existing_unwrap.merge(&unwrap)? {
-                return Ok(());
+            if existing_unwrap.merge(&unwrap).is_ok() {
+                return;
             }
         }
 
         // If the native token unwrap can't be merged with any existing ones,
         // just add it to the vector.
         self.unwraps.push(unwrap);
-        Ok(())
     }
 
     fn token_index(&self, token: H160) -> Option<usize> {
@@ -652,18 +651,14 @@ mod tests {
         let weth = dummy_web3::dummy_weth([0x42; 20]);
 
         let mut encoder = SettlementEncoder::new(HashMap::new());
-        encoder
-            .add_unwrap(UnwrapWethInteraction {
-                weth: weth.clone(),
-                amount: 1.into(),
-            })
-            .unwrap();
-        encoder
-            .add_unwrap(UnwrapWethInteraction {
-                weth: weth.clone(),
-                amount: 2.into(),
-            })
-            .unwrap();
+        encoder.add_unwrap(UnwrapWethInteraction {
+            weth: weth.clone(),
+            amount: 1.into(),
+        });
+        encoder.add_unwrap(UnwrapWethInteraction {
+            weth: weth.clone(),
+            amount: 2.into(),
+        });
 
         assert_eq!(
             encoder.finish().interactions[1],
@@ -678,18 +673,14 @@ mod tests {
     #[test]
     fn settlement_encoder_appends_unwraps_for_different_tokens() {
         let mut encoder = SettlementEncoder::new(HashMap::new());
-        encoder
-            .add_unwrap(UnwrapWethInteraction {
-                weth: dummy_web3::dummy_weth([0x01; 20]),
-                amount: 1.into(),
-            })
-            .unwrap();
-        encoder
-            .add_unwrap(UnwrapWethInteraction {
-                weth: dummy_web3::dummy_weth([0x02; 20]),
-                amount: 2.into(),
-            })
-            .unwrap();
+        encoder.add_unwrap(UnwrapWethInteraction {
+            weth: dummy_web3::dummy_weth([0x01; 20]),
+            amount: 1.into(),
+        });
+        encoder.add_unwrap(UnwrapWethInteraction {
+            weth: dummy_web3::dummy_weth([0x02; 20]),
+            amount: 2.into(),
+        });
 
         assert_eq!(
             encoder
@@ -710,7 +701,7 @@ mod tests {
         };
 
         let mut encoder = SettlementEncoder::new(HashMap::new());
-        encoder.add_unwrap(unwrap.clone()).unwrap();
+        encoder.add_unwrap(unwrap.clone());
         encoder.append_to_execution_plan(interaction.clone());
 
         assert_eq!(

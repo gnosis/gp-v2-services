@@ -1,5 +1,5 @@
 use crate::{encoding::EncodedInteraction, settlement::Interaction};
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{ensure, Result};
 use contracts::WETH9;
 use primitive_types::U256;
 
@@ -14,17 +14,17 @@ impl UnwrapWethInteraction {
     /// `true` if the merge was successful, and `false` otherwise.
     ///
     /// Returns an error on arithmetic overflow.
-    pub fn merge(&mut self, other: &Self) -> Result<bool> {
-        let tokens_match = self.weth.address() == other.weth.address();
-        if tokens_match {
-            self.amount = self
-                .amount
-                .checked_add(other.amount)
-                .ok_or_else(|| anyhow!("arithmetic overflow"))
-                .context("error merging native token unwrap interactions")?;
-        }
+    pub fn merge(&mut self, other: &Self) -> Result<()> {
+        ensure!(
+            self.weth.address() == other.weth.address(),
+            "cannot merge unwrap for different token addresses",
+        );
 
-        Ok(tokens_match)
+        self.amount = self
+            .amount
+            .checked_add(other.amount)
+            .expect("no one is that rich");
+        Ok(())
     }
 }
 
@@ -73,7 +73,7 @@ mod tests {
             amount: 2.into(),
         };
 
-        assert!(matches!(unwrap0.merge(&unwrap1), Ok(true)));
+        assert!(unwrap0.merge(&unwrap1).is_ok());
         assert_eq!(unwrap0.amount, 3.into());
     }
 
@@ -88,11 +88,12 @@ mod tests {
             amount: 2.into(),
         };
 
-        assert!(matches!(unwrap0.merge(&unwrap1), Ok(false)));
+        assert!(unwrap0.merge(&unwrap1).is_err());
         assert_eq!(unwrap0.amount, 1.into());
     }
 
     #[test]
+    #[should_panic]
     fn merge_u256_overflow() {
         let mut unwrap0 = UnwrapWethInteraction {
             weth: dummy_web3::dummy_weth([0x01; 20]),
@@ -103,7 +104,6 @@ mod tests {
             amount: U256::max_value(),
         };
 
-        assert!(unwrap0.merge(&unwrap1).is_err());
-        assert_eq!(unwrap0.amount, 1.into());
+        let _ = unwrap0.merge(&unwrap1);
     }
 }
