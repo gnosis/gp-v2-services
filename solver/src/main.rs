@@ -157,7 +157,21 @@ async fn main() {
     )
     .await
     .expect("failed to create gas price estimator");
-    let (pool_fetcher, uniswap_like_liquidity) = build_amm_artifacts(
+
+    // TODO - Currently we use only Uniswap for price estimation.
+    let price_estimator = Arc::new(UniswapPriceEstimator::new(
+        Box::new(PoolFetcher {
+            pair_provider: Arc::new(UniswapPairProvider {
+                factory: contracts::UniswapV2Factory::deployed(&web3)
+                    .await
+                    .expect("couldn't load deployed uniswap router"),
+                chain_id,
+            }),
+            web3: web3.clone(),
+        }),
+        base_tokens.clone(),
+    ));
+    let uniswap_like_liquidity = build_amm_artifacts(
         args.amm_sources,
         chain_id,
         settlement_contract.clone(),
@@ -165,10 +179,6 @@ async fn main() {
         web3,
     )
     .await;
-    let price_estimator = Arc::new(UniswapPriceEstimator::new(
-        Box::new(pool_fetcher),
-        base_tokens.clone(),
-    ));
     let solver = solver::solver::create(
         args.solvers,
         base_tokens,
@@ -204,30 +214,21 @@ async fn build_amm_artifacts(
     settlement_contract: contracts::GPv2Settlement,
     base_tokens: HashSet<H160>,
     web3: web3::Web3<LoggingTransport<Http>>,
-) -> (PoolFetcher, Vec<UniswapLikeLiquidity>) {
+) -> Vec<UniswapLikeLiquidity> {
     let mut res = vec![];
-    // At the moment, we build uniswap artifacts for price finding.
-    // TODO - Eventually this code will move into the match statement.
-    let uniswap_router = contracts::UniswapV2Router02::deployed(&web3)
-        .await
-        .expect("couldn't load deployed uniswap router");
-    let uniswap_factory = contracts::UniswapV2Factory::deployed(&web3)
-        .await
-        .expect("couldn't load deployed uniswap router");
-    let uniswap_pair_provider = Arc::new(UniswapPairProvider {
-        factory: uniswap_factory,
-        chain_id,
-    });
-    let pool_fetcher = PoolFetcher {
-        pair_provider: uniswap_pair_provider.clone(),
-        web3: web3.clone(),
-    };
     for source in sources {
         match source {
             AmmSources::Uniswap => {
+                let router = contracts::UniswapV2Router02::deployed(&web3)
+                    .await
+                    .expect("couldn't load deployed uniswap router");
+                let factory = contracts::UniswapV2Factory::deployed(&web3)
+                    .await
+                    .expect("couldn't load deployed uniswap router");
+                let pair_provider = Arc::new(UniswapPairProvider { factory, chain_id });
                 res.push(UniswapLikeLiquidity::new(
-                    IUniswapLikeRouter::at(&web3, uniswap_router.address()),
-                    uniswap_pair_provider.clone(),
+                    IUniswapLikeRouter::at(&web3, router.address()),
+                    pair_provider.clone(),
                     settlement_contract.clone(),
                     base_tokens.clone(),
                     web3.clone(),
@@ -251,5 +252,5 @@ async fn build_amm_artifacts(
             }
         }
     }
-    (pool_fetcher, res)
+    res
 }
