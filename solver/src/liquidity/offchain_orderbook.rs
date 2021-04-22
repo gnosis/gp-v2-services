@@ -109,10 +109,10 @@ fn executed_buy_amount(order: &Order, executed_amount: U256, price: Price) -> Op
 }
 
 #[cfg(test)]
-mod test {
+pub mod tests {
     use super::*;
     use crate::interactions::dummy_web3;
-    use crate::settlement::assert_settlement_encoded_with;
+    use crate::settlement::tests::assert_settlement_encoded_with;
     use maplit::hashmap;
     use model::order::OrderCreation;
 

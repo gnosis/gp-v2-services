@@ -336,35 +336,34 @@ fn sell_order_surplus(
 }
 
 #[cfg(test)]
-pub fn assert_settlement_encoded_with<L, S>(
-    prices: HashMap<H160, U256>,
-    handler: S,
-    execution: L::Execution,
-    exec: impl FnOnce(&mut SettlementEncoder),
-) where
-    L: Settleable,
-    S: SettlementHandling<L>,
-{
-    let actual_settlement = {
-        let mut encoder = SettlementEncoder::new(prices.clone());
-        handler.encode(execution, &mut encoder).unwrap();
-        encoder.finish()
-    };
-    let expected_settlement = {
-        let mut encoder = SettlementEncoder::new(prices);
-        exec(&mut encoder);
-        encoder.finish()
-    };
-
-    assert_eq!(actual_settlement, expected_settlement);
-}
-
-#[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::interactions::dummy_web3;
     use model::order::{OrderCreation, OrderKind};
     use num::FromPrimitive;
+
+    pub fn assert_settlement_encoded_with<L, S>(
+        prices: HashMap<H160, U256>,
+        handler: S,
+        execution: L::Execution,
+        exec: impl FnOnce(&mut SettlementEncoder),
+    ) where
+        L: Settleable,
+        S: SettlementHandling<L>,
+    {
+        let actual_settlement = {
+            let mut encoder = SettlementEncoder::new(prices.clone());
+            handler.encode(execution, &mut encoder).unwrap();
+            encoder.finish()
+        };
+        let expected_settlement = {
+            let mut encoder = SettlementEncoder::new(prices);
+            exec(&mut encoder);
+            encoder.finish()
+        };
+
+        assert_eq!(actual_settlement, expected_settlement);
+    }
 
     #[test]
     pub fn encode_trades_finds_token_index() {
