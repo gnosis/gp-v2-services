@@ -63,13 +63,6 @@ async fn run() -> Result<()> {
     let uniswap_factory = deploy!(UniswapV2Factory(accounts[0]));
     deploy!(UniswapV2Router02(uniswap_factory.address(), weth.address()));
 
-    log::info!("deploying Sushiswap contracts");
-    let sushiswap_factory = deploy!(SushiswapV2Factory(accounts[0]));
-    deploy!(SushiswapV2Router02(
-        sushiswap_factory.address(),
-        weth.address()
-    ));
-
     log::info!("deploying exchange contracts");
     let gp_authentication = deploy!(GPv2AllowListAuthentication);
     gp_authentication
