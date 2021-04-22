@@ -117,6 +117,45 @@ pub mod tests {
     use model::order::OrderCreation;
 
     #[test]
+    fn executed_buy_amount_returns_err_on_overflows() {
+        let order = Order {
+            order_creation: OrderCreation {
+                kind: OrderKind::Sell,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        // mul
+        let executed_amount = U256::MAX;
+        let sell_price = U256::from(2);
+        let buy_price = U256::one();
+        assert!(executed_buy_amount(
+            &order,
+            executed_amount,
+            Price {
+                sell_price,
+                buy_price
+            }
+        )
+        .is_none());
+
+        // div
+        let executed_amount = U256::one();
+        let sell_price = U256::one();
+        let buy_price = U256::zero();
+        assert!(executed_buy_amount(
+            &order,
+            executed_amount,
+            Price {
+                sell_price,
+                buy_price
+            }
+        )
+        .is_none());
+    }
+
+    #[test]
     fn adds_unwrap_interaction_for_sell_order_with_eth_flag() {
         let native_token_address = H160([0x42; 20]);
         let sell_token = H160([0x21; 20]);
