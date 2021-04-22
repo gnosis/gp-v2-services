@@ -10,6 +10,9 @@ use primitive_types::{H160, U256};
 use shared::conversions::U256Ext;
 use std::{collections::HashMap, iter};
 
+#[cfg(test)]
+use crate::liquidity::SettlementHandling;
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Trade {
     pub order: Order,
@@ -111,6 +114,10 @@ impl SettlementEncoder {
             execution_plan: Vec::new(),
             unwraps: Vec::new(),
         }
+    }
+
+    pub fn clearing_prices(&self) -> &HashMap<H160, U256> {
+        &self.clearing_prices
     }
 
     pub fn add_trade(&mut self, order: Order, executed_amount: U256) -> Result<()> {
@@ -326,6 +333,30 @@ fn sell_order_surplus(
     } else {
         Some(res)
     }
+}
+
+#[cfg(test)]
+pub fn assert_settlement_encoded_with<L, S>(
+    prices: HashMap<H160, U256>,
+    handler: S,
+    execution: L::Execution,
+    exec: impl FnOnce(&mut SettlementEncoder),
+) where
+    L: Settleable,
+    S: SettlementHandling<L>,
+{
+    let actual_settlement = {
+        let mut encoder = SettlementEncoder::new(prices.clone());
+        handler.encode(execution, &mut encoder).unwrap();
+        encoder.finish()
+    };
+    let expected_settlement = {
+        let mut encoder = SettlementEncoder::new(prices);
+        exec(&mut encoder);
+        encoder.finish()
+    };
+
+    assert_eq!(actual_settlement, expected_settlement);
 }
 
 #[cfg(test)]
