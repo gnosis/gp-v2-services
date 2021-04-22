@@ -76,28 +76,21 @@ fn compute_unwrap_interaction(
     executed_amount: U256,
     weth: WETH9,
 ) -> Result<UnwrapWethInteraction> {
-    let sell_price = if let Some(&price) = clearing_prices.get(&order.order_creation.sell_token) {
-        price
-    } else {
-        return Err(anyhow!("sell price not available"));
-    };
-    let buy_price = if let Some(&price) = clearing_prices.get(&order.order_creation.buy_token) {
-        price
-    } else {
-        return Err(anyhow!("buy price not available"));
-    };
-    let amount = if let Some(amount) = executed_buy_amount(
+    let sell_price = *clearing_prices
+        .get(&order.order_creation.sell_token)
+        .ok_or_else(|| anyhow!("sell price not available"))?;
+    let buy_price = *clearing_prices
+        .get(&order.order_creation.buy_token)
+        .ok_or_else(|| anyhow!("buy price not available"))?;
+    let amount = executed_buy_amount(
         order,
         executed_amount,
         Price {
             sell_price,
             buy_price,
         },
-    ) {
-        amount
-    } else {
-        return Err(anyhow!("cannot compute executed buy amount"));
-    };
+    )
+    .ok_or_else(|| anyhow!("cannot compute executed buy amount"))?;
     Ok(UnwrapWethInteraction { weth, amount })
 }
 
