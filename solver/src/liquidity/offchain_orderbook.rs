@@ -26,17 +26,20 @@ impl OrderBookApi {
 }
 
 struct OrderSettlementHandler {
-    #[allow(dead_code)]
     native_token: WETH9,
     order: Order,
 }
 
 pub fn normalize_limit_order(order: Order, native_token: WETH9) -> LimitOrder {
+    let buy_token = if order.order_creation.buy_token == BUY_ETH_ADDRESS {
+        native_token.address()
+    } else {
+        order.order_creation.buy_token
+    };
     LimitOrder {
         id: order.order_meta_data.uid.to_string(),
         sell_token: order.order_creation.sell_token,
-        // TODO handle ETH buy token address (0xe...e) by making the handler include an WETH.unwrap() interaction
-        buy_token: order.order_creation.buy_token,
+        buy_token,
         // TODO discount previously executed sell amount
         sell_amount: order.order_creation.sell_amount,
         buy_amount: order.order_creation.buy_amount,
@@ -115,6 +118,42 @@ pub mod tests {
     use crate::settlement::tests::assert_settlement_encoded_with;
     use maplit::hashmap;
     use model::order::OrderCreation;
+
+    #[test]
+    fn eth_buy_liquidity_is_assigned_to_weth() {
+        let native_token_address = H160([0x42; 20]);
+        let native_token = WETH9::at(&dummy_web3::dummy_web3(), native_token_address);
+        let order = Order {
+            order_creation: OrderCreation {
+                buy_token: BUY_ETH_ADDRESS,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(
+            normalize_limit_order(order, native_token).buy_token,
+            native_token_address
+        );
+    }
+    #[test]
+    fn non_eth_buy_liquidity_stays_put() {
+        let buy_token = H160([0x21; 20]);
+        let native_token_address = H160([0x42; 20]);
+        let native_token = WETH9::at(&dummy_web3::dummy_web3(), native_token_address);
+        let order = Order {
+            order_creation: OrderCreation {
+                buy_token,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(
+            normalize_limit_order(order, native_token).buy_token,
+            buy_token
+        );
+    }
 
     #[test]
     fn executed_buy_amount_returns_err_on_overflows() {
