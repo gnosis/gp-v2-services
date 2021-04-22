@@ -92,10 +92,7 @@ impl SwapQuery {
     }
 }
 
-/// A 1Inch API swap result.
-///
-/// The response data is currently incomplete, and missing fields can be added
-/// incrementally as needed.
+/// A 1Inch API swap response.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Swap {
