@@ -10,9 +10,6 @@ use primitive_types::{H160, U256};
 use shared::conversions::U256Ext;
 use std::{collections::HashMap, iter};
 
-#[cfg(test)]
-use crate::liquidity::SettlementHandling;
-
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Trade {
     pub order: Order,
@@ -339,6 +336,7 @@ fn sell_order_surplus(
 pub mod tests {
     use super::*;
     use crate::interactions::dummy_web3;
+    use crate::liquidity::SettlementHandling;
     use model::order::{OrderCreation, OrderKind};
     use num::FromPrimitive;
 
