@@ -1,8 +1,5 @@
 use contracts::{ERC20Mintable, IUniswapLikeRouter, UniswapV2Factory, UniswapV2Router02, WETH9};
-use ethcontract::{
-    prelude::{Account, Address, Http, PrivateKey, U256},
-    H160,
-};
+use ethcontract::prelude::{Account, Address, Http, PrivateKey, U256};
 use hex_literal::hex;
 use model::{
     order::{OrderBuilder, OrderKind},
@@ -23,8 +20,10 @@ use shared::{
     Web3,
 };
 use solver::{
-    liquidity::uniswap::UniswapLikeLiquidity, liquidity_collector::LiquidityCollector,
-    metrics::NoopMetrics, orderbook::OrderBookApi,
+    liquidity::{offchain_orderbook::BUY_ETH_ADDRESS, uniswap::UniswapLikeLiquidity},
+    liquidity_collector::LiquidityCollector,
+    metrics::NoopMetrics,
+    orderbook::OrderBookApi,
 };
 use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 use web3::signing::SecretKeyRef;
@@ -62,15 +61,21 @@ async fn test_with_ganache() {
             .expect("MintableERC20 deployment failed")
     };
 
-    macro_rules! tx {
-        ($acc:ident, $call:expr) => {{
+    macro_rules! tx_value {
+        ($acc:ident, $value:expr, $call:expr) => {{
             const NAME: &str = stringify!($call);
             $call
                 .from($acc.clone())
+                .value($value)
                 .send()
                 .await
                 .expect(&format!("{} failed", NAME))
         }};
+    }
+    macro_rules! tx {
+        ($acc:ident, $call:expr) => {
+            tx_value!($acc, U256::zero(), $call)
+        };
     }
 
     // Fetch deployed instances
@@ -95,14 +100,18 @@ async fn test_with_ganache() {
     tx!(solver, token_a.mint(solver.address(), to_wei(100_000)));
     tx!(solver, token_a.mint(trader_a.address(), to_wei(100)));
 
-    let token_b = deploy_mintable_token().await;
-    tx!(solver, token_b.mint(solver.address(), to_wei(100_000)));
-    tx!(solver, token_b.mint(trader_b.address(), to_wei(100)));
+    let weth = WETH9::builder(&web3)
+        .deploy()
+        .await
+        .expect("WETH deployment failed");
+    tx_value!(solver, to_wei(100_000), weth.deposit());
+    tx_value!(solver, to_wei(100), weth.deposit());
+    tx!(solver, weth.transfer(trader_b.address(), to_wei(100)));
 
     // Create and fund Uniswap pool
     tx!(
         solver,
-        uniswap_factory.create_pair(token_a.address(), token_b.address())
+        uniswap_factory.create_pair(token_a.address(), weth.address())
     );
     tx!(
         solver,
@@ -110,13 +119,13 @@ async fn test_with_ganache() {
     );
     tx!(
         solver,
-        token_b.approve(uniswap_router.address(), to_wei(100_000))
+        weth.approve(uniswap_router.address(), to_wei(100_000))
     );
     tx!(
         solver,
         uniswap_router.add_liquidity(
             token_a.address(),
-            token_b.address(),
+            weth.address(),
             to_wei(100_000),
             to_wei(100_000),
             0_u64.into(),
@@ -128,7 +137,7 @@ async fn test_with_ganache() {
 
     // Approve GPv2 for trading
     tx!(trader_a, token_a.approve(gp_allowance, to_wei(100)));
-    tx!(trader_b, token_b.approve(gp_allowance, to_wei(100)));
+    tx!(trader_b, weth.approve(gp_allowance, to_wei(100)));
 
     // Place Orders
     let domain_separator = DomainSeparator(
@@ -158,7 +167,7 @@ async fn test_with_ganache() {
         Box::new(pool_fetcher),
         HashSet::new(),
     ));
-    let native_token = token_a.address();
+    let native_token = weth.address();
     let fee_calculator = Arc::new(MinFeeCalculator::new(
         price_estimator.clone(),
         Box::new(web3.clone()),
@@ -188,10 +197,11 @@ async fn test_with_ganache() {
     );
     let client = reqwest::Client::new();
 
+    assert_ne!(weth.address(), BUY_ETH_ADDRESS);
     let order_a = OrderBuilder::default()
         .with_sell_token(token_a.address())
         .with_sell_amount(to_wei(100))
-        .with_buy_token(token_b.address())
+        .with_buy_token(BUY_ETH_ADDRESS)
         .with_buy_amount(to_wei(80))
         .with_valid_to(u32::max_value())
         .with_kind(OrderKind::Sell)
@@ -210,7 +220,7 @@ async fn test_with_ganache() {
     assert_eq!(placement.unwrap().status(), 201);
 
     let order_b = OrderBuilder::default()
-        .with_sell_token(token_b.address())
+        .with_sell_token(weth.address())
         .with_sell_amount(to_wei(50))
         .with_buy_token(token_a.address())
         .with_buy_amount(to_wei(40))
@@ -245,7 +255,7 @@ async fn test_with_ganache() {
     let solver = solver::naive_solver::NaiveSolver {};
     let liquidity_collector = LiquidityCollector {
         uniswap_liquidity,
-        orderbook_api: create_orderbook_api(&web3),
+        orderbook_api: create_orderbook_api(weth.clone()),
     };
     let mut driver = solver::driver::Driver::new(
         gp_settlement.clone(),
@@ -262,9 +272,9 @@ async fn test_with_ganache() {
     driver.single_run().await.unwrap();
 
     // Check matching
-    let balance = token_b
-        .balance_of(trader_a.address())
-        .call()
+    let balance = web3
+        .eth()
+        .balance(trader_a.address(), None)
         .await
         .expect("Couldn't fetch TokenB's balance");
     assert_eq!(balance, U256::from(99_650_498_453_042_316_810u128));
@@ -279,7 +289,10 @@ async fn test_with_ganache() {
     // Drive orderbook in order to check the removal of settled order_b
     orderbook.run_maintenance(&gp_settlement).await.unwrap();
 
-    let orders = create_orderbook_api(&web3).get_orders().await.unwrap();
+    let orders = create_orderbook_api(weth.clone())
+        .get_orders()
+        .await
+        .unwrap();
     assert!(orders.is_empty());
 
     // Drive again to ensure we can continue solution finding
@@ -290,8 +303,7 @@ fn to_wei(base: u32) -> U256 {
     U256::from(base) * U256::from(10).pow(18.into())
 }
 
-fn create_orderbook_api(web3: &Web3) -> OrderBookApi {
-    let native_token = WETH9::at(web3, H160([0x42; 20]));
+fn create_orderbook_api(native_token: WETH9) -> OrderBookApi {
     solver::orderbook::OrderBookApi::new(
         reqwest::Url::from_str(API_HOST).unwrap(),
         std::time::Duration::from_secs(10),
