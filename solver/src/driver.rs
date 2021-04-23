@@ -239,7 +239,7 @@ pub async fn collect_estimated_prices(
 
 #[cfg(test)]
 mod tests {
-    use shared::price_estimate::{FailingPriceEstimator, FakePriceEstimator};
+    use shared::price_estimate::mocks::{FailingPriceEstimator, FakePriceEstimator};
 
     use super::*;
     use crate::liquidity::{tests::CapturingSettlementHandler, AmmOrder, LimitOrder};
