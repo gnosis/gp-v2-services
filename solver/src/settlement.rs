@@ -78,6 +78,11 @@ impl Interaction for EncodedInteraction {
 /// Additionally, the fact that the settlement is kept in an intermediate
 /// representation allows the encoder to potentially perform gas optimizations
 /// (e.g. collapsing two interactions into one equivalent one).
+///
+/// If any of the encoder methods fail, then the encoder is assumed to be in a
+/// bad state and should be discarded. There is an issue to fix this at a type
+/// level:
+/// <https://github.com/gnosis/gp-v2-services/issues/501>
 #[derive(Debug)]
 pub struct SettlementEncoder {
     tokens: Vec<H160>,

@@ -62,14 +62,10 @@ impl SettlementHandling<LimitOrder> for OrderSettlementHandler {
                 self.native_token.clone(),
             )?;
 
-            encoder.add_trade(self.order.clone(), executed_amount)?;
-
+            encoder.add_token_equivalency(self.native_token.address(), BUY_ETH_ADDRESS)?;
             encoder.add_unwrap(interaction);
-        } else {
-            encoder.add_trade(self.order.clone(), executed_amount)?;
         }
-
-        Ok(())
+        encoder.add_trade(self.order.clone(), executed_amount)
     }
 }
 
@@ -83,7 +79,7 @@ fn compute_unwrap_interaction(
         .get(&order.order_creation.sell_token)
         .ok_or_else(|| anyhow!("sell price not available"))?;
     let buy_price = *clearing_prices
-        .get(&order.order_creation.buy_token)
+        .get(&weth.address())
         .ok_or_else(|| anyhow!("buy price not available"))?;
     let amount = executed_buy_amount(
         order,
@@ -202,7 +198,7 @@ pub mod tests {
 
         let executed_amount = U256::from(1337);
         let prices = hashmap! {
-            BUY_ETH_ADDRESS => U256::from(100),
+            native_token.address() => U256::from(100),
             sell_token => U256::from(200),
         };
         let executed_buy_amount = U256::from(2 * 1337);
@@ -227,11 +223,14 @@ pub mod tests {
             order_settlement_handler,
             executed_amount,
             |encoder| {
-                assert!(encoder.add_trade(order, executed_amount).is_ok());
+                encoder
+                    .add_token_equivalency(native_token.address(), BUY_ETH_ADDRESS)
+                    .unwrap();
                 encoder.add_unwrap(UnwrapWethInteraction {
                     weth: native_token,
                     amount: executed_buy_amount,
                 });
+                assert!(encoder.add_trade(order, executed_amount).is_ok());
             },
         );
     }
@@ -243,7 +242,7 @@ pub mod tests {
         let native_token = WETH9::at(&dummy_web3::dummy_web3(), native_token_address);
         let executed_amount = U256::from(1337);
         let prices = hashmap! {
-            BUY_ETH_ADDRESS => U256::from(1),
+            native_token.address() => U256::from(1),
             sell_token => U256::from(2),
         };
         let order = Order {
@@ -267,6 +266,9 @@ pub mod tests {
             order_settlement_handler,
             executed_amount,
             |encoder| {
+                encoder
+                    .add_token_equivalency(native_token.address(), BUY_ETH_ADDRESS)
+                    .unwrap();
                 assert!(encoder.add_trade(order, executed_amount).is_ok());
                 encoder.add_unwrap(UnwrapWethInteraction {
                     weth: native_token,
