@@ -3,7 +3,7 @@ use crate::{
     interactions::UnwrapWethInteraction,
     liquidity::Settleable,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, ensure, Result};
 use model::order::{Order, OrderKind};
 use num::{BigRational, Signed, Zero};
 use primitive_types::{H160, U256};
@@ -78,6 +78,11 @@ impl Interaction for EncodedInteraction {
 /// Additionally, the fact that the settlement is kept in an intermediate
 /// representation allows the encoder to potentially perform gas optimizations
 /// (e.g. collapsing two interactions into one equivalent one).
+///
+/// If any of the encoder methods fail, then the encoder is assumed to be in a
+/// bad state and should be discarded. There is an issue to fix this at a type
+/// level:
+/// <https://github.com/gnosis/gp-v2-services/issues/501>
 #[derive(Debug)]
 pub struct SettlementEncoder {
     tokens: Vec<H160>,
@@ -113,6 +118,10 @@ impl SettlementEncoder {
         }
     }
 
+    pub fn clearing_prices(&self) -> &HashMap<H160, U256> {
+        &self.clearing_prices
+    }
+
     pub fn add_trade(&mut self, order: Order, executed_amount: U256) -> Result<()> {
         let sell_token_index = self
             .token_index(order.order_creation.sell_token)
@@ -144,6 +153,43 @@ impl SettlementEncoder {
         // If the native token unwrap can't be merged with any existing ones,
         // just add it to the vector.
         self.unwraps.push(unwrap);
+    }
+
+    pub fn add_token_equivalency(&mut self, token_a: H160, token_b: H160) -> Result<()> {
+        let (new_token, existing_price) = match (
+            self.clearing_prices.get(&token_a),
+            self.clearing_prices.get(&token_b),
+        ) {
+            (Some(price_a), Some(price_b)) => {
+                ensure!(
+                    price_a == price_b,
+                    "non-matching prices for equivalent tokens"
+                );
+                // Nothing to do, since both tokens are part of the solution and
+                // have the same price (i.e. are equivalent).
+                return Ok(());
+            }
+            (None, None) => bail!("tokens not part of solution for equivalency"),
+            (Some(price_a), None) => (token_b, *price_a),
+            (None, Some(price_b)) => (token_a, *price_b),
+        };
+
+        self.clearing_prices.insert(new_token, existing_price);
+        self.tokens.push(new_token);
+
+        // Now the tokens array is no longer sorted, so fix that, and make sure
+        // to re-compute trade token indices as they may have changed.
+        self.tokens.sort();
+        for i in 0..self.trades.len() {
+            self.trades[i].sell_token_index = self
+                .token_index(self.trades[i].order.order_creation.sell_token)
+                .expect("missing sell token for exisiting trade");
+            self.trades[i].buy_token_index = self
+                .token_index(self.trades[i].order.order_creation.buy_token)
+                .expect("missing buy token for exisiting trade");
+        }
+
+        Ok(())
     }
 
     fn token_index(&self, token: H160) -> Option<usize> {
@@ -329,11 +375,36 @@ fn sell_order_surplus(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::interactions::dummy_web3;
+    use crate::liquidity::SettlementHandling;
+    use maplit::hashmap;
     use model::order::{OrderCreation, OrderKind};
     use num::FromPrimitive;
+
+    pub fn assert_settlement_encoded_with<L, S>(
+        prices: HashMap<H160, U256>,
+        handler: S,
+        execution: L::Execution,
+        exec: impl FnOnce(&mut SettlementEncoder),
+    ) where
+        L: Settleable,
+        S: SettlementHandling<L>,
+    {
+        let actual_settlement = {
+            let mut encoder = SettlementEncoder::new(prices.clone());
+            handler.encode(execution, &mut encoder).unwrap();
+            encoder.finish()
+        };
+        let expected_settlement = {
+            let mut encoder = SettlementEncoder::new(prices);
+            exec(&mut encoder);
+            encoder.finish()
+        };
+
+        assert_eq!(actual_settlement, expected_settlement);
+    }
 
     #[test]
     pub fn encode_trades_finds_token_index() {
@@ -708,5 +779,62 @@ mod tests {
             encoder.finish().interactions[1],
             [interaction.encode(), unwrap.encode()].concat(),
         );
+    }
+
+    #[test]
+    fn settlement_encoder_add_token_equivalency() {
+        let token_a = H160([0x00; 20]);
+        let token_b = H160([0xff; 20]);
+        let mut encoder = SettlementEncoder::new(hashmap! {
+            token_a => 1.into(),
+            token_b => 2.into(),
+        });
+        encoder
+            .add_trade(
+                Order {
+                    order_creation: OrderCreation {
+                        sell_token: token_a,
+                        buy_token: token_b,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                0.into(),
+            )
+            .unwrap();
+
+        assert_eq!(encoder.tokens, [token_a, token_b]);
+        assert_eq!(encoder.trades[0].sell_token_index, 0);
+        assert_eq!(encoder.trades[0].buy_token_index, 1);
+
+        let token_c = H160([0xee; 20]);
+        encoder.add_token_equivalency(token_a, token_c).unwrap();
+
+        assert_eq!(encoder.tokens, [token_a, token_c, token_b]);
+        assert_eq!(
+            encoder.clearing_prices[&token_a],
+            encoder.clearing_prices[&token_c],
+        );
+        assert_eq!(encoder.trades[0].sell_token_index, 0);
+        assert_eq!(encoder.trades[0].buy_token_index, 2);
+    }
+
+    #[test]
+    fn settlement_encoder_token_equivalency_missing_tokens() {
+        let mut encoder = SettlementEncoder::new(HashMap::new());
+        assert!(encoder
+            .add_token_equivalency(H160([0; 20]), H160([1; 20]))
+            .is_err());
+    }
+
+    #[test]
+    fn settlement_encoder_non_equivalent_tokens() {
+        let token_a = H160([1; 20]);
+        let token_b = H160([2; 20]);
+        let mut encoder = SettlementEncoder::new(hashmap! {
+            token_a => 1.into(),
+            token_b => 2.into(),
+        });
+        assert!(encoder.add_token_equivalency(token_a, token_b).is_err());
     }
 }
