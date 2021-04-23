@@ -270,6 +270,18 @@ impl PriceEstimating for FakePriceEstimator {
     }
 }
 
+pub struct FailingPriceEstimator();
+#[async_trait::async_trait]
+impl PriceEstimating for FailingPriceEstimator {
+    async fn estimate_price(&self, _: H160, _: H160, _: U256, _: OrderKind) -> Result<BigRational> {
+        Err(anyhow!("error"))
+    }
+
+    async fn estimate_gas(&self, _: H160, _: H160, _: U256, _: OrderKind) -> Result<U256> {
+        Err(anyhow!("error"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use assert_approx_eq::assert_approx_eq;
