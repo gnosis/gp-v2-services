@@ -10,7 +10,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use super::{LimitOrder, SettlementHandling};
 
-const BUY_ETH_ADDRESS: H160 = H160([0xee; 20]);
+pub const BUY_ETH_ADDRESS: H160 = H160([0xee; 20]);
 
 impl OrderBookApi {
     /// Returns a list of limit orders coming from the offchain orderbook API
