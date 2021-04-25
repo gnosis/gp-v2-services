@@ -1,14 +1,17 @@
+mod settlement_encoder;
+
 use crate::{
     encoding::{self, EncodedInteraction, EncodedSettlement, EncodedTrade},
-    interactions::UnwrapWethInteraction,
     liquidity::Settleable,
 };
-use anyhow::{anyhow, Result};
-use model::order::{Order, OrderKind};
+use anyhow::Result;
+use model::order::Order;
 use num::{BigRational, Signed, Zero};
 use primitive_types::{H160, U256};
 use shared::conversions::U256Ext;
-use std::{collections::HashMap, iter};
+use std::collections::HashMap;
+
+pub use settlement_encoder::SettlementEncoder;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Trade {
@@ -70,163 +73,6 @@ impl Interaction for EncodedInteraction {
     }
 }
 
-/// An intermediate settlement representation that can be incrementally
-/// constructed.
-///
-/// This allows liquidity to to encode itself into the settlement, in a way that
-/// is completely decoupled from solvers, or how the liquidity is modelled.
-/// Additionally, the fact that the settlement is kept in an intermediate
-/// representation allows the encoder to potentially perform gas optimizations
-/// (e.g. collapsing two interactions into one equivalent one).
-#[derive(Debug)]
-pub struct SettlementEncoder {
-    tokens: Vec<H160>,
-    clearing_prices: HashMap<H160, U256>,
-    trades: Vec<Trade>,
-    execution_plan: Vec<Box<dyn Interaction>>,
-    unwraps: Vec<UnwrapWethInteraction>,
-}
-
-impl SettlementEncoder {
-    /// Creates a new settlement encoder with the specified prices.
-    ///
-    /// The prices must be provided up front in order to ensure that all tokens
-    /// included in the settlement are known when encoding trades.
-    fn new(clearing_prices: HashMap<H160, U256>) -> Self {
-        // Explicitely define a token ordering based on the supplied clearing
-        // prices. This is done since `HashMap::keys` returns an iterator in
-        // arbitrary order ([1]), meaning that we can't rely that the ordering
-        // will be consistent across calls. The list is sorted so that
-        // settlements with the same encoded trades and interactions produce
-        // the same resulting encoded settlement, and so that we can use binary
-        // searching in order to find token indices.
-        // [1]: https://doc.rust-lang.org/beta/std/collections/hash_map/struct.HashMap.html#method.keys
-        let mut tokens = clearing_prices.keys().copied().collect::<Vec<_>>();
-        tokens.sort();
-
-        SettlementEncoder {
-            tokens,
-            clearing_prices,
-            trades: Vec::new(),
-            execution_plan: Vec::new(),
-            unwraps: Vec::new(),
-        }
-    }
-
-    pub fn add_trade(&mut self, order: Order, executed_amount: U256) -> Result<()> {
-        let sell_token_index = self
-            .token_index(order.order_creation.sell_token)
-            .ok_or_else(|| anyhow!("settlement missing sell token"))?;
-        let buy_token_index = self
-            .token_index(order.order_creation.buy_token)
-            .ok_or_else(|| anyhow!("settlement missing buy token"))?;
-        self.trades.push(Trade {
-            order,
-            sell_token_index,
-            buy_token_index,
-            executed_amount,
-        });
-
-        Ok(())
-    }
-
-    pub fn append_to_execution_plan(&mut self, interaction: impl Interaction + 'static) {
-        self.execution_plan.push(Box::new(interaction));
-    }
-
-    pub fn add_unwrap(&mut self, unwrap: UnwrapWethInteraction) {
-        for existing_unwrap in self.unwraps.iter_mut() {
-            if existing_unwrap.merge(&unwrap).is_ok() {
-                return;
-            }
-        }
-
-        // If the native token unwrap can't be merged with any existing ones,
-        // just add it to the vector.
-        self.unwraps.push(unwrap);
-    }
-
-    fn token_index(&self, token: H160) -> Option<usize> {
-        self.tokens.binary_search(&token).ok()
-    }
-
-    fn total_surplus(
-        &self,
-        normalizing_prices: &HashMap<H160, BigRational>,
-    ) -> Option<BigRational> {
-        self.trades.iter().fold(Some(num::zero()), |acc, trade| {
-            let sell_token_clearing_price = self
-                .clearing_prices
-                .get(&trade.order.order_creation.sell_token)
-                .expect("Solution with trade but without price for sell token")
-                .to_big_rational();
-            let buy_token_clearing_price = self
-                .clearing_prices
-                .get(&trade.order.order_creation.buy_token)
-                .expect("Solution with trade but without price for buy token")
-                .to_big_rational();
-
-            let sell_token_external_price = normalizing_prices
-                .get(&trade.order.order_creation.sell_token)
-                .expect("Solution with trade but without price for sell token");
-            let buy_token_external_price = normalizing_prices
-                .get(&trade.order.order_creation.buy_token)
-                .expect("Solution with trade but without price for buy token");
-
-            if match trade.order.order_creation.kind {
-                OrderKind::Sell => &buy_token_clearing_price,
-                OrderKind::Buy => &sell_token_clearing_price,
-            }
-            .is_zero()
-            {
-                return None;
-            }
-
-            let surplus = &trade.surplus(&sell_token_clearing_price, &buy_token_clearing_price)?;
-            let normalized_surplus = match trade.order.order_creation.kind {
-                OrderKind::Sell => surplus * buy_token_external_price / buy_token_clearing_price,
-                OrderKind::Buy => surplus * sell_token_external_price / sell_token_clearing_price,
-            };
-            Some(acc? + normalized_surplus)
-        })
-    }
-
-    pub fn finish(self) -> EncodedSettlement {
-        let clearing_prices = self
-            .tokens
-            .iter()
-            .map(|token| {
-                *self
-                    .clearing_prices
-                    .get(token)
-                    .expect("missing clearing price for token")
-            })
-            .collect();
-
-        EncodedSettlement {
-            tokens: self.tokens,
-            clearing_prices,
-            trades: self
-                .trades
-                .into_iter()
-                .map(|trade| trade.encode())
-                .collect(),
-            interactions: [
-                Vec::new(),
-                iter::empty()
-                    .chain(
-                        self.execution_plan
-                            .iter()
-                            .flat_map(|interaction| interaction.encode()),
-                    )
-                    .chain(self.unwraps.iter().flat_map(|unwrap| unwrap.encode()))
-                    .collect(),
-                Vec::new(),
-            ],
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct Settlement {
     encoder: SettlementEncoder,
@@ -252,19 +98,19 @@ impl Settlement {
 
     /// Returns the clearing prices map.
     pub fn clearing_prices(&self) -> &HashMap<H160, U256> {
-        &self.encoder.clearing_prices
+        self.encoder.clearing_prices()
     }
 
     /// Returns the clearing price for the specified token.
     ///
     /// Returns `None` if the token is not part of the settlement.
     pub fn clearing_price(&self, token: H160) -> Option<U256> {
-        self.encoder.clearing_prices.get(&token).copied()
+        self.clearing_prices().get(&token).copied()
     }
 
     /// Returns the currently encoded trades.
     pub fn trades(&self) -> &[Trade] {
-        &self.encoder.trades
+        &self.encoder.trades()
     }
 
     // For now this computes the total surplus of all EOA trades.
@@ -329,40 +175,33 @@ fn sell_order_surplus(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
-    use crate::interactions::dummy_web3;
+    use crate::liquidity::SettlementHandling;
     use model::order::{OrderCreation, OrderKind};
     use num::FromPrimitive;
 
-    #[test]
-    pub fn encode_trades_finds_token_index() {
-        let token0 = H160::from_low_u64_be(0);
-        let token1 = H160::from_low_u64_be(1);
-        let order0 = Order {
-            order_creation: OrderCreation {
-                sell_token: token0,
-                buy_token: token1,
-                ..Default::default()
-            },
-            ..Default::default()
+    pub fn assert_settlement_encoded_with<L, S>(
+        prices: HashMap<H160, U256>,
+        handler: S,
+        execution: L::Execution,
+        exec: impl FnOnce(&mut SettlementEncoder),
+    ) where
+        L: Settleable,
+        S: SettlementHandling<L>,
+    {
+        let actual_settlement = {
+            let mut encoder = SettlementEncoder::new(prices.clone());
+            handler.encode(execution, &mut encoder).unwrap();
+            encoder.finish()
         };
-        let order1 = Order {
-            order_creation: OrderCreation {
-                sell_token: token1,
-                buy_token: token0,
-                ..Default::default()
-            },
-            ..Default::default()
+        let expected_settlement = {
+            let mut encoder = SettlementEncoder::new(prices);
+            exec(&mut encoder);
+            encoder.finish()
         };
 
-        let mut settlement = SettlementEncoder::new(maplit::hashmap! {
-            token0 => 0.into(),
-            token1 => 0.into(),
-        });
-
-        assert!(settlement.add_trade(order0, 0.into()).is_ok());
-        assert!(settlement.add_trade(order1, 0.into()).is_ok());
+        assert_eq!(actual_settlement, expected_settlement);
     }
 
     // Helper function to save some repeatition below.
@@ -374,10 +213,7 @@ mod tests {
     /// trades for testing objective value computations.
     fn test_settlement(prices: HashMap<H160, U256>, trades: Vec<Trade>) -> Settlement {
         Settlement {
-            encoder: SettlementEncoder {
-                trades,
-                ..SettlementEncoder::new(prices)
-            },
+            encoder: SettlementEncoder::with_trades(prices, trades),
         }
     }
 
@@ -643,70 +479,6 @@ mod tests {
         assert_eq!(
             buy_order_surplus(&r(100), &r(200), &r(60), &r(20), &r(20)),
             Some(r(2000))
-        );
-    }
-
-    #[test]
-    fn settlement_merges_unwraps_for_same_token() {
-        let weth = dummy_web3::dummy_weth([0x42; 20]);
-
-        let mut encoder = SettlementEncoder::new(HashMap::new());
-        encoder.add_unwrap(UnwrapWethInteraction {
-            weth: weth.clone(),
-            amount: 1.into(),
-        });
-        encoder.add_unwrap(UnwrapWethInteraction {
-            weth: weth.clone(),
-            amount: 2.into(),
-        });
-
-        assert_eq!(
-            encoder.finish().interactions[1],
-            UnwrapWethInteraction {
-                weth,
-                amount: 3.into(),
-            }
-            .encode(),
-        );
-    }
-
-    #[test]
-    fn settlement_encoder_appends_unwraps_for_different_tokens() {
-        let mut encoder = SettlementEncoder::new(HashMap::new());
-        encoder.add_unwrap(UnwrapWethInteraction {
-            weth: dummy_web3::dummy_weth([0x01; 20]),
-            amount: 1.into(),
-        });
-        encoder.add_unwrap(UnwrapWethInteraction {
-            weth: dummy_web3::dummy_weth([0x02; 20]),
-            amount: 2.into(),
-        });
-
-        assert_eq!(
-            encoder
-                .unwraps
-                .iter()
-                .map(|unwrap| (unwrap.weth.address().0, unwrap.amount.as_u64()))
-                .collect::<Vec<_>>(),
-            vec![([0x01; 20], 1), ([0x02; 20], 2)],
-        );
-    }
-
-    #[test]
-    fn settlement_unwraps_after_execution_plan() {
-        let interaction: EncodedInteraction = (H160([0x01; 20]), 0.into(), Vec::new());
-        let unwrap = UnwrapWethInteraction {
-            weth: dummy_web3::dummy_weth([0x01; 20]),
-            amount: 1.into(),
-        };
-
-        let mut encoder = SettlementEncoder::new(HashMap::new());
-        encoder.add_unwrap(unwrap.clone());
-        encoder.append_to_execution_plan(interaction.clone());
-
-        assert_eq!(
-            encoder.finish().interactions[1],
-            [interaction.encode(), unwrap.encode()].concat(),
         );
     }
 }
