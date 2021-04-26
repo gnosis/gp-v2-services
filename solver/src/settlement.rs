@@ -73,7 +73,7 @@ impl Interaction for EncodedInteraction {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Settlement {
     encoder: SettlementEncoder,
 }

@@ -24,12 +24,11 @@ pub struct BaselineSolver {
 
 #[async_trait::async_trait]
 impl Solver for BaselineSolver {
-    async fn solve(
-        &self,
-        liquidity: Vec<Liquidity>,
-        _gas_price: f64,
-    ) -> Result<Option<Settlement>> {
-        self.solve(liquidity).transpose()
+    async fn solve(&self, liquidity: Vec<Liquidity>, _gas_price: f64) -> Result<Vec<Settlement>> {
+        match self.solve(liquidity) {
+            Some(result) => result.map(|settlement| vec![settlement]),
+            None => Ok(Vec::new()),
+        }
     }
 }
 
@@ -45,6 +44,8 @@ impl BaselineSolver {
     }
 
     fn solve(&self, liquidity: Vec<Liquidity>) -> Option<Result<Settlement>> {
+        // TODO: produce multiple settlements
+
         let amm_map = extract_deepest_amm_liquidity(&liquidity);
 
         let pool_map = amm_map
