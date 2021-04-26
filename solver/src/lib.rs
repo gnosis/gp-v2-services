@@ -1,15 +1,18 @@
+pub mod baseline_solver;
 pub mod driver;
 pub mod encoding;
 pub mod http_solver;
 pub mod interactions;
 pub mod liquidity;
+pub mod liquidity_collector;
 pub mod metrics;
 pub mod naive_solver;
+pub mod oneinch_solver;
 pub mod orderbook;
+pub mod pending_transactions;
 pub mod settlement;
 pub mod settlement_submission;
 pub mod solver;
-pub mod uniswap_solver;
 mod util;
 
 use anyhow::Result;

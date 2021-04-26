@@ -1,39 +1,27 @@
-use crate::encoding::{self, EncodedInteraction, EncodedTrade};
+mod settlement_encoder;
+
+use crate::{
+    encoding::{self, EncodedInteraction, EncodedSettlement, EncodedTrade},
+    liquidity::Settleable,
+};
 use anyhow::Result;
-use model::order::{Order, OrderKind};
+use model::order::Order;
 use num::{BigRational, Signed, Zero};
 use primitive_types::{H160, U256};
 use shared::conversions::U256Ext;
 use std::collections::HashMap;
 
+pub use settlement_encoder::SettlementEncoder;
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Trade {
     pub order: Order,
+    pub sell_token_index: usize,
+    pub buy_token_index: usize,
     pub executed_amount: U256,
-    pub fee_discount: u16,
 }
 
 impl Trade {
-    pub fn fully_matched(order: Order) -> Self {
-        let executed_amount = match order.order_creation.kind {
-            model::order::OrderKind::Buy => order.order_creation.buy_amount,
-            model::order::OrderKind::Sell => order.order_creation.sell_amount,
-        };
-        Self {
-            order,
-            executed_amount,
-            fee_discount: 0,
-        }
-    }
-
-    pub fn matched(order: Order, executed_amount: U256) -> Self {
-        Self {
-            order,
-            executed_amount,
-            fee_discount: 0,
-        }
-    }
-
     // The difference between the minimum you were willing to buy/maximum you were willing to sell, and what you ended up buying/selling
     pub fn surplus(
         &self,
@@ -57,6 +45,17 @@ impl Trade {
             ),
         }
     }
+
+    /// Encodes the settlement trade as a tuple, as expected by the smart
+    /// contract.
+    pub fn encode(&self) -> EncodedTrade {
+        encoding::encode_trade(
+            &self.order.order_creation,
+            self.sell_token_index,
+            self.buy_token_index,
+            &self.executed_amount,
+        )
+    }
 }
 
 pub trait Interaction: std::fmt::Debug + Send {
@@ -67,108 +66,68 @@ pub trait Interaction: std::fmt::Debug + Send {
     fn encode(&self) -> Vec<EncodedInteraction>;
 }
 
-#[derive(Debug, Default)]
+#[cfg(test)]
+impl Interaction for EncodedInteraction {
+    fn encode(&self) -> Vec<EncodedInteraction> {
+        vec![self.clone()]
+    }
+}
+
+#[derive(Debug)]
 pub struct Settlement {
-    pub clearing_prices: HashMap<H160, U256>,
-    pub fee_factor: U256,
-    pub trades: Vec<Trade>,
-    pub pre_interactions: Vec<Box<dyn Interaction>>,
-    pub intra_interactions: Vec<Box<dyn Interaction>>,
-    pub post_interactions: Vec<Box<dyn Interaction>>,
+    encoder: SettlementEncoder,
 }
 
 impl Settlement {
-    pub fn tokens(&self) -> Vec<H160> {
-        self.clearing_prices.keys().copied().collect()
-    }
-
-    pub fn clearing_prices(&self) -> Vec<U256> {
-        self.clearing_prices.values().copied().collect()
-    }
-
-    // Returns None if a trade uses a token for which there is no price.
-    pub fn encode_trades(&self) -> Option<Vec<EncodedTrade>> {
-        let mut token_index = HashMap::new();
-        for (i, token) in self.clearing_prices.keys().enumerate() {
-            token_index.insert(token, i);
+    /// Creates a new settlement builder for the specified clearing prices.
+    pub fn new(clearing_prices: HashMap<H160, U256>) -> Self {
+        Self {
+            encoder: SettlementEncoder::new(clearing_prices),
         }
-        self.trades
-            .iter()
-            .map(|trade| {
-                Some(encoding::encode_trade(
-                    &trade.order.order_creation,
-                    *token_index.get(&trade.order.order_creation.sell_token)?,
-                    *token_index.get(&trade.order.order_creation.buy_token)?,
-                    &trade.executed_amount,
-                ))
-            })
-            .collect()
     }
 
-    pub fn encode_interactions(&self) -> Result<[Vec<EncodedInteraction>; 3]> {
-        let encode = |interactions: &[Box<dyn Interaction>]| {
-            interactions
-                .iter()
-                .flat_map(|interaction| interaction.encode())
-                .collect()
-        };
-        Ok([
-            encode(&self.pre_interactions),
-            encode(&self.intra_interactions),
-            encode(&self.post_interactions),
-        ])
+    /// .
+    pub fn with_liquidity<L>(&mut self, liquidity: &L, execution: L::Execution) -> Result<()>
+    where
+        L: Settleable,
+    {
+        liquidity
+            .settlement_handling()
+            .encode(execution, &mut self.encoder)
     }
 
-    fn total_surplus(
-        &self,
-        normalizing_prices: &HashMap<H160, BigRational>,
-    ) -> Option<BigRational> {
-        self.trades.iter().fold(Some(num::zero()), |acc, trade| {
-            let sell_token_clearing_price = self
-                .clearing_prices
-                .get(&trade.order.order_creation.sell_token)
-                .expect("Solution with trade but without price for sell token")
-                .to_big_rational();
-            let buy_token_clearing_price = self
-                .clearing_prices
-                .get(&trade.order.order_creation.buy_token)
-                .expect("Solution with trade but without price for buy token")
-                .to_big_rational();
+    /// Returns the clearing prices map.
+    pub fn clearing_prices(&self) -> &HashMap<H160, U256> {
+        self.encoder.clearing_prices()
+    }
 
-            let sell_token_external_price = normalizing_prices
-                .get(&trade.order.order_creation.sell_token)
-                .expect("Solution with trade but without price for sell token");
-            let buy_token_external_price = normalizing_prices
-                .get(&trade.order.order_creation.buy_token)
-                .expect("Solution with trade but without price for buy token");
+    /// Returns the clearing price for the specified token.
+    ///
+    /// Returns `None` if the token is not part of the settlement.
+    pub fn clearing_price(&self, token: H160) -> Option<U256> {
+        self.clearing_prices().get(&token).copied()
+    }
 
-            if match trade.order.order_creation.kind {
-                OrderKind::Sell => &buy_token_clearing_price,
-                OrderKind::Buy => &sell_token_clearing_price,
-            }
-            .is_zero()
-            {
-                return None;
-            }
-
-            let surplus = &trade.surplus(&sell_token_clearing_price, &buy_token_clearing_price)?;
-            let normalized_surplus = match trade.order.order_creation.kind {
-                OrderKind::Sell => surplus * buy_token_external_price / buy_token_clearing_price,
-                OrderKind::Buy => surplus * sell_token_external_price / sell_token_clearing_price,
-            };
-            Some(acc? + normalized_surplus)
-        })
+    /// Returns the currently encoded trades.
+    pub fn trades(&self) -> &[Trade] {
+        &self.encoder.trades()
     }
 
     // For now this computes the total surplus of all EOA trades.
     pub fn objective_value(&self, external_prices: &HashMap<H160, BigRational>) -> BigRational {
-        match self.total_surplus(&external_prices) {
+        match self.encoder.total_surplus(&external_prices) {
             Some(value) => value,
             None => {
                 tracing::error!("Overflow computing objective value for: {:?}", self);
                 num::zero()
             }
         }
+    }
+}
+
+impl From<Settlement> for EncodedSettlement {
+    fn from(settlement: Settlement) -> Self {
+        settlement.encoder.finish()
     }
 }
 
@@ -216,50 +175,46 @@ fn sell_order_surplus(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
+    use crate::liquidity::SettlementHandling;
     use model::order::{OrderCreation, OrderKind};
     use num::FromPrimitive;
 
-    #[test]
-    pub fn encode_trades_finds_token_index() {
-        let token0 = H160::from_low_u64_be(0);
-        let token1 = H160::from_low_u64_be(1);
-        let order0 = Order {
-            order_creation: OrderCreation {
-                sell_token: token0,
-                buy_token: token1,
-                ..Default::default()
-            },
-            ..Default::default()
+    pub fn assert_settlement_encoded_with<L, S>(
+        prices: HashMap<H160, U256>,
+        handler: S,
+        execution: L::Execution,
+        exec: impl FnOnce(&mut SettlementEncoder),
+    ) where
+        L: Settleable,
+        S: SettlementHandling<L>,
+    {
+        let actual_settlement = {
+            let mut encoder = SettlementEncoder::new(prices.clone());
+            handler.encode(execution, &mut encoder).unwrap();
+            encoder.finish()
         };
-        let order1 = Order {
-            order_creation: OrderCreation {
-                sell_token: token1,
-                buy_token: token0,
-                ..Default::default()
-            },
-            ..Default::default()
+        let expected_settlement = {
+            let mut encoder = SettlementEncoder::new(prices);
+            exec(&mut encoder);
+            encoder.finish()
         };
-        let trade0 = Trade {
-            order: order0,
-            ..Default::default()
-        };
-        let trade1 = Trade {
-            order: order1,
-            ..Default::default()
-        };
-        let settlement = Settlement {
-            clearing_prices: maplit::hashmap! {token0 => 0.into(), token1 => 0.into()},
-            trades: vec![trade0, trade1],
-            ..Default::default()
-        };
-        assert!(settlement.encode_trades().is_some());
+
+        assert_eq!(actual_settlement, expected_settlement);
     }
 
     // Helper function to save some repeatition below.
     fn r(u: u128) -> BigRational {
         BigRational::from_u128(u).unwrap()
+    }
+
+    /// Helper function for creating a settlement for the specified prices and
+    /// trades for testing objective value computations.
+    fn test_settlement(prices: HashMap<H160, U256>, trades: Vec<Trade>) -> Settlement {
+        Settlement {
+            encoder: SettlementEncoder::with_trades(prices, trades),
+        }
     }
 
     #[test]
@@ -306,17 +261,9 @@ mod tests {
         let clearing_prices0 = maplit::hashmap! {token0 => 1.into(), token1 => 1.into()};
         let clearing_prices1 = maplit::hashmap! {token0 => 2.into(), token1 => 2.into()};
 
-        let settlement0 = Settlement {
-            clearing_prices: clearing_prices0,
-            trades: vec![trade0.clone(), trade1.clone()],
-            ..Default::default()
-        };
+        let settlement0 = test_settlement(clearing_prices0, vec![trade0.clone(), trade1.clone()]);
 
-        let settlement1 = Settlement {
-            clearing_prices: clearing_prices1,
-            trades: vec![trade0, trade1],
-            ..Default::default()
-        };
+        let settlement1 = test_settlement(clearing_prices1, vec![trade0, trade1]);
 
         let external_prices = maplit::hashmap! {token0 => r(1), token1 => r(1)};
         assert_eq!(
@@ -348,11 +295,7 @@ mod tests {
         // Settlement0 gets the following surpluses:
         // trade0: 81 - 81 = 0
         // trade1: 100 - 81 = 19
-        let settlement0 = Settlement {
-            clearing_prices: clearing_prices0,
-            trades: vec![trade0, trade1],
-            ..Default::default()
-        };
+        let settlement0 = test_settlement(clearing_prices0, vec![trade0, trade1]);
 
         let trade0 = Trade {
             order: order0,
@@ -370,11 +313,7 @@ mod tests {
         // Settlement1 gets the following surpluses:
         // trade0: 90 - 72.9 = 17.1
         // trade1: 100 - 100 = 0
-        let settlement1 = Settlement {
-            clearing_prices: clearing_prices1,
-            trades: vec![trade0, trade1],
-            ..Default::default()
-        };
+        let settlement1 = test_settlement(clearing_prices1, vec![trade0, trade1]);
 
         // If the external prices of the two tokens is the same, then both settlements are symmetric.
         let external_prices = maplit::hashmap! {token0 => r(1), token1 => r(1)};
@@ -437,11 +376,7 @@ mod tests {
 
         let clearing_prices = maplit::hashmap! {token0 => 1.into(), token1 => 0.into()};
 
-        let settlement = Settlement {
-            clearing_prices,
-            trades: vec![trade],
-            ..Default::default()
-        };
+        let settlement = test_settlement(clearing_prices, vec![trade]);
 
         let external_prices = maplit::hashmap! {token0 => r(1), token1 => r(1)};
         settlement.objective_value(&external_prices);

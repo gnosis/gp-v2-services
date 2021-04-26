@@ -1,10 +1,10 @@
 use anyhow::Result;
-use contracts::{GPv2Settlement, UniswapV2Factory, UniswapV2Router02, ERC20};
+use contracts::{GPv2Settlement, IUniswapLikeRouter, ERC20};
 use ethcontract::batch::CallBatch;
 use primitive_types::{H160, U256};
 use shared::{
-    uniswap_pool::{PoolFetcher, PoolFetching as _},
-    uniswap_solver::{path_candidates, token_path_to_pair_path},
+    baseline_solver::{path_candidates, token_path_to_pair_path},
+    pool_fetching::{PoolFetcher, PoolFetching as _},
     Web3,
 };
 use std::collections::{HashMap, HashSet};
@@ -14,11 +14,12 @@ const MAX_BATCH_SIZE: usize = 100;
 pub const MAX_HOPS: usize = 2;
 
 use crate::interactions::UniswapInteraction;
-use crate::settlement::Interaction;
+use crate::settlement::SettlementEncoder;
 
-use super::{AmmOrder, AmmSettlementHandling, LimitOrder};
+use super::{AmmOrder, AmmOrderExecution, LimitOrder, SettlementHandling};
+use shared::amm_pair_provider::AmmPairProvider;
 
-pub struct UniswapLiquidity {
+pub struct UniswapLikeLiquidity {
     inner: Arc<Inner>,
     pool_fetcher: PoolFetcher,
     web3: Web3,
@@ -26,20 +27,19 @@ pub struct UniswapLiquidity {
 }
 
 struct Inner {
-    router: UniswapV2Router02,
+    router: IUniswapLikeRouter,
     gpv2_settlement: GPv2Settlement,
     // Mapping of how much allowance the router has per token to spend on behalf of the settlement contract
     allowances: Mutex<HashMap<H160, U256>>,
 }
 
-impl UniswapLiquidity {
+impl UniswapLikeLiquidity {
     pub fn new(
-        factory: UniswapV2Factory,
-        router: UniswapV2Router02,
+        router: IUniswapLikeRouter,
+        pair_provider: Arc<dyn AmmPairProvider>,
         gpv2_settlement: GPv2Settlement,
         base_tokens: HashSet<H160>,
         web3: Web3,
-        chain_id: u64,
     ) -> Self {
         Self {
             inner: Arc::new(Inner {
@@ -49,9 +49,8 @@ impl UniswapLiquidity {
             }),
             web3: web3.clone(),
             pool_fetcher: PoolFetcher {
-                factory,
+                pair_provider,
                 web3,
-                chain_id,
             },
             base_tokens,
         }
@@ -137,7 +136,7 @@ impl Inner {
             < input.1;
 
         UniswapInteraction {
-            contract: self.router.clone(),
+            router: self.router.clone(),
             settlement: self.gpv2_settlement.clone(),
             set_allowance,
             amount_in: input.1,
@@ -149,10 +148,11 @@ impl Inner {
     }
 }
 
-impl AmmSettlementHandling for Inner {
+impl SettlementHandling<AmmOrder> for Inner {
     // Creates the required interaction to convert the given input into output. Applies 0.1% slippage tolerance to the output.
-    fn settle(&self, input: (H160, U256), output: (H160, U256)) -> Vec<Box<dyn Interaction>> {
-        vec![Box::new(self._settle(input, output))]
+    fn encode(&self, execution: AmmOrderExecution, encoder: &mut SettlementEncoder) -> Result<()> {
+        encoder.append_to_execution_plan(self._settle(execution.input, execution.output));
+        Ok(())
     }
 }
 
@@ -174,7 +174,7 @@ mod tests {
         fn new(allowances: HashMap<H160, U256>) -> Self {
             let web3 = dummy_web3::dummy_web3();
             Self {
-                router: UniswapV2Router02::at(&web3, H160::zero()),
+                router: IUniswapLikeRouter::at(&web3, H160::zero()),
                 gpv2_settlement: GPv2Settlement::at(&web3, H160::zero()),
                 allowances: Mutex::new(allowances),
             }

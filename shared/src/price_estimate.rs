@@ -1,9 +1,9 @@
-use crate::conversions::U256Ext;
-use crate::uniswap_pool::{Pool, PoolFetching};
-use crate::uniswap_solver::{
+use crate::baseline_solver::{
     estimate_buy_amount, estimate_sell_amount, estimate_spot_price, path_candidates,
     token_path_to_pair_path,
 };
+use crate::conversions::U256Ext;
+use crate::pool_fetching::{Pool, PoolFetching};
 use anyhow::{anyhow, Result};
 use ethcontract::{H160, U256};
 use futures::future::join_all;
@@ -258,15 +258,43 @@ impl UniswapPriceEstimator {
     }
 }
 
-pub struct FakePriceEstimator(pub BigRational);
-#[async_trait::async_trait]
-impl PriceEstimating for FakePriceEstimator {
-    async fn estimate_price(&self, _: H160, _: H160, _: U256, _: OrderKind) -> Result<BigRational> {
-        Ok(self.0.clone())
+pub mod mocks {
+    use super::*;
+
+    pub struct FakePriceEstimator(pub BigRational);
+    #[async_trait::async_trait]
+    impl PriceEstimating for FakePriceEstimator {
+        async fn estimate_price(
+            &self,
+            _: H160,
+            _: H160,
+            _: U256,
+            _: OrderKind,
+        ) -> Result<BigRational> {
+            Ok(self.0.clone())
+        }
+
+        async fn estimate_gas(&self, _: H160, _: H160, _: U256, _: OrderKind) -> Result<U256> {
+            Ok(100_000.into())
+        }
     }
 
-    async fn estimate_gas(&self, _: H160, _: H160, _: U256, _: OrderKind) -> Result<U256> {
-        Ok(100_000.into())
+    pub struct FailingPriceEstimator();
+    #[async_trait::async_trait]
+    impl PriceEstimating for FailingPriceEstimator {
+        async fn estimate_price(
+            &self,
+            _: H160,
+            _: H160,
+            _: U256,
+            _: OrderKind,
+        ) -> Result<BigRational> {
+            Err(anyhow!("error"))
+        }
+
+        async fn estimate_gas(&self, _: H160, _: H160, _: U256, _: OrderKind) -> Result<U256> {
+            Err(anyhow!("error"))
+        }
     }
 }
 
@@ -277,7 +305,7 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
-    use crate::uniswap_pool::{FilteredPoolFetcher, Pool, PoolFetching};
+    use crate::pool_fetching::{FilteredPoolFetcher, Pool, PoolFetching};
 
     struct FakePoolFetcher(Vec<Pool>);
     #[async_trait::async_trait]

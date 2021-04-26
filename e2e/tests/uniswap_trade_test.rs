@@ -1,5 +1,8 @@
-use contracts::{ERC20Mintable, UniswapV2Factory, UniswapV2Router02};
-use ethcontract::prelude::{Account, Address, Http, PrivateKey, Web3, U256};
+use contracts::{ERC20Mintable, IUniswapLikeRouter, UniswapV2Factory, UniswapV2Router02, WETH9};
+use ethcontract::{
+    prelude::{Account, Address, Http, PrivateKey, U256},
+    H160,
+};
 use hex_literal::hex;
 use model::{
     order::{OrderBuilder, OrderKind},
@@ -12,12 +15,17 @@ use orderbook::{
 use secp256k1::SecretKey;
 use serde_json::json;
 use shared::{
+    amm_pair_provider::UniswapPairProvider,
     current_block::current_block_stream,
+    pool_fetching::{CachedPoolFetcher, PoolFetcher},
     price_estimate::UniswapPriceEstimator,
     transport::LoggingTransport,
-    uniswap_pool::{CachedPoolFetcher, PoolFetcher},
+    Web3,
 };
-use solver::{liquidity::uniswap::UniswapLiquidity, metrics::NoopMetrics, orderbook::OrderBookApi};
+use solver::{
+    liquidity::uniswap::UniswapLikeLiquidity, liquidity_collector::LiquidityCollector,
+    metrics::NoopMetrics, orderbook::OrderBookApi,
+};
 use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 use web3::signing::SecretKeyRef;
 
@@ -71,8 +79,7 @@ async fn test_with_ganache() {
         .expect("Failed to load deployed UniswapFactory");
     let uniswap_router = UniswapV2Router02::deployed(&web3)
         .await
-        .expect("Failed to load deployed UniswapFactory");
-
+        .expect("Failed to load deployed UniswapRouter");
     let gp_settlement = solver::get_settlement_contract(&web3, solver.clone())
         .await
         .expect("Failed to load deployed GPv2Settlement");
@@ -135,11 +142,14 @@ async fn test_with_ganache() {
     let event_updater = EventUpdater::new(gp_settlement.clone(), db.clone(), None);
 
     let current_block_stream = current_block_stream(web3.clone()).await.unwrap();
+    let pair_provider = Arc::new(UniswapPairProvider {
+        factory: uniswap_factory.clone(),
+        chain_id,
+    });
     let pool_fetcher = CachedPoolFetcher::new(
         Box::new(PoolFetcher {
-            factory: uniswap_factory.clone(),
+            pair_provider,
             web3: web3.clone(),
-            chain_id,
         }),
         current_block_stream,
     );
@@ -159,7 +169,11 @@ async fn test_with_ganache() {
         domain_separator,
         db.clone(),
         event_updater,
-        Box::new(Web3BalanceFetcher::new(web3.clone(), gp_allowance)),
+        Box::new(Web3BalanceFetcher::new(
+            web3.clone(),
+            gp_allowance,
+            gp_settlement.address(),
+        )),
         fee_calculator.clone(),
         HashSet::new(),
     ));
@@ -214,24 +228,30 @@ async fn test_with_ganache() {
         .send()
         .await;
     assert_eq!(placement.unwrap().status(), 201);
+    let uniswap_pair_provider = Arc::new(UniswapPairProvider {
+        factory: uniswap_factory.clone(),
+        chain_id,
+    });
 
     // Drive solution
-    let uniswap_liquidity = UniswapLiquidity::new(
-        uniswap_factory.clone(),
-        uniswap_router.clone(),
+    let uniswap_liquidity = UniswapLikeLiquidity::new(
+        IUniswapLikeRouter::at(&web3, uniswap_router.address()),
+        uniswap_pair_provider.clone(),
         gp_settlement.clone(),
         HashSet::new(),
         web3.clone(),
-        1,
     );
     let solver = solver::naive_solver::NaiveSolver {};
+    let liquidity_collector = LiquidityCollector {
+        uniswap_like_liquidity: vec![uniswap_liquidity],
+        orderbook_api: create_orderbook_api(&web3),
+    };
     let mut driver = solver::driver::Driver::new(
         gp_settlement.clone(),
-        uniswap_liquidity,
-        create_orderbook_api(),
+        liquidity_collector,
         price_estimator,
         vec![Box::new(solver)],
-        Box::new(web3),
+        Box::new(web3.clone()),
         Duration::from_secs(1),
         Duration::from_secs(30),
         native_token,
@@ -258,7 +278,7 @@ async fn test_with_ganache() {
     // Drive orderbook in order to check the removal of settled order_b
     orderbook.run_maintenance(&gp_settlement).await.unwrap();
 
-    let orders = create_orderbook_api().get_orders().await.unwrap();
+    let orders = create_orderbook_api(&web3).get_orders().await.unwrap();
     assert!(orders.is_empty());
 
     // Drive again to ensure we can continue solution finding
@@ -269,9 +289,11 @@ fn to_wei(base: u32) -> U256 {
     U256::from(base) * U256::from(10).pow(18.into())
 }
 
-fn create_orderbook_api() -> OrderBookApi {
+fn create_orderbook_api(web3: &Web3) -> OrderBookApi {
+    let native_token = WETH9::at(web3, H160([0x42; 20]));
     solver::orderbook::OrderBookApi::new(
         reqwest::Url::from_str(API_HOST).unwrap(),
         std::time::Duration::from_secs(10),
+        native_token,
     )
 }

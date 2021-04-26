@@ -8,7 +8,7 @@ mod paths;
 
 fn main() {
     // NOTE: This is a workaround for `rerun-if-changed` directives for
-    // non-existant files cause the crate's build unit to get flagged for a
+    // non-existent files cause the crate's build unit to get flagged for a
     // rebuild if any files in the workspace change.
     //
     // See:
@@ -35,6 +35,25 @@ fn main() {
         },
     );
     generate_contract("UniswapV2Pair", hashmap! {});
+    // This is done to have a common interface for Sushiswap, Uniswap & Honeyswap
+    generate_contract("IUniswapLikeRouter", hashmap! {});
+    generate_contract(
+        "SushiswapV2Router02",
+        hashmap! {
+            1 => (Address::from_str("d9e1cE17f2641f24aE83637ab66a2cca9C378B9F").unwrap(), None),
+            4 => (Address::from_str("1b02dA8Cb0d097eB8D57A175b88c7D8b47997506").unwrap(), None),
+            100 => (Address::from_str("1b02dA8Cb0d097eB8D57A175b88c7D8b47997506").unwrap(), None),
+        },
+    );
+    generate_contract(
+        "SushiswapV2Factory",
+        hashmap! {
+            1 => (Address::from_str("C0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac").unwrap(), None),
+            4 => (Address::from_str("c35DADB65012eC5796536bD9864eD8773aBc74C4").unwrap(), None),
+            100 => (Address::from_str("c35DADB65012eC5796536bD9864eD8773aBc74C4").unwrap(), None),
+        },
+    );
+    generate_contract("SushiswapV2Pair", hashmap! {});
     generate_contract(
         "GPv2Settlement",
         hashmap! {

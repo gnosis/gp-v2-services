@@ -1,6 +1,7 @@
 mod multi_order_solver;
 
 use crate::{
+    baseline_solver::extract_deepest_amm_liquidity,
     liquidity::{AmmOrder, LimitOrder, Liquidity},
     settlement::Settlement,
     solver::Solver,
@@ -18,21 +19,14 @@ impl Solver for NaiveSolver {
         liquidity: Vec<Liquidity>,
         _gas_price: f64,
     ) -> Result<Option<Settlement>> {
-        let mut limit_orders = Vec::new();
-        let mut uniswaps = HashMap::new();
-        for liquidity in liquidity {
-            match liquidity {
-                Liquidity::Limit(order) => limit_orders.push(order),
-                Liquidity::Amm(uniswap) => {
-                    let pair = uniswap.tokens;
-                    uniswaps.insert(
-                        TokenPair::new(pair.get().0, pair.get().1).expect("Invalid Pair"),
-                        uniswap,
-                    );
-                }
-            }
-        }
-        Ok(settle(limit_orders.into_iter(), uniswaps).await)
+        let uniswaps = extract_deepest_amm_liquidity(&liquidity);
+        let limit_orders = liquidity
+            .into_iter()
+            .filter_map(|liquidity| match liquidity {
+                Liquidity::Limit(order) => Some(order),
+                _ => None,
+            });
+        Ok(settle(limit_orders, uniswaps).await.into_iter().next())
     }
 }
 
@@ -45,18 +39,16 @@ impl fmt::Display for NaiveSolver {
 async fn settle(
     orders: impl Iterator<Item = LimitOrder>,
     uniswaps: HashMap<TokenPair, AmmOrder>,
-) -> Option<Settlement> {
-    let orders = organize_orders_by_token_pair(orders);
-    // TODO: Settle multiple token pairs in one settlement.
-    for (pair, orders) in orders {
-        if let Some(settlement) = settle_pair(pair, orders, &uniswaps).await {
-            return Some(settlement);
-        }
-    }
-    None
+) -> Vec<Settlement> {
+    // The multi order solver matches as many orders as possible together with one uniswap pool.
+    // Settlements between different token pairs are thus independent.
+    organize_orders_by_token_pair(orders)
+        .into_iter()
+        .filter_map(|(pair, orders)| settle_pair(pair, orders, &uniswaps))
+        .collect()
 }
 
-async fn settle_pair(
+fn settle_pair(
     pair: TokenPair,
     orders: Vec<LimitOrder>,
     uniswaps: &HashMap<TokenPair, AmmOrder>,

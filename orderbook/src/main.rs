@@ -10,12 +10,12 @@ use orderbook::{
     orderbook::Orderbook,
     serve_task, verify_deployed_contract_constants,
 };
-use shared::uniswap_pool::FilteredPoolFetcher;
 use shared::{
+    amm_pair_provider::UniswapPairProvider,
     current_block::{current_block_stream, CurrentBlockStream},
+    pool_fetching::{CachedPoolFetcher, FilteredPoolFetcher, PoolFetcher},
     price_estimate::UniswapPriceEstimator,
     transport::LoggingTransport,
-    uniswap_pool::{CachedPoolFetcher, PoolFetcher},
 };
 use std::{collections::HashSet, iter::FromIterator as _, net::SocketAddr, sync::Arc};
 use structopt::StructOpt;
@@ -85,7 +85,7 @@ async fn main() {
         .expect("Couldn't get allowance manager address");
     let uniswap_factory = UniswapV2Factory::deployed(&web3)
         .await
-        .expect("couldn't load deployed uniswap router");
+        .expect("couldn't load deployed uniswap factory");
     let native_token = WETH9::deployed(&web3)
         .await
         .expect("couldn't load deployed native token");
@@ -95,6 +95,10 @@ async fn main() {
         .await
         .expect("Could not get chainId")
         .as_u64();
+    let uniswap_pair_provider = UniswapPairProvider {
+        factory: uniswap_factory,
+        chain_id,
+    };
     verify_deployed_contract_constants(&settlement_contract, chain_id)
         .await
         .expect("Deployed contract constants don't match the ones in this binary");
@@ -114,7 +118,8 @@ async fn main() {
 
     let event_updater =
         EventUpdater::new(settlement_contract.clone(), database.clone(), sync_start);
-    let balance_fetcher = Web3BalanceFetcher::new(web3.clone(), gp_allowance);
+    let balance_fetcher =
+        Web3BalanceFetcher::new(web3.clone(), gp_allowance, settlement_contract.address());
 
     let gas_price_estimator = shared::gas_price_estimation::create_priority_estimator(
         &reqwest::Client::new(),
@@ -139,9 +144,8 @@ async fn main() {
     let current_block_stream = current_block_stream(web3.clone()).await.unwrap();
     let cached_pool_fetcher = CachedPoolFetcher::new(
         Box::new(PoolFetcher {
-            factory: uniswap_factory,
+            pair_provider: Arc::new(uniswap_pair_provider),
             web3,
-            chain_id,
         }),
         current_block_stream.clone(),
     );
