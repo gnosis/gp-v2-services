@@ -98,7 +98,8 @@ pub fn estimate_sell_amount<'a, L: BaselineSolvable>(
         )
         .map(|(amount, _, liquidity)| Estimate {
             value: amount,
-            path: liquidity,
+            // Since we reversed the path originally, we need ret re-reverse it here.
+            path: liquidity.into_iter().rev().collect(),
         })
 }
 
@@ -365,7 +366,7 @@ mod tests {
         let sell_estimate = estimate_sell_amount(1000.into(), &path, &pools).unwrap();
         assert_eq!(
             sell_estimate.path,
-            [&second_hop_low_slippage, &first_hop_low_price]
+            [&first_hop_low_price, &second_hop_low_slippage]
         );
 
         let spot_price = estimate_spot_price(&path, &pools).unwrap();
@@ -385,7 +386,7 @@ mod tests {
         let sell_estimate = estimate_sell_amount(1000.into(), &path, &pools).unwrap();
         assert_eq!(
             sell_estimate.path,
-            [&first_hop_high_price, &second_hop_low_slippage]
+            [&second_hop_low_slippage, &first_hop_high_price]
         );
 
         let spot_price = estimate_spot_price(&path, &pools).unwrap();
