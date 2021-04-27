@@ -240,6 +240,13 @@ mod tests {
                 fee: Ratio::new(3, 1000),
                 settlement_handling: amm_handler[1].clone(),
             },
+            // Second native token pool has a worse price despite larger k
+            AmmOrder {
+                tokens: TokenPair::new(sell_token, native_token).unwrap(),
+                reserves: (11_000_000, 10_000_000),
+                fee: Ratio::new(3, 1000),
+                settlement_handling: amm_handler[1].clone(),
+            },
             AmmOrder {
                 tokens: TokenPair::new(native_token, buy_token).unwrap(),
                 reserves: (10_000_000, 10_000_000),
@@ -333,6 +340,13 @@ mod tests {
             AmmOrder {
                 tokens: TokenPair::new(sell_token, native_token).unwrap(),
                 reserves: (10_000_000, 10_000_000),
+                fee: Ratio::new(3, 1000),
+                settlement_handling: amm_handler[1].clone(),
+            },
+            // Second native token pool has a worse price despite larger k
+            AmmOrder {
+                tokens: TokenPair::new(sell_token, native_token).unwrap(),
+                reserves: (11_000_000, 10_000_000),
                 fee: Ratio::new(3, 1000),
                 settlement_handling: amm_handler[1].clone(),
             },
