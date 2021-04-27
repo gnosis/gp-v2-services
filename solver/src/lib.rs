@@ -12,7 +12,6 @@ pub mod orderbook;
 pub mod pending_transactions;
 pub mod settlement;
 pub mod settlement_submission;
-pub mod slippage;
 pub mod solver;
 mod util;
 

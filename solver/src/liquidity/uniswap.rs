@@ -13,7 +13,8 @@ use std::sync::{Arc, Mutex};
 const MAX_BATCH_SIZE: usize = 100;
 pub const MAX_HOPS: usize = 2;
 
-use crate::{interactions::UniswapInteraction, settlement::SettlementEncoder, slippage};
+use super::slippage;
+use crate::{interactions::UniswapInteraction, settlement::SettlementEncoder};
 
 use super::{AmmOrder, AmmOrderExecution, LimitOrder, SettlementHandling};
 use shared::amm_pair_provider::AmmPairProvider;
