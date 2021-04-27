@@ -1,12 +1,18 @@
 use ethcontract::futures::FutureExt;
 use ethcontract::{Http, U256};
+use lazy_static::lazy_static;
 use shared::{transport::LoggingTransport, Web3};
 use std::{
     fmt::Debug,
     future::Future,
     panic::{self, AssertUnwindSafe},
+    sync::Mutex,
 };
 use web3::{api::Namespace, helpers::CallFuture, Transport};
+
+lazy_static! {
+    static ref GANACHE_MUTEX: Mutex<()> = Mutex::new(());
+}
 
 const NODE_HOST: &str = "http://127.0.0.1:8545";
 
@@ -14,13 +20,19 @@ const NODE_HOST: &str = "http://127.0.0.1:8545";
 /// Before each test, it creates a snapshot of the current state of the chain.
 /// The saved state is restored at the end of the test.
 ///
-/// This function must not be called again until the current execution has
-/// terminated.
+/// Note that tests calling with this function will not be run aymultaneously.
 pub async fn test<F, Fut>(f: F)
 where
     F: FnOnce(Web3) -> Fut,
     Fut: Future<Output = ()>,
 {
+    // The mutex guarantees that no more than a test at a time is running on
+    // Ganache.
+    // Note that the mutex is expected to become poisoned if a test panics. This
+    // is not relevant for us as we are not interested in the data stored in
+    // it but rather in the locked state.
+    let _lock = GANACHE_MUTEX.lock();
+
     let http = LoggingTransport::new(Http::new(NODE_HOST).expect("transport failure"));
     let web3 = Web3::new(http);
     let resetter = Resetter::new(&web3).await;
