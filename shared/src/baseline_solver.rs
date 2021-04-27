@@ -41,31 +41,19 @@ pub fn estimate_buy_amount<'a, L: BaselineSolvable>(
         .fold(
             Some((sell_amount, *sell_token, Vec::new())),
             |previous, current| {
-                let previous = match previous {
-                    Some(previous) => previous,
-                    None => return None,
-                };
-
-                match liquidity.get(&TokenPair::new(*current, previous.1)?) {
-                    Some(liquidity) => liquidity
-                        .iter()
-                        .max_by_key(|item| item.get_amount_out(*current, previous.0, previous.1))
-                        .and_then(|best| {
-                            best.get_amount_out(*current, previous.0, previous.1)
-                                .map(|amount| {
-                                    (
-                                        amount,
-                                        *current,
-                                        previous
-                                            .2
-                                            .into_iter()
-                                            .chain(std::iter::once(best))
-                                            .collect(),
-                                    )
-                                })
-                        }),
-                    None => None,
-                }
+                let (amount, previous, mut path) = previous?;
+                let (best_liquidity, amount) = liquidity
+                    .get(&TokenPair::new(*current, previous)?)?
+                    .iter()
+                    .map(|liquidity| {
+                        (
+                            liquidity,
+                            liquidity.get_amount_out(*current, amount, previous),
+                        )
+                    })
+                    .max_by(|(_, amount_a), (_, amount_b)| amount_a.cmp(&amount_b))?;
+                path.push(best_liquidity);
+                Some((amount?, *current, path))
             },
         )
         .map(|(amount, _, liquidity)| Estimate {
@@ -89,34 +77,23 @@ pub fn estimate_sell_amount<'a, L: BaselineSolvable>(
         .fold(
             Some((buy_amount, *buy_token, Vec::new())),
             |previous, current| {
-                let previous = match previous {
-                    Some(previous) => previous,
-                    None => return None,
-                };
-                match liquidity.get(&TokenPair::new(*current, previous.1)?) {
-                    Some(liquidity) => liquidity
-                        .iter()
-                        .min_by_key(|liquidity| {
-                            liquidity
-                                .get_amount_in(*current, previous.0, previous.1)
-                                .unwrap_or_else(U256::max_value)
-                        })
-                        .and_then(|best| {
-                            best.get_amount_in(*current, previous.0, previous.1)
-                                .map(|amount| {
-                                    (
-                                        amount,
-                                        *current,
-                                        previous
-                                            .2
-                                            .into_iter()
-                                            .chain(std::iter::once(best))
-                                            .collect(),
-                                    )
-                                })
-                        }),
-                    None => None,
-                }
+                let (amount, previous, mut path) = previous?;
+                let (best_liquidity, amount) = liquidity
+                    .get(&TokenPair::new(*current, previous)?)?
+                    .iter()
+                    .map(|liquidity| {
+                        (
+                            liquidity,
+                            liquidity.get_amount_in(*current, amount, previous),
+                        )
+                    })
+                    .min_by(|(_, amount_a), (_, amount_b)| {
+                        amount_a
+                            .unwrap_or_else(U256::max_value)
+                            .cmp(&amount_b.unwrap_or_else(U256::max_value))
+                    })?;
+                path.push(best_liquidity);
+                Some((amount?, *current, path))
             },
         )
         .map(|(amount, _, liquidity)| Estimate {
@@ -135,24 +112,14 @@ pub fn estimate_spot_price<'a, L: BaselineSolvable>(
         .fold(
             Some((BigRational::from_integer(1.into()), *sell_token, Vec::new())),
             |previous, current| {
-                let previous = match previous {
-                    Some(previous) => previous,
-                    None => return None,
-                };
-                let liquidity = liquidity.get(&TokenPair::new(*current, previous.1)?)?;
-                let best = liquidity
+                let (price_so_far, previous, mut path) = previous?;
+                let (best_liquidity, price) = liquidity
+                    .get(&TokenPair::new(*current, previous)?)?
                     .iter()
-                    .max_by_key(|liquidity| liquidity.get_spot_price(previous.1, *current))?;
-                let price = best.get_spot_price(previous.1, *current)?;
-                Some((
-                    previous.0 * price,
-                    *current,
-                    previous
-                        .2
-                        .into_iter()
-                        .chain(std::iter::once(best))
-                        .collect(),
-                ))
+                    .map(|liquidity| (liquidity, liquidity.get_spot_price(previous, *current)))
+                    .max_by(|(_, amount_a), (_, amount_b)| amount_a.cmp(&amount_b))?;
+                path.push(best_liquidity);
+                Some((price_so_far * price?, *current, path))
             },
         )
         .map(|(amount, _, liquidity)| Estimate {
