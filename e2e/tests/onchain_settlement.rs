@@ -248,6 +248,7 @@ async fn onchain_settlement(web3: Web3) {
         uniswap_like_liquidity: vec![uniswap_liquidity],
         orderbook_api: create_orderbook_api(&web3),
     };
+    let network_id = web3.net().version().await.unwrap();
     let mut driver = solver::driver::Driver::new(
         gp_settlement.clone(),
         liquidity_collector,
@@ -259,6 +260,8 @@ async fn onchain_settlement(web3: Web3) {
         native_token,
         Duration::from_secs(0),
         Arc::new(NoopMetrics::default()),
+        web3.clone(),
+        network_id,
     );
     driver.single_run().await.unwrap();
 

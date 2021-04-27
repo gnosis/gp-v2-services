@@ -131,6 +131,11 @@ async fn main() {
         .await
         .expect("Could not get chainId")
         .as_u64();
+    let network_id = web3
+        .net()
+        .version()
+        .await
+        .expect("failed to get network id");
     let account = Account::Offline(args.private_key, Some(chain_id));
     let settlement_contract = solver::get_settlement_contract(&web3, account)
         .await
@@ -176,7 +181,7 @@ async fn main() {
         chain_id,
         settlement_contract.clone(),
         base_tokens.clone(),
-        web3,
+        web3.clone(),
     )
     .await;
     let solver = solver::solver::create(
@@ -202,6 +207,8 @@ async fn main() {
         native_token_contract.address(),
         args.min_order_age,
         metrics,
+        web3,
+        network_id,
     );
 
     serve_metrics(registry, ([0, 0, 0, 0], args.metrics_port).into());
