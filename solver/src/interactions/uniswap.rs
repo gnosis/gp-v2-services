@@ -30,7 +30,6 @@ impl UniswapInteraction {
         let token = ERC20::at(&self.web3(), self.token_in);
         Erc20ApproveInteraction {
             token,
-            owner: self.settlement.address(),
             spender: self.router.address(),
             amount: U256::MAX,
         }

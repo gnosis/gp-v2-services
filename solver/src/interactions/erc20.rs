@@ -7,7 +7,6 @@ use primitive_types::{H160, U256};
 #[derive(Debug)]
 pub struct Erc20ApproveInteraction {
     pub token: ERC20,
-    pub owner: H160,
     pub spender: H160,
     pub amount: U256,
 }
@@ -36,7 +35,6 @@ mod tests {
     fn encode_erc20_approve() {
         let approve = Erc20ApproveInteraction {
             token: ERC20::at(&dummy_web3::dummy_web3(), H160([0x01; 20])),
-            owner: H160([0x02; 20]),
             spender: H160([0x02; 20]),
             amount: U256::from_big_endian(&[0x03; 32]),
         };
