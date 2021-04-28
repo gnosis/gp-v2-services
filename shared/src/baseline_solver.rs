@@ -98,7 +98,7 @@ pub fn estimate_sell_amount<'a, L: BaselineSolvable>(
         )
         .map(|(amount, _, liquidity)| Estimate {
             value: amount,
-            // Since we reversed the path originally, we need ret re-reverse it here.
+            // Since we reversed the path originally, we need to re-reverse it here.
             path: liquidity.into_iter().rev().collect(),
         })
 }
