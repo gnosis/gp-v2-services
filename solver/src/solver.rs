@@ -44,6 +44,7 @@ pub fn create(
     mip_solver_url: Url,
     token_info_fetcher: Arc<dyn TokenInfoFetching>,
     price_estimator: Arc<dyn PriceEstimating>,
+    network_id: String,
 ) -> Vec<Box<dyn Solver>> {
     solvers
         .into_iter()
@@ -60,6 +61,7 @@ pub fn create(
                 native_token,
                 token_info_fetcher.clone(),
                 price_estimator.clone(),
+                network_id.clone(),
             )),
         })
         .collect()

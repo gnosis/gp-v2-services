@@ -191,6 +191,7 @@ async fn main() {
         args.mip_solver_url,
         token_info_fetcher,
         price_estimator.clone(),
+        network_id.clone(),
     );
     let liquidity_collector = LiquidityCollector {
         uniswap_like_liquidity,

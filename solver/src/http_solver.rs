@@ -59,6 +59,7 @@ pub struct HttpSolver {
     native_token: H160,
     token_info_fetcher: Arc<dyn TokenInfoFetching>,
     price_estimator: Arc<dyn PriceEstimating>,
+    network_id: String,
 }
 
 impl HttpSolver {
@@ -69,6 +70,7 @@ impl HttpSolver {
         native_token: H160,
         token_info_fetcher: Arc<dyn TokenInfoFetching>,
         price_estimator: Arc<dyn PriceEstimating>,
+        network_id: String,
     ) -> Self {
         // Unwrap because we cannot handle client creation failing.
         let client = Client::builder().build().unwrap();
@@ -80,6 +82,7 @@ impl HttpSolver {
             native_token,
             token_info_fetcher,
             price_estimator,
+            network_id,
         }
     }
 
@@ -244,6 +247,9 @@ impl HttpSolver {
             tokens: token_models,
             orders: order_models,
             uniswaps: uniswap_models,
+            metadata: Some(MetadataModel {
+                environment: Some(self.network_id.clone()),
+            }),
         };
         let context = SettlementContext {
             tokens,
@@ -420,6 +426,7 @@ mod tests {
             H160::zero(),
             mock_token_info_fetcher,
             mock_price_estimation,
+            "mock_network_id".to_string(),
         );
         let base = |x: u128| x * 10u128.pow(18);
         let orders = vec![
