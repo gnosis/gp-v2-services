@@ -16,6 +16,7 @@ use crate::{
 use anyhow::Result;
 use contracts::{GPv2Settlement, ERC20};
 use ethcontract::U256;
+use futures::future;
 use maplit::hashmap;
 use model::order::OrderKind;
 use shared::Web3;
@@ -41,7 +42,7 @@ impl OneInchSolver {
     }
 
     /// Settles a single sell order against a 1Inch swap.
-    async fn settle_order(&self, order: &LimitOrder) -> Result<Option<Settlement>> {
+    async fn settle_order(&self, order: LimitOrder) -> Result<Settlement> {
         debug_assert_eq!(
             order.kind,
             OrderKind::Sell,
@@ -55,7 +56,7 @@ impl OneInchSolver {
             .call()
             .await?;
 
-        let swap = match self
+        let swap = self
             .client
             .get_swap(SwapQuery {
                 from_token_address: order.sell_token,
@@ -67,38 +68,27 @@ impl OneInchSolver {
                 // does not hold balances to traded tokens.
                 disable_estimate: Some(true),
             })
-            .await
-        {
-            Ok(swap) => swap,
-            Err(err) => {
-                // It could be that 1Inch can't find match an order and would
-                // return an error for whatever reason. In that case, we want to
-                // continue trying to solve for other orders.
-                tracing::warn!("1Inch API error quoting swap: {}", err);
-                return Ok(None);
-            }
-        };
+            .await?;
 
         let mut settlement = Settlement::new(hashmap! {
             order.sell_token => swap.to_token_amount,
             order.buy_token => swap.from_token_amount,
         });
 
-        settlement.with_liquidity(order, order.sell_amount)?;
+        settlement.with_liquidity(&order, order.sell_amount)?;
 
         if existing_allowance < order.sell_amount {
             settlement
                 .encoder
                 .append_to_execution_plan(Erc20ApproveInteraction {
                     token: sell_token,
-                    owner: self.settlement_contract.address(),
                     spender: spender.address,
                     amount: U256::MAX,
                 });
         }
         settlement.encoder.append_to_execution_plan(swap);
 
-        Ok(None)
+        Ok(settlement)
     }
 }
 
@@ -108,33 +98,86 @@ impl Interaction for Swap {
     }
 }
 
+/// Maximum number of sell orders to consider for settlements.
+///
+/// This is mostly out of concern to avoid rate limiting and because 1Inch
+/// requests take a non-trivial amount of time.
+const MAX_SETTLEMENTS: usize = 5;
+
 #[async_trait::async_trait]
 impl Solver for OneInchSolver {
-    async fn solve(
-        &self,
-        liquidity: Vec<Liquidity>,
-        _gas_price: f64,
-    ) -> Result<Option<Settlement>> {
-        let sell_orders = liquidity
+    async fn solve(&self, liquidity: Vec<Liquidity>, _gas_price: f64) -> Result<Vec<Settlement>> {
+        let settlements = future::join_all(
+            liquidity
+                .into_iter()
+                .filter_map(|liquidity| match liquidity {
+                    Liquidity::Limit(order) if order.kind == OrderKind::Sell => Some(order),
+                    _ => None,
+                })
+                .take(MAX_SETTLEMENTS)
+                .map(|sell_order| self.settle_order(sell_order)),
+        )
+        .await;
+
+        Ok(settlements
             .into_iter()
-            .filter_map(|liquidity| match liquidity {
-                Liquidity::Limit(order) if order.kind == OrderKind::Sell => Some(order),
-                _ => None,
-            });
-
-        for order in sell_orders {
-            let settlement = self.settle_order(&order).await?;
-            if settlement.is_some() {
-                return Ok(settlement);
-            }
-        }
-
-        Ok(None)
+            .filter_map(|settlement| match settlement {
+                Ok(settlement) => Some(settlement),
+                Err(err) => {
+                    // It could be that 1Inch can't find match an order and would
+                    // return an error for whatever reason. In that case, we want
+                    // to continue trying to solve for other orders.
+                    tracing::warn!("1Inch API error quoting swap: {}", err);
+                    None
+                }
+            })
+            .collect())
     }
 }
 
 impl Display for OneInchSolver {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "OneInchSolver")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{interactions::dummy_web3, liquidity::offchain_orderbook::normalize_limit_order};
+    use contracts::{GPv2Settlement, WETH9};
+    use ethcontract::H160;
+    use hex_literal::hex;
+    use model::order::{Order, OrderCreation, OrderKind};
+
+    #[tokio::test]
+    #[ignore]
+    async fn solve_order_on_oneinch() {
+        let web3 = dummy_web3::infura("mainnet");
+        let settlement = GPv2Settlement::deployed(&web3).await.unwrap();
+
+        let weth = WETH9::deployed(&web3).await.unwrap();
+        let gno = H160(hex!("6810e776880c02933d47db1b9fc05908e5386b96"));
+
+        let solver = OneInchSolver::new(web3, settlement);
+        let settlement = solver
+            .settle_order(normalize_limit_order(
+                Order {
+                    order_creation: OrderCreation {
+                        sell_token: weth.address(),
+                        buy_token: gno,
+                        sell_amount: 1_000_000_000_000_000_000u128.into(),
+                        buy_amount: 1u128.into(),
+                        kind: OrderKind::Sell,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                weth,
+            ))
+            .await
+            .unwrap();
+
+        println!("{:#?}", settlement);
     }
 }
