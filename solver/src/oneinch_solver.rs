@@ -15,17 +15,15 @@ use crate::{
 };
 use anyhow::Result;
 use contracts::{GPv2Settlement, ERC20};
-use ethcontract::U256;
+use ethcontract::{dyns::DynWeb3, U256};
 use futures::future;
 use maplit::hashmap;
 use model::order::OrderKind;
-use shared::Web3;
 use std::fmt::{self, Display, Formatter};
 
 /// A GPv2 solver that matches GP **sell** orders to direct 1Inch swaps.
 #[derive(Debug)]
 pub struct OneInchSolver {
-    web3: Web3,
     settlement_contract: GPv2Settlement,
     client: OneInchClient,
 }
@@ -33,9 +31,8 @@ pub struct OneInchSolver {
 impl OneInchSolver {
     /// Creates a new 1Inch solver instance for specified settlement contract
     /// instance.
-    pub fn new(web3: Web3, settlement_contract: GPv2Settlement) -> Self {
+    pub fn new(settlement_contract: GPv2Settlement) -> Self {
         Self {
-            web3,
             settlement_contract,
             client: Default::default(),
         }
@@ -50,7 +47,7 @@ impl OneInchSolver {
         );
 
         let spender = self.client.get_spender().await?;
-        let sell_token = ERC20::at(&self.web3, order.sell_token);
+        let sell_token = ERC20::at(&self.web3(), order.sell_token);
         let existing_allowance = sell_token
             .allowance(self.settlement_contract.address(), spender.address)
             .call()
@@ -89,6 +86,10 @@ impl OneInchSolver {
         settlement.encoder.append_to_execution_plan(swap);
 
         Ok(settlement)
+    }
+
+    fn web3(&self) -> DynWeb3 {
+        self.settlement_contract.raw_instance().web3()
     }
 }
 
@@ -144,11 +145,51 @@ impl Display for OneInchSolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{interactions::dummy_web3, liquidity::offchain_orderbook::normalize_limit_order};
+    use crate::{
+        interactions::dummy_web3,
+        liquidity::{AmmOrder, LimitOrder},
+    };
     use contracts::{GPv2Settlement, WETH9};
     use ethcontract::H160;
     use hex_literal::hex;
-    use model::order::{Order, OrderCreation, OrderKind};
+    use model::order::OrderKind;
+
+    fn dummy_solver() -> OneInchSolver {
+        let web3 = dummy_web3::dummy_web3();
+        let settlement = GPv2Settlement::at(&web3, H160::zero());
+        OneInchSolver::new(settlement)
+    }
+
+    #[tokio::test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    async fn panics_when_settling_buy_orders() {
+        let _ = dummy_solver()
+            .settle_order(LimitOrder {
+                kind: OrderKind::Buy,
+                ..Default::default()
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn ignores_all_liquidity_other_than_sell_orders() {
+        let settlements = dummy_solver()
+            .solve(
+                vec![
+                    Liquidity::Limit(LimitOrder {
+                        kind: OrderKind::Buy,
+                        ..Default::default()
+                    }),
+                    Liquidity::Amm(AmmOrder::default()),
+                ],
+                0.0,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(settlements.len(), 0);
+    }
 
     #[tokio::test]
     #[ignore]
@@ -159,22 +200,16 @@ mod tests {
         let weth = WETH9::deployed(&web3).await.unwrap();
         let gno = H160(hex!("6810e776880c02933d47db1b9fc05908e5386b96"));
 
-        let solver = OneInchSolver::new(web3, settlement);
+        let solver = OneInchSolver::new(settlement);
         let settlement = solver
-            .settle_order(normalize_limit_order(
-                Order {
-                    order_creation: OrderCreation {
-                        sell_token: weth.address(),
-                        buy_token: gno,
-                        sell_amount: 1_000_000_000_000_000_000u128.into(),
-                        buy_amount: 1u128.into(),
-                        kind: OrderKind::Sell,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-                weth,
-            ))
+            .settle_order(LimitOrder {
+                sell_token: weth.address(),
+                buy_token: gno,
+                sell_amount: 1_000_000_000_000_000_000u128.into(),
+                buy_amount: 1u128.into(),
+                kind: OrderKind::Sell,
+                ..Default::default()
+            })
             .await
             .unwrap();
 

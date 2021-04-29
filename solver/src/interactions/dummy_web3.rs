@@ -29,13 +29,15 @@ pub fn dummy_weth(addr: impl Into<H160>) -> WETH9 {
 pub fn infura(network: impl AsRef<str>) -> shared::Web3 {
     let infura_project_id =
         std::env::var("INFURA_PROJECT_ID").expect("Missing INFURA_PROJECT_ID env variable");
-    let node_url = format!(
+    from_node_url(&format!(
         "https://{}.infura.io/v3/{}",
         network.as_ref(),
         infura_project_id
-    );
+    ))
+}
 
+fn from_node_url(node_url: &str) -> shared::Web3 {
     Web3::new(LoggingTransport::new(
-        Http::new(&node_url).expect("transport creation failed"),
+        Http::new(node_url).expect("transport creation failed"),
     ))
 }
