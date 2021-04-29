@@ -1,15 +1,12 @@
 use crate::{
-    liquidity::{offchain_orderbook::BUY_ETH_ADDRESS, Liquidity},
-    liquidity_collector::LiquidityCollector,
-    metrics::SolverMetrics,
-    settlement::Settlement,
-    settlement_simulation, settlement_submission,
-    solver::Solver,
+    liquidity::Liquidity, liquidity_collector::LiquidityCollector, metrics::SolverMetrics,
+    settlement::Settlement, settlement_simulation, settlement_submission, solver::Solver,
 };
 use anyhow::{Context, Result};
 use contracts::GPv2Settlement;
 use futures::future::join_all;
 use gas_estimation::GasPriceEstimating;
+use model::order::BUY_ETH_ADDRESS;
 use num::BigRational;
 use primitive_types::H160;
 use shared::{price_estimate::PriceEstimating, Web3};

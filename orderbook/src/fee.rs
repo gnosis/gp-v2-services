@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
-use model::order::OrderKind;
+use model::order::{OrderKind, BUY_ETH_ADDRESS};
 use primitive_types::{H160, U256};
 use std::sync::{Arc, Mutex};
 
@@ -84,6 +84,12 @@ impl MinFeeCalculator {
         amount: Option<U256>,
         kind: Option<OrderKind>,
     ) -> Result<Option<Measurement>> {
+        let buy_token = if buy_token == Some(BUY_ETH_ADDRESS) {
+            Some(self.native_token)
+        } else {
+            buy_token
+        };
+
         let now = (self.now)();
         let official_valid_until = now + Duration::seconds(STANDARD_VALIDITY_FOR_FEE_IN_SEC);
         let internal_valid_until = now + Duration::seconds(PERSISTED_VALIDITY_FOR_FEE_IN_SEC);
@@ -260,12 +266,13 @@ mod tests {
         fn new_for_test(
             gas_estimator: Box<dyn GasPriceEstimating>,
             price_estimator: Arc<dyn PriceEstimating>,
+            native_token: Option<H160>,
             now: Box<dyn Fn() -> DateTime<Utc> + Send + Sync>,
         ) -> Self {
             Self {
                 gas_estimator,
                 price_estimator,
-                native_token: Default::default(),
+                native_token: native_token.unwrap_or_default(),
                 measurements: Box::new(InMemoryFeeStore::default()),
                 now,
                 discount_factor: 1.0,
@@ -283,8 +290,12 @@ mod tests {
         let time_copy = time.clone();
         let now = move || *time_copy.lock().unwrap();
 
-        let fee_estimator =
-            MinFeeCalculator::new_for_test(gas_price_estimator, price_estimator, Box::new(now));
+        let fee_estimator = MinFeeCalculator::new_for_test(
+            gas_price_estimator,
+            price_estimator,
+            None,
+            Box::new(now),
+        );
 
         let token = H160::from_low_u64_be(1);
         let (fee, expiry) = fee_estimator
@@ -315,6 +326,7 @@ mod tests {
         let fee_estimator = MinFeeCalculator::new_for_test(
             gas_price_estimator,
             price_estimator,
+            None,
             Box::new(Utc::now),
         );
 
@@ -333,5 +345,62 @@ mod tests {
         // Gas price reduces, and slightly lower fee is now valid
         *gas_price.lock().unwrap() /= 2.0;
         assert!(fee_estimator.is_valid_fee(token, lower_fee).await);
+    }
+
+    /// Panics if asked for a gas estimate for a buy token that is not the token
+    /// stored in the struct.
+    pub struct PriceEstimatorForJust(H160);
+    #[async_trait::async_trait]
+    impl PriceEstimating for PriceEstimatorForJust {
+        async fn estimate_price(
+            &self,
+            _: H160,
+            _: H160,
+            _: U256,
+            _: OrderKind,
+        ) -> Result<num::BigRational> {
+            Ok(num::one())
+        }
+
+        async fn estimate_gas(
+            &self,
+            _: H160,
+            buy_token: H160,
+            _: U256,
+            _: OrderKind,
+        ) -> Result<U256> {
+            if buy_token == self.0 {
+                return Ok(0.into());
+            };
+            panic!("did not ask for price of tested buy token")
+        }
+    }
+
+    #[tokio::test]
+    async fn min_fee_uses_weth_price_for_buying_eth() {
+        let gas_price = Arc::new(Mutex::new(0.0));
+        let native_token = H160([42; 20]);
+        assert_ne!(native_token, BUY_ETH_ADDRESS);
+
+        let gas_price_estimator = Box::new(FakeGasPriceEstimator(gas_price));
+        let price_estimator = Arc::new(PriceEstimatorForJust(native_token));
+
+        let fee_estimator = MinFeeCalculator::new_for_test(
+            gas_price_estimator,
+            price_estimator,
+            Some(native_token),
+            Box::new(Utc::now),
+        );
+
+        let token = H160::from_low_u64_be(1);
+        assert!(fee_estimator
+            .min_fee(
+                token,
+                Some(BUY_ETH_ADDRESS),
+                Some(1_u64.into()),
+                Some(OrderKind::Sell)
+            )
+            .await
+            .is_ok());
     }
 }
