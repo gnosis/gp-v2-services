@@ -152,7 +152,7 @@ mod tests {
     use contracts::{GPv2Settlement, WETH9};
     use ethcontract::H160;
     use hex_literal::hex;
-    use model::order::OrderKind;
+    use model::order::{Order, OrderCreation, OrderKind};
 
     fn dummy_solver() -> OneInchSolver {
         let web3 = dummy_web3::dummy_web3();
@@ -202,14 +202,20 @@ mod tests {
 
         let solver = OneInchSolver::new(settlement);
         let settlement = solver
-            .settle_order(LimitOrder {
-                sell_token: weth.address(),
-                buy_token: gno,
-                sell_amount: 1_000_000_000_000_000_000u128.into(),
-                buy_amount: 1u128.into(),
-                kind: OrderKind::Sell,
-                ..Default::default()
-            })
+            .settle_order(
+                Order {
+                    order_creation: OrderCreation {
+                        sell_token: weth.address(),
+                        buy_token: gno,
+                        sell_amount: 1_000_000_000_000_000_000u128.into(),
+                        buy_amount: 1u128.into(),
+                        kind: OrderKind::Sell,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+                .into(),
+            )
             .await
             .unwrap();
 
