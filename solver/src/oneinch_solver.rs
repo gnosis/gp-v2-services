@@ -19,6 +19,7 @@ use ethcontract::{dyns::DynWeb3, U256};
 use futures::future;
 use maplit::hashmap;
 use model::order::OrderKind;
+use rand::seq::SliceRandom as _;
 use std::fmt::{self, Display, Formatter};
 
 /// A GPv2 solver that matches GP **sell** orders to direct 1Inch swaps.
@@ -108,13 +109,23 @@ const MAX_SETTLEMENTS: usize = 5;
 #[async_trait::async_trait]
 impl Solver for OneInchSolver {
     async fn solve(&self, liquidity: Vec<Liquidity>, _gas_price: f64) -> Result<Vec<Settlement>> {
+        let mut sell_orders = liquidity
+            .into_iter()
+            .filter_map(|liquidity| match liquidity {
+                Liquidity::Limit(order) if order.kind == OrderKind::Sell => Some(order),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        // Randomize which orders we take, this prevents this solver "getting
+        // stuck" on bad orders.
+        if sell_orders.len() > MAX_SETTLEMENTS {
+            sell_orders.shuffle(&mut rand::thread_rng());
+        }
+
         let settlements = future::join_all(
-            liquidity
+            sell_orders
                 .into_iter()
-                .filter_map(|liquidity| match liquidity {
-                    Liquidity::Limit(order) if order.kind == OrderKind::Sell => Some(order),
-                    _ => None,
-                })
                 .take(MAX_SETTLEMENTS)
                 .map(|sell_order| self.settle_order(sell_order)),
         )
