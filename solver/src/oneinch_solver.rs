@@ -13,20 +13,24 @@ use crate::{
     settlement::{Interaction, Settlement},
     solver::Solver,
 };
-use anyhow::Result;
+use anyhow::{ensure, Result};
 use contracts::{GPv2Settlement, ERC20};
 use ethcontract::{dyns::DynWeb3, U256};
 use futures::future;
 use maplit::hashmap;
 use model::order::OrderKind;
 use rand::seq::SliceRandom as _;
-use std::fmt::{self, Display, Formatter};
+use std::{
+    fmt::{self, Display, Formatter},
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 /// A GPv2 solver that matches GP **sell** orders to direct 1Inch swaps.
 #[derive(Debug)]
 pub struct OneInchSolver {
     settlement_contract: GPv2Settlement,
     client: OneInchClient,
+    chain_id: AtomicU64,
 }
 
 impl OneInchSolver {
@@ -36,6 +40,7 @@ impl OneInchSolver {
         Self {
             settlement_contract,
             client: Default::default(),
+            chain_id: 0.into(),
         }
     }
 
@@ -92,6 +97,20 @@ impl OneInchSolver {
     fn web3(&self) -> DynWeb3 {
         self.settlement_contract.raw_instance().web3()
     }
+
+    async fn chain_id(&self) -> Result<u64> {
+        // Cache the retrieved chain ID. Use an atomic integer for interior
+        // mutability. The ordering is not important here, as it will, in the
+        // very worst case, cause is to hit the node an extra time (which will
+        // happen anyways for concurrent solves).
+        let mut chain_id = self.chain_id.load(Ordering::Relaxed);
+        if chain_id == 0 {
+            chain_id = self.web3().eth().chain_id().await?.as_u64();
+            self.chain_id.store(chain_id, Ordering::Relaxed);
+        }
+
+        Ok(chain_id)
+    }
 }
 
 impl Interaction for Swap {
@@ -99,6 +118,9 @@ impl Interaction for Swap {
         vec![(self.tx.to, self.tx.value, self.tx.data.clone())]
     }
 }
+
+/// Chain ID for Mainnet.
+const MAINNET_CHAIN_ID: u64 = 1;
 
 /// Maximum number of sell orders to consider for settlements.
 ///
@@ -109,6 +131,11 @@ const MAX_SETTLEMENTS: usize = 5;
 #[async_trait::async_trait]
 impl Solver for OneInchSolver {
     async fn solve(&self, liquidity: Vec<Liquidity>, _gas_price: f64) -> Result<Vec<Settlement>> {
+        ensure!(
+            self.chain_id().await? == MAINNET_CHAIN_ID,
+            "1Inch solver only works on Mainnet",
+        );
+
         let mut sell_orders = liquidity
             .into_iter()
             .filter_map(|liquidity| match liquidity {
@@ -167,7 +194,13 @@ mod tests {
     fn dummy_solver() -> OneInchSolver {
         let web3 = testutil::dummy_web3();
         let settlement = GPv2Settlement::at(&web3, H160::zero());
-        OneInchSolver::new(settlement)
+        let solver = OneInchSolver::new(settlement);
+
+        // Set the chain ID as if it were already retrieved, so we don't need
+        // a web3 instance mocked to return the correct chain ID.
+        solver.chain_id.store(MAINNET_CHAIN_ID, Ordering::Relaxed);
+
+        solver
     }
 
     #[tokio::test]
@@ -230,5 +263,15 @@ mod tests {
             .unwrap();
 
         println!("{:#?}", settlement);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn returns_error_on_non_mainnet() {
+        let web3 = dummy_web3::infura("rinkeby");
+        let settlement = GPv2Settlement::deployed(&web3).await.unwrap();
+
+        let solver = OneInchSolver::new(settlement);
+        assert!(solver.solve(vec![], 0.).await.is_err());
     }
 }
