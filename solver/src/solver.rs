@@ -5,9 +5,11 @@ use crate::{
     http_solver::{HttpSolver, SolverConfig},
     liquidity::Liquidity,
     naive_solver::NaiveSolver,
+    oneinch_solver::OneInchSolver,
     settlement::Settlement,
 };
 use anyhow::Result;
+use contracts::GPv2Settlement;
 use ethcontract::H160;
 use reqwest::Url;
 use shared::{price_estimate::PriceEstimating, token_info::TokenInfoFetching};
@@ -37,8 +39,9 @@ arg_enum! {
     #[derive(Debug)]
     pub enum SolverType {
         Naive,
-        UniswapBaseline,
+        Baseline,
         Mip,
+        OneInch,
     }
 }
 
@@ -47,6 +50,7 @@ pub fn create(
     base_tokens: HashSet<H160>,
     native_token: H160,
     mip_solver_url: Url,
+    settlement_contract: &GPv2Settlement,
     token_info_fetcher: Arc<dyn TokenInfoFetching>,
     price_estimator: Arc<dyn PriceEstimating>,
     network_id: String,
@@ -55,7 +59,7 @@ pub fn create(
         .into_iter()
         .map(|solver_type| match solver_type {
             SolverType::Naive => Box::new(NaiveSolver {}) as Box<dyn Solver>,
-            SolverType::UniswapBaseline => Box::new(BaselineSolver::new(base_tokens.clone())),
+            SolverType::Baseline => Box::new(BaselineSolver::new(base_tokens.clone())),
             SolverType::Mip => Box::new(HttpSolver::new(
                 mip_solver_url.clone(),
                 None,
@@ -68,6 +72,7 @@ pub fn create(
                 price_estimator.clone(),
                 network_id.clone(),
             )),
+            SolverType::OneInch => Box::new(OneInchSolver::new(settlement_contract.clone())),
         })
         .collect()
 }
