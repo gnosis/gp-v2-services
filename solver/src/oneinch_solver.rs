@@ -136,7 +136,7 @@ impl Solver for OneInchSolver {
             .filter_map(|settlement| match settlement {
                 Ok(settlement) => Some(settlement),
                 Err(err) => {
-                    // It could be that 1Inch can't find match an order and would
+                    // It could be that 1Inch can't match an order and would
                     // return an error for whatever reason. In that case, we want
                     // to continue trying to solve for other orders.
                     tracing::warn!("1Inch API error quoting swap: {}", err);
