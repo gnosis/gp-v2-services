@@ -73,6 +73,10 @@ impl OneInchSolver {
             })
             .await?;
 
+        ensure!(
+            swap.to_token_amount >= order.buy_amount,
+            "order limit price not respected",
+        );
         let mut settlement = Settlement::new(hashmap! {
             order.sell_token => swap.to_token_amount,
             order.buy_token => swap.from_token_amount,
