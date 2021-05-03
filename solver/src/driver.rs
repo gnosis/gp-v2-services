@@ -2,6 +2,7 @@ mod solver_settlements;
 
 use self::solver_settlements::RatedSettlement;
 use crate::{
+    chain,
     liquidity::{offchain_orderbook::BUY_ETH_ADDRESS, Liquidity},
     liquidity_collector::LiquidityCollector,
     metrics::SolverMetrics,
@@ -125,13 +126,23 @@ impl Driver {
         }
     }
 
+    async fn can_settle(&self, settlement: RatedSettlement) -> Result<bool> {
+        let simulations = settlement_simulation::simulate_settlements(
+            chain![settlement.settlement.clone().into()],
+            &self.settlement_contract,
+            &self.web3,
+            &self.network_id,
+        )
+        .await
+        .context("failed to simulate settlement")?;
+        Ok(simulations[0].is_ok())
+    }
+
     // Returns only settlements for which simulation succeeded.
     async fn simulate_settlements(
         &self,
         settlements: Vec<RatedSettlement>,
-        on_successful_settlement: fn(&RatedSettlement) -> (),
-        on_failed_settlement: fn(&RatedSettlement, anyhow::Error) -> (),
-    ) -> Result<Vec<Option<RatedSettlement>>> {
+    ) -> Result<Vec<RatedSettlement>> {
         let simulations = settlement_simulation::simulate_settlements(
             settlements
                 .iter()
@@ -145,13 +156,11 @@ impl Driver {
         Ok(settlements
             .into_iter()
             .zip(simulations)
-            .map(|(settlement, simulation)| match simulation {
-                Ok(()) => {
-                    on_successful_settlement(&settlement);
-                    Some(settlement)
-                }
+            .filter_map(|(settlement, simulation)| match simulation {
+                Ok(()) => Some(settlement),
                 Err(err) => {
-                    on_failed_settlement(&settlement, err);
+                    tracing::error!("settlement simulation failed\n error: {:?}", err);
+                    tracing::debug!("settlement failure for: \n{:#?}", settlement.settlement,);
                     None
                 }
             })
@@ -202,55 +211,20 @@ impl Driver {
             &mut settlements,
         );
 
-        // Remove liquidity provision interactions from settlements.
-        let settlements_with_liquidity_removed = settlements
-            .iter()
-            .map(|s| s.without_liquidity())
-            .collect::<Vec<_>>();
+        let settlements = self.simulate_settlements(settlements).await?;
 
-        // Use settlements without external liquidity provision if possible.
-        let settlements = self
-            .simulate_settlements(
-                settlements_with_liquidity_removed,
-                |settlement| {
-                    tracing::debug!(
-                        "settlement totally covered by buffers: \n{:#?}",
-                        settlement.settlement
-                    )
-                },
-                |_s, _e| (),
-            )
-            .await?
-            .into_iter()
-            .zip(settlements)
-            .map(
-                |(maybe_settlement_with_liquidity_removed, settlement_with_liquidity)| {
-                    match maybe_settlement_with_liquidity_removed {
-                        Some(settlement_without_liquidity) => settlement_without_liquidity,
-                        None => settlement_with_liquidity,
-                    }
-                },
-            )
-            .collect();
-
-        let settlements: Vec<RatedSettlement> = self
-            .simulate_settlements(
-                settlements,
-                |_s| (),
-                |settlement, err| {
-                    tracing::error!("settlement simulation failed\n error: {:?}", err);
-                    tracing::debug!("settlement failure for: \n{:#?}", settlement.settlement,);
-                },
-            )
-            .await?
-            .into_iter()
-            .filter_map(|s| s)
-            .collect();
-
-        if let Some(settlement) = settlements
+        if let Some(mut settlement) = settlements
             .into_iter()
             .max_by(|a, b| a.objective_value.cmp(&b.objective_value))
         {
+            // If we have enough buffer in the settlement contract to not use on-chain interactions, remove those
+            if self
+                .can_settle(settlement.without_liquidity())
+                .await
+                .unwrap_or(false)
+            {
+                settlement = settlement.without_liquidity()
+            }
             self.submit_settlement(settlement).await;
         }
         Ok(())
