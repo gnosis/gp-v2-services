@@ -303,7 +303,7 @@ impl PriceEstimating for MultiAmmPriceEstimator {
         amount: U256,
         kind: OrderKind,
     ) -> Result<U256> {
-        // Return min price estimate as best case.
+        // Return max price estimate as worst case.
         let estimates = join_all(self.amm_estimators.iter().map(|estimator| async move {
             estimator
                 .estimate_gas(sell_token, buy_token, amount, kind)
