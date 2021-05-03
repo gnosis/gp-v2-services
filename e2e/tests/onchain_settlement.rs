@@ -1,6 +1,6 @@
 use contracts::{ERC20Mintable, IUniswapLikeRouter, UniswapV2Factory, UniswapV2Router02, WETH9};
 use ethcontract::{
-    prelude::{Account, Address, Http, PrivateKey, U256},
+    prelude::{Account, Address, PrivateKey, U256},
     H160,
 };
 use hex_literal::hex;
@@ -19,7 +19,6 @@ use shared::{
     current_block::current_block_stream,
     pool_fetching::{CachedPoolFetcher, PoolFetcher},
     price_estimate::UniswapPriceEstimator,
-    transport::LoggingTransport,
     Web3,
 };
 use solver::{
@@ -29,20 +28,23 @@ use solver::{
 use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 use web3::signing::SecretKeyRef;
 
+mod ganache;
+
 const TRADER_A_PK: [u8; 32] =
     hex!("0000000000000000000000000000000000000000000000000000000000000001");
 const TRADER_B_PK: [u8; 32] =
     hex!("0000000000000000000000000000000000000000000000000000000000000002");
 
-const NODE_HOST: &str = "http://127.0.0.1:8545";
 const API_HOST: &str = "http://127.0.0.1:8080";
 const ORDER_PLACEMENT_ENDPOINT: &str = "/api/v1/orders/";
 
 #[tokio::test]
-async fn test_with_ganache() {
+async fn ganache_onchain_settlement() {
+    ganache::test(onchain_settlement).await;
+}
+
+async fn onchain_settlement(web3: Web3) {
     shared::tracing::initialize("warn,orderbook=debug,solver=debug");
-    let http = LoggingTransport::new(Http::new(NODE_HOST).expect("transport failure"));
-    let web3 = Web3::new(http);
     let chain_id = web3
         .eth()
         .chain_id()
@@ -176,6 +178,7 @@ async fn test_with_ganache() {
         )),
         fee_calculator.clone(),
         HashSet::new(),
+        Duration::from_secs(120),
     ));
 
     orderbook::serve_task(
@@ -192,7 +195,7 @@ async fn test_with_ganache() {
         .with_sell_amount(to_wei(100))
         .with_buy_token(token_b.address())
         .with_buy_amount(to_wei(80))
-        .with_valid_to(u32::max_value())
+        .with_valid_to(shared::time::now_in_epoch_seconds() + 300)
         .with_kind(OrderKind::Sell)
         .with_signing_scheme(SigningScheme::Eip712)
         .sign_with(
@@ -213,7 +216,7 @@ async fn test_with_ganache() {
         .with_sell_amount(to_wei(50))
         .with_buy_token(token_a.address())
         .with_buy_amount(to_wei(40))
-        .with_valid_to(u32::max_value())
+        .with_valid_to(shared::time::now_in_epoch_seconds() + 300)
         .with_kind(OrderKind::Sell)
         .with_signing_scheme(SigningScheme::EthSign)
         .sign_with(
@@ -260,6 +263,7 @@ async fn test_with_ganache() {
         Arc::new(NoopMetrics::default()),
         web3.clone(),
         network_id,
+        1,
     );
     driver.single_run().await.unwrap();
 
