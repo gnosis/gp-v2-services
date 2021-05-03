@@ -37,6 +37,15 @@ pub struct RatedSettlement {
     pub objective_value: BigRational,
 }
 
+impl RatedSettlement {
+    pub fn without_liquidity(&self) -> Self {
+        RatedSettlement {
+            settlement: self.settlement.without_liquidity(),
+            objective_value: self.objective_value.clone(), // This will change once objective fn has costs.
+        }
+    }
+}
+
 // Takes the settlements of a single solver and adds a merged settlement.
 pub fn merge_settlements(
     max_merged_settlements: usize,

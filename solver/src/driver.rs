@@ -129,7 +129,9 @@ impl Driver {
     async fn simulate_settlements(
         &self,
         settlements: Vec<RatedSettlement>,
-    ) -> Result<Vec<RatedSettlement>> {
+        on_successful_settlement: fn(&RatedSettlement) -> (),
+        on_failed_settlement: fn(&RatedSettlement, anyhow::Error) -> (),
+    ) -> Result<Vec<Option<RatedSettlement>>> {
         let simulations = settlement_simulation::simulate_settlements(
             settlements
                 .iter()
@@ -143,11 +145,13 @@ impl Driver {
         Ok(settlements
             .into_iter()
             .zip(simulations)
-            .filter_map(|(settlement, simulation)| match simulation {
-                Ok(()) => Some(settlement),
+            .map(|(settlement, simulation)| match simulation {
+                Ok(()) => {
+                    on_successful_settlement(&settlement);
+                    Some(settlement)
+                }
                 Err(err) => {
-                    tracing::error!("settlement simulation failed\n error: {:?}", err);
-                    tracing::debug!("settlement failure for: \n{:#?}", settlement.settlement,);
+                    on_failed_settlement(&settlement, err);
                     None
                 }
             })
@@ -197,7 +201,51 @@ impl Driver {
             self.min_order_age,
             &mut settlements,
         );
-        let settlements = self.simulate_settlements(settlements).await?;
+
+        // Remove liquidity provision interactions from settlements.
+        let settlements_with_liquidity_removed = settlements
+            .iter()
+            .map(|s| s.without_liquidity())
+            .collect::<Vec<_>>();
+
+        // Use settlements without external liquidity provision if possible.
+        let settlements = self
+            .simulate_settlements(
+                settlements_with_liquidity_removed,
+                |settlement| {
+                    tracing::debug!(
+                        "settlement totally covered by buffers: \n{:#?}",
+                        settlement.settlement
+                    )
+                },
+                |_s, _e| (),
+            )
+            .await?
+            .into_iter()
+            .zip(settlements)
+            .map(
+                |(maybe_settlement_with_liquidity_removed, settlement_with_liquidity)| {
+                    match maybe_settlement_with_liquidity_removed {
+                        Some(settlement_without_liquidity) => settlement_without_liquidity,
+                        None => settlement_with_liquidity,
+                    }
+                },
+            )
+            .collect();
+
+        let settlements: Vec<RatedSettlement> = self
+            .simulate_settlements(
+                settlements,
+                |_s| (),
+                |settlement, err| {
+                    tracing::error!("settlement simulation failed\n error: {:?}", err);
+                    tracing::debug!("settlement failure for: \n{:#?}", settlement.settlement,);
+                },
+            )
+            .await?
+            .into_iter()
+            .filter_map(|s| s)
+            .collect();
 
         if let Some(settlement) = settlements
             .into_iter()
