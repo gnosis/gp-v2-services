@@ -289,17 +289,11 @@ impl PriceEstimating for MultiAmmPriceEstimator {
         }))
         .await;
 
-        let mut valid_estimates = vec![];
-        for estimate in estimates {
-            if let Ok(price) = estimate {
-                valid_estimates.push(price)
-            }
-        }
-
-        match valid_estimates.len() {
-            0 => Err(anyhow!("Failed to estimate price on all estimators")),
-            _ => Ok(valid_estimates.iter().min().unwrap().clone()),
-        }
+        estimates
+            .into_iter()
+            .filter_map(Result::ok)
+            .min()
+            .ok_or_else(|| anyhow!("Failed to estimate prices on all estimators"))
     }
 
     async fn estimate_gas(
