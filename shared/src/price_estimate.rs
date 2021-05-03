@@ -311,13 +311,6 @@ impl PriceEstimating for MultiAmmPriceEstimator {
         }))
         .await;
 
-        let mut valid_estimates = vec![];
-        for estimate in estimates {
-            if let Ok(gas) = estimate {
-                valid_estimates.push(gas)
-            }
-        }
-
         estimates
             .into_iter()
             .filter_map(Result::ok)
