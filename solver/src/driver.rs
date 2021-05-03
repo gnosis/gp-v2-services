@@ -1,3 +1,6 @@
+mod solver_settlements;
+
+use self::solver_settlements::RatedSettlement;
 use crate::{
     liquidity::Liquidity, liquidity_collector::LiquidityCollector, metrics::SolverMetrics,
     settlement::Settlement, settlement_simulation, settlement_submission, solver::Solver,
@@ -33,6 +36,7 @@ pub struct Driver {
     metrics: Arc<dyn SolverMetrics>,
     web3: Web3,
     network_id: String,
+    max_merged_settlements: usize,
 }
 impl Driver {
     #[allow(clippy::too_many_arguments)]
@@ -49,6 +53,7 @@ impl Driver {
         metrics: Arc<dyn SolverMetrics>,
         web3: Web3,
         network_id: String,
+        max_merged_settlements: usize,
     ) -> Self {
         Self {
             settlement_contract,
@@ -63,6 +68,7 @@ impl Driver {
             metrics,
             web3,
             network_id,
+            max_merged_settlements,
         }
     }
 
@@ -76,47 +82,24 @@ impl Driver {
         }
     }
 
+    // Returns solver name and result.
     async fn run_solvers(
         &self,
         liquidity: Vec<Liquidity>,
         gas_price: f64,
-        prices: &HashMap<H160, BigRational>,
-    ) -> Vec<SolverWithSettlements> {
-        join_all(self.solver.iter().enumerate().map(|(index, solver)| {
+    ) -> impl Iterator<Item = (&'static str, Result<Vec<Settlement>>)> {
+        join_all(self.solver.iter().map(|solver| {
             let liquidity = liquidity.clone();
             let metrics = &self.metrics;
             async move {
                 let start_time = Instant::now();
                 let settlement = solver.solve(liquidity, gas_price).await;
                 metrics.settlement_computed(solver.name(), start_time);
-                (index, settlement)
+                (solver.name(), settlement)
             }
         }))
         .await
         .into_iter()
-        .filter_map(|(index, settlements)| {
-            let mut settlements = match settlements {
-                Ok(settlements) => settlements,
-                Err(err) => {
-                    tracing::error!("solver {} error: {:?}", self.solver[index].name(), err);
-                    return None;
-                }
-            };
-            settlements.retain(|settlement| !settlement.trades().is_empty());
-            let settlements = settlements
-                .into_iter()
-                .map(|settlement| {
-                    let objective_value = settlement.objective_value(prices);
-                    RatedSettlement {
-                        settlement,
-                        objective_value,
-                    }
-                })
-                .collect();
-            Some(SolverWithSettlements { index, settlements })
-        })
-        .filter(|settlement| !settlement.settlements.is_empty())
-        .collect()
     }
 
     async fn submit_settlement(&self, settlement: RatedSettlement) {
@@ -137,18 +120,6 @@ impl Driver {
             }
             Err(err) => tracing::error!("Failed to submit settlement: {:?}", err,),
         }
-    }
-
-    fn filter_settlements_without_old_orders(&self, settlements: &mut Vec<RatedSettlement>) {
-        let settle_orders_older_than =
-            chrono::offset::Utc::now() - chrono::Duration::from_std(self.min_order_age).unwrap();
-        settlements.retain(|settlement| {
-            settlement
-                .settlement
-                .trades()
-                .iter()
-                .any(|trade| trade.order.order_meta_data.creation_date <= settle_orders_older_than)
-        });
     }
 
     // Returns only settlements for which simulation succeeded.
@@ -198,25 +169,31 @@ impl Driver {
         tracing::debug!("solving with gas price of {}", gas_price);
 
         let settlements = self
-            .run_solvers(liquidity, gas_price, &estimated_prices)
-            .await;
-        for settlements in settlements.iter() {
-            for settlement in settlements.settlements.iter() {
-                tracing::debug!(
-                    "solver {} found solution with objective value {}: {:?}",
-                    self.solver[settlements.index].name(),
-                    settlement.objective_value,
-                    settlement.settlement,
-                );
-            }
-        }
+            .run_solvers(liquidity, gas_price)
+            .await
+            .filter_map(solver_settlements::filter_bad_settlements)
+            .inspect(|(name, settlements)| {
+                for settlement in settlements.iter() {
+                    tracing::debug!("solver {} found solution:\n {:?}", name, settlement);
+                }
+            });
 
         let mut settlements = settlements
-            .into_iter()
+            .map(|(name, settlements)| {
+                solver_settlements::merge_settlements(
+                    self.max_merged_settlements,
+                    &estimated_prices,
+                    name,
+                    settlements,
+                )
+            })
             .flat_map(|settlements| settlements.settlements.into_iter())
             .collect::<Vec<_>>();
 
-        self.filter_settlements_without_old_orders(&mut settlements);
+        solver_settlements::filter_settlements_without_old_orders(
+            self.min_order_age,
+            &mut settlements,
+        );
         let settlements = self.simulate_settlements(settlements).await?;
 
         if let Some(settlement) = settlements
@@ -295,27 +272,14 @@ fn liquidity_with_price(
     liquidity
 }
 
-// A single solver produces multiple settlements
-struct SolverWithSettlements {
-    // Index in the Driver::solver vector
-    index: usize,
-    settlements: Vec<RatedSettlement>,
-}
-
-// Each individual settlement has an objective value.
-struct RatedSettlement {
-    settlement: Settlement,
-    objective_value: BigRational,
-}
-
 #[cfg(test)]
 mod tests {
-    use shared::price_estimate::mocks::{FailingPriceEstimator, FakePriceEstimator};
-
     use super::*;
     use crate::liquidity::{tests::CapturingSettlementHandler, AmmOrder, LimitOrder};
+    use maplit::hashmap;
     use model::{order::OrderKind, TokenPair};
-    use num::rational::Ratio;
+    use num::{rational::Ratio, traits::One};
+    use shared::price_estimate::mocks::{FailingPriceEstimator, FakePriceEstimator};
 
     #[tokio::test]
     async fn collect_estimated_prices_adds_prices_for_buy_and_sell_token_of_limit_orders() {
@@ -393,5 +357,34 @@ mod tests {
         assert!(prices.contains_key(&sell_token));
         assert!(prices.contains_key(&native_token));
         assert!(prices.contains_key(&BUY_ETH_ADDRESS));
+    }
+
+    #[test]
+    fn liquidity_with_price_removes_liqiduity_without_price() {
+        let tokens = [
+            H160::from_low_u64_be(0),
+            H160::from_low_u64_be(1),
+            H160::from_low_u64_be(2),
+            H160::from_low_u64_be(3),
+        ];
+        let prices = hashmap! {tokens[0] => BigRational::one(), tokens[1] => BigRational::one()};
+        let order = |sell_token, buy_token| {
+            Liquidity::Limit(LimitOrder {
+                sell_token,
+                buy_token,
+                ..Default::default()
+            })
+        };
+        let liquidity = vec![
+            order(tokens[0], tokens[1]),
+            order(tokens[0], tokens[2]),
+            order(tokens[2], tokens[0]),
+            order(tokens[2], tokens[3]),
+        ];
+        let filtered = liquidity_with_price(liquidity, &prices);
+        assert_eq!(filtered.len(), 1);
+        assert!(
+            matches!(&filtered[0], Liquidity::Limit(order) if order.sell_token == tokens[0] && order.buy_token == tokens[1])
+        );
     }
 }
