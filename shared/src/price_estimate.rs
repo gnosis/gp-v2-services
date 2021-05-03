@@ -268,12 +268,12 @@ impl UniswapPriceEstimator {
     }
 }
 
-pub struct MultiAMMPriceEstimator {
+pub struct MultiAmmPriceEstimator {
     amm_estimators: Vec<UniswapPriceEstimator>,
 }
 
 #[async_trait::async_trait]
-impl PriceEstimating for MultiAMMPriceEstimator {
+impl PriceEstimating for MultiAmmPriceEstimator {
     async fn estimate_price(
         &self,
         sell_token: H160,
