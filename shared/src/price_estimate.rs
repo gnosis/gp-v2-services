@@ -318,10 +318,11 @@ impl PriceEstimating for MultiAmmPriceEstimator {
             }
         }
 
-        match valid_estimates.len() {
-            0 => Err(anyhow!("Failed to estimate price on all estimators")),
-            _ => Ok(*valid_estimates.iter().max().unwrap()),
-        }
+        estimates
+            .into_iter()
+            .filter_map(Result::ok)
+            .max()
+            .ok_or_else(|| anyhow!("Failed to estimate gas on all estimators"))
     }
 }
 
