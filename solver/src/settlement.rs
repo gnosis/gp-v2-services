@@ -107,8 +107,8 @@ impl Settlement {
             .encode(execution, &mut self.encoder)
     }
 
-    pub fn without_liquidity(&self) -> Self {
-        let encoder = self.encoder.without_liquidity();
+    pub fn without_onchain_liquidity(&self) -> Self {
+        let encoder = self.encoder.without_onchain_liquidity();
         Self { encoder }
     }
 

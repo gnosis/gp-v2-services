@@ -69,7 +69,7 @@ impl SettlementEncoder {
     }
 
     // Returns a copy of self without any liquidity provision interaction.
-    pub fn without_liquidity(&self) -> Self {
+    pub fn without_onchain_liquidity(&self) -> Self {
         SettlementEncoder {
             tokens: self.tokens.clone(),
             clearing_prices: self.clearing_prices.clone(),

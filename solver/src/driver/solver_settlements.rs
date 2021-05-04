@@ -38,9 +38,9 @@ pub struct RatedSettlement {
 }
 
 impl RatedSettlement {
-    pub fn without_liquidity(&self) -> Self {
+    pub fn without_onchain_liquidity(&self) -> Self {
         RatedSettlement {
-            settlement: self.settlement.without_liquidity(),
+            settlement: self.settlement.without_onchain_liquidity(),
             objective_value: self.objective_value.clone(), // This will change once objective fn has costs.
         }
     }

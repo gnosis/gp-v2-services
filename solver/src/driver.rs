@@ -219,11 +219,11 @@ impl Driver {
         {
             // If we have enough buffer in the settlement contract to not use on-chain interactions, remove those
             if self
-                .can_settle(settlement.without_liquidity())
+                .can_settle(settlement.without_onchain_liquidity())
                 .await
                 .unwrap_or(false)
             {
-                settlement = settlement.without_liquidity()
+                settlement = settlement.without_onchain_liquidity()
             }
             self.submit_settlement(settlement).await;
         }
