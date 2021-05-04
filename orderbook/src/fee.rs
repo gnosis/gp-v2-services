@@ -61,7 +61,7 @@ pub enum MinFeeCalculationError {
     #[error("Token not found")]
     NotFound,
 
-    // Represents a failure when no liquidity between sell and buy token via the native token can be found
+    // Represents a failure when one of the tokens involved is not supported by the system
     #[error("Token {0:?} not supported")]
     UnsupportedToken(H160),
 
