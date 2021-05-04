@@ -46,9 +46,9 @@ impl RatedSettlement {
     }
 }
 
-impl Into<EncodedSettlement> for RatedSettlement {
-    fn into(self) -> EncodedSettlement {
-        self.settlement.into()
+impl From<RatedSettlement> for EncodedSettlement {
+    fn from(settlement: RatedSettlement) -> Self {
+        settlement.settlement.into()
     }
 }
 
