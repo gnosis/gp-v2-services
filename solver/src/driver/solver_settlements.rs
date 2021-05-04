@@ -1,4 +1,4 @@
-use crate::settlement::Settlement;
+use crate::{encoding::EncodedSettlement, settlement::Settlement};
 use anyhow::Result;
 use num::BigRational;
 use primitive_types::H160;
@@ -31,7 +31,7 @@ pub struct SolverWithSettlements {
 }
 
 // Each individual settlement has an objective value.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RatedSettlement {
     pub settlement: Settlement,
     pub objective_value: BigRational,
@@ -43,6 +43,12 @@ impl RatedSettlement {
             settlement: self.settlement.without_onchain_liquidity(),
             objective_value: self.objective_value.clone(), // This will change once objective fn has costs.
         }
+    }
+}
+
+impl Into<EncodedSettlement> for RatedSettlement {
+    fn into(self) -> EncodedSettlement {
+        self.settlement.into()
     }
 }
 

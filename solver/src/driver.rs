@@ -128,7 +128,7 @@ impl Driver {
 
     async fn can_settle(&self, settlement: RatedSettlement) -> Result<bool> {
         let simulations = settlement_simulation::simulate_settlements(
-            chain![settlement.settlement.clone().into()],
+            chain![settlement.into()],
             &self.settlement_contract,
             &self.web3,
             &self.network_id,
@@ -146,7 +146,7 @@ impl Driver {
         let simulations = settlement_simulation::simulate_settlements(
             settlements
                 .iter()
-                .map(|settlement| settlement.settlement.clone().into()),
+                .map(|settlement| settlement.clone().into()),
             &self.settlement_contract,
             &self.web3,
             &self.network_id,
