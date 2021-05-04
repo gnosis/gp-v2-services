@@ -198,7 +198,9 @@ async fn main() {
         token_info_fetcher,
         price_estimator.clone(),
         network_name.to_string(),
-    );
+        chain_id,
+    )
+    .expect("failure creating solvers");
     let liquidity_collector = LiquidityCollector {
         uniswap_like_liquidity,
         orderbook_api,
