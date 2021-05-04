@@ -5,7 +5,7 @@ use self::retry::{CancelSender, SettlementSender};
 use crate::{encoding::EncodedSettlement, settlement::Settlement};
 use anyhow::{Context, Result};
 use contracts::GPv2Settlement;
-use ethcontract::{dyns::DynTransport, Web3};
+use ethcontract::{dyns::DynTransport, errors::ExecutionError, Web3};
 use futures::stream::StreamExt;
 use gas_estimation::GasPriceEstimating;
 use gas_price_stream::gas_price_stream;
@@ -15,6 +15,16 @@ use transaction_retry::RetryResult;
 
 const GAS_PRICE_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
 const ESTIMATE_GAS_LIMIT_FACTOR: f64 = 1.2;
+
+pub async fn estimate_gas(
+    contract: &GPv2Settlement,
+    settlement: &EncodedSettlement,
+) -> Result<U256, ExecutionError> {
+    retry::settle_method_builder(contract, settlement.clone())
+        .tx
+        .estimate_gas()
+        .await
+}
 
 // Submit a settlement to the contract, updating the transaction with gas prices if they increase.
 pub async fn submit(
@@ -41,9 +51,7 @@ pub async fn submit(
         .context("failed to get pending gas price")?;
 
     // Account for some buffer in the gas limit in case racing state changes result in slightly more heavy computation at execution time
-    let gas_limit = retry::settle_method_builder(contract, settlement.clone())
-        .tx
-        .estimate_gas()
+    let gas_limit = estimate_gas(contract, &settlement)
         .await
         .context("failed to estimate gas")?
         .to_f64_lossy()

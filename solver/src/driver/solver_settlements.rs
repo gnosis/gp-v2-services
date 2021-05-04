@@ -27,14 +27,25 @@ pub fn filter_bad_settlements(
 #[derive(Debug)]
 pub struct SolverWithSettlements {
     pub name: &'static str,
-    pub settlements: Vec<RatedSettlement>,
+    pub settlements: Vec<Settlement>,
 }
 
 // Each individual settlement has an objective value.
 #[derive(Debug)]
 pub struct RatedSettlement {
     pub settlement: Settlement,
-    pub objective_value: BigRational,
+    pub surplus: BigRational,
+    pub gas_estimate: BigRational,
+}
+
+impl RatedSettlement {
+    pub fn objective_value(&self, gas_price: f64) -> BigRational {
+        // I can't see why a f64 couldn't be represented as a BigRational. Thoughts?
+        // (we could also convert everything to float as this is the final computation)
+        let cost: BigRational =
+            self.gas_estimate.clone() * BigRational::from_float(gas_price).unwrap();
+        self.surplus.clone() - cost
+    }
 }
 
 // Takes the settlements of a single solver and adds a merged settlement.
@@ -44,28 +55,16 @@ pub fn merge_settlements(
     name: &'static str,
     settlements: Vec<Settlement>,
 ) -> SolverWithSettlements {
-    let mut settlements = settlements
-        .into_iter()
-        .map(|settlement| {
-            let objective_value = settlement.objective_value(prices);
-            RatedSettlement {
-                settlement,
-                objective_value,
-            }
-        })
-        .collect::<Vec<_>>();
-    settlements.sort_by(|a, b| b.objective_value.cmp(&a.objective_value));
-    if let Some(settlement) = merge_at_most_settlements(
-        max_merged_settlements,
-        settlements
-            .iter()
-            .map(|settlement| settlement.settlement.clone()),
-    ) {
-        let objective_value = settlement.objective_value(prices);
-        settlements.push(RatedSettlement {
-            settlement,
-            objective_value,
-        });
+    let mut settlements = settlements;
+
+    settlements.sort_by_cached_key(|a| -a.total_surplus(prices));
+
+    // I'd like a comment here: what is this doing? If there were N settlements, after
+    // this block there will be N+1 settlements, right? Where's the merging happening?
+    if let Some(settlement) =
+        merge_at_most_settlements(max_merged_settlements, settlements.clone().into_iter())
+    {
+        settlements.push(settlement);
     }
     SolverWithSettlements { name, settlements }
 }
@@ -101,13 +100,12 @@ fn merge_at_most_settlements(
 
 pub fn filter_settlements_without_old_orders(
     min_order_age: Duration,
-    settlements: &mut Vec<RatedSettlement>,
+    settlements: &mut Vec<Settlement>,
 ) {
     let settle_orders_older_than =
         chrono::offset::Utc::now() - chrono::Duration::from_std(min_order_age).unwrap();
     settlements.retain(|settlement| {
         settlement
-            .settlement
             .trades()
             .iter()
             .any(|trade| trade.order.order_meta_data.creation_date <= settle_orders_older_than)
@@ -170,7 +168,7 @@ mod tests {
 
         assert_eq!(settlements.len(), 4);
         assert!(settlements.iter().any(|settlement| {
-            let trades = settlement.settlement.trades();
+            let trades = settlement.trades();
             let uids: HashSet<OrderUid> = trades
                 .iter()
                 .map(|trade| trade.order.order_meta_data.uid)
