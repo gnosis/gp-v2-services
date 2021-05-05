@@ -1,5 +1,5 @@
 use chrono::offset::Utc;
-use contracts::{GPv2Settlement, SushiswapV2Factory, UniswapV2Factory, WETH9};
+use contracts::{GPv2Settlement, WETH9};
 use futures::StreamExt;
 use model::{order::OrderUid, DomainSeparator};
 use orderbook::{
@@ -10,12 +10,10 @@ use orderbook::{
     orderbook::Orderbook,
     serve_task, verify_deployed_contract_constants,
 };
-use shared::amm_pair_provider::SushiswapPairProvider;
 use shared::{
-    amm_pair_provider::UniswapPairProvider,
     current_block::{current_block_stream, CurrentBlockStream},
     pool_aggregating::PoolAggregator,
-    pool_fetching::{CachedPoolFetcher, FilteredPoolFetcher, PoolFetcher},
+    pool_fetching::{CachedPoolFetcher, FilteredPoolFetcherfrom},
     price_estimate::BaselinePriceEstimator,
     transport::LoggingTransport,
 };
@@ -96,12 +94,6 @@ async fn main() {
         .call()
         .await
         .expect("Couldn't get allowance manager address");
-    let uniswap_factory = UniswapV2Factory::deployed(&web3)
-        .await
-        .expect("couldn't load deployed uniswap factory");
-    let sushiswap_factory = SushiswapV2Factory::deployed(&web3)
-        .await
-        .expect("couldn't load deployed sushiswap factory");
     let native_token = WETH9::deployed(&web3)
         .await
         .expect("couldn't load deployed native token");
@@ -111,13 +103,7 @@ async fn main() {
         .await
         .expect("Could not get chainId")
         .as_u64();
-    let uniswap_pair_provider = Arc::new(UniswapPairProvider {
-        factory: uniswap_factory,
-        chain_id,
-    });
-    let sushiswap_pair_provider = Arc::new(SushiswapPairProvider {
-        factory: sushiswap_factory,
-    });
+
     verify_deployed_contract_constants(&settlement_contract, chain_id)
         .await
         .expect("Deployed contract constants don't match the ones in this binary");
@@ -161,18 +147,9 @@ async fn main() {
     );
 
     let current_block_stream = current_block_stream(web3.clone()).await.unwrap();
-    let pool_aggregator = PoolAggregator {
-        pool_fetchers: vec![
-            PoolFetcher {
-                pair_provider: uniswap_pair_provider,
-                web3: web3.clone(),
-            },
-            PoolFetcher {
-                pair_provider: sushiswap_pair_provider,
-                web3,
-            },
-        ],
-    };
+    let pool_aggregator =
+        PoolAggregator::from_sources(args.shared.price_estimation_sources, chain_id, web3.clone())
+            .await;
     let cached_pool_fetcher =
         CachedPoolFetcher::new(Box::new(pool_aggregator), current_block_stream.clone());
     let pool_fetcher =

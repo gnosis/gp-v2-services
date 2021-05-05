@@ -2,7 +2,6 @@ use contracts::{IUniswapLikeRouter, WETH9};
 use ethcontract::{Account, PrivateKey, H160};
 use prometheus::Registry;
 use reqwest::Url;
-use shared::pool_fetching::PoolFetcher;
 use shared::{
     amm_pair_provider::{SushiswapPairProvider, UniswapPairProvider},
     metrics::serve_metrics,
@@ -101,7 +100,7 @@ struct Arguments {
 
     /// Which AMM sources to use. Multiple sources are supported alone or simultaneously
     #[structopt(
-    long,
+        long,
         env = "AMM_SOURCES",
         default_value = "Uniswap,Sushiswap",
         possible_values = &AmmSources::variants(),
@@ -169,32 +168,11 @@ async fn main() {
     .await
     .expect("failed to create gas price estimator");
 
-    let uniswap_pair_provider = Arc::new(UniswapPairProvider {
-        factory: contracts::UniswapV2Factory::deployed(&web3)
-            .await
-            .expect("couldn't load deployed uniswap router"),
-        chain_id,
-    });
-    let sushiswap_pair_provider = Arc::new(SushiswapPairProvider {
-        factory: contracts::SushiswapV2Factory::deployed(&web3)
-            .await
-            .expect("couldn't load deployed sushiswap router"),
-    });
-    // TODO - use Filtered-Cached PoolFetchers here too.
-    let pool_collector = PoolAggregator {
-        pool_fetchers: vec![
-            PoolFetcher {
-                pair_provider: uniswap_pair_provider,
-                web3: web3.clone(),
-            },
-            PoolFetcher {
-                pair_provider: sushiswap_pair_provider,
-                web3: web3.clone(),
-            },
-        ],
-    };
+    let pool_aggregator =
+        PoolAggregator::from_sources(args.shared.price_estimation_sources, chain_id, web3.clone())
+            .await;
     let price_estimator = Arc::new(BaselinePriceEstimator::new(
-        Box::new(pool_collector),
+        Box::new(pool_aggregator),
         base_tokens.clone(),
     ));
     let uniswap_like_liquidity = build_amm_artifacts(
