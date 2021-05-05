@@ -171,6 +171,7 @@ async fn main() {
     let pool_aggregator =
         PoolAggregator::from_sources(args.shared.price_estimation_sources, chain_id, web3.clone())
             .await;
+    // TODO - use Filtered-Cached PoolFetchers here too.
     let price_estimator = Arc::new(BaselinePriceEstimator::new(
         Box::new(pool_aggregator),
         base_tokens.clone(),

@@ -35,6 +35,7 @@ impl PoolAggregator {
                             .expect("couldn't load deployed uniswap router"),
                         chain_id,
                     });
+                    tracing::info!("Constructed Uniswap Pair Provider");
                 }
                 PriceEstimationSources::Sushiswap => {
                     pair_provider = Arc::new(SushiswapPairProvider {
@@ -42,14 +43,15 @@ impl PoolAggregator {
                             .await
                             .expect("couldn't load deployed sushiswap router"),
                     });
+                    tracing::info!("Constructed Sushiswap Pair Provider");
                 }
             }
-            // TODO - use Filtered-Cached PoolFetchers here too.
             pool_fetchers.push(PoolFetcher {
                 pair_provider,
                 web3: web3.clone(),
             })
         }
+        tracing::info!("Built Pool Aggregator with {} sources", pool_fetchers.len());
         Self { pool_fetchers }
     }
 }
