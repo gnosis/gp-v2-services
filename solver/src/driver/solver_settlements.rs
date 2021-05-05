@@ -54,14 +54,10 @@ pub fn merge_settlements(
     max_merged_settlements: usize,
     prices: &HashMap<H160, BigRational>,
     name: &'static str,
-    settlements: Vec<Settlement>,
+    mut settlements: Vec<Settlement>,
 ) -> SolverWithSettlements {
-    let mut settlements = settlements;
-
     settlements.sort_by_cached_key(|a| -a.total_surplus(prices));
 
-    // I'd like a comment here: what is this doing? If there were N settlements, after
-    // this block there will be N+1 settlements, right? Where's the merging happening?
     if let Some(settlement) =
         merge_at_most_settlements(max_merged_settlements, settlements.clone().into_iter())
     {
