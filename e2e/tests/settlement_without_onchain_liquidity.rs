@@ -29,11 +29,11 @@ const TRADER_A_PK: [u8; 32] =
 const ORDER_PLACEMENT_ENDPOINT: &str = "/api/v1/orders/";
 
 #[tokio::test]
-async fn ganache_onchain_settlement() {
-    ganache::test(onchain_settlement).await;
+async fn ganache_onchain_settlement_without_liquidity() {
+    ganache::test(onchain_settlement_without_liquidity).await;
 }
 
-async fn onchain_settlement(web3: Web3) {
+async fn onchain_settlement_without_liquidity(web3: Web3) {
     shared::tracing::initialize("warn,orderbook=debug,solver=debug");
     let chain_id = web3
         .eth()
@@ -67,7 +67,7 @@ async fn onchain_settlement(web3: Web3) {
     );
     tx!(
         solver_account,
-        token_b.mint(solver_account.address(), to_wei(100_100))
+        token_b.mint(solver_account.address(), to_wei(100_000))
     );
 
     // Create and fund Uniswap pool
@@ -113,7 +113,7 @@ async fn onchain_settlement(web3: Web3) {
         .with_sell_token(token_a.address())
         .with_sell_amount(to_wei(100))
         .with_buy_token(token_b.address())
-        .with_buy_amount(to_wei(100))
+        .with_buy_amount(to_wei(90))
         .with_valid_to(shared::time::now_in_epoch_seconds() + 300)
         .with_kind(OrderKind::Sell)
         .with_signing_scheme(SigningScheme::Eip712)
@@ -166,21 +166,37 @@ async fn onchain_settlement(web3: Web3) {
     );
     driver.single_run().await.unwrap();
 
-    // Check matching
+    // Check that trader traded.
     let balance = token_a
         .balance_of(trader_account.address())
         .call()
         .await
         .expect("Couldn't fetch trader TokenA's balance");
-    assert_eq!(balance, U256::from(100_000_000_000_000_000_000u128));
+    assert_eq!(balance, U256::from(0_u128));
 
     let balance = token_b
         .balance_of(trader_account.address())
         .call()
         .await
         .expect("Couldn't fetch trader TokenB's balance");
-    assert_eq!(balance, U256::from(0_u128));
+    assert_eq!(balance, U256::from(99_600_698_103_990_321_649u128));
 
+    // Check that uniswap wasn't touched.
+    let balance = token_a
+        .balance_of(uniswap_router.address())
+        .call()
+        .await
+        .expect("Couldn't fetch uniswap TokenA's balance");
+    assert_eq!(balance, U256::from(100_000_000_000_000_000_000_000u128));
+
+    let balance = token_b
+        .balance_of(trader_account.address())
+        .call()
+        .await
+        .expect("Couldn't fetch uniswap TokenB's balance");
+    assert_eq!(balance, U256::from(100_000_000_000_000_000_000_000u128));
+
+    // Check that solver buffers were traded.
     let balance = token_a
         .balance_of(solver_account.address())
         .call()
