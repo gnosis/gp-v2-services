@@ -180,6 +180,7 @@ async fn main() {
             .await
             .expect("couldn't load deployed sushiswap router"),
     });
+    // TODO - use Filtered-Cached PoolFetchers here too.
     let pool_collector = PoolAggregator {
         pool_fetchers: vec![
             PoolFetcher {
