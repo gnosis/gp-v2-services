@@ -1,4 +1,4 @@
-mod solver_settlements;
+pub mod solver_settlements;
 
 use self::solver_settlements::RatedSettlement;
 use crate::{
@@ -113,7 +113,7 @@ impl Driver {
             self.gas_price_estimator.as_ref(),
             self.target_confirm_time,
             GAS_PRICE_CAP,
-            settlement.settlement,
+            settlement,
         )
         .await
         {
