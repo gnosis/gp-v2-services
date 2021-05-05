@@ -1,7 +1,9 @@
 use crate::settlement::Settlement;
 use anyhow::Result;
+use ethcontract::U256;
 use num::BigRational;
 use primitive_types::H160;
+use shared::conversions::U256Ext;
 use std::{collections::HashMap, time::Duration};
 
 // Return None if the result is an error or there are no settlements remaining after removing
@@ -35,15 +37,14 @@ pub struct SolverWithSettlements {
 pub struct RatedSettlement {
     pub settlement: Settlement,
     pub surplus: BigRational,
-    pub gas_estimate: BigRational,
+    pub gas_estimate: U256,
 }
 
 impl RatedSettlement {
     pub fn objective_value(&self, gas_price: f64) -> BigRational {
-        // I can't see why a f64 couldn't be represented as a BigRational. Thoughts?
-        // (we could also convert everything to float as this is the final computation)
-        let cost: BigRational =
-            self.gas_estimate.clone() * BigRational::from_float(gas_price).unwrap();
+        let gas_price = BigRational::from_float(gas_price).unwrap();
+        let gas_estimate = self.gas_estimate.to_big_rational();
+        let cost = gas_estimate * gas_price;
         self.surplus.clone() - cost
     }
 }

@@ -16,7 +16,7 @@ use gas_estimation::GasPriceEstimating;
 use itertools::{Either, Itertools};
 use num::BigRational;
 use primitive_types::H160;
-use shared::{conversions::U256Ext, price_estimate::PriceEstimating, Web3};
+use shared::{price_estimate::PriceEstimating, Web3};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -216,7 +216,7 @@ impl Driver {
             result.push(RatedSettlement {
                 settlement,
                 surplus,
-                gas_estimate: gas_estimate.to_big_rational(),
+                gas_estimate,
             });
         }
         Ok(result)
