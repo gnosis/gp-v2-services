@@ -209,20 +209,17 @@ impl Driver {
         futures::stream::iter(settlements)
             .filter_map(|settlement| async {
                 let surplus = settlement.total_surplus(prices);
-                if let Ok(gas_estimate) = settlement_submission::estimate_gas(
+                let gas_estimate = settlement_submission::estimate_gas(
                     &self.settlement_contract,
                     &settlement.clone().into(),
                 )
                 .await
-                {
-                    Some(RatedSettlement {
-                        settlement,
-                        surplus,
-                        gas_estimate,
-                    })
-                } else {
-                    None
-                }
+                .ok()?;
+                Some(RatedSettlement {
+                    settlement,
+                    surplus,
+                    gas_estimate,
+                })
             })
             .collect::<Vec<_>>()
             .await
