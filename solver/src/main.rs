@@ -2,11 +2,11 @@ use contracts::{IUniswapLikeRouter, WETH9};
 use ethcontract::{Account, PrivateKey, H160};
 use prometheus::Registry;
 use reqwest::Url;
-use shared::{amm_pair_provider::SushiswapPairProvider, network::network_name};
 use shared::{
-    amm_pair_provider::UniswapPairProvider,
+    amm_pair_provider::{SushiswapPairProvider, UniswapPairProvider},
     metrics::serve_metrics,
-    pool_fetching::PoolFetcher,
+    network::network_name,
+    pool_collector::PoolCollector,
     price_estimate::BaselinePriceEstimator,
     token_info::{CachedTokenInfoFetcher, TokenInfoFetcher},
     transport::LoggingTransport,
@@ -168,18 +168,21 @@ async fn main() {
     .await
     .expect("failed to create gas price estimator");
 
-    // TODO - Currently we use only Uniswap for price estimation.
     let uniswap_pair_provider = Arc::new(UniswapPairProvider {
         factory: contracts::UniswapV2Factory::deployed(&web3)
             .await
             .expect("couldn't load deployed uniswap router"),
         chain_id,
     });
+    let sushiswap_pair_provider = Arc::new(SushiswapPairProvider {
+        factory: contracts::SushiswapV2Factory::deployed(&web3)
+            .await
+            .expect("couldn't load deployed sushiswap router"),
+    });
+    let pool_collector =
+        PoolCollector::new(vec![uniswap_pair_provider, sushiswap_pair_provider], web3.clone());
     let price_estimator = Arc::new(BaselinePriceEstimator::new(
-        Box::new(PoolFetcher {
-            pair_provider: uniswap_pair_provider,
-            web3: web3.clone(),
-        }),
+        Box::new(pool_collector),
         base_tokens.clone(),
     ));
     let uniswap_like_liquidity = build_amm_artifacts(
