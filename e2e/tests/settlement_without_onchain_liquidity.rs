@@ -57,9 +57,18 @@ async fn onchain_settlement(web3: Web3) {
     let token_b = deploy_mintable_token(&web3).await;
 
     // Fund trader and solver accounts
-    tx!(solver_account, token_a.mint(trader_account.address(), to_wei(100)));
-    tx!(solver_account, token_a.mint(solver_account.address(), to_wei(100_000)));
-    tx!(solver_account, token_b.mint(solver_account.address(), to_wei(100_100)));
+    tx!(
+        solver_account,
+        token_a.mint(trader_account.address(), to_wei(100))
+    );
+    tx!(
+        solver_account,
+        token_a.mint(solver_account.address(), to_wei(100_000))
+    );
+    tx!(
+        solver_account,
+        token_b.mint(solver_account.address(), to_wei(100_100))
+    );
 
     // Create and fund Uniswap pool
     tx!(
@@ -159,10 +168,10 @@ async fn onchain_settlement(web3: Web3) {
 
     // Check matching
     let balance = token_a
-    .balance_of(trader_account.address())
-    .call()
-    .await
-    .expect("Couldn't fetch trader TokenA's balance");
+        .balance_of(trader_account.address())
+        .call()
+        .await
+        .expect("Couldn't fetch trader TokenA's balance");
     assert_eq!(balance, U256::from(100_000_000_000_000_000_000u128));
 
     let balance = token_b
@@ -180,10 +189,10 @@ async fn onchain_settlement(web3: Web3) {
     assert_eq!(balance, U256::from(0u128));
 
     let balance = token_b
-    .balance_of(solver_account.address())
-    .call()
-    .await
-    .expect("Couldn't fetch TokenA's balance");
+        .balance_of(solver_account.address())
+        .call()
+        .await
+        .expect("Couldn't fetch TokenA's balance");
     assert_eq!(balance, U256::from(100_000_000_000_000_000_000u128));
 
     // Drive orderbook in order to check the removal of settled order_b
