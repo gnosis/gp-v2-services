@@ -101,7 +101,7 @@ async fn main() {
         .expect("couldn't load deployed uniswap factory");
     let sushiswap_factory = SushiswapV2Factory::deployed(&web3)
         .await
-        .expect("couldn't load deployed uniswap factory");
+        .expect("couldn't load deployed sushiswap factory");
     let native_token = WETH9::deployed(&web3)
         .await
         .expect("couldn't load deployed native token");
