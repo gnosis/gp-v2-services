@@ -1,10 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use model::order::OrderKind;
 use primitive_types::{H160, U256};
 use std::sync::{Arc, Mutex};
+use thiserror::Error;
 
 use crate::database::Database;
 use gas_estimation::GasPriceEstimating;
@@ -19,6 +20,7 @@ pub struct MinFeeCalculator {
     measurements: Box<dyn MinFeeStoring>,
     now: Box<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     discount_factor: f64,
+    unsupported_tokens: HashSet<H160>,
 }
 
 #[async_trait::async_trait]
@@ -53,6 +55,20 @@ const GAS_PER_ORDER: f64 = 100_000.0;
 const STANDARD_VALIDITY_FOR_FEE_IN_SEC: i64 = 60;
 const PERSISTED_VALIDITY_FOR_FEE_IN_SEC: i64 = 120;
 
+#[derive(Error, Debug)]
+pub enum MinFeeCalculationError {
+    // Represents a failure when no liquidity between sell and buy token via the native token can be found
+    #[error("Token not found")]
+    NotFound,
+
+    // Represents a failure when one of the tokens involved is not supported by the system
+    #[error("Token {0:?} not supported")]
+    UnsupportedToken(H160),
+
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
 impl MinFeeCalculator {
     pub fn new(
         price_estimator: Arc<dyn PriceEstimating>,
@@ -60,6 +76,7 @@ impl MinFeeCalculator {
         native_token: H160,
         database: Database,
         discount_factor: f64,
+        unsupported_tokens: HashSet<H160>,
     ) -> Self {
         Self {
             price_estimator,
@@ -68,11 +85,10 @@ impl MinFeeCalculator {
             measurements: Box::new(database),
             now: Box::new(Utc::now),
             discount_factor,
+            unsupported_tokens,
         }
     }
-}
 
-impl MinFeeCalculator {
     // Returns the minimum amount of fee required to accept an order selling the specified order
     // and an expiry date for the estimate.
     // Returns an error if there is some estimation error and Ok(None) if no information about the given
@@ -83,7 +99,20 @@ impl MinFeeCalculator {
         buy_token: Option<H160>,
         amount: Option<U256>,
         kind: Option<OrderKind>,
-    ) -> Result<Option<Measurement>> {
+    ) -> Result<Measurement, MinFeeCalculationError> {
+        if self.unsupported_tokens.contains(&sell_token) {
+            return Err(MinFeeCalculationError::UnsupportedToken(sell_token));
+        }
+
+        if buy_token
+            .map(|t| self.unsupported_tokens.contains(&t))
+            .unwrap_or_default()
+        {
+            return Err(MinFeeCalculationError::UnsupportedToken(
+                buy_token.expect("Must exist"),
+            ));
+        }
+
         let now = (self.now)();
         let official_valid_until = now + Duration::seconds(STANDARD_VALIDITY_FOR_FEE_IN_SEC);
         let internal_valid_until = now + Duration::seconds(PERSISTED_VALIDITY_FOR_FEE_IN_SEC);
@@ -93,7 +122,7 @@ impl MinFeeCalculator {
             .get_min_fee(sell_token, buy_token, amount, kind, official_valid_until)
             .await
         {
-            return Ok(Some((past_fee, official_valid_until)));
+            return Ok((past_fee, official_valid_until));
         }
 
         let min_fee = match self
@@ -101,7 +130,7 @@ impl MinFeeCalculator {
             .await?
         {
             Some(fee) => fee,
-            None => return Ok(None),
+            None => return Err(MinFeeCalculationError::NotFound),
         };
 
         let _ = self
@@ -115,7 +144,7 @@ impl MinFeeCalculator {
                 min_fee,
             )
             .await;
-        Ok(Some((min_fee, official_valid_until)))
+        Ok((min_fee, official_valid_until))
     }
 
     async fn compute_min_fee(
@@ -250,9 +279,10 @@ impl MinFeeStoring for InMemoryFeeStore {
 #[cfg(test)]
 mod tests {
     use chrono::Duration;
+    use maplit::hashset;
     use shared::gas_price_estimation::FakeGasPriceEstimator;
     use shared::price_estimate::mocks::FakePriceEstimator;
-    use std::sync::Arc;
+    use std::{collections::HashSet, sync::Arc};
 
     use super::*;
 
@@ -269,6 +299,7 @@ mod tests {
                 measurements: Box::new(InMemoryFeeStore::default()),
                 now,
                 discount_factor: 1.0,
+                unsupported_tokens: HashSet::new(),
             }
         }
     }
@@ -290,7 +321,6 @@ mod tests {
         let (fee, expiry) = fee_estimator
             .min_fee(token, None, None, None)
             .await
-            .unwrap()
             .unwrap();
 
         // Gas price increase after measurement
@@ -322,7 +352,6 @@ mod tests {
         let (fee, _) = fee_estimator
             .min_fee(token, None, None, None)
             .await
-            .unwrap()
             .unwrap();
 
         let lower_fee = fee - U256::one();
@@ -333,5 +362,51 @@ mod tests {
         // Gas price reduces, and slightly lower fee is now valid
         *gas_price.lock().unwrap() /= 2.0;
         assert!(fee_estimator.is_valid_fee(token, lower_fee).await);
+    }
+
+    #[tokio::test]
+    async fn fails_for_unsupported_tokens() {
+        let unsupported_token = H160::from_low_u64_be(1);
+        let supported_token = H160::from_low_u64_be(2);
+
+        let gas_price_estimator = Box::new(FakeGasPriceEstimator(Arc::new(Mutex::new(100.0))));
+        let price_estimator = Arc::new(FakePriceEstimator(num::one()));
+        let unsupported_tokens = hashset! {unsupported_token};
+
+        let fee_estimator = MinFeeCalculator {
+            price_estimator,
+            gas_estimator: gas_price_estimator,
+            native_token: Default::default(),
+            measurements: Box::new(InMemoryFeeStore::default()),
+            now: Box::new(Utc::now),
+            discount_factor: 1.0,
+            unsupported_tokens,
+        };
+
+        // Selling unsupported token
+        assert!(matches!(
+            fee_estimator
+                .min_fee(
+                    unsupported_token,
+                    Some(supported_token),
+                    Some(100.into()),
+                    Some(OrderKind::Sell)
+                )
+                .await,
+            Err(MinFeeCalculationError::UnsupportedToken(t)) if t == unsupported_token
+        ));
+
+        // Buying unsupported token
+        assert!(matches!(
+            fee_estimator
+                .min_fee(
+                    supported_token,
+                    Some(unsupported_token),
+                    Some(100.into()),
+                    Some(OrderKind::Sell)
+                )
+                .await,
+            Err(MinFeeCalculationError::UnsupportedToken(t)) if t == unsupported_token
+        ));
     }
 }

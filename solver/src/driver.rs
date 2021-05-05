@@ -270,6 +270,9 @@ impl Driver {
             settlements.len(),
             errors.len()
         );
+        self.metrics
+            .settlement_simulations_succeeded(settlements.len());
+        self.metrics.settlement_simulations_failed(errors.len());
         if let Some(mut settlement) = settlements
             .into_iter()
             .max_by(|a, b| a.objective_value.cmp(&b.objective_value))
@@ -280,7 +283,8 @@ impl Driver {
                 .await
                 .unwrap_or(false)
             {
-                settlement = settlement.without_onchain_liquidity()
+                settlement = settlement.without_onchain_liquidity();
+                tracing::info!("settlement without onchain liquidity");
             }
             self.submit_settlement(settlement).await;
         }
