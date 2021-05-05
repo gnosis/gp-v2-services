@@ -7,7 +7,7 @@ use shared::{
     amm_pair_provider::{SushiswapPairProvider, UniswapPairProvider},
     metrics::serve_metrics,
     network::network_name,
-    pool_collector::PoolAggregator,
+    pool_aggregating::PoolAggregator,
     price_estimate::BaselinePriceEstimator,
     token_info::{CachedTokenInfoFetcher, TokenInfoFetcher},
     transport::LoggingTransport,

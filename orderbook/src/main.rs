@@ -14,7 +14,7 @@ use shared::amm_pair_provider::SushiswapPairProvider;
 use shared::{
     amm_pair_provider::UniswapPairProvider,
     current_block::{current_block_stream, CurrentBlockStream},
-    pool_collector::PoolAggregator,
+    pool_aggregating::PoolAggregator,
     pool_fetching::{CachedPoolFetcher, FilteredPoolFetcher, PoolFetcher},
     price_estimate::BaselinePriceEstimator,
     transport::LoggingTransport,
