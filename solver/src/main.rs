@@ -179,8 +179,10 @@ async fn main() {
             .await
             .expect("couldn't load deployed sushiswap router"),
     });
-    let pool_collector =
-        PoolCollector::new(vec![uniswap_pair_provider, sushiswap_pair_provider], web3.clone());
+    let pool_collector = PoolCollector::new(
+        vec![uniswap_pair_provider, sushiswap_pair_provider],
+        web3.clone(),
+    );
     let price_estimator = Arc::new(BaselinePriceEstimator::new(
         Box::new(pool_collector),
         base_tokens.clone(),
