@@ -268,57 +268,6 @@ impl UniswapPriceEstimator {
     }
 }
 
-pub struct MultiAmmPriceEstimator {
-    amm_estimators: Vec<UniswapPriceEstimator>,
-}
-
-#[async_trait::async_trait]
-impl PriceEstimating for MultiAmmPriceEstimator {
-    async fn estimate_price(
-        &self,
-        sell_token: H160,
-        buy_token: H160,
-        amount: U256,
-        kind: OrderKind,
-    ) -> Result<BigRational> {
-        // Return min price estimate as best case.
-        let estimates = join_all(self.amm_estimators.iter().map(|estimator| async move {
-            estimator
-                .estimate_price(sell_token, buy_token, amount, kind)
-                .await
-        }))
-        .await;
-
-        estimates
-            .into_iter()
-            .filter_map(Result::ok)
-            .min()
-            .ok_or_else(|| anyhow!("Failed to estimate prices on all estimators"))
-    }
-
-    async fn estimate_gas(
-        &self,
-        sell_token: H160,
-        buy_token: H160,
-        amount: U256,
-        kind: OrderKind,
-    ) -> Result<U256> {
-        // Return max price estimate as worst case.
-        let estimates = join_all(self.amm_estimators.iter().map(|estimator| async move {
-            estimator
-                .estimate_gas(sell_token, buy_token, amount, kind)
-                .await
-        }))
-        .await;
-
-        estimates
-            .into_iter()
-            .filter_map(Result::ok)
-            .max()
-            .ok_or_else(|| anyhow!("Failed to estimate gas on all estimators"))
-    }
-}
-
 pub mod mocks {
     use super::*;
 
