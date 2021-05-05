@@ -204,22 +204,26 @@ impl Driver {
         &self,
         settlements: Vec<Settlement>,
         prices: &HashMap<H160, BigRational>,
-    ) -> Result<Vec<RatedSettlement>> {
-        let mut result: Vec<RatedSettlement> = Vec::new();
-        for settlement in settlements {
+    ) -> Vec<RatedSettlement> {
+        use futures::stream::{StreamExt};
+        futures::stream::iter(settlements).filter_map(|settlement| async {
             let surplus = settlement.total_surplus(prices);
-            let gas_estimate = settlement_submission::estimate_gas(
+            if let Ok(gas_estimate) = settlement_submission::estimate_gas(
                 &self.settlement_contract,
                 &settlement.clone().into(),
-            )
-            .await?;
-            result.push(RatedSettlement {
-                settlement,
-                surplus,
-                gas_estimate,
-            });
-        }
-        Ok(result)
+            ).await {
+                Some(
+                    RatedSettlement {
+                        settlement,
+                        surplus,
+                        gas_estimate,
+                    }
+                )
+            }
+            else {
+                None
+            }
+        }).collect::<Vec<_>>().await
     }
 
     pub async fn single_run(&mut self) -> Result<()> {
@@ -283,8 +287,7 @@ impl Driver {
         self.metrics.settlement_simulations_failed(errors.len());
 
         let rated_settlements = self
-            .rate_settlements(settlements, &estimated_prices)
-            .await?;
+            .rate_settlements(settlements, &estimated_prices).await;
 
         if let Some(settlement) = rated_settlements.into_iter().max_by(|a, b| {
             a.objective_value(gas_price)
