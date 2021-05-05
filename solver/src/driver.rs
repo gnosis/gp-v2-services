@@ -205,25 +205,27 @@ impl Driver {
         settlements: Vec<Settlement>,
         prices: &HashMap<H160, BigRational>,
     ) -> Vec<RatedSettlement> {
-        use futures::stream::{StreamExt};
-        futures::stream::iter(settlements).filter_map(|settlement| async {
-            let surplus = settlement.total_surplus(prices);
-            if let Ok(gas_estimate) = settlement_submission::estimate_gas(
-                &self.settlement_contract,
-                &settlement.clone().into(),
-            ).await {
-                Some(
-                    RatedSettlement {
+        use futures::stream::StreamExt;
+        futures::stream::iter(settlements)
+            .filter_map(|settlement| async {
+                let surplus = settlement.total_surplus(prices);
+                if let Ok(gas_estimate) = settlement_submission::estimate_gas(
+                    &self.settlement_contract,
+                    &settlement.clone().into(),
+                )
+                .await
+                {
+                    Some(RatedSettlement {
                         settlement,
                         surplus,
                         gas_estimate,
-                    }
-                )
-            }
-            else {
-                None
-            }
-        }).collect::<Vec<_>>().await
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .await
     }
 
     pub async fn single_run(&mut self) -> Result<()> {
@@ -286,8 +288,7 @@ impl Driver {
             .settlement_simulations_succeeded(settlements.len());
         self.metrics.settlement_simulations_failed(errors.len());
 
-        let rated_settlements = self
-            .rate_settlements(settlements, &estimated_prices).await;
+        let rated_settlements = self.rate_settlements(settlements, &estimated_prices).await;
 
         if let Some(settlement) = rated_settlements.into_iter().max_by(|a, b| {
             a.objective_value(gas_price)
