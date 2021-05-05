@@ -32,7 +32,10 @@ pub struct Estimate<'a, V, L> {
 
 impl<'a, V, L: BaselineSolvable> Estimate<'a, V, L> {
     pub fn gas_cost(&self) -> usize {
-        self.path.iter().map(|item| item.gas_cost()).sum()
+        // This could be more accurate by actually simulating the settlement (since different tokens might have more or less expensive transfer costs)
+        // For the standard OZ token the cost is roughly 110k for a direct trade, 170k for a 1 hop trade, 230k for a 2 hop trade.
+        let cost_of_hops: usize = self.path.iter().map(|item| item.gas_cost()).sum();
+        50_000 + cost_of_hops
     }
 }
 
