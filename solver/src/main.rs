@@ -2,11 +2,12 @@ use contracts::{IUniswapLikeRouter, WETH9};
 use ethcontract::{Account, PrivateKey, H160};
 use prometheus::Registry;
 use reqwest::Url;
+use shared::pool_fetching::PoolFetcher;
 use shared::{
     amm_pair_provider::{SushiswapPairProvider, UniswapPairProvider},
     metrics::serve_metrics,
     network::network_name,
-    pool_collector::PoolCollector,
+    pool_collector::PoolAggregator,
     price_estimate::BaselinePriceEstimator,
     token_info::{CachedTokenInfoFetcher, TokenInfoFetcher},
     transport::LoggingTransport,
@@ -179,10 +180,18 @@ async fn main() {
             .await
             .expect("couldn't load deployed sushiswap router"),
     });
-    let pool_collector = PoolCollector::new(
-        vec![uniswap_pair_provider, sushiswap_pair_provider],
-        web3.clone(),
-    );
+    let pool_collector = PoolAggregator {
+        pool_fetchers: vec![
+            PoolFetcher {
+                pair_provider: uniswap_pair_provider,
+                web3: web3.clone(),
+            },
+            PoolFetcher {
+                pair_provider: sushiswap_pair_provider,
+                web3: web3.clone(),
+            },
+        ],
+    };
     let price_estimator = Arc::new(BaselinePriceEstimator::new(
         Box::new(pool_collector),
         base_tokens.clone(),

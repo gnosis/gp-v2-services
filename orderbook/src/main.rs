@@ -14,8 +14,8 @@ use shared::amm_pair_provider::SushiswapPairProvider;
 use shared::{
     amm_pair_provider::UniswapPairProvider,
     current_block::{current_block_stream, CurrentBlockStream},
-    pool_collector::PoolCollector,
-    pool_fetching::{CachedPoolFetcher, FilteredPoolFetcher},
+    pool_collector::PoolAggregator,
+    pool_fetching::{CachedPoolFetcher, FilteredPoolFetcher, PoolFetcher},
     price_estimate::BaselinePriceEstimator,
     transport::LoggingTransport,
 };
@@ -111,13 +111,13 @@ async fn main() {
         .await
         .expect("Could not get chainId")
         .as_u64();
-    let uniswap_pair_provider = UniswapPairProvider {
+    let uniswap_pair_provider = Arc::new(UniswapPairProvider {
         factory: uniswap_factory,
         chain_id,
-    };
-    let sushiswap_pair_provider = SushiswapPairProvider {
+    });
+    let sushiswap_pair_provider = Arc::new(SushiswapPairProvider {
         factory: sushiswap_factory,
-    };
+    });
     verify_deployed_contract_constants(&settlement_contract, chain_id)
         .await
         .expect("Deployed contract constants don't match the ones in this binary");
@@ -161,15 +161,20 @@ async fn main() {
     );
 
     let current_block_stream = current_block_stream(web3.clone()).await.unwrap();
-    let pool_collector = PoolCollector::new(
-        vec![
-            Arc::new(uniswap_pair_provider),
-            Arc::new(sushiswap_pair_provider),
+    let pool_aggregator = PoolAggregator {
+        pool_fetchers: vec![
+            PoolFetcher {
+                pair_provider: uniswap_pair_provider,
+                web3: web3.clone(),
+            },
+            PoolFetcher {
+                pair_provider: sushiswap_pair_provider,
+                web3,
+            },
         ],
-        web3,
-    );
+    };
     let cached_pool_fetcher =
-        CachedPoolFetcher::new(Box::new(pool_collector), current_block_stream.clone());
+        CachedPoolFetcher::new(Box::new(pool_aggregator), current_block_stream.clone());
     let pool_fetcher =
         FilteredPoolFetcher::new(Box::new(cached_pool_fetcher), unsupported_tokens.clone());
 
