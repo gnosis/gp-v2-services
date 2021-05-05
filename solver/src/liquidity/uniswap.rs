@@ -49,7 +49,7 @@ impl UniswapLikeLiquidity {
             }),
             web3: web3.clone(),
             pool_fetcher: PoolFetcher {
-                pair_provider,
+                pair_providers: vec![pair_provider],
                 web3,
             },
             base_tokens,

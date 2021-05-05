@@ -155,7 +155,7 @@ async fn main() {
     let current_block_stream = current_block_stream(web3.clone()).await.unwrap();
     let cached_pool_fetcher = CachedPoolFetcher::new(
         Box::new(PoolFetcher {
-            pair_provider: Arc::new(uniswap_pair_provider),
+            pair_providers: vec![Arc::new(uniswap_pair_provider)],
             web3,
         }),
         current_block_stream.clone(),

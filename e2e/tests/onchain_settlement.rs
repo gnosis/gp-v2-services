@@ -144,13 +144,13 @@ async fn onchain_settlement(web3: Web3) {
     let event_updater = EventUpdater::new(gp_settlement.clone(), db.clone(), None);
 
     let current_block_stream = current_block_stream(web3.clone()).await.unwrap();
-    let pair_provider = Arc::new(UniswapPairProvider {
+    let uniswap_pair_provider = Arc::new(UniswapPairProvider {
         factory: uniswap_factory.clone(),
         chain_id,
     });
     let pool_fetcher = CachedPoolFetcher::new(
         Box::new(PoolFetcher {
-            pair_provider,
+            pair_providers: vec![uniswap_pair_provider],
             web3: web3.clone(),
         }),
         current_block_stream,

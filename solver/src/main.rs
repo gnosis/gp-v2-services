@@ -169,14 +169,15 @@ async fn main() {
     .expect("failed to create gas price estimator");
 
     // TODO - Currently we use only Uniswap for price estimation.
+    let uniswap_pair_provider = Arc::new(UniswapPairProvider {
+        factory: contracts::UniswapV2Factory::deployed(&web3)
+            .await
+            .expect("couldn't load deployed uniswap router"),
+        chain_id,
+    });
     let price_estimator = Arc::new(UniswapPriceEstimator::new(
         Box::new(PoolFetcher {
-            pair_provider: Arc::new(UniswapPairProvider {
-                factory: contracts::UniswapV2Factory::deployed(&web3)
-                    .await
-                    .expect("couldn't load deployed uniswap router"),
-                chain_id,
-            }),
+            pair_providers: vec![uniswap_pair_provider],
             web3: web3.clone(),
         }),
         base_tokens.clone(),
