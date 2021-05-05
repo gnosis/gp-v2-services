@@ -7,7 +7,7 @@ use shared::{
     amm_pair_provider::UniswapPairProvider,
     metrics::serve_metrics,
     pool_fetching::PoolFetcher,
-    price_estimate::UniswapPriceEstimator,
+    price_estimate::BaselinePriceEstimator,
     token_info::{CachedTokenInfoFetcher, TokenInfoFetcher},
     transport::LoggingTransport,
 };
@@ -175,9 +175,9 @@ async fn main() {
             .expect("couldn't load deployed uniswap router"),
         chain_id,
     });
-    let price_estimator = Arc::new(UniswapPriceEstimator::new(
+    let price_estimator = Arc::new(BaselinePriceEstimator::new(
         Box::new(PoolFetcher {
-            pair_providers: vec![uniswap_pair_provider],
+            pair_provider: uniswap_pair_provider,
             web3: web3.clone(),
         }),
         base_tokens.clone(),

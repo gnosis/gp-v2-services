@@ -238,7 +238,7 @@ impl PoolFetching for CachedPoolFetcher {
 }
 
 pub struct PoolFetcher {
-    pub pair_providers: Vec<Arc<dyn AmmPairProvider>>,
+    pub pair_provider: Arc<dyn AmmPairProvider>,
     pub web3: Web3,
 }
 
@@ -249,29 +249,19 @@ impl PoolFetching for PoolFetcher {
         let futures = token_pairs
             .into_iter()
             .map(|pair| {
-                let pair_addresses: Vec<_> = self
-                    .pair_providers
-                    .iter()
-                    .map(|provider| provider.pair_address(&pair))
-                    .collect();
+                let pair_address = self.pair_provider.pair_address(&pair);
+                let pair_contract = IUniswapLikePair::at(&self.web3, pair_address);
 
                 // Fetch ERC20 token balances of the pools to sanity check with reserves
                 let token0 = ERC20::at(&self.web3, pair.get().0);
                 let token1 = ERC20::at(&self.web3, pair.get().1);
-
-                let mut res = vec![];
-                for pair_address in pair_addresses {
-                    let pair_contract = IUniswapLikePair::at(&self.web3, pair_address);
-                    res.push((
-                        pair,
-                        pair_contract.get_reserves().batch_call(&mut batch),
-                        token0.balance_of(pair_address).batch_call(&mut batch),
-                        token1.balance_of(pair_address).batch_call(&mut batch),
-                    ))
-                }
-                res
+                (
+                    pair,
+                    pair_contract.get_reserves().batch_call(&mut batch),
+                    token0.balance_of(pair_address).batch_call(&mut batch),
+                    token1.balance_of(pair_address).batch_call(&mut batch),
+                )
             })
-            .flatten()
             .collect::<Vec<_>>();
 
         batch.execute_all(MAX_BATCH_SIZE).await;
