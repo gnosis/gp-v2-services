@@ -13,7 +13,7 @@ use orderbook::{
 use shared::{
     current_block::{current_block_stream, CurrentBlockStream},
     pool_aggregating::PoolAggregator,
-    pool_fetching::{CachedPoolFetcher, FilteredPoolFetcherfrom},
+    pool_fetching::{CachedPoolFetcher, FilteredPoolFetcher},
     price_estimate::BaselinePriceEstimator,
     transport::LoggingTransport,
 };
