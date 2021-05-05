@@ -252,8 +252,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FeeInformation"
+        400:
+          description: Token not supported by the protocol (e.g. token with fee on transfer)
         404:
           description: Token non-existent or not connected to native token
+        500:
+          description: Unexpected internal error while processing the request
   /api/v1/markets/{baseToken}-{quoteToken}/{kind}/{amount}:
     get:
       description: |
@@ -397,6 +401,11 @@ components:
         signingScheme:
           $ref: "#/components/schemas/SigningScheme"
         from:
+          description: |
+            If set, the backend enforces that this address matches what is decoded as the signer of
+            the signature. This helps catch errors with invalid signature encodings as the backend
+            might otherwise silently work with an unexpected address that for example does not have
+            any balance.
           $ref: "#/components/schemas/Address"
           nullable: true
       required:
