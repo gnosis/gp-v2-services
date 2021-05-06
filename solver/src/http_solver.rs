@@ -59,9 +59,11 @@ pub struct HttpSolver {
     token_info_fetcher: Arc<dyn TokenInfoFetching>,
     price_estimator: Arc<dyn PriceEstimating>,
     network_id: String,
+    fee_discount_factor: f64,
 }
 
 impl HttpSolver {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         base: Url,
         api_key: Option<String>,
@@ -70,6 +72,7 @@ impl HttpSolver {
         token_info_fetcher: Arc<dyn TokenInfoFetching>,
         price_estimator: Arc<dyn PriceEstimating>,
         network_id: String,
+        fee_discount_factor: f64,
     ) -> Self {
         // Unwrap because we cannot handle client creation failing.
         let client = Client::builder().build().unwrap();
@@ -82,6 +85,7 @@ impl HttpSolver {
             token_info_fetcher,
             price_estimator,
             network_id,
+            fee_discount_factor,
         }
     }
 
@@ -159,8 +163,10 @@ impl HttpSolver {
                     buy_amount: order.buy_amount,
                     allow_partial_fill: order.partially_fillable,
                     is_sell_order: matches!(order.kind, OrderKind::Sell),
-                    // TODO: map order fee and fixed cost
-                    fee: 0.0,
+                    fee: FeeModel {
+                        amount: self.order_fee(&order),
+                        token: self.token_to_string(&order.sell_token),
+                    },
                     cost: CostModel {
                         amount: order_cost,
                         token: self.token_to_string(&self.native_token),
@@ -302,6 +308,12 @@ impl HttpSolver {
     async fn uniswap_cost(&self, gas_price: f64) -> u128 {
         gas_price as u128 * GAS_PER_UNISWAP
     }
+
+    fn order_fee(&self,  order: &LimitOrder) -> u128 {
+        assert!(self.fee_discount_factor > 0., "Discount factor can't be zero.");
+        let  subsidized_fee = (order.fee_amount.to_f64_lossy() / self.fee_discount_factor).ceil().to_u128();
+        subsidized_fee.unwrap() // Should we panic or return zero if this happens?
+    }
 }
 
 fn split_liquidity(liquidity: Vec<Liquidity>) -> (Vec<LimitOrder>, Vec<AmmOrder>) {
@@ -424,6 +436,7 @@ mod tests {
             mock_token_info_fetcher,
             mock_price_estimation,
             "mock_network_id".to_string(),
+            1.,
         );
         let base = |x: u128| x * 10u128.pow(18);
         let orders = vec![
@@ -434,6 +447,7 @@ mod tests {
                 sell_amount: base(2).into(),
                 kind: OrderKind::Sell,
                 partially_fillable: false,
+                fee_amount: Default::default(),
                 settlement_handling: CapturingSettlementHandler::arc(),
                 id: "0".to_string(),
             }),
@@ -503,6 +517,7 @@ mod tests {
             buy_amount: Default::default(),
             kind: OrderKind::Sell,
             partially_fillable: Default::default(),
+            fee_amount: Default::default(),
             settlement_handling: limit_handling.clone(),
             id: "0".to_string(),
         })

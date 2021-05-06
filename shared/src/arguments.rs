@@ -50,6 +50,9 @@ pub struct Arguments {
     /// List of token addresses to be ignored throughout service
     #[structopt(long, env = "UNSUPPORTED_TOKENS", use_delimiter = true)]
     pub unsupported_tokens: Vec<H160>,
+
+    #[structopt(long, env = "FEE_DISCOUNT_FACTOR", default_value = "1")]
+    pub fee_discount_factor: f64,
 }
 
 pub fn duration_from_seconds(s: &str) -> Result<Duration, ParseFloatError> {
