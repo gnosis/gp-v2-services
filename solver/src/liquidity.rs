@@ -97,7 +97,7 @@ impl Default for LimitOrder {
             buy_amount: Default::default(),
             kind: Default::default(),
             partially_fillable: Default::default(),
-            fee_amount: Default::default(),            
+            fee_amount: Default::default(),
             settlement_handling: tests::CapturingSettlementHandler::arc(),
             id: Default::default(),
         }

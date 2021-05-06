@@ -309,9 +309,14 @@ impl HttpSolver {
         gas_price as u128 * GAS_PER_UNISWAP
     }
 
-    fn order_fee(&self,  order: &LimitOrder) -> u128 {
-        assert!(self.fee_discount_factor > 0., "Discount factor can't be zero.");
-        let  subsidized_fee = (order.fee_amount.to_f64_lossy() / self.fee_discount_factor).ceil().to_u128();
+    fn order_fee(&self, order: &LimitOrder) -> u128 {
+        assert!(
+            self.fee_discount_factor > 0.,
+            "Discount factor can't be zero."
+        );
+        let subsidized_fee = (order.fee_amount.to_f64_lossy() / self.fee_discount_factor)
+            .ceil()
+            .to_u128();
         subsidized_fee.unwrap() // Should we panic or return zero if this happens?
     }
 }
