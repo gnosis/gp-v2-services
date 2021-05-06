@@ -1,4 +1,4 @@
-mod solver_settlements;
+pub mod solver_settlements;
 
 use self::solver_settlements::RatedSettlement;
 use crate::{
@@ -114,7 +114,7 @@ impl Driver {
             self.gas_price_estimator.as_ref(),
             self.target_confirm_time,
             GAS_PRICE_CAP,
-            settlement.settlement,
+            settlement,
         )
         .await
         {
@@ -143,8 +143,8 @@ impl Driver {
     // Split settlements into successfully simulating ones and errors.
     async fn simulate_settlements(
         &self,
-        settlements: Vec<RatedSettlement>,
-    ) -> Result<(Vec<RatedSettlement>, Vec<(RatedSettlement, Error)>)> {
+        settlements: Vec<Settlement>,
+    ) -> Result<(Vec<Settlement>, Vec<(Settlement, Error)>)> {
         let simulations = settlement_simulation::simulate_settlements(
             settlements
                 .iter()
@@ -173,13 +173,13 @@ impl Driver {
     // the block has changed just as were were querying the node.
     async fn report_simulation_errors(
         &self,
-        errors: Vec<(RatedSettlement, Error)>,
+        errors: Vec<(Settlement, Error)>,
         current_block_during_liquidity_fetch: u64,
     ) {
         let simulations = match settlement_simulation::simulate_settlements(
             errors
                 .iter()
-                .map(|(settlement, _)| settlement.settlement.clone().into()),
+                .map(|(settlement, _)| settlement.clone().into()),
             &self.settlement_contract,
             &self.web3,
             &self.network_id,
@@ -209,8 +209,34 @@ impl Driver {
             );
             // This is an additional debug log so that the log message doesn't get too long as
             // settlement information is recoverable through tenderly anyway.
-            tracing::warn!("settlement failure for: \n{:#?}", settlement.settlement,);
+            tracing::warn!("settlement failure for: \n{:#?}", settlement,);
         }
+    }
+
+    // Rate settlements, ignoring those for which the rating procedure failed.
+    async fn rate_settlements(
+        &self,
+        settlements: Vec<Settlement>,
+        prices: &HashMap<H160, BigRational>,
+    ) -> Vec<RatedSettlement> {
+        use futures::stream::StreamExt;
+        futures::stream::iter(settlements)
+            .filter_map(|settlement| async {
+                let surplus = settlement.total_surplus(prices);
+                let gas_estimate = settlement_submission::estimate_gas(
+                    &self.settlement_contract,
+                    &settlement.clone().into(),
+                )
+                .await
+                .ok()?;
+                Some(RatedSettlement {
+                    settlement,
+                    surplus,
+                    gas_estimate,
+                })
+            })
+            .collect::<Vec<_>>()
+            .await
     }
 
     pub async fn single_run(&mut self) -> Result<()> {
@@ -273,10 +299,13 @@ impl Driver {
         self.metrics
             .settlement_simulations_succeeded(settlements.len());
         self.metrics.settlement_simulations_failed(errors.len());
-        if let Some(mut settlement) = settlements
-            .into_iter()
-            .max_by(|a, b| a.objective_value.cmp(&b.objective_value))
-        {
+
+        let rated_settlements = self.rate_settlements(settlements, &estimated_prices).await;
+
+        if let Some(mut settlement) = rated_settlements.into_iter().max_by(|a, b| {
+            a.objective_value(gas_price)
+                .cmp(&b.objective_value(gas_price))
+        }) {
             // If we have enough buffer in the settlement contract to not use on-chain interactions, remove those
             if self
                 .can_settle(settlement.without_onchain_liquidity())
@@ -451,7 +480,7 @@ mod tests {
     }
 
     #[test]
-    fn liquidity_with_price_removes_liqiduity_without_price() {
+    fn liquidity_with_price_removes_liquidity_without_price() {
         let tokens = [
             H160::from_low_u64_be(0),
             H160::from_low_u64_be(1),

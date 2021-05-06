@@ -67,7 +67,7 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
     );
     tx!(
         solver_account,
-        token_b.mint(solver_account.address(), to_wei(100_000))
+        token_b.mint(solver_account.address(), to_wei(100_100))
     );
 
     // Create and fund Uniswap pool
