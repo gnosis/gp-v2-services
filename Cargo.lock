@@ -633,7 +633,7 @@ dependencies = [
 [[package]]
 name = "ethcontract"
 version = "0.11.3"
-source = "git+https://github.com/gnosis/ethcontract-rs.git?rev=39d40e06428df7da6d36318054ca672ff4e2d115#39d40e06428df7da6d36318054ca672ff4e2d115"
+source = "git+https://github.com/gnosis/ethcontract-rs.git?rev=20714100f891663b3f16740df855e34222cc6178#20714100f891663b3f16740df855e34222cc6178"
 dependencies = [
  "arrayvec",
  "ethcontract-common",
@@ -655,7 +655,7 @@ dependencies = [
 [[package]]
 name = "ethcontract-common"
 version = "0.11.3"
-source = "git+https://github.com/gnosis/ethcontract-rs.git?rev=39d40e06428df7da6d36318054ca672ff4e2d115#39d40e06428df7da6d36318054ca672ff4e2d115"
+source = "git+https://github.com/gnosis/ethcontract-rs.git?rev=20714100f891663b3f16740df855e34222cc6178#20714100f891663b3f16740df855e34222cc6178"
 dependencies = [
  "ethabi-fork-ethcontract",
  "hex",
@@ -670,7 +670,7 @@ dependencies = [
 [[package]]
 name = "ethcontract-generate"
 version = "0.11.3"
-source = "git+https://github.com/gnosis/ethcontract-rs.git?rev=39d40e06428df7da6d36318054ca672ff4e2d115#39d40e06428df7da6d36318054ca672ff4e2d115"
+source = "git+https://github.com/gnosis/ethcontract-rs.git?rev=20714100f891663b3f16740df855e34222cc6178#20714100f891663b3f16740df855e34222cc6178"
 dependencies = [
  "Inflector",
  "anyhow",
@@ -1735,6 +1735,7 @@ dependencies = [
  "shared",
  "sqlx",
  "structopt",
+ "thiserror",
  "tokio",
  "tracing",
  "url",
@@ -2232,9 +2233,9 @@ checksum = "d29ab0c6d3fc0ee92fe66e2d99f700eab17a8d57d1c1d3b748380fb20baa78cd"
 
 [[package]]
 name = "secp256k1"
-version = "0.20.1"
+version = "0.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "733b114f058f260c0af7591434eef4272ae1a8ec2751766d3cb89c6df8d5e450"
+checksum = "ee5070fdc6f26ca5be6dcfc3d07c76fdb974a63a8b246b459854274145f5a258"
 dependencies = [
  "secp256k1-sys",
 ]
@@ -2746,18 +2747,18 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "1.0.23"
+version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76cc616c6abf8c8928e2fdcc0dbfab37175edd8fb49a4641066ad1364fdab146"
+checksum = "e0f4a65597094d4483ddaed134f409b2cb7c1beccf25201a9f73c719254fa98e"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.23"
+version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9be73a2caec27583d0046ef3796c3794f868a5bc813db689eed00c7631275cd1"
+checksum = "7765189610d8241a44529806d6fd1f2e0a08734313a35d5b3a556f92b381f3c0"
 dependencies = [
  "proc-macro2",
  "quote",

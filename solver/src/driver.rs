@@ -1,14 +1,15 @@
-mod solver_settlements;
+pub mod solver_settlements;
 
 use self::solver_settlements::RatedSettlement;
 use crate::{
     liquidity::Liquidity, liquidity_collector::LiquidityCollector, metrics::SolverMetrics,
     settlement::Settlement, settlement_simulation, settlement_submission, solver::Solver,
 };
-use anyhow::{Context, Result};
+use anyhow::{Context, Error, Result};
 use contracts::GPv2Settlement;
 use futures::future::join_all;
 use gas_estimation::GasPriceEstimating;
+use itertools::{Either, Itertools};
 use model::order::BUY_ETH_ADDRESS;
 use num::BigRational;
 use primitive_types::H160;
@@ -109,7 +110,7 @@ impl Driver {
             self.gas_price_estimator.as_ref(),
             self.target_confirm_time,
             GAS_PRICE_CAP,
-            settlement.settlement,
+            settlement,
         )
         .await
         {
@@ -122,38 +123,115 @@ impl Driver {
         }
     }
 
-    // Returns only settlements for which simulation succeeded.
+    // Split settlements into successfully simulating ones and errors.
     async fn simulate_settlements(
         &self,
-        settlements: Vec<RatedSettlement>,
-    ) -> Result<Vec<RatedSettlement>> {
+        settlements: Vec<Settlement>,
+    ) -> Result<(Vec<Settlement>, Vec<(Settlement, Error)>)> {
         let simulations = settlement_simulation::simulate_settlements(
             settlements
                 .iter()
-                .map(|settlement| settlement.settlement.clone().into()),
+                .map(|settlement| settlement.clone().into()),
             &self.settlement_contract,
             &self.web3,
             &self.network_id,
+            settlement_simulation::Block::LatestWithoutTenderly,
         )
         .await
         .context("failed to simulate settlements")?;
+
         Ok(settlements
             .into_iter()
             .zip(simulations)
-            .filter_map(|(settlement, simulation)| match simulation {
-                Ok(()) => Some(settlement),
-                Err(err) => {
-                    tracing::error!("settlement simulation failed\n error: {:?}", err);
-                    tracing::debug!("settlement failure for: \n{:#?}", settlement.settlement,);
-                    None
-                }
+            .partition_map(|(settlement, result)| match result {
+                Ok(()) => Either::Left(settlement),
+                Err(err) => Either::Right((settlement, err)),
+            }))
+    }
+
+    // Log simulation errors only if the simulation also fails in the block at which on chain
+    // liquidity was queried. If the simulation succeeds at the previous block then the solver
+    // worked correctly and the error doesn't have to be reported.
+    // Note that we could still report a false positive because the earlier block might be off by if
+    // the block has changed just as were were querying the node.
+    async fn report_simulation_errors(
+        &self,
+        errors: Vec<(Settlement, Error)>,
+        current_block_during_liquidity_fetch: u64,
+    ) {
+        let simulations = match settlement_simulation::simulate_settlements(
+            errors
+                .iter()
+                .map(|(settlement, _)| settlement.clone().into()),
+            &self.settlement_contract,
+            &self.web3,
+            &self.network_id,
+            settlement_simulation::Block::FixedWithTenderly(current_block_during_liquidity_fetch),
+        )
+        .await
+        {
+            Ok(simulations) => simulations,
+            Err(err) => {
+                tracing::error!(
+                    "unable to complete simulation of settlements at earlier block {}: {:?}",
+                    current_block_during_liquidity_fetch,
+                    err
+                );
+                return;
+            }
+        };
+
+        for ((settlement, _previous_error), result) in errors.into_iter().zip(simulations) {
+            let error_at_earlier_block = match result {
+                Ok(()) => continue,
+                Err(err) => err,
+            };
+            tracing::error!(
+                "settlement simulation failed right before submission AND for block {} which was current when liquidity was fetched:\n{:?}",
+                current_block_during_liquidity_fetch, error_at_earlier_block
+            );
+            // This is an additional debug log so that the log message doesn't get too long as
+            // settlement information is recoverable through tenderly anyway.
+            tracing::warn!("settlement failure for: \n{:#?}", settlement,);
+        }
+    }
+
+    // Rate settlements, ignoring those for which the rating procedure failed.
+    async fn rate_settlements(
+        &self,
+        settlements: Vec<Settlement>,
+        prices: &HashMap<H160, BigRational>,
+    ) -> Vec<RatedSettlement> {
+        use futures::stream::StreamExt;
+        futures::stream::iter(settlements)
+            .filter_map(|settlement| async {
+                let surplus = settlement.total_surplus(prices);
+                let gas_estimate = settlement_submission::estimate_gas(
+                    &self.settlement_contract,
+                    &settlement.clone().into(),
+                )
+                .await
+                .ok()?;
+                Some(RatedSettlement {
+                    settlement,
+                    surplus,
+                    gas_estimate,
+                })
             })
-            .collect())
+            .collect::<Vec<_>>()
+            .await
     }
 
     pub async fn single_run(&mut self) -> Result<()> {
         tracing::debug!("starting single run");
         let liquidity = self.liquidity_collector.get_liquidity().await?;
+        let current_block_during_liquidity_fetch = self
+            .web3
+            .eth()
+            .block_number()
+            .await
+            .context("failed to get current block")?
+            .as_u64();
 
         let estimated_prices =
             collect_estimated_prices(self.price_estimator.as_ref(), self.native_token, &liquidity)
@@ -194,14 +272,29 @@ impl Driver {
             self.min_order_age,
             &mut settlements,
         );
-        let settlements = self.simulate_settlements(settlements).await?;
+        let (settlements, errors) = self.simulate_settlements(settlements).await?;
+        tracing::info!(
+            "{} settlements passed simulation and {} failed",
+            settlements.len(),
+            errors.len()
+        );
+        self.metrics
+            .settlement_simulations_succeeded(settlements.len());
+        self.metrics.settlement_simulations_failed(errors.len());
 
-        if let Some(settlement) = settlements
-            .into_iter()
-            .max_by(|a, b| a.objective_value.cmp(&b.objective_value))
-        {
+        let rated_settlements = self.rate_settlements(settlements, &estimated_prices).await;
+
+        if let Some(settlement) = rated_settlements.into_iter().max_by(|a, b| {
+            a.objective_value(gas_price)
+                .cmp(&b.objective_value(gas_price))
+        }) {
             self.submit_settlement(settlement).await;
         }
+
+        // Happens after settlement submission so that we do not delay it.
+        self.report_simulation_errors(errors, current_block_during_liquidity_fetch)
+            .await;
+
         Ok(())
     }
 }
@@ -360,7 +453,7 @@ mod tests {
     }
 
     #[test]
-    fn liquidity_with_price_removes_liqiduity_without_price() {
+    fn liquidity_with_price_removes_liquidity_without_price() {
         let tokens = [
             H160::from_low_u64_be(0),
             H160::from_low_u64_be(1),
