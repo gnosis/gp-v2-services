@@ -416,10 +416,9 @@ mod tests {
             fee_estimator
                 .min_fee(
                     unsupported_token,
-                    Some(supported_token),
-                    Some(100.into()),
-                    Some(OrderKind::Sell)
-                )
+                    supported_token,
+                    100.into(),
+                    OrderKind::Sell)
                 .await,
             Err(MinFeeCalculationError::UnsupportedToken(t)) if t == unsupported_token
         ));
@@ -429,9 +428,9 @@ mod tests {
             fee_estimator
                 .min_fee(
                     supported_token,
-                    Some(unsupported_token),
-                    Some(100.into()),
-                    Some(OrderKind::Sell)
+                    unsupported_token,
+                    100.into(),
+                    OrderKind::Sell
                 )
                 .await,
             Err(MinFeeCalculationError::UnsupportedToken(t)) if t == unsupported_token
