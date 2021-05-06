@@ -148,8 +148,7 @@ async fn main() {
 
     let current_block_stream = current_block_stream(web3.clone()).await.unwrap();
     let pool_aggregator =
-        PoolAggregator::from_sources(args.shared.price_estimation_sources, chain_id, web3.clone())
-            .await;
+        PoolAggregator::from_sources(args.shared.baseline_sources, chain_id, web3.clone()).await;
     let cached_pool_fetcher =
         CachedPoolFetcher::new(Box::new(pool_aggregator), current_block_stream.clone());
     let pool_fetcher =

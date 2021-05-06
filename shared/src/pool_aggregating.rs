@@ -7,8 +7,8 @@ use std::sync::Arc;
 use structopt::clap::arg_enum;
 
 arg_enum! {
-    #[derive(Debug)]
-    pub enum PriceEstimationSources {
+    #[derive(Debug, Clone)]
+    pub enum BaselineSources {
         Uniswap,
         Sushiswap,
     }
@@ -19,31 +19,25 @@ pub struct PoolAggregator {
 }
 
 impl PoolAggregator {
-    pub async fn from_sources(
-        sources: Vec<PriceEstimationSources>,
-        chain_id: u64,
-        web3: Web3,
-    ) -> Self {
+    pub async fn from_sources(sources: Vec<BaselineSources>, chain_id: u64, web3: Web3) -> Self {
         let mut pool_fetchers = vec![];
-        for source in sources {
+        for source in sources.clone() {
             let pair_provider: Arc<dyn AmmPairProvider>;
             match source {
-                PriceEstimationSources::Uniswap => {
+                BaselineSources::Uniswap => {
                     pair_provider = Arc::new(UniswapPairProvider {
                         factory: contracts::UniswapV2Factory::deployed(&web3)
                             .await
                             .expect("couldn't load deployed uniswap router"),
                         chain_id,
                     });
-                    tracing::info!("Constructed Uniswap Pair Provider");
                 }
-                PriceEstimationSources::Sushiswap => {
+                BaselineSources::Sushiswap => {
                     pair_provider = Arc::new(SushiswapPairProvider {
                         factory: contracts::SushiswapV2Factory::deployed(&web3)
                             .await
                             .expect("couldn't load deployed sushiswap router"),
                     });
-                    tracing::info!("Constructed Sushiswap Pair Provider");
                 }
             }
             pool_fetchers.push(PoolFetcher {
@@ -51,7 +45,7 @@ impl PoolAggregator {
                 web3: web3.clone(),
             })
         }
-        tracing::info!("Built Pool Aggregator with {} sources", pool_fetchers.len());
+        tracing::info!("Built Pool Aggregator from sources: {:?}", sources);
         Self { pool_fetchers }
     }
 }

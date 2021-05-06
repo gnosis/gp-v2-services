@@ -1,5 +1,5 @@
 //! Contains command line arguments and related helpers that are shared between the binaries.
-use crate::{gas_price_estimation::GasEstimatorType, pool_aggregating::PriceEstimationSources};
+use crate::{gas_price_estimation::GasEstimatorType, pool_aggregating::BaselineSources};
 use ethcontract::H160;
 use std::{num::ParseFloatError, time::Duration};
 use url::Url;
@@ -54,13 +54,13 @@ pub struct Arguments {
     /// Which Liquidity sources to be used by Price Estimator.
     #[structopt(
         long,
-        env = "PRICE_ESTIMATION_SOURCES",
+        env = "BASELINE_SOURCES",
         default_value = "Uniswap,Sushiswap",
-        possible_values = &PriceEstimationSources::variants(),
+        possible_values = &BaselineSources::variants(),
         case_insensitive = true,
         use_delimiter = true
     )]
-    pub price_estimation_sources: Vec<PriceEstimationSources>,
+    pub baseline_sources: Vec<BaselineSources>,
 }
 
 pub fn duration_from_seconds(s: &str) -> Result<Duration, ParseFloatError> {
