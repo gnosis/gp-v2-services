@@ -56,10 +56,20 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
     let token_a = deploy_mintable_token(&web3).await;
     let token_b = deploy_mintable_token(&web3).await;
 
-    // Fund trader and solver accounts
+    // Fund trader and settlement accounts
     tx!(
         solver_account,
         token_a.mint(trader_account.address(), to_wei(100))
+    );
+    tx!(
+        solver_account,
+        token_b.mint(gpv2.settlement.address(), to_wei(100))
+    );
+
+    // Create and fund Uniswap pool
+    tx!(
+        solver_account,
+        uniswap_factory.create_pair(token_a.address(), token_b.address())
     );
     tx!(
         solver_account,
@@ -67,13 +77,7 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
     );
     tx!(
         solver_account,
-        token_b.mint(solver_account.address(), to_wei(100_100))
-    );
-
-    // Create and fund Uniswap pool
-    tx!(
-        solver_account,
-        uniswap_factory.create_pair(token_a.address(), token_b.address())
+        token_b.mint(solver_account.address(), to_wei(100_000))
     );
     tx!(
         solver_account,
@@ -179,22 +183,15 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
         .call()
         .await
         .expect("Couldn't fetch trader TokenB's balance");
-    assert_eq!(balance, U256::from(99_600_698_103_990_321_649u128));
+    assert!(balance > U256::zero());
 
-    // Check that solver buffers were traded.
+    // Check that settlement buffers were traded.
     let balance = token_a
-        .balance_of(solver_account.address())
+        .balance_of(gpv2.settlement.address())
         .call()
         .await
-        .expect("Couldn't fetch solver TokenA's balance");
-    assert_eq!(balance, U256::from(100_000_000_000_000_000_000u128));
-
-    let balance = token_b
-        .balance_of(solver_account.address())
-        .call()
-        .await
-        .expect("Couldn't fetch solver TokenB's balance");
-    assert_eq!(balance, U256::from(0u128));
+        .expect("Couldn't fetch settlements TokenA's balance");
+    assert_eq!(balance, to_wei(100));
 
     // Drive orderbook in order to check the removal of settled order_b
     orderbook.run_maintenance(&gpv2.settlement).await.unwrap();
