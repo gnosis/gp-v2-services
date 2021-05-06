@@ -181,35 +181,20 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
         .expect("Couldn't fetch trader TokenB's balance");
     assert_eq!(balance, U256::from(99_600_698_103_990_321_649u128));
 
-    // Check that uniswap wasn't touched.
-    let balance = token_a
-        .balance_of(uniswap_router.address())
-        .call()
-        .await
-        .expect("Couldn't fetch uniswap TokenA's balance");
-    assert_eq!(balance, U256::from(100_000_000_000_000_000_000_000u128));
-
-    let balance = token_b
-        .balance_of(trader_account.address())
-        .call()
-        .await
-        .expect("Couldn't fetch uniswap TokenB's balance");
-    assert_eq!(balance, U256::from(100_000_000_000_000_000_000_000u128));
-
     // Check that solver buffers were traded.
     let balance = token_a
         .balance_of(solver_account.address())
         .call()
         .await
-        .expect("Couldn't fetch TokenA's balance");
-    assert_eq!(balance, U256::from(0u128));
+        .expect("Couldn't fetch solver TokenA's balance");
+    assert_eq!(balance, U256::from(100_000_000_000_000_000_000u128));
 
     let balance = token_b
         .balance_of(solver_account.address())
         .call()
         .await
-        .expect("Couldn't fetch TokenA's balance");
-    assert_eq!(balance, U256::from(100_000_000_000_000_000_000u128));
+        .expect("Couldn't fetch solver TokenB's balance");
+    assert_eq!(balance, U256::from(0u128));
 
     // Drive orderbook in order to check the removal of settled order_b
     orderbook.run_maintenance(&gpv2.settlement).await.unwrap();

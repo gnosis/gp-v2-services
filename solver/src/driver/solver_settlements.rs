@@ -54,7 +54,7 @@ impl RatedSettlement {
         RatedSettlement {
             settlement: self.settlement.without_onchain_liquidity(),
             surplus: self.surplus.clone(),
-            gas_estimate: self.gas_estimate, // TODO: This becomes an overestimate.
+            gas_estimate: self.gas_estimate, // TODO: This becomes an overestimate!
         }
     }
 }
