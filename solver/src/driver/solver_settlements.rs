@@ -61,6 +61,15 @@ impl From<SettlementWithSolver> for Settlement {
     }
 }
 
+impl SettlementWithSolver {
+    pub fn without_onchain_liquidity(&self) -> Self {
+        Self {
+            name: self.name,
+            settlement: self.settlement.without_onchain_liquidity(),
+        }
+    }
+}
+
 // Each individual settlement has an objective value.
 #[derive(Debug, Clone)]
 pub struct RatedSettlement {
@@ -89,7 +98,7 @@ impl From<RatedSettlement> for Settlement {
         instance.settlement.into()
     }
 }
-  
+
 impl RatedSettlement {
     pub fn without_onchain_liquidity(&self) -> Self {
         RatedSettlement {
