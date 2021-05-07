@@ -312,7 +312,8 @@ impl HttpSolver {
     fn order_fee(&self, order: &LimitOrder) -> Result<u128> {
         (order.fee_amount.to_f64_lossy() / self.fee_discount_factor)
             .ceil()
-            .to_u128().context("failed to compute order fee")
+            .to_u128()
+            .context("failed to compute order fee")
     }
 }
 
