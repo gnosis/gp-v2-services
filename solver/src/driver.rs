@@ -107,7 +107,7 @@ impl Driver {
     }
 
     async fn submit_settlement(&self, rated_settlement: RatedSettlement) {
-        let settlement: Settlement = rated_settlement.clone().into();
+        let SettlementWithSolver { name, settlement } = rated_settlement.clone().settlement;
         let trades = settlement.trades().to_vec();
         match settlement_submission::submit(
             &self.settlement_contract,
@@ -121,7 +121,7 @@ impl Driver {
             Ok(_) => {
                 trades
                     .iter()
-                    .for_each(|trade| self.metrics.order_settled(&trade.order));
+                    .for_each(|trade| self.metrics.order_settled(&trade.order, name));
             }
             Err(err) => tracing::error!("Failed to submit settlement: {:?}", err,),
         }
@@ -285,9 +285,13 @@ impl Driver {
             settlements.len(),
             errors.len()
         );
-        self.metrics
-            .settlement_simulations_succeeded(settlements.len());
-        self.metrics.settlement_simulations_failed(errors.len());
+        for settlement in &settlements {
+            self.metrics
+                .settlement_simulation_succeeded(settlement.name);
+        }
+        for (settlement, _) in &errors {
+            self.metrics.settlement_simulation_failed(settlement.name);
+        }
 
         let rated_settlements = self.rate_settlements(settlements, &estimated_prices).await;
 
