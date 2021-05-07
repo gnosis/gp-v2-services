@@ -1,4 +1,4 @@
-use crate::settlement::Settlement;
+use crate::{encoding::EncodedSettlement, settlement::Settlement};
 use anyhow::Result;
 use ethcontract::U256;
 use num::BigRational;
@@ -32,10 +32,39 @@ pub struct SolverWithSettlements {
     pub settlements: Vec<Settlement>,
 }
 
-// Each individual settlement has an objective value.
-#[derive(Debug)]
-pub struct RatedSettlement {
+impl From<SolverWithSettlements> for Vec<SettlementWithSolver> {
+    fn from(instance: SolverWithSettlements) -> Self {
+        let name = instance.name;
+        instance
+            .settlements
+            .into_iter()
+            .map(|settlement| SettlementWithSolver { name, settlement })
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SettlementWithSolver {
+    pub name: &'static str,
     pub settlement: Settlement,
+}
+
+impl From<SettlementWithSolver> for EncodedSettlement {
+    fn from(instance: SettlementWithSolver) -> Self {
+        instance.settlement.into()
+    }
+}
+
+impl From<SettlementWithSolver> for Settlement {
+    fn from(instance: SettlementWithSolver) -> Self {
+        instance.settlement
+    }
+}
+
+// Each individual settlement has an objective value.
+#[derive(Debug, Clone)]
+pub struct RatedSettlement {
+    pub settlement: SettlementWithSolver,
     pub surplus: BigRational,
     pub gas_estimate: U256,
 }
@@ -46,6 +75,18 @@ impl RatedSettlement {
         let gas_estimate = self.gas_estimate.to_big_rational();
         let cost = gas_estimate * gas_price;
         self.surplus.clone() - cost
+    }
+}
+
+impl From<RatedSettlement> for EncodedSettlement {
+    fn from(instance: RatedSettlement) -> Self {
+        instance.settlement.into()
+    }
+}
+
+impl From<RatedSettlement> for Settlement {
+    fn from(instance: RatedSettlement) -> Self {
+        instance.settlement.into()
     }
 }
 
@@ -97,12 +138,13 @@ fn merge_at_most_settlements(
 
 pub fn filter_settlements_without_old_orders(
     min_order_age: Duration,
-    settlements: &mut Vec<Settlement>,
+    settlements: &mut Vec<SettlementWithSolver>,
 ) {
     let settle_orders_older_than =
         chrono::offset::Utc::now() - chrono::Duration::from_std(min_order_age).unwrap();
     settlements.retain(|settlement| {
         settlement
+            .settlement
             .trades()
             .iter()
             .any(|trade| trade.order.order_meta_data.creation_date <= settle_orders_older_than)
