@@ -150,7 +150,7 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
     let solver = solver::naive_solver::NaiveSolver {};
     let liquidity_collector = LiquidityCollector {
         uniswap_like_liquidity: vec![uniswap_liquidity],
-        orderbook_api: create_orderbook_api(&web3),
+        orderbook_api: create_orderbook_api(&web3, native_token),
     };
     let network_id = web3.net().version().await.unwrap();
     let mut driver = solver::driver::Driver::new(
@@ -197,7 +197,10 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
     // Drive orderbook in order to check the removal of settled order_b
     orderbook.run_maintenance(&gpv2.settlement).await.unwrap();
 
-    let orders = create_orderbook_api(&web3).get_orders().await.unwrap();
+    let orders = create_orderbook_api(&web3, native_token)
+        .get_orders()
+        .await
+        .unwrap();
     assert!(orders.is_empty());
 
     // Drive again to ensure we can continue solution finding
