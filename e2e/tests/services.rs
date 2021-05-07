@@ -5,8 +5,11 @@ use ethcontract::{
 };
 use model::DomainSeparator;
 use orderbook::{
-    account_balances::Web3BalanceFetcher, database::Database, event_updater::EventUpdater,
-    fee::MinFeeCalculator, orderbook::Orderbook,
+    account_balances::Web3BalanceFetcher,
+    database::Database,
+    event_updater::EventUpdater,
+    fee::{EthAwareMinFeeCalculator, MinFeeCalculating},
+    orderbook::Orderbook,
 };
 use shared::{
     amm_pair_provider::UniswapPairProvider,
@@ -139,7 +142,7 @@ impl OrderbookServices {
             HashSet::new(),
             HashSet::new(),
         ));
-        let fee_calculator = Arc::new(MinFeeCalculator::new(
+        let fee_calculator = Arc::new(EthAwareMinFeeCalculator::new(
             price_estimator.clone(),
             Box::new(web3.clone()),
             native_token,
