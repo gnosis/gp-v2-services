@@ -89,6 +89,16 @@ impl From<RatedSettlement> for Settlement {
         instance.settlement.into()
     }
 }
+  
+impl RatedSettlement {
+    pub fn without_onchain_liquidity(&self) -> Self {
+        RatedSettlement {
+            settlement: self.settlement.without_onchain_liquidity(),
+            surplus: self.surplus.clone(),
+            gas_estimate: self.gas_estimate, // TODO: This becomes an overestimate!
+        }
+    }
+}
 
 // Takes the settlements of a single solver and adds a merged settlement.
 pub fn merge_settlements(
