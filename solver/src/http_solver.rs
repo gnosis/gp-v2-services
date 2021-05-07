@@ -151,30 +151,30 @@ impl HttpSolver {
         &self,
         orders: &HashMap<String, LimitOrder>,
         gas_price: f64,
-    ) -> HashMap<String, OrderModel> {
+    ) -> Result<HashMap<String, OrderModel>> {
         let order_cost = self.order_cost(gas_price).await;
-        orders
-            .iter()
-            .map(|(index, order)| {
-                let order = OrderModel {
-                    sell_token: self.token_to_string(&order.sell_token),
-                    buy_token: self.token_to_string(&order.buy_token),
-                    sell_amount: order.sell_amount,
-                    buy_amount: order.buy_amount,
-                    allow_partial_fill: order.partially_fillable,
-                    is_sell_order: matches!(order.kind, OrderKind::Sell),
-                    fee: FeeModel {
-                        amount: self.order_fee(&order),
-                        token: self.token_to_string(&order.sell_token),
-                    },
-                    cost: CostModel {
-                        amount: order_cost,
-                        token: self.token_to_string(&self.native_token),
-                    },
-                };
-                (index.clone(), order)
-            })
-            .collect()
+        let mut result: HashMap<String, OrderModel> = HashMap::new();
+        for (index, order) in orders {
+            let order_fee = self.order_fee(&order)?;
+            let order = OrderModel {
+                sell_token: self.token_to_string(&order.sell_token),
+                buy_token: self.token_to_string(&order.buy_token),
+                sell_amount: order.sell_amount,
+                buy_amount: order.buy_amount,
+                allow_partial_fill: order.partially_fillable,
+                is_sell_order: matches!(order.kind, OrderKind::Sell),
+                fee: FeeModel {
+                    amount: order_fee,
+                    token: self.token_to_string(&order.sell_token),
+                },
+                cost: CostModel {
+                    amount: order_cost,
+                    token: self.token_to_string(&self.native_token),
+                },
+            };
+            result.insert(index.clone(), order);
+        }
+        Ok(result)
     }
 
     fn map_amms_for_solver(&self, orders: Vec<AmmOrder>) -> HashMap<String, AmmOrder> {
@@ -246,7 +246,7 @@ impl HttpSolver {
         let token_models = self
             .token_models(&tokens, &token_infos, &price_estimates)
             .await;
-        let order_models = self.order_models(&limit_orders, gas_price).await;
+        let order_models = self.order_models(&limit_orders, gas_price).await?;
         let uniswap_models = self.amm_models(&amm_orders, gas_price).await;
         let model = BatchAuctionModel {
             tokens: token_models,
@@ -309,15 +309,10 @@ impl HttpSolver {
         gas_price as u128 * GAS_PER_UNISWAP
     }
 
-    fn order_fee(&self, order: &LimitOrder) -> u128 {
-        assert!(
-            self.fee_discount_factor > 0.,
-            "Discount factor can't be zero."
-        );
-        let subsidized_fee = (order.fee_amount.to_f64_lossy() / self.fee_discount_factor)
+    fn order_fee(&self, order: &LimitOrder) -> Result<u128> {
+        (order.fee_amount.to_f64_lossy() / self.fee_discount_factor)
             .ceil()
-            .to_u128();
-        subsidized_fee.unwrap() // Should we panic or return zero if this happens?
+            .to_u128().context("failed to compute order fee")
     }
 }
 
