@@ -417,6 +417,7 @@ mod tests {
                 buy_token,
                 kind: OrderKind::Buy,
                 partially_fillable: false,
+                fee_amount: Default::default(),
                 settlement_handling: CapturingSettlementHandler::arc(),
                 id: "0".into(),
             }),
@@ -448,6 +449,7 @@ mod tests {
             buy_token,
             kind: OrderKind::Buy,
             partially_fillable: false,
+            fee_amount: Default::default(),
             settlement_handling: CapturingSettlementHandler::arc(),
             id: "0".into(),
         })];
@@ -469,6 +471,7 @@ mod tests {
             buy_token: native_token,
             kind: OrderKind::Buy,
             partially_fillable: false,
+            fee_amount: Default::default(),
             settlement_handling: CapturingSettlementHandler::arc(),
             id: "0".into(),
         })];

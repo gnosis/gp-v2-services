@@ -1,5 +1,5 @@
 //! Contains command line arguments and related helpers that are shared between the binaries.
-use crate::gas_price_estimation::GasEstimatorType;
+use crate::{gas_price_estimation::GasEstimatorType, pool_aggregating::BaselineSources};
 use ethcontract::H160;
 use std::{num::ParseFloatError, time::Duration};
 use url::Url;
@@ -50,6 +50,21 @@ pub struct Arguments {
     /// List of token addresses to be ignored throughout service
     #[structopt(long, env = "UNSUPPORTED_TOKENS", use_delimiter = true)]
     pub unsupported_tokens: Vec<H160>,
+
+    /// Fee discount factor: 1 means no discount, 0.9 means 10% discount.
+    #[structopt(long, env = "FEE_DISCOUNT_FACTOR", default_value = "1")]
+    pub fee_discount_factor: f64,
+
+    /// Which Liquidity sources to be used by Price Estimator.
+    #[structopt(
+        long,
+        env = "BASELINE_SOURCES",
+        default_value = "Uniswap,Sushiswap",
+        possible_values = &BaselineSources::variants(),
+        case_insensitive = true,
+        use_delimiter = true
+    )]
+    pub baseline_sources: Vec<BaselineSources>,
 }
 
 pub fn duration_from_seconds(s: &str) -> Result<Duration, ParseFloatError> {

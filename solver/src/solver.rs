@@ -29,14 +29,6 @@ pub trait Solver {
 
 arg_enum! {
     #[derive(Debug)]
-    pub enum AmmSources {
-        Uniswap,
-        Sushiswap,
-    }
-}
-
-arg_enum! {
-    #[derive(Debug)]
     pub enum SolverType {
         Naive,
         Baseline,
@@ -56,6 +48,7 @@ pub fn create(
     price_estimator: Arc<dyn PriceEstimating>,
     network_id: String,
     chain_id: u64,
+    fee_discount_factor: f64,
 ) -> Result<Vec<Box<dyn Solver>>> {
     // Tiny helper function to help out with type inference. Otherwise, all
     // `Box::new(...)` expressions would have to be cast `as Box<dyn Solver>`.
@@ -80,6 +73,7 @@ pub fn create(
                 token_info_fetcher.clone(),
                 price_estimator.clone(),
                 network_id.clone(),
+                fee_discount_factor,
             )),
             SolverType::OneInch => {
                 boxed(OneInchSolver::new(settlement_contract.clone(), chain_id)?)
