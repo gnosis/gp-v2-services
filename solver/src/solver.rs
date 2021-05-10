@@ -15,8 +15,9 @@ use reqwest::Url;
 use shared::{price_estimate::PriceEstimating, token_info::TokenInfoFetching};
 use structopt::clap::arg_enum;
 
-/// Defines shared behaviour for all Solvers.
-/// A `solve` method which transforms a collection of `Liquidity` sources into a `Settlement`
+/// Interface that all solvers must implement
+/// A `solve` method which transforms a collection of `Liquidity`
+/// sources into a list of independent `Settlements`
 /// The `name` method is included for logging purposes.
 #[async_trait::async_trait]
 pub trait Solver {
