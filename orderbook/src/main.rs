@@ -6,7 +6,7 @@ use orderbook::{
     account_balances::Web3BalanceFetcher,
     database::{Database, OrderFilter},
     event_updater::EventUpdater,
-    fee::{EthAwareMinFeeCalculator, MinFeeCalculating},
+    fee::EthAwareMinFeeCalculator,
     orderbook::Orderbook,
     serve_task, verify_deployed_contract_constants,
 };

@@ -5,11 +5,8 @@ use ethcontract::{
 };
 use model::DomainSeparator;
 use orderbook::{
-    account_balances::Web3BalanceFetcher,
-    database::Database,
-    event_updater::EventUpdater,
-    fee::{EthAwareMinFeeCalculator, MinFeeCalculating},
-    orderbook::Orderbook,
+    account_balances::Web3BalanceFetcher, database::Database, event_updater::EventUpdater,
+    fee::EthAwareMinFeeCalculator, orderbook::Orderbook,
 };
 use shared::{
     amm_pair_provider::UniswapPairProvider,

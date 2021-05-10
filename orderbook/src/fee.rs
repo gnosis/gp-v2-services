@@ -33,15 +33,6 @@ pub struct MinFeeCalculator {
 #[cfg_attr(test, mockall::automock)]
 #[async_trait::async_trait]
 pub trait MinFeeCalculating {
-    fn new(
-        price_estimator: Arc<dyn PriceEstimating>,
-        gas_estimator: Box<dyn GasPriceEstimating>,
-        native_token: H160,
-        database: Database,
-        discount_factor: f64,
-        unsupported_tokens: HashSet<H160>,
-    ) -> Self;
-
     // Returns the minimum amount of fee required to accept an order selling the specified order
     // and an expiry date for the estimate.
     // Returns an error if there is some estimation error and Ok(None) if no information about the given
@@ -112,12 +103,8 @@ fn normalize_buy_token(buy_token: H160, weth: H160) -> H160 {
     }
 }
 
-#[async_trait::async_trait]
-impl<T> MinFeeCalculating for EthAdapter<T>
-where
-    T: MinFeeCalculating + Send + Sync,
-{
-    fn new(
+impl EthAwareMinFeeCalculator {
+    pub fn new(
         price_estimator: Arc<dyn PriceEstimating>,
         gas_estimator: Box<dyn GasPriceEstimating>,
         native_token: H160,
@@ -126,7 +113,7 @@ where
         unsupported_tokens: HashSet<H160>,
     ) -> Self {
         Self {
-            calculator: T::new(
+            calculator: MinFeeCalculator::new(
                 price_estimator,
                 gas_estimator,
                 native_token,
@@ -137,7 +124,13 @@ where
             weth: native_token,
         }
     }
+}
 
+#[async_trait::async_trait]
+impl<T> MinFeeCalculating for EthAdapter<T>
+where
+    T: MinFeeCalculating + Send + Sync,
+{
     async fn min_fee(
         &self,
         sell_token: H160,
@@ -161,6 +154,25 @@ where
 }
 
 impl MinFeeCalculator {
+    fn new(
+        price_estimator: Arc<dyn PriceEstimating>,
+        gas_estimator: Box<dyn GasPriceEstimating>,
+        native_token: H160,
+        database: Database,
+        discount_factor: f64,
+        unsupported_tokens: HashSet<H160>,
+    ) -> Self {
+        Self {
+            price_estimator,
+            gas_estimator,
+            native_token,
+            measurements: Box::new(database),
+            now: Box::new(Utc::now),
+            discount_factor,
+            unsupported_tokens,
+        }
+    }
+
     async fn compute_min_fee(
         &self,
         sell_token: H160,
@@ -210,25 +222,6 @@ impl MinFeeCalculator {
 
 #[async_trait::async_trait]
 impl MinFeeCalculating for MinFeeCalculator {
-    fn new(
-        price_estimator: Arc<dyn PriceEstimating>,
-        gas_estimator: Box<dyn GasPriceEstimating>,
-        native_token: H160,
-        database: Database,
-        discount_factor: f64,
-        unsupported_tokens: HashSet<H160>,
-    ) -> Self {
-        Self {
-            price_estimator,
-            gas_estimator,
-            native_token,
-            measurements: Box::new(database),
-            now: Box::new(Utc::now),
-            discount_factor,
-            unsupported_tokens,
-        }
-    }
-
     // Returns the minimum amount of fee required to accept an order selling the specified order
     // and an expiry date for the estimate.
     // Returns an error if there is some estimation error and Ok(None) if no information about the given
