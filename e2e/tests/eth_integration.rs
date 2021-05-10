@@ -131,11 +131,11 @@ async fn eth_integration(web3: Web3) {
             .await
             .unwrap()
     };
-    let fee_with_weth = estimate_fee(token.address(), BUY_ETH_ADDRESS).await;
-    assert_eq!(fee_with_weth.status(), 200);
+    let fee_buy_eth = estimate_fee(token.address(), BUY_ETH_ADDRESS).await;
+    assert_eq!(fee_buy_eth.status(), 200);
     // Eth is only supported as the buy token
-    let fee_with_eth = estimate_fee(BUY_ETH_ADDRESS, token.address()).await;
-    assert_eq!(fee_with_eth.status(), 404);
+    let fee_invalid_token = estimate_fee(BUY_ETH_ADDRESS, token.address()).await;
+    assert_eq!(fee_invalid_token.status(), 404);
 
     // Place Orders
     assert_ne!(weth.address(), BUY_ETH_ADDRESS);
