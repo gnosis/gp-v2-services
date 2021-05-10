@@ -161,19 +161,19 @@ impl Pool {
 }
 
 impl BaselineSolvable for Pool {
-    fn get_amount_in(&self, in_token: H160, out_amount: U256, out_token: H160) -> Option<U256> {
-        self.get_amount_in(out_token, out_amount)
-            .map(|(in_amount, token)| {
-                assert_eq!(token, in_token);
-                in_amount
-            })
-    }
-
     fn get_amount_out(&self, out_token: H160, in_amount: U256, in_token: H160) -> Option<U256> {
         self.get_amount_out(in_token, in_amount)
             .map(|(out_amount, token)| {
                 assert_eq!(token, out_token);
                 out_amount
+            })
+    }
+
+    fn get_amount_in(&self, in_token: H160, out_amount: U256, out_token: H160) -> Option<U256> {
+        self.get_amount_in(out_token, out_amount)
+            .map(|(in_amount, token)| {
+                assert_eq!(token, in_token);
+                in_amount
             })
     }
 
@@ -276,7 +276,7 @@ impl PoolFetching for PoolFetcher {
             {
                 // Some ERC20s (e.g. AMPL) have an elastic supply and can thus reduce the balance of their owners without any transfer or other interaction ("rebase").
                 // Such behavior can implicitly change the *k* in the pool's constant product formula. E.g. a pool with 10 USDC and 10 AMPL has k = 100. After a negative
-                // rebase the pool's AMPL balance may reduce to 9, thus k should be implicitly updated to 90 (figuratively speaking the pool is undercollateralized).
+                // rebase the pool's AMPL balance may reduce to 9, thus k should be implicitly updated to 90 (figuratively speaking the pool is under-collateralized).
                 // Uniswap pools however only update their reserves upon swaps. Such an "out of sync" pool has numerical issues when computing the right clearing price.
                 // Note, that a positive rebase is not problematic as k would increase in this case giving the pool excess in the elastic token (an arbitrageur could
                 // benefit by withdrawing the excess from the pool without selling anything).
