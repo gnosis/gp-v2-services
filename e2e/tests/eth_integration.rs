@@ -1,6 +1,5 @@
 use contracts::{IUniswapLikeRouter, WETH9};
 use ethcontract::prelude::{Account, Address, PrivateKey, U256};
-use hex_literal::hex;
 use model::{
     order::{OrderBuilder, OrderKind, BUY_ETH_ADDRESS},
     SigningScheme,
@@ -23,12 +22,9 @@ use crate::services::{
     API_HOST,
 };
 
-const TRADER_BUY_ETH_A_PK: [u8; 32] =
-    hex!("0000000000000000000000000000000000000000000000000000000000000001");
-const TRADER_BUY_ETH_B_PK: [u8; 32] =
-    hex!("0000000000000000000000000000000000000000000000000000000000000002");
-const TRADER_SELL_ETH_PK: [u8; 32] =
-    hex!("0000000000000000000000000000000000000000000000000000000000000003");
+const TRADER_BUY_ETH_A_PK: [u8; 32] = [1; 32];
+const TRADER_BUY_ETH_B_PK: [u8; 32] = [2; 32];
+const TRADER_SELL_ETH_PK: [u8; 32] = [3; 32];
 
 const ORDER_PLACEMENT_ENDPOINT: &str = "/api/v1/orders/";
 const FEE_ENDPOINT: &str = "/api/v1/fee/";
@@ -237,6 +233,7 @@ async fn eth_integration(web3: Web3) {
         web3.clone(),
         network_id,
         1,
+        Duration::from_secs(30),
     );
     driver.single_run().await.unwrap();
 
