@@ -6,8 +6,9 @@ use ethcontract::{
 use model::DomainSeparator;
 use orderbook::{
     account_balances::Web3BalanceFetcher, database::Database, event_updater::EventUpdater,
-    fee::EthAwareMinFeeCalculator, orderbook::Orderbook,
+    fee::EthAwareMinFeeCalculator, metrics::Metrics, orderbook::Orderbook,
 };
+use prometheus::Registry;
 use shared::{
     amm_pair_provider::UniswapPairProvider,
     current_block::current_block_stream,
@@ -155,18 +156,23 @@ impl OrderbookServices {
                 web3.clone(),
                 gpv2.allowance,
                 gpv2.settlement.address(),
+                true,
             )),
             fee_calculator.clone(),
             HashSet::new(),
             Duration::from_secs(120),
         ));
 
+        let registry = Registry::default();
+        let metrics = Arc::new(Metrics::new(&registry).unwrap());
         orderbook::serve_task(
             db.clone(),
             orderbook.clone(),
             fee_calculator,
             price_estimator.clone(),
             API_HOST[7..].parse().expect("Couldn't parse API address"),
+            registry,
+            metrics,
         );
 
         Self {
