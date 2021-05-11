@@ -1,6 +1,6 @@
 use super::model::*;
 use crate::{
-    liquidity::{AmmOrder, AmmOrderExecution, LimitOrder},
+    liquidity::{AmmOrderExecution, ConstantProductOrder, LimitOrder},
     settlement::Settlement,
 };
 use anyhow::{anyhow, ensure, Result};
@@ -17,7 +17,7 @@ use std::{
 pub struct SettlementContext {
     pub tokens: HashMap<String, H160>,
     pub limit_orders: HashMap<String, LimitOrder>,
-    pub amm_orders: HashMap<String, AmmOrder>,
+    pub amm_orders: HashMap<String, ConstantProductOrder>,
 }
 
 pub fn convert_settlement(
@@ -52,7 +52,7 @@ impl ExecutedLimitOrder {
 }
 
 struct ExecutedAmm {
-    order: AmmOrder,
+    order: ConstantProductOrder,
     input: (H160, U256),
     output: (H160, U256),
 }
@@ -117,7 +117,7 @@ fn match_prepared_and_settled_orders(
 }
 
 fn match_prepared_and_settled_amms(
-    mut prepared_orders: HashMap<String, AmmOrder>,
+    mut prepared_orders: HashMap<String, ConstantProductOrder>,
     settled_orders: HashMap<String, UpdatedUniswapModel>,
 ) -> Result<Vec<ExecutedAmm>> {
     settled_orders
@@ -231,7 +231,7 @@ mod tests {
         let orders = hashmap! { "lo0".to_string() => limit_order };
 
         let amm_handler = CapturingSettlementHandler::arc();
-        let amm_order = AmmOrder {
+        let amm_order = ConstantProductOrder {
             tokens: TokenPair::new(t0, t1).unwrap(),
             reserves: (3, 4),
             fee: 5.into(),

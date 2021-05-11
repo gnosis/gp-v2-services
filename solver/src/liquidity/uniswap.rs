@@ -2,16 +2,11 @@ use anyhow::Result;
 use contracts::{GPv2Settlement, IUniswapLikeRouter, ERC20};
 use ethcontract::batch::CallBatch;
 use primitive_types::{H160, U256};
-use shared::{
-    baseline_solver::{path_candidates, token_path_to_pair_path},
-    pool_fetching::PoolFetcher,
-    Web3,
-};
+use shared::{pool_fetching::PoolFetcher, Web3};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 const MAX_BATCH_SIZE: usize = 100;
-pub const MAX_HOPS: usize = 2;
 
 use super::slippage;
 use crate::{
@@ -19,7 +14,9 @@ use crate::{
     settlement::SettlementEncoder,
 };
 
-use super::{AmmOrder, AmmOrderExecution, LimitOrder, SettlementHandling};
+use super::{AmmOrderExecution, ConstantProductOrder, SettlementHandling};
+use crate::liquidity::Liquidity;
+use model::TokenPair;
 use shared::amm_pair_provider::AmmPairProvider;
 use shared::pool_fetching::PoolFetching;
 
@@ -27,7 +24,6 @@ pub struct UniswapLikeLiquidity {
     inner: Arc<Inner>,
     pool_fetcher: PoolFetcher,
     web3: Web3,
-    base_tokens: HashSet<H160>,
 }
 
 struct Inner {
@@ -39,39 +35,20 @@ struct Inner {
 
 #[async_trait::async_trait]
 impl BaselineLiquidity for UniswapLikeLiquidity {
-    /// Given a list of offchain orders returns the list of AMM liquidity to be considered
-    async fn get_liquidity(
-        &self,
-        offchain_orders: &mut (dyn Iterator<Item = &LimitOrder> + Send + Sync),
-    ) -> Result<Vec<AmmOrder>> {
-        let mut pools = HashSet::new();
-
-        for order in offchain_orders {
-            let path_candidates = path_candidates(
-                order.sell_token,
-                order.buy_token,
-                &self.base_tokens,
-                MAX_HOPS,
-            );
-            pools.extend(
-                path_candidates
-                    .iter()
-                    .flat_map(|candidate| token_path_to_pair_path(&candidate).into_iter()),
-            );
-        }
-
+    /// Given a set of pools returns the list of AMM liquidity to be considered
+    async fn get_liquidity(&self, pools: HashSet<TokenPair>) -> Result<Vec<Liquidity>> {
         let mut tokens = HashSet::new();
         let mut result = Vec::new();
         for pool in self.pool_fetcher.fetch(pools).await {
             tokens.insert(pool.tokens.get().0);
             tokens.insert(pool.tokens.get().1);
 
-            result.push(AmmOrder {
+            result.push(Liquidity::ConstantProduct(ConstantProductOrder {
                 tokens: pool.tokens,
                 reserves: pool.reserves,
                 fee: pool.fee,
                 settlement_handling: self.inner.clone(),
-            })
+            }))
         }
         self.cache_allowances(tokens.into_iter()).await;
         Ok(result)
@@ -83,7 +60,6 @@ impl UniswapLikeLiquidity {
         router: IUniswapLikeRouter,
         pair_provider: Arc<dyn AmmPairProvider>,
         gpv2_settlement: GPv2Settlement,
-        base_tokens: HashSet<H160>,
         web3: Web3,
     ) -> Self {
         Self {
@@ -97,7 +73,6 @@ impl UniswapLikeLiquidity {
                 pair_provider,
                 web3,
             },
-            base_tokens,
         }
     }
 
@@ -160,7 +135,7 @@ impl Inner {
     }
 }
 
-impl SettlementHandling<AmmOrder> for Inner {
+impl SettlementHandling<ConstantProductOrder> for Inner {
     // Creates the required interaction to convert the given input into output. Applies 0.1% slippage tolerance to the output.
     fn encode(&self, execution: AmmOrderExecution, encoder: &mut SettlementEncoder) -> Result<()> {
         encoder.append_to_execution_plan(self._settle(execution.input, execution.output));

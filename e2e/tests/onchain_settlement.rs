@@ -155,12 +155,12 @@ async fn onchain_settlement(web3: Web3) {
         IUniswapLikeRouter::at(&web3, uniswap_router.address()),
         uniswap_pair_provider.clone(),
         gpv2.settlement.clone(),
-        HashSet::new(),
         web3.clone(),
     );
     let solver = solver::naive_solver::NaiveSolver {};
     let liquidity_collector = LiquidityCollector {
         baseline_liquidity: vec![Box::new(uniswap_liquidity)],
+        base_tokens: HashSet::new(),
         orderbook_api: create_orderbook_api(&web3),
     };
     let network_id = web3.net().version().await.unwrap();

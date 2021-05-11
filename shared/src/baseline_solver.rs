@@ -4,7 +4,7 @@ use ethcontract::{H160, U256};
 use model::TokenPair;
 use num::BigRational;
 use std::collections::{HashMap, HashSet};
-
+pub const MAX_HOPS: usize = 2;
 type PathCandidate = Vec<H160>;
 
 pub trait BaselineSolvable {
@@ -176,7 +176,7 @@ pub fn token_path_to_pair_path(token_list: &[H160]) -> Vec<TokenPair> {
 mod tests {
     use super::*;
     use crate::conversions::big_rational_to_float;
-    use crate::pool_fetching::Pool;
+    use crate::pool_fetching::ConstantProductPool;
     use ethcontract::H160;
     use maplit::{hashmap, hashset};
     use model::TokenPair;
@@ -256,7 +256,7 @@ mod tests {
         let buy_token = H160::from_low_u64_be(3);
 
         let path = vec![sell_token, intermediate, buy_token];
-        let pools = [Pool::uniswap(
+        let pools = [ConstantProductPool::uniswap(
             TokenPair::new(path[0], path[1]).unwrap(),
             (100, 100),
         )];
@@ -276,8 +276,8 @@ mod tests {
 
         let path = vec![sell_token, intermediate, buy_token];
         let pools = [
-            Pool::uniswap(TokenPair::new(path[0], path[1]).unwrap(), (100, 100)),
-            Pool::uniswap(TokenPair::new(path[1], path[2]).unwrap(), (200, 50)),
+            ConstantProductPool::uniswap(TokenPair::new(path[0], path[1]).unwrap(), (100, 100)),
+            ConstantProductPool::uniswap(TokenPair::new(path[1], path[2]).unwrap(), (200, 50)),
         ];
         let pools = hashmap! {
             pools[0].tokens => vec![pools[0].clone()],
@@ -305,8 +305,8 @@ mod tests {
 
         let path = vec![sell_token, intermediate, buy_token];
         let pools = [
-            Pool::uniswap(TokenPair::new(path[0], path[1]).unwrap(), (100, 100)),
-            Pool::uniswap(TokenPair::new(path[1], path[2]).unwrap(), (200, 50)),
+            ConstantProductPool::uniswap(TokenPair::new(path[0], path[1]).unwrap(), (100, 100)),
+            ConstantProductPool::uniswap(TokenPair::new(path[1], path[2]).unwrap(), (200, 50)),
         ];
         let pools = hashmap! {
             pools[0].tokens => vec![pools[0].clone()],
@@ -324,8 +324,8 @@ mod tests {
 
         let path = vec![sell_token, intermediate, buy_token];
         let pools = [
-            Pool::uniswap(TokenPair::new(path[0], path[1]).unwrap(), (100, 100)),
-            Pool::uniswap(TokenPair::new(path[1], path[2]).unwrap(), (200, 50)),
+            ConstantProductPool::uniswap(TokenPair::new(path[0], path[1]).unwrap(), (100, 100)),
+            ConstantProductPool::uniswap(TokenPair::new(path[1], path[2]).unwrap(), (200, 50)),
         ];
         let pools = hashmap! {
             pools[0].tokens => vec![pools[0].clone()],
@@ -348,10 +348,11 @@ mod tests {
         let first_pair = TokenPair::new(path[0], path[1]).unwrap();
         let second_pair = TokenPair::new(path[1], path[2]).unwrap();
 
-        let first_hop_high_price = Pool::uniswap(first_pair, (101_000, 100_000));
-        let first_hop_low_price = Pool::uniswap(first_pair, (100_000, 101_000));
-        let second_hop_high_slippage = Pool::uniswap(second_pair, (200_000, 50_000));
-        let second_hop_low_slippage = Pool::uniswap(second_pair, (200_000_000, 50_000_000));
+        let first_hop_high_price = ConstantProductPool::uniswap(first_pair, (101_000, 100_000));
+        let first_hop_low_price = ConstantProductPool::uniswap(first_pair, (100_000, 101_000));
+        let second_hop_high_slippage = ConstantProductPool::uniswap(second_pair, (200_000, 50_000));
+        let second_hop_low_slippage =
+            ConstantProductPool::uniswap(second_pair, (200_000_000, 50_000_000));
         let pools = hashmap! {
             first_pair => vec![first_hop_high_price.clone(), first_hop_low_price.clone()],
             second_pair => vec![second_hop_high_slippage, second_hop_low_slippage.clone()],
@@ -403,8 +404,8 @@ mod tests {
         let pair = TokenPair::new(sell_token, buy_token).unwrap();
 
         let path = vec![sell_token, buy_token];
-        let valid_pool = Pool::uniswap(pair, (100_000, 100_000));
-        let invalid_pool = Pool::uniswap(pair, (0, 0));
+        let valid_pool = ConstantProductPool::uniswap(pair, (100_000, 100_000));
+        let invalid_pool = ConstantProductPool::uniswap(pair, (0, 0));
         let pools = hashmap! {
             pair => vec![valid_pool.clone(), invalid_pool],
         };

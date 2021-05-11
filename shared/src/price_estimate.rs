@@ -3,7 +3,7 @@ use crate::baseline_solver::{
     token_path_to_pair_path,
 };
 use crate::conversions::U256Ext;
-use crate::pool_fetching::{Pool, PoolFetching};
+use crate::pool_fetching::{ConstantProductPool, PoolFetching};
 use anyhow::{anyhow, Result};
 use ethcontract::{H160, U256};
 use futures::future::join_all;
@@ -262,8 +262,9 @@ impl BaselinePriceEstimator {
         resulting_amount: AmountFn,
     ) -> Result<(Vec<H160>, Amount)>
     where
-        AmountFn: Fn(U256, &[H160], &HashMap<TokenPair, Vec<Pool>>) -> Option<Amount>,
-        CompareFn: Fn(U256, &[H160], &HashMap<TokenPair, Vec<Pool>>) -> O,
+        AmountFn:
+            Fn(U256, &[H160], &HashMap<TokenPair, Vec<ConstantProductPool>>) -> Option<Amount>,
+        CompareFn: Fn(U256, &[H160], &HashMap<TokenPair, Vec<ConstantProductPool>>) -> O,
         O: Ord,
     {
         let path_candidates = path_candidates(sell_token, buy_token, &self.base_tokens, MAX_HOPS);
@@ -356,12 +357,12 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
-    use crate::pool_fetching::{FilteredPoolFetcher, Pool, PoolFetching};
+    use crate::pool_fetching::{ConstantProductPool, FilteredPoolFetcher, PoolFetching};
 
-    struct FakePoolFetcher(Vec<Pool>);
+    struct FakePoolFetcher(Vec<ConstantProductPool>);
     #[async_trait::async_trait]
     impl PoolFetching for FakePoolFetcher {
-        async fn fetch(&self, token_pairs: HashSet<TokenPair>) -> Vec<Pool> {
+        async fn fetch(&self, token_pairs: HashSet<TokenPair>) -> Vec<ConstantProductPool> {
             self.0
                 .clone()
                 .into_iter()
@@ -374,7 +375,7 @@ mod tests {
     async fn estimate_price_on_direct_pair() {
         let token_a = H160::from_low_u64_be(1);
         let token_b = H160::from_low_u64_be(2);
-        let pool = Pool::uniswap(
+        let pool = ConstantProductPool::uniswap(
             TokenPair::new(token_a, token_b).unwrap(),
             (10u128.pow(30), 10u128.pow(29)),
         );
@@ -434,7 +435,7 @@ mod tests {
     async fn estimate_price_with_zero_amount() {
         let token_a = H160::from_low_u64_be(1);
         let token_b = H160::from_low_u64_be(2);
-        let pool = Pool::uniswap(
+        let pool = ConstantProductPool::uniswap(
             TokenPair::new(token_a, token_b).unwrap(),
             (10u128.pow(30), 10u128.pow(29)),
         );
@@ -457,11 +458,11 @@ mod tests {
         let token_a = H160::from_low_u64_be(1);
         let token_b = H160::from_low_u64_be(2);
         let token_c = H160::from_low_u64_be(3);
-        let pool_ab = Pool::uniswap(
+        let pool_ab = ConstantProductPool::uniswap(
             TokenPair::new(token_a, token_b).unwrap(),
             (10u128.pow(30), 10u128.pow(29)),
         );
-        let pool_bc = Pool::uniswap(
+        let pool_bc = ConstantProductPool::uniswap(
             TokenPair::new(token_b, token_c).unwrap(),
             (10u128.pow(30), 10u128.pow(29)),
         );
@@ -501,7 +502,7 @@ mod tests {
     async fn return_error_if_token_denied() {
         let token_a = H160::from_low_u64_be(1);
         let token_b = H160::from_low_u64_be(2);
-        let pool_ab = Pool::uniswap(
+        let pool_ab = ConstantProductPool::uniswap(
             TokenPair::new(token_a, token_b).unwrap(),
             (10u128.pow(30), 10u128.pow(29)),
         );
@@ -537,7 +538,7 @@ mod tests {
     async fn return_error_if_invalid_reserves() {
         let token_a = H160::from_low_u64_be(1);
         let token_b = H160::from_low_u64_be(2);
-        let pool = Pool::uniswap(TokenPair::new(token_a, token_b).unwrap(), (0, 10));
+        let pool = ConstantProductPool::uniswap(TokenPair::new(token_a, token_b).unwrap(), (0, 10));
 
         let pool_fetcher = Box::new(FakePoolFetcher(vec![pool]));
         let estimator = BaselinePriceEstimator::new(pool_fetcher, hashset!(), hashset!());
@@ -556,7 +557,7 @@ mod tests {
         // The path via the base token does not exist (making it an invalid path)
         let base_token = H160::from_low_u64_be(3);
 
-        let pool = Pool::uniswap(
+        let pool = ConstantProductPool::uniswap(
             TokenPair::new(token_a, token_b).unwrap(),
             (10u128.pow(30), 10u128.pow(29)),
         );
@@ -582,9 +583,15 @@ mod tests {
 
         // Direct trade is better when selling token_b
         let pools = vec![
-            Pool::uniswap(TokenPair::new(token_a, token_b).unwrap(), (1000, 1000)),
-            Pool::uniswap(TokenPair::new(token_a, intermediate).unwrap(), (900, 1000)),
-            Pool::uniswap(TokenPair::new(intermediate, token_b).unwrap(), (900, 1000)),
+            ConstantProductPool::uniswap(TokenPair::new(token_a, token_b).unwrap(), (1000, 1000)),
+            ConstantProductPool::uniswap(
+                TokenPair::new(token_a, intermediate).unwrap(),
+                (900, 1000),
+            ),
+            ConstantProductPool::uniswap(
+                TokenPair::new(intermediate, token_b).unwrap(),
+                (900, 1000),
+            ),
         ];
 
         let pool_fetcher = Box::new(FakePoolFetcher(pools));

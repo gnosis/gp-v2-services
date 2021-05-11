@@ -7,15 +7,17 @@ use shared::{
     baseline_solver::{
         estimate_buy_amount, estimate_sell_amount, path_candidates, BaselineSolvable,
     },
-    pool_fetching::Pool,
+    pool_fetching::ConstantProductPool,
 };
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    liquidity::{uniswap::MAX_HOPS, AmmOrder, AmmOrderExecution, LimitOrder, Liquidity},
+    liquidity::{AmmOrderExecution, ConstantProductOrder, LimitOrder, Liquidity},
     settlement::Settlement,
     solver::Solver,
 };
+use shared::baseline_solver::MAX_HOPS;
+
 pub struct BaselineSolver {
     base_tokens: HashSet<H160>,
 }
@@ -31,7 +33,7 @@ impl Solver for BaselineSolver {
     }
 }
 
-impl BaselineSolvable for AmmOrder {
+impl BaselineSolvable for ConstantProductOrder {
     fn get_amount_out(&self, out_token: H160, in_amount: U256, in_token: H160) -> Option<U256> {
         amm_to_pool(self).get_amount_out(out_token, in_amount, in_token)
     }
@@ -53,7 +55,7 @@ impl BaselineSolver {
     fn solve(&self, liquidity: Vec<Liquidity>) -> Vec<Settlement> {
         let mut amm_map: HashMap<_, Vec<_>> = HashMap::new();
         for liquidity in &liquidity {
-            if let Liquidity::Amm(amm_order) = liquidity {
+            if let Liquidity::ConstantProduct(amm_order) = liquidity {
                 let entry = amm_map.entry(amm_order.tokens).or_default();
                 entry.push(amm_order.clone())
             }
@@ -67,7 +69,7 @@ impl BaselineSolver {
         for liquidity in liquidity {
             let user_order = match liquidity {
                 Liquidity::Limit(order) => order,
-                Liquidity::Amm(_) => continue,
+                Liquidity::ConstantProduct(_) => continue,
             };
 
             let solution = match self.settle_order(&user_order, &amm_map) {
@@ -94,7 +96,7 @@ impl BaselineSolver {
     fn settle_order(
         &self,
         order: &LimitOrder,
-        pools: &HashMap<TokenPair, Vec<AmmOrder>>,
+        pools: &HashMap<TokenPair, Vec<ConstantProductOrder>>,
     ) -> Option<Solution> {
         let candidates = path_candidates(
             order.sell_token,
@@ -133,7 +135,7 @@ impl BaselineSolver {
 }
 
 struct Solution {
-    path: Vec<AmmOrder>,
+    path: Vec<ConstantProductOrder>,
     executed_sell_amount: U256,
     executed_buy_amount: U256,
 }
@@ -168,8 +170,8 @@ impl Solution {
     }
 }
 
-fn amm_to_pool(amm: &AmmOrder) -> Pool {
-    Pool {
+fn amm_to_pool(amm: &ConstantProductOrder) -> ConstantProductPool {
+    ConstantProductPool {
         tokens: amm.tokens,
         reserves: amm.reserves,
         fee: amm.fee,
@@ -183,7 +185,7 @@ mod tests {
     use num::rational::Ratio;
 
     use crate::liquidity::{
-        tests::CapturingSettlementHandler, AmmOrder, AmmOrderExecution, LimitOrder,
+        tests::CapturingSettlementHandler, AmmOrderExecution, ConstantProductOrder, LimitOrder,
     };
 
     use super::*;
@@ -229,27 +231,27 @@ mod tests {
             CapturingSettlementHandler::arc(),
         ];
         let amms = vec![
-            AmmOrder {
+            ConstantProductOrder {
                 tokens: TokenPair::new(buy_token, sell_token).unwrap(),
                 reserves: (1_000_000, 1_000_000),
                 fee: Ratio::new(3, 1000),
                 settlement_handling: amm_handler[0].clone(),
             },
             // Path via native token has more liquidity
-            AmmOrder {
+            ConstantProductOrder {
                 tokens: TokenPair::new(sell_token, native_token).unwrap(),
                 reserves: (10_000_000, 10_000_000),
                 fee: Ratio::new(3, 1000),
                 settlement_handling: amm_handler[1].clone(),
             },
             // Second native token pool has a worse price despite larger k
-            AmmOrder {
+            ConstantProductOrder {
                 tokens: TokenPair::new(sell_token, native_token).unwrap(),
                 reserves: (11_000_000, 10_000_000),
                 fee: Ratio::new(3, 1000),
                 settlement_handling: amm_handler[1].clone(),
             },
-            AmmOrder {
+            ConstantProductOrder {
                 tokens: TokenPair::new(native_token, buy_token).unwrap(),
                 reserves: (10_000_000, 10_000_000),
                 fee: Ratio::new(3, 1000),
@@ -258,7 +260,7 @@ mod tests {
         ];
 
         let mut liquidity: Vec<_> = orders.iter().cloned().map(Liquidity::Limit).collect();
-        liquidity.extend(amms.iter().cloned().map(Liquidity::Amm));
+        liquidity.extend(amms.iter().cloned().map(Liquidity::ConstantProduct));
 
         let solver = BaselineSolver::new(hashset! { native_token});
         let result = solver.must_solve(liquidity);
@@ -334,27 +336,27 @@ mod tests {
             CapturingSettlementHandler::arc(),
         ];
         let amms = vec![
-            AmmOrder {
+            ConstantProductOrder {
                 tokens: TokenPair::new(buy_token, sell_token).unwrap(),
                 reserves: (1_000_000, 1_000_000),
                 fee: Ratio::new(3, 1000),
                 settlement_handling: amm_handler[0].clone(),
             },
             // Path via native token has more liquidity
-            AmmOrder {
+            ConstantProductOrder {
                 tokens: TokenPair::new(sell_token, native_token).unwrap(),
                 reserves: (10_000_000, 10_000_000),
                 fee: Ratio::new(3, 1000),
                 settlement_handling: amm_handler[1].clone(),
             },
             // Second native token pool has a worse price despite larger k
-            AmmOrder {
+            ConstantProductOrder {
                 tokens: TokenPair::new(sell_token, native_token).unwrap(),
                 reserves: (11_000_000, 10_000_000),
                 fee: Ratio::new(3, 1000),
                 settlement_handling: amm_handler[1].clone(),
             },
-            AmmOrder {
+            ConstantProductOrder {
                 tokens: TokenPair::new(native_token, buy_token).unwrap(),
                 reserves: (10_000_000, 10_000_000),
                 fee: Ratio::new(3, 1000),
@@ -363,7 +365,7 @@ mod tests {
         ];
 
         let mut liquidity: Vec<_> = orders.iter().cloned().map(Liquidity::Limit).collect();
-        liquidity.extend(amms.iter().cloned().map(Liquidity::Amm));
+        liquidity.extend(amms.iter().cloned().map(Liquidity::ConstantProduct));
 
         let solver = BaselineSolver::new(hashset! { native_token});
         let result = solver.must_solve(liquidity);
@@ -416,14 +418,14 @@ mod tests {
         }];
 
         let amms = vec![
-            AmmOrder {
+            ConstantProductOrder {
                 tokens: TokenPair::new(buy_token, sell_token).unwrap(),
                 reserves: (10_000_000, 10_000_000),
                 fee: Ratio::new(3, 1000),
                 settlement_handling: CapturingSettlementHandler::arc(),
             },
             // Other direct pool has not enough liquidity to compute a valid estimate
-            AmmOrder {
+            ConstantProductOrder {
                 tokens: TokenPair::new(buy_token, sell_token).unwrap(),
                 reserves: (0, 0),
                 fee: Ratio::new(3, 1000),
@@ -432,7 +434,7 @@ mod tests {
         ];
 
         let mut liquidity: Vec<_> = orders.iter().cloned().map(Liquidity::Limit).collect();
-        liquidity.extend(amms.iter().cloned().map(Liquidity::Amm));
+        liquidity.extend(amms.iter().cloned().map(Liquidity::ConstantProduct));
 
         let solver = BaselineSolver::new(hashset! {});
         assert_eq!(solver.solve(liquidity).len(), 1);

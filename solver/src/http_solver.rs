@@ -3,7 +3,7 @@ mod settlement;
 
 use self::{model::*, settlement::SettlementContext};
 use crate::{
-    liquidity::{AmmOrder, LimitOrder, Liquidity},
+    liquidity::{ConstantProductOrder, LimitOrder, Liquidity},
     settlement::Settlement,
     solver::Solver,
 };
@@ -104,7 +104,7 @@ impl HttpSolver {
                 Liquidity::Limit(order) => {
                     std::iter::once(order.sell_token).chain(std::iter::once(order.buy_token))
                 }
-                Liquidity::Amm(amm) => {
+                Liquidity::ConstantProduct(amm) => {
                     std::iter::once(amm.tokens.get().0).chain(std::iter::once(amm.tokens.get().1))
                 }
             })
@@ -177,7 +177,10 @@ impl HttpSolver {
         Ok(result)
     }
 
-    fn map_amms_for_solver(&self, orders: Vec<AmmOrder>) -> HashMap<String, AmmOrder> {
+    fn map_amms_for_solver(
+        &self,
+        orders: Vec<ConstantProductOrder>,
+    ) -> HashMap<String, ConstantProductOrder> {
         orders
             .into_iter()
             .enumerate()
@@ -187,7 +190,7 @@ impl HttpSolver {
 
     async fn amm_models(
         &self,
-        amms: &HashMap<String, AmmOrder>,
+        amms: &HashMap<String, ConstantProductOrder>,
         gas_price: f64,
     ) -> HashMap<String, UniswapModel> {
         let uniswap_cost = self.uniswap_cost(gas_price).await;
@@ -317,13 +320,13 @@ impl HttpSolver {
     }
 }
 
-fn split_liquidity(liquidity: Vec<Liquidity>) -> (Vec<LimitOrder>, Vec<AmmOrder>) {
+fn split_liquidity(liquidity: Vec<Liquidity>) -> (Vec<LimitOrder>, Vec<ConstantProductOrder>) {
     let mut limit_orders = Vec::new();
     let mut amm_orders = Vec::new();
     for order in liquidity {
         match order {
             Liquidity::Limit(order) => limit_orders.push(order),
-            Liquidity::Amm(order) => amm_orders.push(order),
+            Liquidity::ConstantProduct(order) => amm_orders.push(order),
         }
     }
     (limit_orders, amm_orders)
@@ -331,7 +334,7 @@ fn split_liquidity(liquidity: Vec<Liquidity>) -> (Vec<LimitOrder>, Vec<AmmOrder>
 
 fn remove_orders_without_native_connection(
     orders: &mut Vec<LimitOrder>,
-    amms: &[AmmOrder],
+    amms: &[ConstantProductOrder],
     native_token: &H160,
 ) {
     // Find all tokens that are connected through potentially multiple amm hops to the fee.
@@ -390,7 +393,7 @@ impl Solver for HttpSolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::liquidity::{tests::CapturingSettlementHandler, AmmOrder, LimitOrder};
+    use crate::liquidity::{tests::CapturingSettlementHandler, ConstantProductOrder, LimitOrder};
     use ::model::TokenPair;
     use maplit::hashmap;
     use num::rational::Ratio;
@@ -452,7 +455,7 @@ mod tests {
                 settlement_handling: CapturingSettlementHandler::arc(),
                 id: "0".to_string(),
             }),
-            Liquidity::Amm(AmmOrder {
+            Liquidity::ConstantProduct(ConstantProductOrder {
                 tokens: TokenPair::new(H160::zero(), H160::from_low_u64_be(1)).unwrap(),
                 reserves: (base(100), base(100)),
                 fee: Ratio::new(0, 1),
@@ -492,7 +495,7 @@ mod tests {
 
         let amms = [(native_token, tokens[0]), (tokens[0], tokens[1])]
             .iter()
-            .map(|tokens| AmmOrder {
+            .map(|tokens| ConstantProductOrder {
                 tokens: TokenPair::new(tokens.0, tokens.1).unwrap(),
                 reserves: (0, 0),
                 fee: 0.into(),

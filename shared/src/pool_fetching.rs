@@ -19,7 +19,7 @@ type RelativeReserves = (U256, U256, H160);
 
 #[async_trait::async_trait]
 pub trait PoolFetching: Send + Sync {
-    async fn fetch(&self, token_pairs: HashSet<TokenPair>) -> Vec<Pool>;
+    async fn fetch(&self, token_pairs: HashSet<TokenPair>) -> Vec<ConstantProductPool>;
 }
 
 pub struct FilteredPoolFetcher {
@@ -38,7 +38,7 @@ impl FilteredPoolFetcher {
 
 #[async_trait::async_trait]
 impl PoolFetching for FilteredPoolFetcher {
-    async fn fetch(&self, token_pairs: HashSet<TokenPair>) -> Vec<Pool> {
+    async fn fetch(&self, token_pairs: HashSet<TokenPair>) -> Vec<ConstantProductPool> {
         let filtered_pairs = token_pairs
             .into_iter()
             .filter(|pair| !self.unsupported_tokens.iter().any(|t| pair.contains(t)))
@@ -48,13 +48,13 @@ impl PoolFetching for FilteredPoolFetcher {
 }
 
 #[derive(Clone, Hash, PartialEq, Debug)]
-pub struct Pool {
+pub struct ConstantProductPool {
     pub tokens: TokenPair,
     pub reserves: (u128, u128),
     pub fee: Ratio<u32>,
 }
 
-impl Pool {
+impl ConstantProductPool {
     pub fn uniswap(tokens: TokenPair, reserves: (u128, u128)) -> Self {
         Self {
             tokens,
@@ -160,7 +160,7 @@ impl Pool {
     }
 }
 
-impl BaselineSolvable for Pool {
+impl BaselineSolvable for ConstantProductPool {
     fn get_amount_out(&self, out_token: H160, in_amount: U256, in_token: H160) -> Option<U256> {
         self.get_amount_out(in_token, in_amount)
             .map(|(out_amount, token)| {
@@ -188,7 +188,7 @@ impl BaselineSolvable for Pool {
 // Read though Pool Fetcher that keeps previously fetched pools in a cache, which get invalidated whenever there is a new block
 pub struct CachedPoolFetcher {
     inner: Box<dyn PoolFetching>,
-    cache: Arc<Mutex<(Block, HashMap<TokenPair, Pool>)>>,
+    cache: Arc<Mutex<(Block, HashMap<TokenPair, ConstantProductPool>)>>,
     block_stream: CurrentBlockStream,
 }
 
@@ -201,7 +201,7 @@ impl CachedPoolFetcher {
         }
     }
 
-    async fn fetch_inner(&self, token_pairs: HashSet<TokenPair>) -> Vec<Pool> {
+    async fn fetch_inner(&self, token_pairs: HashSet<TokenPair>) -> Vec<ConstantProductPool> {
         let mut cache = self.cache.lock().await;
         let (cache_hits, cache_misses) = token_pairs
             .into_iter()
@@ -231,7 +231,7 @@ impl CachedPoolFetcher {
 
 #[async_trait::async_trait]
 impl PoolFetching for CachedPoolFetcher {
-    async fn fetch(&self, token_pairs: HashSet<TokenPair>) -> Vec<Pool> {
+    async fn fetch(&self, token_pairs: HashSet<TokenPair>) -> Vec<ConstantProductPool> {
         self.clear_cache_if_necessary().await;
         self.fetch_inner(token_pairs).await
     }
@@ -244,7 +244,7 @@ pub struct PoolFetcher {
 
 #[async_trait::async_trait]
 impl PoolFetching for PoolFetcher {
-    async fn fetch(&self, token_pairs: HashSet<TokenPair>) -> Vec<Pool> {
+    async fn fetch(&self, token_pairs: HashSet<TokenPair>) -> Vec<ConstantProductPool> {
         let mut batch = CallBatch::new(self.web3.transport());
         let futures = token_pairs
             .into_iter()
@@ -284,7 +284,7 @@ impl PoolFetching for PoolFetcher {
                 if U256::from(reserves.0) <= token0_balance
                     && U256::from(reserves.1) <= token1_balance
                 {
-                    results.push(Pool::uniswap(pair, (reserves.0, reserves.1)));
+                    results.push(ConstantProductPool::uniswap(pair, (reserves.0, reserves.1)));
                 }
             }
         }
@@ -308,7 +308,10 @@ mod tests {
         let buy_token = H160::from_low_u64_be(2);
 
         // Even Pool
-        let pool = Pool::uniswap(TokenPair::new(sell_token, buy_token).unwrap(), (100, 100));
+        let pool = ConstantProductPool::uniswap(
+            TokenPair::new(sell_token, buy_token).unwrap(),
+            (100, 100),
+        );
         assert_eq!(
             pool.get_amount_out(sell_token, 10.into()),
             Some((9.into(), buy_token))
@@ -323,7 +326,8 @@ mod tests {
         );
 
         //Uneven Pool
-        let pool = Pool::uniswap(TokenPair::new(sell_token, buy_token).unwrap(), (200, 50));
+        let pool =
+            ConstantProductPool::uniswap(TokenPair::new(sell_token, buy_token).unwrap(), (200, 50));
         assert_eq!(
             pool.get_amount_out(sell_token, 10.into()),
             Some((2.into(), buy_token))
@@ -338,7 +342,7 @@ mod tests {
         );
 
         // Large Numbers
-        let pool = Pool::uniswap(
+        let pool = ConstantProductPool::uniswap(
             TokenPair::new(sell_token, buy_token).unwrap(),
             (u128::max_value(), u128::max_value()),
         );
@@ -357,7 +361,10 @@ mod tests {
         let buy_token = H160::from_low_u64_be(2);
 
         // Even Pool
-        let pool = Pool::uniswap(TokenPair::new(sell_token, buy_token).unwrap(), (100, 100));
+        let pool = ConstantProductPool::uniswap(
+            TokenPair::new(sell_token, buy_token).unwrap(),
+            (100, 100),
+        );
         assert_eq!(
             pool.get_amount_in(buy_token, 10.into()),
             Some((12.into(), sell_token))
@@ -372,7 +379,8 @@ mod tests {
         assert_eq!(pool.get_amount_in(buy_token, 1000.into()), None);
 
         //Uneven Pool
-        let pool = Pool::uniswap(TokenPair::new(sell_token, buy_token).unwrap(), (200, 50));
+        let pool =
+            ConstantProductPool::uniswap(TokenPair::new(sell_token, buy_token).unwrap(), (200, 50));
         assert_eq!(
             pool.get_amount_in(buy_token, 10.into()),
             Some((51.into(), sell_token))
@@ -383,7 +391,7 @@ mod tests {
         );
 
         // Large Numbers
-        let pool = Pool::uniswap(
+        let pool = ConstantProductPool::uniswap(
             TokenPair::new(sell_token, buy_token).unwrap(),
             (u128::max_value(), u128::max_value()),
         );
@@ -399,7 +407,8 @@ mod tests {
         let token_a = H160::from_low_u64_be(1);
         let token_b = H160::from_low_u64_be(2);
 
-        let pool = Pool::uniswap(TokenPair::new(token_a, token_b).unwrap(), (100, 125));
+        let pool =
+            ConstantProductPool::uniswap(TokenPair::new(token_a, token_b).unwrap(), (100, 125));
         assert_approx_eq!(
             big_rational_to_float(&pool.get_spot_price(token_a).unwrap().0).unwrap(),
             1.25
@@ -412,14 +421,14 @@ mod tests {
         assert_eq!(pool.get_spot_price(token_a).unwrap().1, token_b);
         assert_eq!(pool.get_spot_price(token_b).unwrap().1, token_a);
 
-        let pool = Pool::uniswap(TokenPair::new(token_a, token_b).unwrap(), (0, 0));
+        let pool = ConstantProductPool::uniswap(TokenPair::new(token_a, token_b).unwrap(), (0, 0));
         assert_eq!(pool.get_spot_price(token_a), None);
     }
 
-    struct FakePoolFetcher(Arc<Mutex<Vec<Pool>>>);
+    struct FakePoolFetcher(Arc<Mutex<Vec<ConstantProductPool>>>);
     #[async_trait::async_trait]
     impl PoolFetching for FakePoolFetcher {
-        async fn fetch(&self, _: HashSet<TokenPair>) -> Vec<Pool> {
+        async fn fetch(&self, _: HashSet<TokenPair>) -> Vec<ConstantProductPool> {
             self.0.lock().await.clone()
         }
     }
@@ -430,7 +439,7 @@ mod tests {
         let token_b = H160::from_low_u64_be(2);
         let pair = TokenPair::new(token_a, token_b).unwrap();
 
-        let pools = Arc::new(Mutex::new(vec![Pool::uniswap(pair, (1, 1))]));
+        let pools = Arc::new(Mutex::new(vec![ConstantProductPool::uniswap(pair, (1, 1))]));
 
         let current_block = Arc::new(std::sync::Mutex::new(Block::default()));
 
@@ -443,14 +452,14 @@ mod tests {
         // Read Through
         assert_eq!(
             instance.fetch(hashset!(pair)).await,
-            vec![Pool::uniswap(pair, (1, 1))]
+            vec![ConstantProductPool::uniswap(pair, (1, 1))]
         );
 
         // clear inner to test caching
         pools.lock().await.clear();
         assert_eq!(
             instance.fetch(hashset!(pair)).await,
-            vec![Pool::uniswap(pair, (1, 1))]
+            vec![ConstantProductPool::uniswap(pair, (1, 1))]
         );
 
         // invalidate cache

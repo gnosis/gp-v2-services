@@ -1,10 +1,9 @@
-use crate::liquidity::{AmmOrder, LimitOrder};
+use crate::liquidity::Liquidity;
 use anyhow::Result;
+use model::TokenPair;
+use std::collections::HashSet;
 
 #[async_trait::async_trait]
 pub trait BaselineLiquidity {
-    async fn get_liquidity(
-        &self,
-        offchain_orders: &mut (dyn Iterator<Item = &LimitOrder> + Send + Sync),
-    ) -> Result<Vec<AmmOrder>>;
+    async fn get_liquidity(&self, pools: HashSet<TokenPair>) -> Result<Vec<Liquidity>>;
 }

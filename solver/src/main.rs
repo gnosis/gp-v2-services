@@ -1,5 +1,5 @@
 use contracts::{IUniswapLikeRouter, WETH9};
-use ethcontract::{Account, PrivateKey, H160};
+use ethcontract::{Account, PrivateKey};
 use prometheus::Registry;
 use reqwest::Url;
 use shared::{
@@ -179,13 +179,12 @@ async fn main() {
         args.shared.baseline_sources,
         chain_id,
         settlement_contract.clone(),
-        base_tokens.clone(),
         web3.clone(),
     )
     .await;
     let solver = solver::solver::create(
         args.solvers,
-        base_tokens,
+        base_tokens.clone(),
         native_token_contract.address(),
         args.mip_solver_url,
         &settlement_contract,
@@ -199,6 +198,7 @@ async fn main() {
     .expect("failure creating solvers");
     let liquidity_collector = LiquidityCollector {
         baseline_liquidity,
+        base_tokens,
         orderbook_api,
     };
     let mut driver = Driver::new(
@@ -226,7 +226,6 @@ async fn build_amm_artifacts(
     sources: Vec<BaselineSources>,
     chain_id: u64,
     settlement_contract: contracts::GPv2Settlement,
-    base_tokens: HashSet<H160>,
     web3: web3::Web3<LoggingTransport<Http>>,
 ) -> Vec<Box<dyn BaselineLiquidity>> {
     let mut res: Vec<Box<dyn BaselineLiquidity>> = vec![];
@@ -244,7 +243,6 @@ async fn build_amm_artifacts(
                     IUniswapLikeRouter::at(&web3, router.address()),
                     pair_provider.clone(),
                     settlement_contract.clone(),
-                    base_tokens.clone(),
                     web3.clone(),
                 )));
             }
@@ -260,7 +258,6 @@ async fn build_amm_artifacts(
                     IUniswapLikeRouter::at(&web3, router.address()),
                     pair_provider.clone(),
                     settlement_contract.clone(),
-                    base_tokens.clone(),
                     web3.clone(),
                 )));
             }

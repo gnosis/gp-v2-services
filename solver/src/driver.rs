@@ -399,7 +399,7 @@ fn liquidity_with_price(
                 Liquidity::Limit(limit_order) => [limit_order.sell_token, limit_order.buy_token]
                     .iter()
                     .all(|token| prices.contains_key(token)),
-                Liquidity::Amm(_) => true,
+                Liquidity::ConstantProduct(_) => true,
             });
     if !removed_orders.is_empty() {
         tracing::debug!(
@@ -414,7 +414,7 @@ fn liquidity_with_price(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::liquidity::{tests::CapturingSettlementHandler, AmmOrder, LimitOrder};
+    use crate::liquidity::{tests::CapturingSettlementHandler, ConstantProductOrder, LimitOrder};
     use maplit::hashmap;
     use model::{order::OrderKind, TokenPair};
     use num::{rational::Ratio, traits::One};
@@ -440,7 +440,7 @@ mod tests {
                 settlement_handling: CapturingSettlementHandler::arc(),
                 id: "0".into(),
             }),
-            Liquidity::Amm(AmmOrder {
+            Liquidity::ConstantProduct(ConstantProductOrder {
                 tokens: TokenPair::new(buy_token, native_token).unwrap(),
                 reserves: (1_000_000, 1_000_000),
                 fee: Ratio::new(3, 1000),

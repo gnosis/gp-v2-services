@@ -169,7 +169,7 @@ impl Display for OneInchSolver {
 mod tests {
     use super::*;
     use crate::{
-        liquidity::{AmmOrder, LimitOrder},
+        liquidity::{ConstantProductOrder, LimitOrder},
         testutil,
     };
     use contracts::{GPv2Settlement, WETH9};
@@ -203,7 +203,7 @@ mod tests {
                         kind: OrderKind::Buy,
                         ..Default::default()
                     }),
-                    Liquidity::Amm(AmmOrder::default()),
+                    Liquidity::ConstantProduct(ConstantProductOrder::default()),
                 ],
                 0.0,
             )

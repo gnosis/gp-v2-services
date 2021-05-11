@@ -1,6 +1,8 @@
 use crate::liquidity::baseline_liquidity::BaselineLiquidity;
-use crate::liquidity::{AmmOrder, LimitOrder};
+use crate::liquidity::Liquidity;
 use anyhow::Result;
+use model::TokenPair;
+use std::collections::HashSet;
 
 pub struct BalancerV2Liquidity {
     // Will need more specific fields
@@ -9,11 +11,7 @@ pub struct BalancerV2Liquidity {
 
 #[async_trait::async_trait]
 impl BaselineLiquidity for BalancerV2Liquidity {
-    async fn get_liquidity(
-        &self,
-        _offchain_orders: &mut (dyn Iterator<Item = &LimitOrder> + Send + Sync),
-    ) -> Result<Vec<AmmOrder>> {
-        // unimplemented!();
+    async fn get_liquidity(&self, _pools: HashSet<TokenPair>) -> Result<Vec<Liquidity>> {
         todo!()
     }
 }
