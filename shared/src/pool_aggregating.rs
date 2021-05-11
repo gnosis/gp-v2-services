@@ -11,6 +11,7 @@ arg_enum! {
     pub enum BaselineSources {
         Uniswap,
         Sushiswap,
+        BalancerV2,
     }
 }
 
@@ -38,6 +39,11 @@ impl PoolAggregator {
                             .await
                             .expect("couldn't load deployed sushiswap router"),
                     });
+                }
+                BaselineSources::BalancerV2 => {
+                    unimplemented!();
+                    // TODO - construct some type of PoolFetcher.
+                    // May have to move pool_fetchers.push into each case.
                 }
             }
             pool_fetchers.push(PoolFetcher {

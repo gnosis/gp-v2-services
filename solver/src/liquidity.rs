@@ -9,6 +9,8 @@ use strum_macros::{AsStaticStr, EnumVariantNames};
 #[cfg(test)]
 use model::order::Order;
 
+pub mod balancer_v2;
+pub mod baseline_liquidity;
 pub mod offchain_orderbook;
 pub mod slippage;
 pub mod uniswap;

@@ -12,8 +12,11 @@ use shared::{
     transport::LoggingTransport,
 };
 use solver::{
-    driver::Driver, liquidity::uniswap::UniswapLikeLiquidity,
-    liquidity_collector::LiquidityCollector, metrics::Metrics, solver::SolverType,
+    driver::Driver,
+    liquidity::{baseline_liquidity::BaselineLiquidity, uniswap::UniswapLikeLiquidity},
+    liquidity_collector::LiquidityCollector,
+    metrics::Metrics,
+    solver::SolverType,
 };
 use std::iter::FromIterator as _;
 use std::{collections::HashSet, sync::Arc, time::Duration};
@@ -172,7 +175,7 @@ async fn main() {
         base_tokens.clone(),
         args.shared.unsupported_tokens.into_iter().collect(),
     ));
-    let uniswap_like_liquidity = build_amm_artifacts(
+    let baseline_liquidity = build_amm_artifacts(
         args.shared.baseline_sources,
         chain_id,
         settlement_contract.clone(),
@@ -195,7 +198,7 @@ async fn main() {
     )
     .expect("failure creating solvers");
     let liquidity_collector = LiquidityCollector {
-        uniswap_like_liquidity,
+        baseline_liquidity,
         orderbook_api,
     };
     let mut driver = Driver::new(
@@ -225,8 +228,8 @@ async fn build_amm_artifacts(
     settlement_contract: contracts::GPv2Settlement,
     base_tokens: HashSet<H160>,
     web3: web3::Web3<LoggingTransport<Http>>,
-) -> Vec<UniswapLikeLiquidity> {
-    let mut res = vec![];
+) -> Vec<Box<dyn BaselineLiquidity>> {
+    let mut res: Vec<Box<dyn BaselineLiquidity>> = vec![];
     for source in sources {
         match source {
             BaselineSources::Uniswap => {
@@ -237,13 +240,13 @@ async fn build_amm_artifacts(
                     .await
                     .expect("couldn't load deployed uniswap router");
                 let pair_provider = Arc::new(UniswapPairProvider { factory, chain_id });
-                res.push(UniswapLikeLiquidity::new(
+                res.push(Box::new(UniswapLikeLiquidity::new(
                     IUniswapLikeRouter::at(&web3, router.address()),
                     pair_provider.clone(),
                     settlement_contract.clone(),
                     base_tokens.clone(),
                     web3.clone(),
-                ));
+                )));
             }
             BaselineSources::Sushiswap => {
                 let router = contracts::SushiswapV2Router02::deployed(&web3)
@@ -253,13 +256,17 @@ async fn build_amm_artifacts(
                     .await
                     .expect("couldn't load deployed sushiswap router");
                 let pair_provider = Arc::new(SushiswapPairProvider { factory });
-                res.push(UniswapLikeLiquidity::new(
+                res.push(Box::new(UniswapLikeLiquidity::new(
                     IUniswapLikeRouter::at(&web3, router.address()),
                     pair_provider.clone(),
                     settlement_contract.clone(),
                     base_tokens.clone(),
                     web3.clone(),
-                ));
+                )));
+            }
+            BaselineSources::BalancerV2 => {
+                unimplemented!();
+                // TODO - Given the information we have, construct BalancerV2Liquidity
             }
         }
     }

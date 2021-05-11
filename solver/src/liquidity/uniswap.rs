@@ -4,7 +4,7 @@ use ethcontract::batch::CallBatch;
 use primitive_types::{H160, U256};
 use shared::{
     baseline_solver::{path_candidates, token_path_to_pair_path},
-    pool_fetching::{PoolFetcher, PoolFetching as _},
+    pool_fetching::PoolFetcher,
     Web3,
 };
 use std::collections::{HashMap, HashSet};
@@ -14,10 +14,14 @@ const MAX_BATCH_SIZE: usize = 100;
 pub const MAX_HOPS: usize = 2;
 
 use super::slippage;
-use crate::{interactions::UniswapInteraction, settlement::SettlementEncoder};
+use crate::{
+    interactions::UniswapInteraction, liquidity::baseline_liquidity::BaselineLiquidity,
+    settlement::SettlementEncoder,
+};
 
 use super::{AmmOrder, AmmOrderExecution, LimitOrder, SettlementHandling};
 use shared::amm_pair_provider::AmmPairProvider;
+use shared::pool_fetching::PoolFetching;
 
 pub struct UniswapLikeLiquidity {
     inner: Arc<Inner>,
@@ -33,33 +37,12 @@ struct Inner {
     allowances: Mutex<HashMap<H160, U256>>,
 }
 
-impl UniswapLikeLiquidity {
-    pub fn new(
-        router: IUniswapLikeRouter,
-        pair_provider: Arc<dyn AmmPairProvider>,
-        gpv2_settlement: GPv2Settlement,
-        base_tokens: HashSet<H160>,
-        web3: Web3,
-    ) -> Self {
-        Self {
-            inner: Arc::new(Inner {
-                router,
-                gpv2_settlement,
-                allowances: Mutex::new(HashMap::new()),
-            }),
-            web3: web3.clone(),
-            pool_fetcher: PoolFetcher {
-                pair_provider,
-                web3,
-            },
-            base_tokens,
-        }
-    }
-
+#[async_trait::async_trait]
+impl BaselineLiquidity for UniswapLikeLiquidity {
     /// Given a list of offchain orders returns the list of AMM liquidity to be considered
-    pub async fn get_liquidity(
+    async fn get_liquidity(
         &self,
-        offchain_orders: impl Iterator<Item = &LimitOrder> + Send + Sync,
+        offchain_orders: &mut (dyn Iterator<Item = &LimitOrder> + Send + Sync),
     ) -> Result<Vec<AmmOrder>> {
         let mut pools = HashSet::new();
 
@@ -92,6 +75,30 @@ impl UniswapLikeLiquidity {
         }
         self.cache_allowances(tokens.into_iter()).await;
         Ok(result)
+    }
+}
+
+impl UniswapLikeLiquidity {
+    pub fn new(
+        router: IUniswapLikeRouter,
+        pair_provider: Arc<dyn AmmPairProvider>,
+        gpv2_settlement: GPv2Settlement,
+        base_tokens: HashSet<H160>,
+        web3: Web3,
+    ) -> Self {
+        Self {
+            inner: Arc::new(Inner {
+                router,
+                gpv2_settlement,
+                allowances: Mutex::new(HashMap::new()),
+            }),
+            web3: web3.clone(),
+            pool_fetcher: PoolFetcher {
+                pair_provider,
+                web3,
+            },
+            base_tokens,
+        }
     }
 
     async fn cache_allowances(&self, tokens: impl Iterator<Item = H160>) {

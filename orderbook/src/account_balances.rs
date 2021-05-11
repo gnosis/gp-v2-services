@@ -27,7 +27,7 @@ pub trait BalanceFetching: Send + Sync {
 
     // Check if the allowance manager would be able to call transfer_from with these parameters.
     // This is useful for tokens that are not consistent about their internal checks and what they
-    // report as balance and allowance. By checking whether the actual transfer would suceed we can
+    // report as balance and allowance. By checking whether the actual transfer would succeed we can
     // be more certain (but still not 100%) that the balance really is available to the settlement
     // contract.
     async fn can_transfer(&self, token: H160, from: H160, amount: U256) -> bool;

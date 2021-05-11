@@ -149,7 +149,7 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
     );
     let solver = solver::naive_solver::NaiveSolver {};
     let liquidity_collector = LiquidityCollector {
-        uniswap_like_liquidity: vec![uniswap_liquidity],
+        baseline_liquidity: vec![Box::new(uniswap_liquidity)],
         orderbook_api: create_orderbook_api(&web3),
     };
     let network_id = web3.net().version().await.unwrap();

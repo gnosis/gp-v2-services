@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
 
 use crate::{
-    liquidity::uniswap::UniswapLikeLiquidity, liquidity::Liquidity, orderbook::OrderBookApi,
+    liquidity::baseline_liquidity::BaselineLiquidity, liquidity::Liquidity, orderbook::OrderBookApi,
 };
 
 pub struct LiquidityCollector {
-    pub uniswap_like_liquidity: Vec<UniswapLikeLiquidity>,
+    pub baseline_liquidity: Vec<Box<dyn BaselineLiquidity>>,
     pub orderbook_api: OrderBookApi,
 }
 
@@ -19,10 +19,10 @@ impl LiquidityCollector {
         tracing::debug!("got {} orders", limit_orders.len());
 
         let mut amms = vec![];
-        for liquidity in self.uniswap_like_liquidity.iter() {
+        for liquidity in self.baseline_liquidity.iter() {
             amms.extend(
                 liquidity
-                    .get_liquidity(limit_orders.iter())
+                    .get_liquidity(&mut limit_orders.iter())
                     .await
                     .context("failed to get pool")?,
             );
