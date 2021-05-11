@@ -5,7 +5,7 @@
 
 pub mod api;
 
-use self::api::{OneInchClient, Slippage, Swap, SwapQuery};
+use self::api::{OneInchClient, Parts, Slippage, Swap, SwapQuery};
 use crate::{
     encoding::EncodedInteraction,
     interactions::Erc20ApproveInteraction,
@@ -73,6 +73,9 @@ impl OneInchSolver {
                 // Disable balance/allowance checks, as the settlement contract
                 // does not hold balances to traded tokens.
                 disable_estimate: Some(true),
+                // Use only 1 main route for cheaper trades.
+                max_route_parts: Some(Parts::one()),
+                parts: Some(Parts::one()),
             })
             .await?;
 

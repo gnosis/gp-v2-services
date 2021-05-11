@@ -48,6 +48,36 @@ impl Display for Slippage {
     }
 }
 
+/// Parts to split a swap.
+///
+/// This type is generic on the maximum number of splits allowed.
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub struct Parts<const N: usize>(usize);
+
+impl<const N: usize> Parts<N> {
+    /// Creates a parts amount from the specified count.
+    pub fn new(amount: usize) -> Result<Self> {
+        // 1Inch API only accepts a slippage from 0 to 50.
+        ensure!(
+            (1..=N).contains(&amount),
+            "parts outside of [1, {}] range",
+            N,
+        );
+        Ok(Parts(amount))
+    }
+
+    /// One part.
+    pub fn one() -> Self {
+        Parts::new(1).unwrap()
+    }
+}
+
+impl<const N: usize> Display for Parts<N> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// A 1Inch API quote query parameters.
 ///
 /// These parameters are currently incomplete, and missing parameters can be
@@ -69,6 +99,10 @@ pub struct SwapQuery {
     pub slippage: Slippage,
     /// Flag to disable checks of the required quantities.
     pub disable_estimate: Option<bool>,
+    /// Limit maximum number of main route parts.
+    pub max_route_parts: Option<Parts<50>>,
+    /// Limit maximum number of parts each main route part can be split into.
+    pub parts: Option<Parts<100>>,
 }
 
 impl SwapQuery {
@@ -94,6 +128,14 @@ impl SwapQuery {
         if let Some(disable_estimate) = self.disable_estimate {
             url.query_pairs_mut()
                 .append_pair("disableEstimate", &disable_estimate.to_string());
+        }
+        if let Some(max_route_parts) = self.max_route_parts {
+            url.query_pairs_mut()
+                .append_pair("maxRouteParts", &max_route_parts.to_string());
+        }
+        if let Some(parts) = self.parts {
+            url.query_pairs_mut()
+                .append_pair("parts", &parts.to_string());
         }
 
         url
@@ -248,6 +290,14 @@ mod tests {
     }
 
     #[test]
+    fn parts_valid_range() {
+        assert!(Parts::<42>::new(0).is_err());
+        assert!(Parts::<42>::new(1).is_ok());
+        assert!(Parts::<42>::new(42).is_ok());
+        assert!(Parts::<42>::new(43).is_err());
+    }
+
+    #[test]
     fn swap_query_serialization() {
         let base_url = Url::parse("https://api.1inch.exchange/").unwrap();
         let url = SwapQuery {
@@ -257,6 +307,8 @@ mod tests {
             from_address: addr!("00000000219ab540356cBB839Cbe05303d7705Fa"),
             slippage: Slippage::basis_points(50).unwrap(),
             disable_estimate: None,
+            max_route_parts: None,
+            parts: None,
         }
         .into_url(&base_url);
 
@@ -281,6 +333,8 @@ mod tests {
             from_address: addr!("00000000219ab540356cBB839Cbe05303d7705Fa"),
             slippage: Slippage::basis_points(50).unwrap(),
             disable_estimate: Some(true),
+            max_route_parts: Some(Parts::new(28).unwrap()),
+            parts: Some(Parts::new(42).unwrap()),
         }
         .into_url(&base_url);
 
@@ -292,7 +346,9 @@ mod tests {
                 &amount=1000000000000000000\
                 &fromAddress=0x00000000219ab540356cbb839cbe05303d7705fa\
                 &slippage=0.5\
-                &disableEstimate=true",
+                &disableEstimate=true\
+                &maxRouteParts=28\
+                &parts=42",
         );
     }
 
@@ -422,6 +478,8 @@ mod tests {
                 from_address: addr!("00000000219ab540356cBB839Cbe05303d7705Fa"),
                 slippage: Slippage::basis_points(50).unwrap(),
                 disable_estimate: None,
+                max_route_parts: None,
+                parts: None,
             })
             .await
             .unwrap();
@@ -430,7 +488,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
-    async fn oneinch_swap_without_amount_checks() {
+    async fn oneinch_swap_without_amount_checks_and_splitting() {
         let swap = OneInchClient::default()
             .get_swap(SwapQuery {
                 from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
@@ -439,6 +497,8 @@ mod tests {
                 from_address: addr!("4e608b7da83f8e9213f554bdaa77c72e125529d0"),
                 slippage: Slippage::basis_points(50).unwrap(),
                 disable_estimate: Some(true),
+                max_route_parts: Some(Parts::one()),
+                parts: Some(Parts::one()),
             })
             .await
             .unwrap();
