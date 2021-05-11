@@ -16,12 +16,12 @@ arg_enum! {
 }
 
 pub struct PoolAggregator {
-    pub pool_fetchers: Vec<PoolFetcher>,
+    pub pool_fetchers: Vec<Box<dyn PoolFetching>>,
 }
 
 impl PoolAggregator {
     pub async fn from_sources(sources: Vec<BaselineSources>, chain_id: u64, web3: Web3) -> Self {
-        let mut pool_fetchers = vec![];
+        let mut pool_fetchers: Vec<Box<dyn PoolFetching>> = vec![];
         for source in sources.clone() {
             let pair_provider: Arc<dyn AmmPairProvider>;
             match source {
@@ -46,10 +46,10 @@ impl PoolAggregator {
                     // May have to move pool_fetchers.push into each case.
                 }
             }
-            pool_fetchers.push(PoolFetcher {
+            pool_fetchers.push(Box::new(PoolFetcher {
                 pair_provider,
                 web3: web3.clone(),
-            })
+            }));
         }
         tracing::info!("Built Pool Aggregator from sources: {:?}", sources);
         Self { pool_fetchers }
