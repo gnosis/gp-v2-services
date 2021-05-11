@@ -31,7 +31,6 @@ pub struct OneInchSolver {
 
 /// Chain ID for Mainnet.
 const MAINNET_CHAIN_ID: u64 = 1;
-pub const MIN_SELL_VOLUME_IN_ETH: u128 = 5_000_000_000_000_000_000;
 
 impl OneInchSolver {
     /// Creates a new 1Inch solver instance for specified settlement contract

@@ -60,6 +60,7 @@ pub fn create(
     chain_id: u64,
     fee_discount_factor: f64,
     solver_timeout: Duration,
+    min_order_size_one_inch: U256,
 ) -> Result<Vec<Box<dyn Solver>>> {
     // Tiny helper function to help out with type inference. Otherwise, all
     // `Box::new(...)` expressions would have to be cast `as Box<dyn Solver>`.
@@ -96,7 +97,7 @@ pub fn create(
                     inner: OneInchSolver::new(settlement_contract.clone(), chain_id)?,
                     price_estimator: price_estimator.clone(),
                     denominator_token: native_token,
-                    min_value: crate::oneinch_solver::MIN_SELL_VOLUME_IN_ETH.into(),
+                    min_value: min_order_size_one_inch,
                 })
             }
         })
