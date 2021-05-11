@@ -110,8 +110,13 @@ struct Arguments {
 
     /// The minimum amount of sell volume (in ETH) that needs to be
     /// traded in order to use the 1Inch solver.
-    #[structopt(long, env = "MIN_ORDER_SIZE_ONE_INCH", default_value = "5",parse(try_from_str = shared::arguments::wei_from_base_unit),)]
-    min_order_size_one_inch_eth: U256,
+    #[structopt(
+        long,
+        env = "MIN_ORDER_SIZE_ONE_INCH", 
+        default_value = "5",
+        parse(try_from_str = shared::arguments::wei_from_base_unit)
+    )]
+    min_order_size_one_inch: U256,
 }
 
 #[tokio::main]
@@ -197,7 +202,7 @@ async fn main() {
         chain_id,
         args.shared.fee_discount_factor,
         args.solver_time_limit,
-        args.min_order_size_one_inch_eth,
+        args.min_order_size_one_inch,
     )
     .expect("failure creating solvers");
     let liquidity_collector = LiquidityCollector {
