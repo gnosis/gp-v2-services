@@ -115,7 +115,7 @@ impl OneInchSolver {
 
 impl Interaction for Swap {
     fn encode(&self) -> Vec<EncodedInteraction> {
-        vec![(self.tx.to, self.tx.value, self.tx.data.clone())]
+        vec![(self.tx.to, self.tx.value, self.tx.data.0.clone())]
     }
 }
 

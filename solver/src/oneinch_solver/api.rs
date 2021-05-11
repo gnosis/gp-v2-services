@@ -189,13 +189,21 @@ pub struct Protocol {
 pub struct Transaction {
     pub from: H160,
     pub to: H160,
-    #[serde(deserialize_with = "deserialize_prefixed_hex")]
-    pub data: Vec<u8>,
+    pub data: BytesWrapper,
     #[serde(deserialize_with = "deserialize_decimal_u256")]
     pub value: U256,
     #[serde(deserialize_with = "deserialize_decimal_u256")]
     pub gas_price: U256,
     pub gas: u64,
+}
+
+#[derive(Clone, Deserialize, Eq, PartialEq)]
+#[serde(transparent)]
+pub struct BytesWrapper(#[serde(deserialize_with = "deserialize_prefixed_hex")] pub Vec<u8>);
+impl std::fmt::Debug for BytesWrapper {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "0x{}", hex::encode(&self.0))
+    }
 }
 
 fn deserialize_decimal_u256<'de, D>(deserializer: D) -> Result<U256, D::Error>
@@ -446,16 +454,18 @@ mod tests {
                 tx: Transaction {
                     from: addr!("00000000219ab540356cBB839Cbe05303d7705Fa"),
                     to: addr!("11111112542d85b3ef69ae05771c2dccff4faa26"),
-                    data: hex::decode(
-                        "2e95b6c8\
+                    data: BytesWrapper(
+                        hex::decode(
+                            "2e95b6c8\
                          0000000000000000000000000000000000000000000000000000000000000000\
                          0000000000000000000000000000000000000000000000000de0b6b3a7640000\
                          00000000000000000000000000000000000000000000001b1038e63128bd548d\
                          0000000000000000000000000000000000000000000000000000000000000080\
                          0000000000000000000000000000000000000000000000000000000000000001\
                          80000000000000003b6d034026aad2da94c59524ac0d93f6d6cbf9071d7086f2"
-                    )
-                    .unwrap(),
+                        )
+                        .unwrap()
+                    ),
                     value: 1_000_000_000_000_000_000u128.into(),
                     gas_price: 154_110_000_000u128.into(),
                     gas: 143297,
