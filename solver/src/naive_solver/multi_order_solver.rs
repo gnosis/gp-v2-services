@@ -669,7 +669,8 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }.into(),
+            }
+            .into(),
             Order {
                 order_creation: OrderCreation {
                     sell_token: token_b,
@@ -681,7 +682,8 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }.into(),
+            }
+            .into(),
         ];
 
         let amm_handler = CapturingSettlementHandler::arc();
@@ -798,7 +800,8 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }.into(),
+            }
+            .into(),
             Order {
                 order_creation: OrderCreation {
                     sell_token: token_b,
@@ -810,7 +813,8 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }.into(),
+            }
+            .into(),
         ];
 
         let amm_handler = CapturingSettlementHandler::arc();
