@@ -255,20 +255,12 @@ fn is_valid_solution(solution: &Settlement) -> bool {
             .clearing_price(order.sell_token)
             .expect("Solution should contain clearing price for sell token");
 
-        let sell_volume = order.sell_amount.checked_mul(sell_token_price);
-
-        if sell_volume.is_none() {
-            return false;
-        }
-
-        let buy_volume = order.buy_amount.checked_mul(buy_token_price);
-
-        if buy_volume.is_none() {
-            return false;
-        }
-
-        if sell_volume.unwrap() < buy_volume.unwrap() {
-            return false;
+        match (
+            order.sell_amount.checked_mul(sell_token_price),
+            order.buy_amount.checked_mul(buy_token_price),
+        ) {
+            (Some(sell_volume), Some(buy_volume)) if sell_volume >= buy_volume => (),
+            _ => return false,
         }
     }
 
