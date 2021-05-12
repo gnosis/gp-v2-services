@@ -46,6 +46,7 @@ pub struct Driver {
     network_id: String,
     max_merged_settlements: usize,
     solver_time_limit: Duration,
+    fee_discount_factor: f64,
 }
 impl Driver {
     #[allow(clippy::too_many_arguments)]
@@ -64,6 +65,7 @@ impl Driver {
         network_id: String,
         max_merged_settlements: usize,
         solver_time_limit: Duration,
+        fee_discount_factor: f64,
     ) -> Self {
         Self {
             settlement_contract,
@@ -80,6 +82,7 @@ impl Driver {
             network_id,
             max_merged_settlements,
             solver_time_limit,
+            fee_discount_factor,
         }
     }
 
@@ -261,10 +264,14 @@ impl Driver {
                 )
                 .await
                 .ok()?;
+                let fees = settlement
+                    .settlement
+                    .total_unsubsidized_fees(self.fee_discount_factor);
                 Some(RatedSettlement {
                     settlement,
                     surplus,
                     gas_estimate,
+                    fees,
                 })
             })
             .collect::<Vec<_>>()

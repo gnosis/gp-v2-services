@@ -76,6 +76,7 @@ pub struct RatedSettlement {
     pub settlement: SettlementWithSolver,
     pub surplus: BigRational,
     pub gas_estimate: U256,
+    pub fees: U256,
 }
 
 impl RatedSettlement {
@@ -83,7 +84,7 @@ impl RatedSettlement {
         let gas_price = BigRational::from_float(gas_price).unwrap();
         let gas_estimate = self.gas_estimate.to_big_rational();
         let cost = gas_estimate * gas_price;
-        self.surplus.clone() - cost
+        self.surplus.clone() - cost + self.fees.to_big_rational()
     }
 }
 
@@ -105,6 +106,7 @@ impl RatedSettlement {
             settlement: self.settlement.without_onchain_liquidity(),
             surplus: self.surplus.clone(),
             gas_estimate: self.gas_estimate, // TODO: This becomes an overestimate!
+            fees: self.fees,
         }
     }
 }

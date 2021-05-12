@@ -224,6 +224,7 @@ async fn main() {
         network_id,
         args.max_merged_settlements,
         args.solver_time_limit,
+        args.shared.fee_discount_factor,
     );
 
     serve_metrics(registry, ([0, 0, 0, 0], args.metrics_port).into());

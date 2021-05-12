@@ -208,6 +208,20 @@ impl SettlementEncoder {
         })
     }
 
+    pub fn total_fees(&self) -> Option<U256> {
+        self.trades.iter().fold(Some(0.into()), |acc, trade| {
+            let fees = trade.order.order_creation.fee_amount;
+            Some(acc? + fees)
+        })
+    }
+
+    pub fn total_unsubsidized_fees(&self, fee_discount_factor: f64) -> Option<U256> {
+        let subsidized_fees = self.total_fees()?;
+        Some(U256::from_f64_lossy(
+            (subsidized_fees.to_f64_lossy() / fee_discount_factor).ceil(),
+        ))
+    }
+
     pub fn finish(self) -> EncodedSettlement {
         let clearing_prices = self
             .tokens
