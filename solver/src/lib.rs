@@ -7,6 +7,7 @@ pub mod driver;
 pub mod encoding;
 pub mod http_solver;
 pub mod interactions;
+pub mod intermediate_settlement;
 pub mod liquidity;
 pub mod liquidity_collector;
 pub mod metrics;

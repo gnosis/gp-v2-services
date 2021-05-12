@@ -1,4 +1,7 @@
-use crate::{encoding::EncodedSettlement, settlement::Settlement};
+use crate::{
+    encoding::EncodedSettlement, intermediate_settlement::IntermediateSettlement,
+    settlement::Settlement, solver::Solver,
+};
 use anyhow::Result;
 use ethcontract::U256;
 use num::BigRational;
@@ -8,21 +11,43 @@ use std::{collections::HashMap, time::Duration};
 
 // Return None if the result is an error or there are no settlements remaining after removing
 // settlements with no trades.
-pub fn filter_bad_settlements(
-    (solver_name, solver_result): (&'static str, Result<Vec<Settlement>>),
-) -> Option<(&'static str, Vec<Settlement>)> {
+pub fn filter_bad_intermediate_settlements(
+    (solver, solver_result): (&dyn Solver, Result<Vec<IntermediateSettlement>>),
+) -> Option<(&dyn Solver, Vec<IntermediateSettlement>)> {
     let mut settlements = match solver_result {
         Ok(settlements) => settlements,
         Err(err) => {
-            tracing::error!("solver {} error: {:?}", solver_name, err);
+            tracing::error!("solver {} error: {:?}", solver.name(), err);
             return None;
         }
     };
-    settlements.retain(|settlement| !settlement.trades().is_empty());
+    settlements.retain(|settlement| !settlement.is_empty());
     if settlements.is_empty() {
         return None;
     }
-    Some((solver_name, settlements))
+    Some((solver, settlements))
+}
+
+// Converts intermediate settlements to settlements, skipping those where the conversion fails.
+// Returns None if the solver has no valid settlements.
+pub async fn finalize_settlements(
+    (solver, intermediate_settlements): (&dyn Solver, Vec<IntermediateSettlement>),
+) -> Option<(&dyn Solver, Vec<Settlement>)> {
+    use futures::stream::StreamExt;
+    let settlements = futures::stream::iter(intermediate_settlements)
+        .filter_map(|intermediate_settlement| async {
+            let settlement_finalizer = solver.settlement_finalizer();
+            settlement_finalizer
+                .finalize_intermediate_settlement(intermediate_settlement)
+                .await
+                .ok()
+        })
+        .collect::<Vec<_>>()
+        .await;
+    if settlements.is_empty() {
+        return None;
+    }
+    Some((solver, settlements))
 }
 
 // A single solver produces multiple settlements

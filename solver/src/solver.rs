@@ -3,10 +3,12 @@ use std::{collections::HashSet, sync::Arc, time::Duration};
 use crate::{
     baseline_solver::BaselineSolver,
     http_solver::{HttpSolver, SolverConfig},
+    intermediate_settlement::{
+        AmmSettlementFinalizer, IntermediateSettlement, SettlementFinalizing,
+    },
     liquidity::Liquidity,
     naive_solver::NaiveSolver,
     oneinch_solver::OneInchSolver,
-    settlement::Settlement,
 };
 use anyhow::Result;
 use contracts::GPv2Settlement;
@@ -23,11 +25,19 @@ const TIMEOUT_SAFETY_BUFFER: Duration = Duration::from_secs(5);
 pub trait Solver {
     // The returned settlements should be independent (for example not reusing the same user
     // order) so that they can be merged by the driver at its leisure.
-    async fn solve(&self, orders: Vec<Liquidity>, gas_price: f64) -> Result<Vec<Settlement>>;
+    async fn solve(
+        &self,
+        orders: Vec<Liquidity>,
+        gas_price: f64,
+    ) -> Result<Vec<IntermediateSettlement>>;
 
     // Displayable name of the solver. Defaults to the type name.
     fn name(&self) -> &'static str {
         std::any::type_name::<Self>()
+    }
+
+    fn settlement_finalizer(&self) -> Box<dyn SettlementFinalizing> {
+        Box::new(AmmSettlementFinalizer {})
     }
 }
 

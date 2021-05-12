@@ -3,8 +3,8 @@ mod settlement;
 
 use self::{model::*, settlement::SettlementContext};
 use crate::{
+    intermediate_settlement::IntermediateSettlement,
     liquidity::{AmmOrder, LimitOrder, Liquidity},
-    settlement::Settlement,
     solver::Solver,
 };
 use ::model::order::OrderKind;
@@ -368,7 +368,11 @@ fn remove_orders_without_native_connection(
 
 #[async_trait::async_trait]
 impl Solver for HttpSolver {
-    async fn solve(&self, liquidity: Vec<Liquidity>, gas_price: f64) -> Result<Vec<Settlement>> {
+    async fn solve(
+        &self,
+        liquidity: Vec<Liquidity>,
+        gas_price: f64,
+    ) -> Result<Vec<IntermediateSettlement>> {
         let has_limit_orders = liquidity.iter().any(|l| matches!(l, Liquidity::Limit(_)));
         if !has_limit_orders {
             return Ok(Vec::new());
@@ -379,7 +383,8 @@ impl Solver for HttpSolver {
         if !settled.has_execution_plan() {
             return Ok(Vec::new());
         }
-        settlement::convert_settlement(settled, context).map(|settlement| vec![settlement])
+        let intermediate_settlement = settlement::into_intermediate_settlement(settled, context)?;
+        Ok(vec![intermediate_settlement])
     }
 
     fn name(&self) -> &'static str {

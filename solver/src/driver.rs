@@ -3,6 +3,7 @@ pub mod solver_settlements;
 use self::solver_settlements::{RatedSettlement, SettlementWithSolver};
 use crate::{
     chain,
+    intermediate_settlement::IntermediateSettlement,
     liquidity::{offchain_orderbook::BUY_ETH_ADDRESS, Liquidity},
     liquidity_collector::LiquidityCollector,
     metrics::SolverMetrics,
@@ -95,7 +96,7 @@ impl Driver {
         &self,
         liquidity: Vec<Liquidity>,
         gas_price: f64,
-    ) -> impl Iterator<Item = (&'static str, Result<Vec<Settlement>>)> {
+    ) -> impl Iterator<Item = (&dyn Solver, Result<Vec<IntermediateSettlement>>)> {
         join_all(self.solver.iter().map(|solver| {
             let liquidity = liquidity.clone();
             let metrics = &self.metrics;
@@ -111,7 +112,7 @@ impl Driver {
                     Err(_timeout) => Err(anyhow!("solver timed out")),
                 };
                 metrics.settlement_computed(solver.name(), start_time);
-                (solver.name(), result)
+                (solver.as_ref(), result)
             }
         }))
         .await
@@ -278,22 +279,34 @@ impl Driver {
             .context("failed to estimate gas price")?;
         tracing::debug!("solving with gas price of {}", gas_price);
 
-        let settlements = self
+        let intermediate_settlements = self
             .run_solvers(liquidity, gas_price)
             .await
-            .filter_map(solver_settlements::filter_bad_settlements)
-            .inspect(|(name, settlements)| {
+            .filter_map(solver_settlements::filter_bad_intermediate_settlements)
+            .inspect(|(solver, settlements)| {
                 for settlement in settlements.iter() {
-                    tracing::debug!("solver {} found solution:\n {:?}", name, settlement);
+                    tracing::debug!(
+                        "solver {} found solution:\n {:?}",
+                        solver.name(),
+                        settlement
+                    );
                 }
             });
 
+        use futures::stream::StreamExt;
+        let settlements: Vec<(&dyn Solver, Vec<Settlement>)> =
+            futures::stream::iter(intermediate_settlements)
+                .filter_map(solver_settlements::finalize_settlements)
+                .collect::<Vec<_>>()
+                .await;
+
         let mut settlements = settlements
-            .map(|(name, settlements)| {
+            .into_iter()
+            .map(|(solver, settlements)| {
                 solver_settlements::merge_settlements(
                     self.max_merged_settlements,
                     &estimated_prices,
-                    name,
+                    solver.name(),
                     settlements,
                 )
             })

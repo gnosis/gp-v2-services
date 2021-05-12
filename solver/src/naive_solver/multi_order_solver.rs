@@ -1,6 +1,5 @@
-use crate::{liquidity, settlement::Settlement};
-use anyhow::Result;
-use liquidity::{AmmOrder, AmmOrderExecution, LimitOrder};
+use crate::{intermediate_settlement::IntermediateSettlement, liquidity};
+use liquidity::{AmmOrder, LimitOrder};
 use model::order::OrderKind;
 use num::{rational::Ratio, BigInt, BigRational};
 use primitive_types::U256;
@@ -37,7 +36,7 @@ impl TokenContext {
 pub fn solve(
     orders: impl Iterator<Item = LimitOrder> + Clone,
     pool: &AmmOrder,
-) -> Option<Settlement> {
+) -> Option<IntermediateSettlement> {
     let mut orders: Vec<LimitOrder> = orders.collect();
     while !orders.is_empty() {
         let (context_a, context_b) = split_into_contexts(orders.clone().into_iter(), pool);
@@ -81,13 +80,13 @@ fn solve_orders(
     pool: &AmmOrder,
     context_a: &TokenContext,
     context_b: &TokenContext,
-) -> Option<Settlement> {
+) -> Option<IntermediateSettlement> {
     if context_a.is_excess_after_fees(&context_b, pool.fee) {
         solve_with_uniswap(orders, pool, &context_b, &context_a)
     } else if context_b.is_excess_after_fees(&context_a, pool.fee) {
         solve_with_uniswap(orders, pool, &context_a, &context_b)
     } else {
-        solve_without_uniswap(orders, &context_a, &context_b).ok()
+        Some(solve_without_uniswap(orders, &context_a, &context_b))
     }
 }
 
@@ -98,16 +97,19 @@ fn solve_without_uniswap(
     orders: impl Iterator<Item = LimitOrder> + Clone,
     context_a: &TokenContext,
     context_b: &TokenContext,
-) -> Result<Settlement> {
-    let mut settlement = Settlement::new(maplit::hashmap! {
+) -> IntermediateSettlement {
+    let prices = maplit::hashmap! {
         context_a.address => context_b.reserve,
         context_b.address => context_a.reserve,
-    });
+    };
+
+    let mut intermediate_settlement = IntermediateSettlement::new(prices);
+
     for order in orders {
-        settlement.with_liquidity(&order, order.full_execution_amount())?;
+        intermediate_settlement.add_fully_executed_limit_order(order);
     }
 
-    Ok(settlement)
+    intermediate_settlement
 }
 
 ///
@@ -119,34 +121,31 @@ fn solve_with_uniswap(
     pool: &AmmOrder,
     shortage: &TokenContext,
     excess: &TokenContext,
-) -> Option<Settlement> {
+) -> Option<IntermediateSettlement> {
     let uniswap_out = compute_uniswap_out(&shortage, &excess, pool.fee)?;
     let uniswap_in = compute_uniswap_in(uniswap_out.clone(), &shortage, &excess, pool.fee);
 
     let uniswap_out = big_rational_to_u256(&uniswap_out).ok()?;
     let uniswap_in = big_rational_to_u256(&uniswap_in).ok()?;
 
-    let mut settlement = Settlement::new(maplit::hashmap! {
+    let prices = maplit::hashmap! {
         shortage.address => uniswap_in,
         excess.address => uniswap_out,
-    });
+    };
+
+    let mut intermediate_settlement = IntermediateSettlement::new(prices);
+
     for order in orders {
-        settlement
-            .with_liquidity(&order, order.full_execution_amount())
-            .ok()?;
+        intermediate_settlement.add_fully_executed_limit_order(order);
     }
 
-    settlement
-        .with_liquidity(
-            pool,
-            AmmOrderExecution {
-                input: (excess.address, uniswap_in),
-                output: (shortage.address, uniswap_out),
-            },
-        )
-        .ok()?;
+    intermediate_settlement.add_executed_liquidity_order(
+        (excess.address, uniswap_in),
+        (shortage.address, uniswap_out),
+        Box::new(pool.clone()),
+    );
 
-    Some(settlement)
+    Some(intermediate_settlement)
 }
 
 impl AmmOrder {
@@ -245,18 +244,22 @@ fn compute_uniswap_in(
 /// Returns true if for each trade the executed price is not smaller than the limit price
 /// Thus we ensure that `buy_token_price / sell_token_price >= limit_buy_amount / limit_sell_amount`
 ///
-fn is_valid_solution(solution: &Settlement) -> bool {
-    for trade in solution.trades().iter() {
-        let order = trade.order.order_creation;
+fn is_valid_solution(solution: &IntermediateSettlement) -> bool {
+    for trade in solution.executed_limit_orders.iter() {
+        let order = &trade.order;
         let buy_token_price = solution
-            .clearing_price(order.buy_token)
+            .price(&order.buy_token)
             .expect("Solution should contain clearing price for buy token");
         let sell_token_price = solution
-            .clearing_price(order.sell_token)
+            .price(&order.sell_token)
             .expect("Solution should contain clearing price for sell token");
 
-        if order.sell_amount * sell_token_price < order.buy_amount * buy_token_price {
-            return false;
+        match (
+            order.sell_amount.checked_mul(sell_token_price),
+            order.buy_amount.checked_mul(buy_token_price),
+        ) {
+            (Some(sell_volume), Some(buy_volume)) if sell_volume >= buy_volume => (),
+            _ => return false,
         }
     }
 
@@ -314,28 +317,28 @@ mod tests {
             fee: Ratio::new(3, 1000),
             settlement_handling: amm_handler.clone(),
         };
-        let result = solve(orders.clone().into_iter(), &pool).unwrap();
+        let intermediate_settlement = solve(orders.clone().into_iter(), &pool).unwrap();
 
-        // Make sure the uniswap interaction is using the correct direction
-        let interaction = amm_handler.calls()[0].clone();
-        assert_eq!(interaction.input.0, token_b);
-        assert_eq!(interaction.output.0, token_a);
+        // Make sure the uniswap pool is using the correct direction
+        let executed_pool = &intermediate_settlement.executed_liquidity_orders[0];
+        assert_eq!(executed_pool.input.0, token_b);
+        assert_eq!(executed_pool.output.0, token_a);
 
-        // Make sure the sell amounts +/- uniswap interaction satisfy min_buy amounts
-        assert!(orders[0].sell_amount + interaction.output.1 >= orders[1].buy_amount);
-        assert!(orders[1].sell_amount - interaction.input.1 > orders[0].buy_amount);
+        // Make sure the sell amounts +/- uniswap pool satisfy min_buy amounts
+        assert!(orders[0].sell_amount + executed_pool.output.1 >= orders[1].buy_amount);
+        assert!(orders[1].sell_amount - executed_pool.input.1 > orders[0].buy_amount);
 
-        // Make sure the sell amounts +/- uniswap interaction satisfy expected buy amounts given clearing price
-        let price_a = result.clearing_price(token_a).unwrap();
-        let price_b = result.clearing_price(token_b).unwrap();
+        // Make sure the sell amounts +/- uniswap pool satisfy expected buy amounts given clearing price
+        let price_a = intermediate_settlement.price(&token_a).unwrap();
+        let price_b = intermediate_settlement.price(&token_b).unwrap();
 
         // Multiplying sellAmount with priceA, gives us sell value in "$", divided by priceB gives us value in buy token
         // We should have at least as much to give (sell amount +/- uniswap) as is expected by the buyer
         let expected_buy = orders[0].sell_amount * price_a / price_b;
-        assert!(orders[1].sell_amount - interaction.input.1 >= expected_buy);
+        assert!(orders[1].sell_amount - executed_pool.input.1 >= expected_buy);
 
         let expected_buy = orders[1].sell_amount * price_b / price_a;
-        assert!(orders[0].sell_amount + interaction.input.1 >= expected_buy);
+        assert!(orders[0].sell_amount + executed_pool.input.1 >= expected_buy);
     }
 
     #[test]
@@ -374,24 +377,24 @@ mod tests {
             fee: Ratio::new(3, 1000),
             settlement_handling: amm_handler.clone(),
         };
-        let result = solve(orders.clone().into_iter(), &pool).unwrap();
+        let intermediate_settlement = solve(orders.clone().into_iter(), &pool).unwrap();
 
-        // Make sure the uniswap interaction is using the correct direction
-        let interaction = amm_handler.calls()[0].clone();
-        assert_eq!(interaction.input.0, token_a);
-        assert_eq!(interaction.output.0, token_b);
+        // Make sure the uniswap pool is using the correct direction
+        let executed_pool = &intermediate_settlement.executed_liquidity_orders[0];
+        assert_eq!(executed_pool.input.0, token_a);
+        assert_eq!(executed_pool.output.0, token_b);
 
         // Make sure the sell amounts cover the uniswap in, and min buy amounts are covered by uniswap out
-        assert!(orders[0].sell_amount + orders[1].sell_amount >= interaction.input.1);
-        assert!(interaction.output.1 >= orders[0].buy_amount + orders[1].buy_amount);
+        assert!(orders[0].sell_amount + orders[1].sell_amount >= executed_pool.input.1);
+        assert!(executed_pool.output.1 >= orders[0].buy_amount + orders[1].buy_amount);
 
         // Make sure expected buy amounts (given prices) are also covered by uniswap out amounts
-        let price_a = result.clearing_price(token_a).unwrap();
-        let price_b = result.clearing_price(token_b).unwrap();
+        let price_a = intermediate_settlement.price(&token_a).unwrap();
+        let price_b = intermediate_settlement.price(&token_b).unwrap();
 
         let first_expected_buy = orders[0].sell_amount * price_a / price_b;
         let second_expected_buy = orders[1].sell_amount * price_a / price_b;
-        assert!(interaction.output.1 >= first_expected_buy + second_expected_buy);
+        assert!(executed_pool.output.1 >= first_expected_buy + second_expected_buy);
     }
 
     #[test]
@@ -430,28 +433,28 @@ mod tests {
             fee: Ratio::new(3, 1000),
             settlement_handling: amm_handler.clone(),
         };
-        let result = solve(orders.clone().into_iter(), &pool).unwrap();
+        let intermediate_settlement = solve(orders.clone().into_iter(), &pool).unwrap();
 
-        // Make sure the uniswap interaction is using the correct direction
-        let interaction = amm_handler.calls()[0].clone();
-        assert_eq!(interaction.input.0, token_b);
-        assert_eq!(interaction.output.0, token_a);
+        // Make sure the uniswap pool is using the correct direction
+        let executed_pool = &intermediate_settlement.executed_liquidity_orders[0];
+        assert_eq!(executed_pool.input.0, token_b);
+        assert_eq!(executed_pool.output.0, token_a);
 
-        // Make sure the buy amounts +/- uniswap interaction satisfy max_sell amounts
-        assert!(orders[0].sell_amount >= orders[1].buy_amount - interaction.output.1);
-        assert!(orders[1].sell_amount >= orders[0].buy_amount + interaction.input.1);
+        // Make sure the buy amounts +/- uniswap pool satisfy max_sell amounts
+        assert!(orders[0].sell_amount >= orders[1].buy_amount - executed_pool.output.1);
+        assert!(orders[1].sell_amount >= orders[0].buy_amount + executed_pool.input.1);
 
-        // Make sure buy sell amounts +/- uniswap interaction satisfy expected sell amounts given clearing price
-        let price_a = result.clearing_price(token_a).unwrap();
-        let price_b = result.clearing_price(token_b).unwrap();
+        // Make sure buy sell amounts +/- uniswap pool satisfy expected sell amounts given clearing price
+        let price_a = intermediate_settlement.price(&token_a).unwrap();
+        let price_b = intermediate_settlement.price(&token_b).unwrap();
 
         // Multiplying buyAmount with priceB, gives us sell value in "$", divided by priceA gives us value in sell token
         // The seller should expect to sell at least as much as we require for the buyer + uniswap.
         let expected_sell = orders[0].buy_amount * price_b / price_a;
-        assert!(orders[1].buy_amount - interaction.input.1 <= expected_sell);
+        assert!(orders[1].buy_amount - executed_pool.input.1 <= expected_sell);
 
         let expected_sell = orders[1].buy_amount * price_a / price_b;
-        assert!(orders[0].buy_amount + interaction.output.1 <= expected_sell);
+        assert!(orders[0].buy_amount + executed_pool.output.1 <= expected_sell);
     }
 
     #[test]
@@ -490,32 +493,32 @@ mod tests {
             fee: Ratio::new(3, 1000),
             settlement_handling: amm_handler.clone(),
         };
-        let result = solve(orders.clone().into_iter(), &pool).unwrap();
+        let intermediate_settlement = solve(orders.clone().into_iter(), &pool).unwrap();
 
-        // Make sure the uniswap interaction is using the correct direction
-        let interaction = amm_handler.calls()[0].clone();
-        assert_eq!(interaction.input.0, token_b);
-        assert_eq!(interaction.output.0, token_a);
+        // Make sure the uniswap pool is using the correct direction
+        let executed_pool = &intermediate_settlement.executed_liquidity_orders[0];
+        assert_eq!(executed_pool.input.0, token_b);
+        assert_eq!(executed_pool.output.0, token_a);
 
-        // Make sure the buy order's sell amount - uniswap interaction satisfies sell order's limit
-        assert!(orders[0].sell_amount >= orders[1].buy_amount - interaction.output.1);
+        // Make sure the buy order's sell amount - uniswap pool satisfies sell order's limit
+        assert!(orders[0].sell_amount >= orders[1].buy_amount - executed_pool.output.1);
 
-        // Make sure the sell order's buy amount + uniswap interaction satisfies buy order's limit
-        assert!(orders[1].buy_amount + interaction.input.1 >= orders[0].sell_amount);
+        // Make sure the sell order's buy amount + uniswap pool satisfies buy order's limit
+        assert!(orders[1].buy_amount + executed_pool.input.1 >= orders[0].sell_amount);
 
-        // Make sure buy sell amounts +/- uniswap interaction satisfy expected sell amounts given clearing price
-        let price_a = result.clearing_price(token_a).unwrap();
-        let price_b = result.clearing_price(token_b).unwrap();
+        // Make sure buy sell amounts +/- uniswap pool satisfy expected sell amounts given clearing price
+        let price_a = intermediate_settlement.price(&token_a).unwrap();
+        let price_b = intermediate_settlement.price(&token_b).unwrap();
 
         // Multiplying buy_amount with priceB, gives us sell value in "$", divided by priceA gives us value in sell token
         // The seller should expect to sell at least as much as we require for the buyer + uniswap.
         let expected_sell = orders[0].buy_amount * price_b / price_a;
-        assert!(orders[1].buy_amount - interaction.input.1 <= expected_sell);
+        assert!(orders[1].buy_amount - executed_pool.input.1 <= expected_sell);
 
         // Multiplying sell_amount with priceA, gives us sell value in "$", divided by priceB gives us value in buy token
         // We should have at least as much to give (sell amount + uniswap out) as is expected by the buyer
         let expected_buy = orders[1].sell_amount * price_b / price_a;
-        assert!(orders[0].sell_amount + interaction.output.1 >= expected_buy);
+        assert!(orders[0].sell_amount + executed_pool.output.1 >= expected_buy);
     }
 
     #[test]
@@ -554,11 +557,11 @@ mod tests {
             fee: Ratio::new(3, 1000),
             settlement_handling: amm_handler.clone(),
         };
-        let result = solve(orders.into_iter(), &pool).unwrap();
+        let intermediate_settlement = solve(orders.into_iter(), &pool).unwrap();
         assert!(amm_handler.calls().is_empty());
         assert_eq!(
-            result.clearing_prices(),
-            &maplit::hashmap! {
+            intermediate_settlement.prices,
+            maplit::hashmap! {
                 token_a => to_wei(1_000_000),
                 token_b => to_wei(1_000_001)
             }
@@ -635,10 +638,10 @@ mod tests {
             fee: Ratio::new(3, 1000),
             settlement_handling: amm_handler,
         };
-        let result = solve(orders.into_iter(), &pool).unwrap();
+        let intermediate_settlement = solve(orders.into_iter(), &pool).unwrap();
 
-        assert_eq!(result.trades().len(), 2);
-        assert_eq!(is_valid_solution(&result), true);
+        assert_eq!(intermediate_settlement.nr_executed_limit_orders(), 2);
+        assert_eq!(is_valid_solution(&intermediate_settlement), true);
     }
 
     #[test]
@@ -677,8 +680,7 @@ mod tests {
             fee: Ratio::new(3, 1000),
             settlement_handling: amm_handler,
         };
-        let result = solve(orders.into_iter(), &pool).unwrap();
-        assert_eq!(result.trades().len(), 0);
+        assert!(solve(orders.into_iter(), &pool).is_none());
     }
 
     #[test]
@@ -712,20 +714,18 @@ mod tests {
             },
         ];
 
-        let settlement_with_prices = |prices: HashMap<Address, U256>| {
-            let mut settlement = Settlement::new(prices);
+        let intermediate_settlement_with_prices = |prices: HashMap<Address, U256>| {
+            let mut intermediate_settlement = IntermediateSettlement::new(prices);
             for order in orders.iter().cloned() {
                 let limit_order = LimitOrder::from(order);
-                settlement
-                    .with_liquidity(&limit_order, limit_order.full_execution_amount())
-                    .unwrap();
+                intermediate_settlement.add_fully_executed_limit_order(limit_order);
             }
-            settlement
+            intermediate_settlement
         };
 
         // Price in the middle is ok
         assert_eq!(
-            is_valid_solution(&settlement_with_prices(maplit::hashmap! {
+            is_valid_solution(&intermediate_settlement_with_prices(maplit::hashmap! {
                 token_a => to_wei(1),
                 token_b => to_wei(1)
             })),
@@ -734,7 +734,7 @@ mod tests {
 
         // Price at the limit of first order is ok
         assert_eq!(
-            is_valid_solution(&settlement_with_prices(maplit::hashmap! {
+            is_valid_solution(&intermediate_settlement_with_prices(maplit::hashmap! {
                 token_a => to_wei(8),
                 token_b => to_wei(10)
             })),
@@ -743,7 +743,7 @@ mod tests {
 
         // Price at the limit of second order is ok
         assert_eq!(
-            is_valid_solution(&settlement_with_prices(maplit::hashmap! {
+            is_valid_solution(&intermediate_settlement_with_prices(maplit::hashmap! {
                 token_a => to_wei(10),
                 token_b => to_wei(9)
             })),
@@ -752,7 +752,7 @@ mod tests {
 
         // Price violating first order is not ok
         assert_eq!(
-            is_valid_solution(&settlement_with_prices(maplit::hashmap! {
+            is_valid_solution(&intermediate_settlement_with_prices(maplit::hashmap! {
                 token_a => to_wei(7),
                 token_b => to_wei(10)
             })),
@@ -761,7 +761,7 @@ mod tests {
 
         // Price violating second order is not ok
         assert_eq!(
-            is_valid_solution(&settlement_with_prices(maplit::hashmap! {
+            is_valid_solution(&intermediate_settlement_with_prices(maplit::hashmap! {
                 token_a => to_wei(10),
                 token_b => to_wei(8)
             })),
@@ -853,7 +853,7 @@ mod tests {
         assert!(solve(orders[0..1].to_vec().into_iter(), &pool).is_none());
 
         // Only the second order should match
-        let result = solve(orders.into_iter(), &pool).unwrap();
-        assert_eq!(result.trades().len(), 1);
+        let intermediate_settlement = solve(orders.into_iter(), &pool).unwrap();
+        assert_eq!(intermediate_settlement.nr_executed_limit_orders(), 1);
     }
 }

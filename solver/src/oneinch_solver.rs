@@ -9,13 +9,16 @@ use self::api::{OneInchClient, Slippage, Swap, SwapQuery};
 use crate::{
     encoding::EncodedInteraction,
     interactions::Erc20ApproveInteraction,
+    intermediate_settlement::{
+        ExecutedLiquidityOrder, IntermediateSettlement, SettlementFinalizing,
+    },
     liquidity::{slippage::MAX_SLIPPAGE_BPS, LimitOrder, Liquidity},
     settlement::{Interaction, Settlement},
     solver::Solver,
 };
 use anyhow::{ensure, Result};
 use contracts::{GPv2Settlement, ERC20};
-use ethcontract::{dyns::DynWeb3, U256};
+use ethcontract::{dyns::DynWeb3, H160, U256};
 use futures::future;
 use maplit::hashmap;
 use model::order::OrderKind;
@@ -47,62 +50,115 @@ impl OneInchSolver {
         })
     }
 
-    /// Settles a single sell order against a 1Inch swap.
-    async fn settle_order(&self, order: LimitOrder) -> Result<Settlement> {
-        debug_assert_eq!(
-            order.kind,
-            OrderKind::Sell,
-            "only sell orders should be passed to settle_order"
-        );
-
-        let spender = self.client.get_spender().await?;
-        let sell_token = ERC20::at(&self.web3(), order.sell_token);
-        let existing_allowance = sell_token
-            .allowance(self.settlement_contract.address(), spender.address)
-            .call()
-            .await?;
-
-        let swap = self
-            .client
+    async fn get_swap(&self, sell_token: H160, buy_token: H160, sell_amount: U256) -> Result<Swap> {
+        self.client
             .get_swap(SwapQuery {
-                from_token_address: order.sell_token,
-                to_token_address: order.buy_token,
-                amount: order.sell_amount,
+                from_token_address: sell_token,
+                to_token_address: buy_token,
+                amount: sell_amount,
                 from_address: self.settlement_contract.address(),
                 slippage: Slippage::basis_points(MAX_SLIPPAGE_BPS).unwrap(),
                 // Disable balance/allowance checks, as the settlement contract
                 // does not hold balances to traded tokens.
                 disable_estimate: Some(true),
             })
+            .await
+    }
+
+    /// Settles a single sell order against a 1Inch swap.
+    async fn settle_order(&self, order: LimitOrder) -> Result<IntermediateSettlement> {
+        debug_assert_eq!(
+            order.kind,
+            OrderKind::Sell,
+            "only sell orders should be passed to settle_order"
+        );
+
+        let swap = self
+            .get_swap(order.sell_token, order.buy_token, order.sell_amount)
             .await?;
 
         ensure!(
             swap.to_token_amount >= order.buy_amount,
             "order limit price not respected",
         );
-        let mut settlement = Settlement::new(hashmap! {
+
+        let prices = hashmap! {
             order.sell_token => swap.to_token_amount,
             order.buy_token => swap.from_token_amount,
-        });
+        };
+        let mut intermediate_settlement = IntermediateSettlement::new(prices);
 
-        settlement.with_liquidity(&order, order.sell_amount)?;
+        intermediate_settlement.add_fully_executed_limit_order(order.clone());
 
-        if existing_allowance < order.sell_amount {
+        intermediate_settlement.add_executed_liquidity_order(
+            (order.sell_token, swap.from_token_amount),
+            (order.buy_token, swap.to_token_amount),
+            Box::new(swap),
+        );
+
+        Ok(intermediate_settlement)
+    }
+
+    fn web3(&self) -> DynWeb3 {
+        self.settlement_contract.raw_instance().web3()
+    }
+}
+
+struct OneInchSettlementFinalizer<'a> {
+    solver: &'a OneInchSolver,
+}
+
+#[async_trait::async_trait(?Send)]
+impl SettlementFinalizing for OneInchSettlementFinalizer<'_> {
+    async fn finalize_intermediate_liquidity_order(
+        &self,
+        settlement: &mut Settlement,
+        liquidity_order: &ExecutedLiquidityOrder,
+    ) -> Result<()> {
+        let spender = self.solver.client.get_spender().await?;
+
+        let sell_token = liquidity_order.input.0;
+        let buy_token = liquidity_order.output.0;
+        let sell_token_contract = ERC20::at(&self.solver.web3(), sell_token);
+        let existing_allowance = sell_token_contract
+            .allowance(self.solver.settlement_contract.address(), spender.address)
+            .call()
+            .await?;
+
+        let sell_amount = liquidity_order.input.1;
+
+        let mut swap = liquidity_order
+            .order
+            .downcast_ref::<Swap>()
+            .unwrap()
+            .clone();
+
+        if swap.from_token_amount != sell_amount {
+            // Must replay swap since sell amount changed
+            swap = self
+                .solver
+                .get_swap(sell_token, buy_token, sell_amount)
+                .await?;
+        }
+
+        let buy_amount = liquidity_order.output.1;
+        ensure!(
+            swap.to_token_amount >= buy_amount,
+            "can't replay 1inch swap with same limit price",
+        );
+
+        if existing_allowance < sell_amount {
             settlement
                 .encoder
                 .append_to_execution_plan(Erc20ApproveInteraction {
-                    token: sell_token,
+                    token: sell_token_contract,
                     spender: spender.address,
                     amount: U256::MAX,
                 });
         }
         settlement.encoder.append_to_execution_plan(swap);
 
-        Ok(settlement)
-    }
-
-    fn web3(&self) -> DynWeb3 {
-        self.settlement_contract.raw_instance().web3()
+        Ok(())
     }
 }
 
@@ -120,7 +176,11 @@ const MAX_SETTLEMENTS: usize = 5;
 
 #[async_trait::async_trait]
 impl Solver for OneInchSolver {
-    async fn solve(&self, liquidity: Vec<Liquidity>, _gas_price: f64) -> Result<Vec<Settlement>> {
+    async fn solve(
+        &self,
+        liquidity: Vec<Liquidity>,
+        _gas_price: f64,
+    ) -> Result<Vec<IntermediateSettlement>> {
         let mut sell_orders = liquidity
             .into_iter()
             .filter_map(|liquidity| match liquidity {

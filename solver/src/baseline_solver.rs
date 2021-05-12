@@ -12,8 +12,8 @@ use shared::{
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    liquidity::{uniswap::MAX_HOPS, AmmOrder, AmmOrderExecution, LimitOrder, Liquidity},
-    settlement::Settlement,
+    intermediate_settlement::IntermediateSettlement,
+    liquidity::{uniswap::MAX_HOPS, AmmOrder, LimitOrder, Liquidity},
     solver::Solver,
 };
 pub struct BaselineSolver {
@@ -22,7 +22,11 @@ pub struct BaselineSolver {
 
 #[async_trait::async_trait]
 impl Solver for BaselineSolver {
-    async fn solve(&self, liquidity: Vec<Liquidity>, _gas_price: f64) -> Result<Vec<Settlement>> {
+    async fn solve(
+        &self,
+        liquidity: Vec<Liquidity>,
+        _gas_price: f64,
+    ) -> Result<Vec<IntermediateSettlement>> {
         Ok(self.solve(liquidity))
     }
 
@@ -50,7 +54,7 @@ impl BaselineSolver {
         Self { base_tokens }
     }
 
-    fn solve(&self, liquidity: Vec<Liquidity>) -> Vec<Settlement> {
+    fn solve(&self, liquidity: Vec<Liquidity>) -> Vec<IntermediateSettlement> {
         let mut amm_map: HashMap<_, Vec<_>> = HashMap::new();
         for liquidity in &liquidity {
             if let Liquidity::Amm(amm_order) = liquidity {
@@ -79,12 +83,7 @@ impl BaselineSolver {
             if solution.executed_buy_amount >= user_order.buy_amount
                 && solution.executed_sell_amount <= user_order.sell_amount
             {
-                match solution.into_settlement(&user_order) {
-                    Ok(settlement) => settlements.push(settlement),
-                    Err(err) => {
-                        tracing::error!("baseline_solver failed to create settlement: {:?}", err)
-                    }
-                }
+                settlements.push(solution.into_intermediate_settlement(&user_order));
             }
         }
 
@@ -127,7 +126,7 @@ impl BaselineSolver {
     }
 
     #[cfg(test)]
-    fn must_solve(&self, liquidity: Vec<Liquidity>) -> Settlement {
+    fn must_solve(&self, liquidity: Vec<Liquidity>) -> IntermediateSettlement {
         self.solve(liquidity).into_iter().next().unwrap()
     }
 }
@@ -139,32 +138,33 @@ struct Solution {
 }
 
 impl Solution {
-    fn into_settlement(self, order: &LimitOrder) -> Result<Settlement> {
-        let mut settlement = Settlement::new(hashmap! {
+    fn into_intermediate_settlement(self, order: &LimitOrder) -> IntermediateSettlement {
+        let clearing_prices = hashmap! {
             order.sell_token => self.executed_buy_amount,
             order.buy_token => self.executed_sell_amount,
-        });
+        };
 
-        settlement.with_liquidity(order, order.full_execution_amount())?;
+        let mut intermediate_settlement = IntermediateSettlement::new(clearing_prices);
+
+        intermediate_settlement.add_fully_executed_limit_order(order.clone());
 
         let (mut sell_amount, mut sell_token) = (self.executed_sell_amount, order.sell_token);
         for amm in self.path {
             let buy_token = amm.tokens.other(&sell_token).expect("Inconsistent path");
             let buy_amount = amm
                 .get_amount_out(buy_token, sell_amount, sell_token)
-                .expect("Path was found, so amount must be calculateable");
-            settlement.with_liquidity(
-                &amm,
-                AmmOrderExecution {
-                    input: (sell_token, sell_amount),
-                    output: (buy_token, buy_amount),
-                },
-            )?;
+                .expect("Path was found, so amount must be computable");
+
+            intermediate_settlement.add_executed_liquidity_order(
+                (sell_token, sell_amount),
+                (buy_token, buy_amount),
+                Box::new(amm.clone()),
+            );
             sell_amount = buy_amount;
             sell_token = buy_token;
         }
 
-        Ok(settlement)
+        intermediate_settlement
     }
 }
 
@@ -182,9 +182,7 @@ mod tests {
     use model::order::OrderKind;
     use num::rational::Ratio;
 
-    use crate::liquidity::{
-        tests::CapturingSettlementHandler, AmmOrder, AmmOrderExecution, LimitOrder,
-    };
+    use crate::liquidity::{tests::CapturingSettlementHandler, AmmOrder, LimitOrder};
 
     use super::*;
     #[test]
@@ -261,35 +259,41 @@ mod tests {
         liquidity.extend(amms.iter().cloned().map(Liquidity::Amm));
 
         let solver = BaselineSolver::new(hashset! { native_token});
-        let result = solver.must_solve(liquidity);
+        let intermediate_settlement = solver.must_solve(liquidity);
+
         assert_eq!(
-            result.clearing_prices(),
-            &hashmap! {
+            intermediate_settlement.prices,
+            hashmap! {
                 sell_token => 97_459.into(),
                 buy_token => 100_000.into(),
             }
         );
 
-        // Second order is fully matched
-        assert_eq!(order_handler[0].clone().calls().len(), 0);
-        assert_eq!(order_handler[1].clone().calls()[0], 100_000.into());
+        // Only one matched order.
+        assert_eq!(intermediate_settlement.nr_executed_limit_orders(), 1);
 
-        // Second & Third AMM are matched
-        assert_eq!(amm_handler[0].clone().calls().len(), 0);
+        // First order is not matched
+        assert!(intermediate_settlement.executed_limit_order("0").is_none());
+
+        // Second order is fully matched
         assert_eq!(
-            amm_handler[1].clone().calls()[0],
-            AmmOrderExecution {
-                input: (sell_token, 100_000.into()),
-                output: (native_token, 98_715.into()),
-            }
+            intermediate_settlement
+                .executed_limit_order("1")
+                .unwrap()
+                .executed_sell_amount,
+            100_000.into()
         );
-        assert_eq!(
-            amm_handler[2].clone().calls()[0],
-            AmmOrderExecution {
-                input: (native_token, 98_715.into()),
-                output: (buy_token, 97_459.into()),
-            }
-        );
+
+        // Second & Third AMM are matched.
+        assert_eq!(intermediate_settlement.executed_liquidity_orders.len(), 2);
+
+        let second_executed_amm = &intermediate_settlement.executed_liquidity_orders[0];
+        assert_eq!(second_executed_amm.input, (sell_token, 100_000.into()));
+        assert_eq!(second_executed_amm.output, (native_token, 98_715.into()));
+
+        let third_executed_amm = &intermediate_settlement.executed_liquidity_orders[1];
+        assert_eq!(third_executed_amm.input, (native_token, 98_715.into()));
+        assert_eq!(third_executed_amm.output, (buy_token, 97_459.into()));
     }
 
     #[test]
@@ -366,35 +370,40 @@ mod tests {
         liquidity.extend(amms.iter().cloned().map(Liquidity::Amm));
 
         let solver = BaselineSolver::new(hashset! { native_token});
-        let result = solver.must_solve(liquidity);
+        let intermediate_settlement = solver.must_solve(liquidity);
         assert_eq!(
-            result.clearing_prices(),
-            &hashmap! {
+            intermediate_settlement.prices,
+            hashmap! {
                 sell_token => 100_000.into(),
                 buy_token => 102_660.into(),
             }
         );
 
+        // Only one matched order.
+        assert_eq!(intermediate_settlement.nr_executed_limit_orders(), 1);
+
+        // First order is not matched
+        assert!(intermediate_settlement.executed_limit_order("0").is_none());
+
         // Second order is fully matched
-        assert_eq!(order_handler[0].clone().calls().len(), 0);
-        assert_eq!(order_handler[1].clone().calls()[0], 100_000.into());
+        assert_eq!(
+            intermediate_settlement
+                .executed_limit_order("1")
+                .unwrap()
+                .executed_buy_amount,
+            100_000.into()
+        );
 
         // Second & Third AMM are matched
-        assert_eq!(amm_handler[0].clone().calls().len(), 0);
-        assert_eq!(
-            amm_handler[1].clone().calls()[0],
-            AmmOrderExecution {
-                input: (sell_token, 102_660.into()),
-                output: (native_token, 101_315.into()),
-            }
-        );
-        assert_eq!(
-            amm_handler[2].clone().calls()[0],
-            AmmOrderExecution {
-                input: (native_token, 101_315.into()),
-                output: (buy_token, 100_000.into()),
-            }
-        );
+        assert_eq!(intermediate_settlement.executed_liquidity_orders.len(), 2);
+
+        let second_executed_amm = &intermediate_settlement.executed_liquidity_orders[0];
+        assert_eq!(second_executed_amm.input, (sell_token, 102_660.into()));
+        assert_eq!(second_executed_amm.output, (native_token, 101_315.into()));
+
+        let third_executed_amm = &intermediate_settlement.executed_liquidity_orders[1];
+        assert_eq!(third_executed_amm.input, (native_token, 101_315.into()));
+        assert_eq!(third_executed_amm.output, (buy_token, 100_000.into()));
     }
 
     #[test]

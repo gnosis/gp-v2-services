@@ -1,8 +1,8 @@
 mod multi_order_solver;
 
 use crate::{
+    intermediate_settlement::IntermediateSettlement,
     liquidity::{AmmOrder, LimitOrder, Liquidity},
-    settlement::Settlement,
     solver::Solver,
 };
 use anyhow::Result;
@@ -13,7 +13,11 @@ pub struct NaiveSolver;
 
 #[async_trait::async_trait]
 impl Solver for NaiveSolver {
-    async fn solve(&self, liquidity: Vec<Liquidity>, _gas_price: f64) -> Result<Vec<Settlement>> {
+    async fn solve(
+        &self,
+        liquidity: Vec<Liquidity>,
+        _gas_price: f64,
+    ) -> Result<Vec<IntermediateSettlement>> {
         let uniswaps = extract_deepest_amm_liquidity(&liquidity);
         let limit_orders = liquidity
             .into_iter()
@@ -32,7 +36,7 @@ impl Solver for NaiveSolver {
 async fn settle(
     orders: impl Iterator<Item = LimitOrder>,
     uniswaps: HashMap<TokenPair, AmmOrder>,
-) -> Vec<Settlement> {
+) -> Vec<IntermediateSettlement> {
     // The multi order solver matches as many orders as possible together with one uniswap pool.
     // Settlements between different token pairs are thus independent.
     organize_orders_by_token_pair(orders)
@@ -45,7 +49,7 @@ fn settle_pair(
     pair: TokenPair,
     orders: Vec<LimitOrder>,
     uniswaps: &HashMap<TokenPair, AmmOrder>,
-) -> Option<Settlement> {
+) -> Option<IntermediateSettlement> {
     let uniswap = match uniswaps.get(&pair) {
         Some(uniswap) => uniswap,
         None => {
