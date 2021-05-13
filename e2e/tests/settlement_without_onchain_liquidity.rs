@@ -168,6 +168,7 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
         network_id,
         1,
         Duration::from_secs(10),
+        1.,
     );
     driver.single_run().await.unwrap();
 
