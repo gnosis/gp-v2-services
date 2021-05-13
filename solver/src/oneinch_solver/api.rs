@@ -130,6 +130,7 @@ impl SwapQuery {
                 .append_pair("disableEstimate", &disable_estimate.to_string());
         }
         if let Some(complexity_level) = self.complexity_level {
+            // complexity level needs to be encoded as a string despite being an in (https://docs.1inch.io/api/quote-swap)
             url.query_pairs_mut()
                 .append_pair("complexityLevel", &format!("'{}'", complexity_level));
         }
