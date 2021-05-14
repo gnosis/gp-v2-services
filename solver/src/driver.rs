@@ -164,7 +164,7 @@ impl Driver {
         if !self
             .market_makable_token_list
             .as_ref()
-            .map(|list| is_only_selling_trusted_tokens(settlement.clone().into(), list))
+            .map(|list| is_only_selling_trusted_tokens(&settlement.settlement.settlement, list))
             .unwrap_or(false)
         {
             return Ok(false);
@@ -441,7 +441,7 @@ fn liquidity_with_price(
     liquidity
 }
 
-fn is_only_selling_trusted_tokens(settlement: Settlement, token_list: &TokenList) -> bool {
+fn is_only_selling_trusted_tokens(settlement: &Settlement, token_list: &TokenList) -> bool {
     !settlement.encoder.trades().iter().any(|trade| {
         token_list
             .get(&trade.order.order_creation.sell_token)
@@ -613,7 +613,7 @@ mod tests {
             HashMap::new(),
             vec![trade(good_token), trade(another_good_token)],
         );
-        assert!(is_only_selling_trusted_tokens(settlement, &token_list));
+        assert!(is_only_selling_trusted_tokens(&settlement, &token_list));
 
         let settlement = Settlement::with_trades(
             HashMap::new(),
@@ -623,6 +623,6 @@ mod tests {
                 trade(bad_token),
             ],
         );
-        assert!(!is_only_selling_trusted_tokens(settlement, &token_list));
+        assert!(!is_only_selling_trusted_tokens(&settlement, &token_list));
     }
 }
