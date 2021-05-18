@@ -18,8 +18,19 @@ pub struct EventHandler<C: EventRetrieving, S: EventStoring<C::Event>> {
     last_handled_block: Option<u64>,
 }
 
+/// `EventStoring` is used by `EventHandler` for the purpose of giving the user freedom
+/// in how, where and which events are stored.
+///
+/// # Examples
+/// Databases: might transform, filter and classify which events are inserted
+/// HashSet: For less persistent (in memory) storing, insert events into a set.
 #[async_trait::async_trait]
 pub trait EventStoring<T> {
+    /// Returns ok, on successful execution, otherwise an appropriate error
+    ///
+    /// # Arguments
+    /// * `events` the contract events to be saved by the implementer
+    /// * `range` optionally indicates a particular range of blocks on which to operate.
     async fn save_events(
         &self,
         events: Vec<EthcontractEvent<T>>,
