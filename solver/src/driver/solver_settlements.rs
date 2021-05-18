@@ -79,11 +79,19 @@ pub struct RatedSettlement {
 }
 
 impl RatedSettlement {
+    fn compute_objective_value(
+        surplus: &BigRational,
+        gas_estimate: &BigRational,
+        gas_price_normalized: &BigRational,
+    ) -> BigRational {
+        let cost = gas_estimate * gas_price_normalized;
+        surplus - cost
+    }
+
     // gas_price_normalized is the price of gas normalized to the found price vector.
     pub fn objective_value(&self, gas_price_normalized: &BigRational) -> BigRational {
         let gas_estimate = self.gas_estimate.to_big_rational();
-        let cost = gas_estimate * gas_price_normalized;
-        self.surplus.clone() - cost
+        Self::compute_objective_value(&self.surplus, &gas_estimate, gas_price_normalized)
     }
 }
 
@@ -256,5 +264,30 @@ mod tests {
         let settlement = Settlement::new(hashmap! {token0 => 0.into()});
         let settlements = vec![settlement.clone(), settlement];
         assert!(merge_at_most_settlements(1, settlements.into_iter()).is_none());
+    }
+
+    #[test]
+    fn compute_objective_value() {
+        // Surplus is 0.4 ETH
+        let surplus = BigRational::from_integer(4.into()) / BigRational::from_integer(10.into());
+
+        // Gas estimate is 500_000
+        let gas_estimate = BigRational::from_integer(500_000.into());
+
+        // Normalized gas price is 2e-7 ETH
+        let gas_price_normalized = BigRational::from_integer(200_000_000_000_u128.into())
+            / BigRational::from_integer(1_000_000_000_000_000_000_u128.into());
+
+        // Objective value is 4e-1 - 5e5 * 2e-7 = 4e-1 - 1e-1 = 0.3
+        let obj_value = RatedSettlement::compute_objective_value(
+            &surplus,
+            &gas_estimate,
+            &gas_price_normalized,
+        );
+
+        assert_eq!(
+            obj_value,
+            BigRational::from_integer(3.into()) / BigRational::from_integer(10.into())
+        );
     }
 }
