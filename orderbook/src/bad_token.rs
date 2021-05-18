@@ -161,12 +161,15 @@ impl BadTokenDetector {
         requests.push(call_request(None, token, tx));
         // 3
         let recipient = Self::arbitrary_recipient();
+        let tx = instance.balance_of(recipient).m.tx;
+        requests.push(call_request(None, token, tx));
+        // 4
         let tx = instance.transfer(recipient, amount).tx;
         requests.push(call_request(Some(self.settlement_contract), token, tx));
-        // 4
+        // 5
         let tx = instance.balance_of(self.settlement_contract).m.tx;
         requests.push(call_request(None, token, tx));
-        // 5
+        // 6
         let tx = instance.balance_of(recipient).m.tx;
         requests.push(call_request(None, token, tx));
 
@@ -174,13 +177,13 @@ impl BadTokenDetector {
     }
 
     fn handle_response(traces: &[BlockTrace], amount: U256) -> Result<TokenQuality> {
-        ensure!(traces.len() == 6, "unexpected number of traces");
+        ensure!(traces.len() == 7, "unexpected number of traces");
 
         let gas_in = match ensure_transaction_ok_and_get_gas(&traces[1])? {
             Ok(gas) => gas,
             Err(reason) => return Ok(TokenQuality::Bad { reason }),
         };
-        let gas_out = match ensure_transaction_ok_and_get_gas(&traces[3])? {
+        let gas_out = match ensure_transaction_ok_and_get_gas(&traces[4])? {
             Ok(gas) => gas,
             Err(reason) => return Ok(TokenQuality::Bad { reason }),
         };
@@ -201,7 +204,7 @@ impl BadTokenDetector {
                 })
             }
         };
-        let balance_after_out = match decode_u256(&traces[4]) {
+        let balance_after_out = match decode_u256(&traces[5]) {
             Ok(balance) => balance,
             Err(_) => {
                 return Ok(TokenQuality::Bad {
@@ -209,11 +212,21 @@ impl BadTokenDetector {
                 })
             }
         };
-        let balance_of_receiver = match decode_u256(&traces[5]) {
+
+        let balance_recpient_before = match decode_u256(&traces[3]) {
             Ok(balance) => balance,
             Err(_) => {
                 return Ok(TokenQuality::Bad {
-                    reason: "can't decode recipient balance".to_string(),
+                    reason: "can't decode recipient balance before".to_string(),
+                })
+            }
+        };
+
+        let balance_recipient_after = match decode_u256(&traces[6]) {
+            Ok(balance) => balance,
+            Err(_) => {
+                return Ok(TokenQuality::Bad {
+                    reason: "can't decode recipient balance after".to_string(),
                 })
             }
         };
@@ -233,9 +246,9 @@ impl BadTokenDetector {
                 reason: "balance after out transfer does not match".to_string(),
             });
         }
-        if balance_of_receiver != amount {
+        if balance_recpient_before + amount != balance_recipient_after {
             return Ok(TokenQuality::Bad {
-                reason: "balance of receiver does not match".to_string(),
+                reason: "balance of recipient does not match".to_string(),
             });
         }
 
@@ -357,6 +370,13 @@ mod tests {
             },
             BlockTrace {
                 output: encode_u256(1.into()),
+                trace: None,
+                vm_trace: None,
+                state_diff: None,
+                transaction_hash: None,
+            },
+            BlockTrace {
+                output: encode_u256(0.into()),
                 trace: None,
                 vm_trace: None,
                 state_diff: None,
