@@ -79,10 +79,10 @@ pub struct RatedSettlement {
 }
 
 impl RatedSettlement {
-    pub fn objective_value(&self, gas_price: f64) -> BigRational {
-        let gas_price = BigRational::from_float(gas_price).unwrap();
+    // gas_price_normalized is the price of gas normalized to the found price vector.
+    pub fn objective_value(&self, gas_price_normalized: &BigRational) -> BigRational {
         let gas_estimate = self.gas_estimate.to_big_rational();
-        let cost = gas_estimate * gas_price;
+        let cost = gas_estimate * gas_price_normalized;
         self.surplus.clone() - cost
     }
 }

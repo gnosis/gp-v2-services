@@ -301,15 +301,15 @@ impl Driver {
         let liquidity = liquidity_with_price(liquidity, &estimated_prices);
         self.metrics.liquidity_fetched(&liquidity);
 
-        let gas_price = self
+        let gas_price_wei = self
             .gas_price_estimator
             .estimate()
             .await
             .context("failed to estimate gas price")?;
-        tracing::debug!("solving with gas price of {}", gas_price);
+        tracing::debug!("solving with gas price of {}", gas_price_wei);
 
         let settlements = self
-            .run_solvers(liquidity, gas_price)
+            .run_solvers(liquidity, gas_price_wei)
             .await
             .filter_map(solver_settlements::filter_bad_settlements)
             .inspect(|(name, settlements)| {
@@ -350,10 +350,13 @@ impl Driver {
         }
 
         let rated_settlements = self.rate_settlements(settlements, &estimated_prices).await;
+        // TODO: 1e18 should be 10**(native_token_decimals)
+        let gas_price_normalized: BigRational = estimated_prices.get(&self.native_token).unwrap()
+            / BigRational::from_integer(1_000_000_000_000_000_000_u128.into());
 
         if let Some(mut settlement) = rated_settlements.into_iter().max_by(|a, b| {
-            a.objective_value(gas_price)
-                .cmp(&b.objective_value(gas_price))
+            a.objective_value(&gas_price_normalized)
+                .cmp(&b.objective_value(&gas_price_normalized))
         }) {
             // If we have enough buffer in the settlement contract to not use on-chain interactions, remove those
             if self
