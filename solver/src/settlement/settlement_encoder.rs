@@ -210,11 +210,12 @@ impl SettlementEncoder {
 
     pub fn total_fees(
         &self,
-        normalizing_prices: &HashMap<H160, BigRational>
+        normalizing_prices: &HashMap<H160, BigRational>,
     ) -> Option<BigRational> {
         self.trades.iter().fold(Some(num::zero()), |acc, trade| {
             let fee_amount = trade.order.order_creation.fee_amount.to_big_rational();
-            let fee_volume = fee_amount * normalizing_prices.get(&trade.order.order_creation.sell_token)?;
+            let fee_volume =
+                fee_amount * normalizing_prices.get(&trade.order.order_creation.sell_token)?;
             Some(acc? + fee_volume)
         })
     }
@@ -222,7 +223,7 @@ impl SettlementEncoder {
     pub fn total_unsubsidized_fees(
         &self,
         normalizing_prices: &HashMap<H160, BigRational>,
-        fee_discount_factor: BigRational
+        fee_discount_factor: BigRational,
     ) -> Option<BigRational> {
         let subsidized_fees = self.total_fees(normalizing_prices)?;
         Some(subsidized_fees / fee_discount_factor)
@@ -530,5 +531,35 @@ pub mod tests {
         encoder1.add_trade(order13, 24.into()).unwrap();
 
         assert!(encoder0.merge(encoder1).is_err());
+    }
+
+    #[test]
+    fn total_fees() {
+        let prices = hashmap! { token(1) => 1.into(), token(3) => 3.into() };
+        let order1 = OrderBuilder::default()
+            .with_sell_token(token(1))
+            .with_buy_token(token(3))
+            .with_fee_amount(5.into())
+            .build();
+
+        let order2 = OrderBuilder::default()
+            .with_sell_token(token(3))
+            .with_buy_token(token(1))
+            .with_fee_amount(7.into())
+            .build();
+
+        let mut encoder = SettlementEncoder::new(prices);
+        encoder.add_trade(order1, 11.into()).unwrap();
+        encoder.add_trade(order2, 13.into()).unwrap();
+
+        let normalizing_prices: HashMap<H160, BigRational> = hashmap! {
+            token(1) => BigRational::from_integer(17.into()),
+            token(3) => BigRational::from_integer(19.into())
+        };
+        // 5 * 17 + 7 * 19
+        assert!(
+            encoder.total_fees(&normalizing_prices).unwrap()
+                == BigRational::from_integer(218.into())
+        );
     }
 }

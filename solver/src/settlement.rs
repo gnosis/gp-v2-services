@@ -149,9 +149,13 @@ impl Settlement {
     // For now this computes the fees of all EOA trades.
     pub fn total_unsubsidized_fees(
         &self,
-        normalizing_prices: &HashMap<H160, BigRational>,        
-        fee_discount_factor: BigRational) -> BigRational {
-        match self.encoder.total_unsubsidized_fees(normalizing_prices, fee_discount_factor) {
+        normalizing_prices: &HashMap<H160, BigRational>,
+        fee_discount_factor: BigRational,
+    ) -> BigRational {
+        match self
+            .encoder
+            .total_unsubsidized_fees(normalizing_prices, fee_discount_factor)
+        {
             Some(value) => value,
             None => {
                 tracing::error!("Overflow computing fees value for: {:?}", self);
