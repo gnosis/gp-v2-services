@@ -351,7 +351,7 @@ impl Driver {
 
         let rated_settlements = self.rate_settlements(settlements, &estimated_prices).await;
         // TODO: 1e18 should be 10**(native_token_decimals)
-        let gas_price_normalized: BigRational = num::one::<BigRational>()
+        let gas_price_normalized: BigRational = estimated_prices.get(&self.native_token).unwrap()
             / BigRational::from_integer(1_000_000_000_000_000_000_u128.into());
 
         if let Some(mut settlement) = rated_settlements.into_iter().max_by(|a, b| {
@@ -384,6 +384,8 @@ pub async fn collect_estimated_prices(
     liquidity: &[Liquidity],
 ) -> HashMap<H160, BigRational> {
     // Computes set of traded tokens (limit orders only).
+    // NOTE: The native token is always added.
+
     let mut tokens = HashSet::new();
     for liquid in liquidity {
         if let Liquidity::Limit(limit_order) = liquid {
@@ -413,10 +415,12 @@ pub async fn collect_estimated_prices(
         })
         .collect();
 
-    // If the wrapped native token is in the price list (e.g. WETH), so should be the placeholder for its native counterpart
-    if let Some(price) = prices.get(&native_token).cloned() {
-        prices.insert(BUY_ETH_ADDRESS, price);
-    }
+    // Always include the native token.
+    prices.insert(native_token, num::one());
+
+    // And the placeholder for its native counterpart.
+    prices.insert(BUY_ETH_ADDRESS, num::one());
+
     prices
 }
 
