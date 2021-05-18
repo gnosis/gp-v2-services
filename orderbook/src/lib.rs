@@ -1,6 +1,7 @@
 pub mod account_balances;
 pub mod api;
 pub mod bad_token;
+pub mod bad_token_cache;
 pub mod conversions;
 pub mod database;
 pub mod event_updater;
