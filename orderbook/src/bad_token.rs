@@ -18,13 +18,13 @@ use web3::{
 };
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub enum TokenInfo {
+pub enum TokenQuality {
     Good { gas_per_transfer: U256 },
     Bad { reason: String },
     NoPool,
 }
 
-impl TokenInfo {
+impl TokenQuality {
     pub fn is_good(&self) -> bool {
         matches!(self, Self::Good { .. })
     }
@@ -45,14 +45,14 @@ pub struct BadTokenDetector {
 }
 
 impl BadTokenDetector {
-    pub async fn detect(&self, token: H160) -> Result<TokenInfo> {
+    pub async fn detect(&self, token: H160) -> Result<TokenQuality> {
         let instance = ERC20::at(&self.web3, token);
         let decimals = match instance.decimals().call().await {
             Ok(decimals) => decimals,
             Err(err) => {
                 return match EthcontractError::classify(&err) {
                     EthcontractError::Node => Err(err.into()),
-                    EthcontractError::Contract => Ok(TokenInfo::Bad {
+                    EthcontractError::Contract => Ok(TokenQuality::Bad {
                         reason: "failed to get decimals".to_string(),
                     }),
                 }
@@ -64,21 +64,19 @@ impl BadTokenDetector {
                 amount
             }
             None => {
-                return Ok(TokenInfo::Bad {
+                return Ok(TokenQuality::Bad {
                     reason: "decimals too large".to_string(),
                 });
             }
         };
 
-        let take_from = match self.find_address_owning_token(token).await? {
+        let take_from = match self.find_largest_pool_owning_token(token).await? {
             Some((address, balance)) if balance > amount => {
                 tracing::debug!("testing token {:?} with pool {:?}", token, address);
                 address
             }
             _ => {
-                return Ok(TokenInfo::Bad {
-                    reason: "no amm pool with base tokens has enough balance".to_string(),
-                });
+                return Ok(TokenQuality::NoPool);
             }
         };
 
@@ -96,7 +94,7 @@ impl BadTokenDetector {
     // Err if communication with the node failed.
     // Ok(None) if there is no pool or getting the balance fails.
     // Ok(address, balance) for an address that has this amount of balance of the token.
-    async fn find_address_owning_token(&self, token: H160) -> Result<Option<(H160, U256)>> {
+    async fn find_largest_pool_owning_token(&self, token: H160) -> Result<Option<(H160, U256)>> {
         const BATCH_SIZE: usize = 100;
 
         let pairs = self
@@ -175,22 +173,22 @@ impl BadTokenDetector {
         requests
     }
 
-    fn handle_response(traces: &[BlockTrace], amount: U256) -> Result<TokenInfo> {
+    fn handle_response(traces: &[BlockTrace], amount: U256) -> Result<TokenQuality> {
         ensure!(traces.len() == 6, "unexpected number of traces");
 
         let gas_in = match ensure_transaction_ok_and_get_gas(&traces[1])? {
             Ok(gas) => gas,
-            Err(reason) => return Ok(TokenInfo::Bad { reason }),
+            Err(reason) => return Ok(TokenQuality::Bad { reason }),
         };
         let gas_out = match ensure_transaction_ok_and_get_gas(&traces[3])? {
             Ok(gas) => gas,
-            Err(reason) => return Ok(TokenInfo::Bad { reason }),
+            Err(reason) => return Ok(TokenQuality::Bad { reason }),
         };
 
         let balance_before_in = match decode_u256(&traces[0]) {
             Ok(balance) => balance,
             Err(_) => {
-                return Ok(TokenInfo::Bad {
+                return Ok(TokenQuality::Bad {
                     reason: "can't decode initial settlement balance".to_string(),
                 })
             }
@@ -198,7 +196,7 @@ impl BadTokenDetector {
         let balance_after_in = match decode_u256(&traces[2]) {
             Ok(balance) => balance,
             Err(_) => {
-                return Ok(TokenInfo::Bad {
+                return Ok(TokenQuality::Bad {
                     reason: "can't decode middle settlement balance".to_string(),
                 })
             }
@@ -206,7 +204,7 @@ impl BadTokenDetector {
         let balance_after_out = match decode_u256(&traces[4]) {
             Ok(balance) => balance,
             Err(_) => {
-                return Ok(TokenInfo::Bad {
+                return Ok(TokenQuality::Bad {
                     reason: "can't decode final settlement balance".to_string(),
                 })
             }
@@ -214,7 +212,7 @@ impl BadTokenDetector {
         let balance_of_receiver = match decode_u256(&traces[5]) {
             Ok(balance) => balance,
             Err(_) => {
-                return Ok(TokenInfo::Bad {
+                return Ok(TokenQuality::Bad {
                     reason: "can't decode recipient balance".to_string(),
                 })
             }
@@ -226,22 +224,22 @@ impl BadTokenDetector {
         // an amount transferred like an anti fee.
 
         if balance_after_in != balance_before_in + amount {
-            return Ok(TokenInfo::Bad {
+            return Ok(TokenQuality::Bad {
                 reason: "balance after in transfer does not match".to_string(),
             });
         }
         if balance_after_out != balance_before_in {
-            return Ok(TokenInfo::Bad {
+            return Ok(TokenQuality::Bad {
                 reason: "balance after out transfer does not match".to_string(),
             });
         }
         if balance_of_receiver != amount {
-            return Ok(TokenInfo::Bad {
+            return Ok(TokenQuality::Bad {
                 reason: "balance of receiver does not match".to_string(),
             });
         }
 
-        Ok(TokenInfo::Good {
+        Ok(TokenQuality::Good {
             gas_per_transfer: (gas_in + gas_out) / 2,
         })
     }
@@ -405,7 +403,7 @@ mod tests {
         ];
 
         let result = BadTokenDetector::handle_response(traces, 1.into()).unwrap();
-        let expected = TokenInfo::Good {
+        let expected = TokenQuality::Good {
             gas_per_transfer: 2.into(),
         };
         assert_eq!(result, expected);
