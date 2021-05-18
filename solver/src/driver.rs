@@ -351,7 +351,7 @@ impl Driver {
 
         let rated_settlements = self.rate_settlements(settlements, &estimated_prices).await;
         // TODO: 1e18 should be 10**(native_token_decimals)
-        let gas_price_normalized: BigRational = estimated_prices.get(&self.native_token).unwrap()
+        let gas_price_normalized: BigRational = num::one::<BigRational>()
             / BigRational::from_integer(1_000_000_000_000_000_000_u128.into());
 
         if let Some(mut settlement) = rated_settlements.into_iter().max_by(|a, b| {
