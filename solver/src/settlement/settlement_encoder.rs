@@ -211,7 +211,7 @@ impl SettlementEncoder {
     pub fn total_fees(&self) -> Option<U256> {
         self.trades.iter().fold(Some(0.into()), |acc, trade| {
             let fees = trade.order.order_creation.fee_amount;
-            Some(acc? + fees)
+            acc?.checked_add(fees)
         })
     }
 
