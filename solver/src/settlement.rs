@@ -147,17 +147,6 @@ impl Settlement {
     }
 
     // For now this computes the fees of all EOA trades.
-    pub fn total_fees(&self) -> U256 {
-        match self.encoder.total_fees() {
-            Some(value) => value,
-            None => {
-                tracing::error!("Overflow computing fees value for: {:?}", self);
-                0.into()
-            }
-        }
-    }
-
-    // For now this computes the fees of all EOA trades.
     pub fn total_unsubsidized_fees(&self, fee_discount_factor: f64) -> U256 {
         match self.encoder.total_unsubsidized_fees(fee_discount_factor) {
             Some(value) => value,
