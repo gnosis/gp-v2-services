@@ -14,10 +14,7 @@ use contracts::{
     GPv2Settlement,
 };
 use ethcontract::contract::AllEventsBuilder;
-use ethcontract::{
-    dyns::DynTransport,
-    Event as EthcontractEvent, EventMetadata,
-};
+use ethcontract::{dyns::DynTransport, Event as EthcontractEvent, EventMetadata};
 use model::order::OrderUid;
 use shared::event_handling::{BlockNumber, EventHandler, EventRetrieving, EventStoring};
 use std::{
