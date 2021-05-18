@@ -264,9 +264,10 @@ impl Driver {
                 )
                 .await
                 .ok()?;
+                let fee_discount_factor = BigRational::from_float(self.fee_discount_factor)?;
                 let fees = settlement
                     .settlement
-                    .total_unsubsidized_fees(self.fee_discount_factor);
+                    .total_unsubsidized_fees(prices, fee_discount_factor);
                 Some(RatedSettlement {
                     settlement,
                     surplus,

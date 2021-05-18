@@ -208,18 +208,24 @@ impl SettlementEncoder {
         })
     }
 
-    pub fn total_fees(&self) -> Option<U256> {
-        self.trades.iter().fold(Some(0.into()), |acc, trade| {
-            let fees = trade.order.order_creation.fee_amount;
-            acc?.checked_add(fees)
+    pub fn total_fees(
+        &self,
+        normalizing_prices: &HashMap<H160, BigRational>
+    ) -> Option<BigRational> {
+        self.trades.iter().fold(Some(num::zero()), |acc, trade| {
+            let fee_amount = trade.order.order_creation.fee_amount.to_big_rational();
+            let fee_volume = fee_amount * normalizing_prices.get(&trade.order.order_creation.sell_token)?;
+            Some(acc? + fee_volume)
         })
     }
 
-    pub fn total_unsubsidized_fees(&self, fee_discount_factor: f64) -> Option<U256> {
-        let subsidized_fees = self.total_fees()?;
-        Some(U256::from_f64_lossy(
-            (subsidized_fees.to_f64_lossy() / fee_discount_factor).ceil(),
-        ))
+    pub fn total_unsubsidized_fees(
+        &self,
+        normalizing_prices: &HashMap<H160, BigRational>,
+        fee_discount_factor: BigRational
+    ) -> Option<BigRational> {
+        let subsidized_fees = self.total_fees(normalizing_prices)?;
+        Some(subsidized_fees / fee_discount_factor)
     }
 
     pub fn finish(self) -> EncodedSettlement {
