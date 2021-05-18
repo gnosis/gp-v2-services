@@ -502,7 +502,7 @@ mod tests {
             }),
         ];
         let prices = collect_estimated_prices(&price_estimator, native_token, &liquidity).await;
-        assert_eq!(prices.len(), 2);
+        assert_eq!(prices.len(), 4);
         assert!(prices.contains_key(&sell_token));
         assert!(prices.contains_key(&buy_token));
     }
@@ -527,7 +527,7 @@ mod tests {
             id: "0".into(),
         })];
         let prices = collect_estimated_prices(&price_estimator, native_token, &liquidity).await;
-        assert_eq!(prices.len(), 0);
+        assert_eq!(prices.len(), 2);
     }
 
     #[tokio::test]
