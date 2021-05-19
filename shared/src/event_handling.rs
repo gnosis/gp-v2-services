@@ -190,11 +190,11 @@ impl BlockNumber {
 
 #[macro_export]
 macro_rules! impl_event_retrieving {
-    ($vis:vis $name:ident for $contract_module:ident) => {
-        $vis struct $name(self::$contract_module::Contract);
+    ($vis:vis $name:ident for $($contract_module:tt)*) => {
+        $vis struct $name($($contract_module)*::Contract);
 
         impl ::shared::event_handling::EventRetrieving for $name {
-            type Event = self::$contract_module::Event;
+            type Event = $($contract_module)*::Event;
 
             fn get_events(&self) -> ::ethcontract::contract::AllEventsBuilder<
                 ::ethcontract::dyns::DynTransport,
