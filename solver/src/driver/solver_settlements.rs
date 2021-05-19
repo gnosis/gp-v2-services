@@ -76,22 +76,24 @@ pub struct RatedSettlement {
     pub settlement: SettlementWithSolver,
     pub surplus: BigRational,
     pub gas_estimate: U256,
+    pub gas_price: BigRational,
 }
 
 impl RatedSettlement {
+    // gas_price_normalized is the price of gas normalized to the found price vector.
+    pub fn objective_value(&self) -> BigRational {
+        let gas_estimate = self.gas_estimate.to_big_rational();
+        Self::compute_objective_value(&self.surplus, &gas_estimate, &self.gas_price)
+    }
+
+    // Helper function to allow unit testing objective value computation without a Settlement.
     fn compute_objective_value(
         surplus: &BigRational,
         gas_estimate: &BigRational,
-        gas_price_normalized: &BigRational,
+        gas_price: &BigRational,
     ) -> BigRational {
-        let cost = gas_estimate * gas_price_normalized;
+        let cost = gas_estimate * gas_price;
         surplus - cost
-    }
-
-    // gas_price_normalized is the price of gas normalized to the found price vector.
-    pub fn objective_value(&self, gas_price_normalized: &BigRational) -> BigRational {
-        let gas_estimate = self.gas_estimate.to_big_rational();
-        Self::compute_objective_value(&self.surplus, &gas_estimate, gas_price_normalized)
     }
 }
 
@@ -113,6 +115,7 @@ impl RatedSettlement {
             settlement: self.settlement.without_onchain_liquidity(),
             surplus: self.surplus.clone(),
             gas_estimate: self.gas_estimate, // TODO: This becomes an overestimate!
+            gas_price: self.gas_price.clone(),
         }
     }
 }

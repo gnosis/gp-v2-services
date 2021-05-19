@@ -263,8 +263,13 @@ impl Driver {
         &self,
         settlements: Vec<SettlementWithSolver>,
         prices: &HashMap<H160, BigRational>,
+        gas_price_wei: f64,
     ) -> Vec<RatedSettlement> {
         use futures::stream::StreamExt;
+
+        // TODO: 1e18 should be 10**(native_token_decimals)
+        let gas_price_wei = BigRational::from_float(gas_price_wei).unwrap();
+
         futures::stream::iter(settlements)
             .filter_map(|settlement| async {
                 let surplus = settlement.settlement.total_surplus(prices);
@@ -274,11 +279,22 @@ impl Driver {
                 )
                 .await
                 .ok()?;
-                Some(RatedSettlement {
+                let solver_name = settlement.name;
+                let rated_settlement = RatedSettlement {
                     settlement,
                     surplus,
                     gas_estimate,
-                })
+                    gas_price: gas_price_wei.clone(),
+                };
+                tracing::info!(
+                    "Objective value for solver {} is {}: surplus={}, gas_estimate={}, gas_price_normalized={}",
+                    solver_name,
+                    rated_settlement.objective_value(),
+                    rated_settlement.surplus,
+                    rated_settlement.gas_estimate,
+                    rated_settlement.gas_price,
+                );
+                Some(rated_settlement)
             })
             .collect::<Vec<_>>()
             .await
@@ -349,15 +365,14 @@ impl Driver {
             self.metrics.settlement_simulation_failed(settlement.name);
         }
 
-        let rated_settlements = self.rate_settlements(settlements, &estimated_prices).await;
-        // TODO: 1e18 should be 10**(native_token_decimals)
-        let gas_price_normalized: BigRational = estimated_prices.get(&self.native_token).unwrap()
-            / BigRational::from_integer(1_000_000_000_000_000_000_u128.into());
+        let rated_settlements = self
+            .rate_settlements(settlements, &estimated_prices, gas_price_wei)
+            .await;
 
-        if let Some(mut settlement) = rated_settlements.into_iter().max_by(|a, b| {
-            a.objective_value(&gas_price_normalized)
-                .cmp(&b.objective_value(&gas_price_normalized))
-        }) {
+        if let Some(mut settlement) = rated_settlements
+            .into_iter()
+            .max_by(|a, b| a.objective_value().cmp(&b.objective_value()))
+        {
             // If we have enough buffer in the settlement contract to not use on-chain interactions, remove those
             if self
                 .can_settle_without_liquidity(&settlement)
