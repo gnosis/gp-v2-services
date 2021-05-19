@@ -1,7 +1,6 @@
-use chrono::offset::Utc;
 use contracts::{GPv2Settlement, WETH9};
-use futures::StreamExt;
 use model::{order::OrderUid, DomainSeparator};
+use orderbook::maintenance::ServiceMaintenance;
 use orderbook::{
     account_balances::Web3BalanceFetcher,
     database::{Database, OrderFilter},
@@ -13,7 +12,7 @@ use orderbook::{
 };
 use prometheus::Registry;
 use shared::{
-    current_block::{current_block_stream, CurrentBlockStream},
+    current_block::current_block_stream,
     pool_aggregating::PoolAggregator,
     pool_fetching::{CachedPoolFetcher, FilteredPoolFetcher},
     price_estimate::BaselinePriceEstimator,
@@ -57,28 +56,6 @@ struct Arguments {
     /// api.
     #[structopt(long, env = "SKIP_TRACE_API")]
     skip_trace_api: bool,
-}
-
-pub async fn orderbook_maintenance(
-    storage: Arc<Orderbook>,
-    database: Database,
-    settlement_contract: GPv2Settlement,
-    mut current_block_stream: CurrentBlockStream,
-) -> ! {
-    while let Some(block) = current_block_stream.next().await {
-        tracing::debug!(
-            "running maintenance on block number {:?} hash {:?}",
-            block.number,
-            block.hash
-        );
-        if let Err(err) = storage.run_maintenance(&settlement_contract).await {
-            tracing::error!(?err, "orderbook maintenance error");
-        }
-        if let Err(err) = database.remove_expired_fee_measurements(Utc::now()).await {
-            tracing::error!(?err, "fee measurement maintenance error");
-        }
-    }
-    unreachable!()
 }
 
 pub async fn database_metrics(metrics: Arc<Metrics>, database: Database) -> ! {
@@ -199,12 +176,13 @@ async fn main() {
     let orderbook = Arc::new(Orderbook::new(
         domain_separator,
         database.clone(),
-        event_updater,
         Box::new(balance_fetcher),
         fee_calculator.clone(),
         unsupported_tokens,
         args.min_order_validity_period,
     ));
+    let service_maintainer =
+        ServiceMaintenance::new(orderbook.clone(), database.clone(), event_updater);
     check_database_connection(orderbook.as_ref()).await;
 
     let registry = Registry::default();
@@ -219,12 +197,8 @@ async fn main() {
         registry,
         metrics.clone(),
     );
-    let maintenance_task = task::spawn(orderbook_maintenance(
-        orderbook,
-        database.clone(),
-        settlement_contract,
-        current_block_stream,
-    ));
+    let maintenance_task =
+        task::spawn(current_block_stream.run_maintenance_on_new_block(service_maintainer));
     let db_metrics_task = task::spawn(database_metrics(metrics, database));
 
     tokio::select! {
