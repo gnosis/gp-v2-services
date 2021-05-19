@@ -108,6 +108,20 @@ impl CurrentBlockStream {
             .ok_or_else(|| anyhow!("no block number"))
             .map(|number| number.as_u64())
     }
+
+    pub async fn run_maintenance_on_new_block(mut self, maintainer: impl Maintaining) -> ! {
+        while let Some(block) = self.next().await {
+            tracing::debug!(
+                "running maintenance on block number {:?} hash {:?}",
+                block.number,
+                block.hash
+            );
+            if let Err(err) = maintainer.run_maintenance().await {
+                tracing::error!(?err, "maintenance error");
+            }
+        }
+        unreachable!()
+    }
 }
 
 impl Stream for CurrentBlockStream {
@@ -118,6 +132,11 @@ impl Stream for CurrentBlockStream {
         futures::pin_mut!(future);
         future.poll(cx)
     }
+}
+
+#[async_trait::async_trait]
+pub trait Maintaining {
+    async fn run_maintenance(&self) -> Result<()>;
 }
 
 impl FusedStream for CurrentBlockStream {

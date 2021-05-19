@@ -4,6 +4,7 @@ use ethcontract::{
     H160,
 };
 use model::DomainSeparator;
+use orderbook::maintenance::ServiceMaintenance;
 use orderbook::{
     account_balances::Web3BalanceFetcher, database::Database, event_updater::EventUpdater,
     fee::EthAwareMinFeeCalculator, metrics::Metrics, orderbook::Orderbook,
@@ -103,8 +104,8 @@ pub async fn deploy_mintable_token(web3: &Web3) -> ERC20Mintable {
 }
 
 pub struct OrderbookServices {
-    pub orderbook: Arc<Orderbook>,
     pub price_estimator: Arc<BaselinePriceEstimator>,
+    pub maintenance: ServiceMaintenance,
 }
 impl OrderbookServices {
     pub async fn new(
@@ -122,7 +123,6 @@ impl OrderbookServices {
         let db = Database::new("postgresql://").unwrap();
         db.clear().await.unwrap();
         let event_updater = EventUpdater::new(gpv2.settlement.clone(), db.clone(), None);
-
         let current_block_stream = current_block_stream(web3.clone()).await.unwrap();
         let pair_provider = Arc::new(UniswapPairProvider {
             factory: uniswap_factory.clone(),
@@ -154,7 +154,6 @@ impl OrderbookServices {
         let orderbook = Arc::new(Orderbook::new(
             gpv2.domain_separator,
             db.clone(),
-            event_updater,
             Box::new(Web3BalanceFetcher::new(
                 web3.clone(),
                 gpv2.allowance,
@@ -165,12 +164,12 @@ impl OrderbookServices {
             HashSet::new(),
             Duration::from_secs(120),
         ));
-
+        let maintenance = ServiceMaintenance::new(orderbook.clone(), db.clone(), event_updater);
         let registry = Registry::default();
         let metrics = Arc::new(Metrics::new(&registry).unwrap());
         orderbook::serve_task(
             db.clone(),
-            orderbook.clone(),
+            orderbook,
             fee_calculator,
             price_estimator.clone(),
             API_HOST[7..].parse().expect("Couldn't parse API address"),
@@ -179,8 +178,8 @@ impl OrderbookServices {
         );
 
         Self {
-            orderbook,
             price_estimator,
+            maintenance,
         }
     }
 }
