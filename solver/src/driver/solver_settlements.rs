@@ -271,26 +271,37 @@ mod tests {
 
     #[test]
     fn compute_objective_value() {
-        // Surplus is 0.4 ETH
-        let surplus = BigRational::from_integer(4.into()) / BigRational::from_integer(10.into());
+        // Gas price is 2e-7 ETH
+        let gas_price = BigRational::from_integer(200_000_000_000_u128.into());
 
-        // Gas estimate is 500_000
-        let gas_estimate = BigRational::from_integer(500_000.into());
+        // Surplus1 is 0.4 ETH
+        let surplus1 = BigRational::from_integer(400_000_000_000_000_000_u128.into());
 
-        // Normalized gas price is 2e-7 ETH
-        let gas_price_normalized = BigRational::from_integer(200_000_000_000_u128.into())
-            / BigRational::from_integer(1_000_000_000_000_000_000_u128.into());
+        // Surplus2 is 1.0 ETH
+        let surplus2 = BigRational::from_integer(1_000_000_000_000_000_000_u128.into());
 
-        // Objective value is 4e-1 - 5e5 * 2e-7 = 4e-1 - 1e-1 = 0.3
-        let obj_value = RatedSettlement::compute_objective_value(
-            &surplus,
-            &gas_estimate,
-            &gas_price_normalized,
-        );
+        // Gas estimate1 is 500_000
+        let gas_estimate1 = BigRational::from_integer(500_000.into());
+
+        // Gas estimate2 is 100_000
+        let gas_estimate2 = BigRational::from_integer(100_000.into());
+
+        // Objective value 1 is 4e-1 - 5e5 * 2e-7 = 4e-1 - 1e-1 = 0.3 ETH
+        let obj_value1 =
+            RatedSettlement::compute_objective_value(&surplus1, &gas_estimate1, &gas_price);
 
         assert_eq!(
-            obj_value,
-            BigRational::from_integer(3.into()) / BigRational::from_integer(10.into())
+            obj_value1,
+            BigRational::from_integer(300_000_000_000_000_000_u128.into())
+        );
+
+        // Objective value 2 is 1 - 1e5 * 2e-7 = 1 - 2e-2 = 0.98 ETH
+        let obj_value2 =
+            RatedSettlement::compute_objective_value(&surplus2, &gas_estimate2, &gas_price);
+
+        assert_eq!(
+            obj_value2,
+            BigRational::from_integer(980_000_000_000_000_000_u128.into())
         );
     }
 }
