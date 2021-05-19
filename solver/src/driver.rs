@@ -258,12 +258,12 @@ impl Driver {
         }
     }
 
-    // Log the amount of orders that were matched but not settled in this runloop (effectively queued for the next one)
+    // Record metric with the amount of orders that were matched but not settled in this runloop (effectively queued for the next one)
     // Should help us to identify how much we can save by parallelizing execution.
-    fn report_matched_but_unsettled_orders<I: Iterator<Item = Settlement>>(
+    fn report_matched_but_unsettled_orders(
         &self,
         submitted: &Settlement,
-        all: I,
+        all: impl Iterator<Item = Settlement>,
     ) {
         let submitted: HashSet<_> = submitted
             .trades()
