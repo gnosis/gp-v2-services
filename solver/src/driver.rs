@@ -267,8 +267,8 @@ impl Driver {
     ) -> Vec<RatedSettlement> {
         use futures::stream::StreamExt;
 
-        // TODO: 1e18 should be 10**(native_token_decimals)
-        let gas_price_wei = BigRational::from_float(gas_price_wei).unwrap();
+        let gas_price_wei = BigRational::from_float(gas_price_wei).unwrap()
+            * prices.get(&self.native_token).unwrap();
 
         futures::stream::iter(settlements)
             .filter_map(|settlement| async {
