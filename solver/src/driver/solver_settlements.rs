@@ -80,7 +80,6 @@ pub struct RatedSettlement {
 }
 
 impl RatedSettlement {
-    // gas_price_normalized is the price of gas normalized to the found price vector.
     pub fn objective_value(&self) -> BigRational {
         let gas_estimate = self.gas_estimate.to_big_rational();
         Self::compute_objective_value(&self.surplus, &gas_estimate, &self.gas_price)
