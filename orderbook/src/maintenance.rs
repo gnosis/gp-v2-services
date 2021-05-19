@@ -26,12 +26,17 @@ impl ServiceMaintenance {
 #[async_trait::async_trait]
 impl Maintaining for ServiceMaintenance {
     async fn run_maintenance(&self) -> Result<()> {
-        join_all(vec![
+        for result in join_all(vec![
             self.storage.run_maintenance(),
             self.event_updater.run_maintenance(),
             self.database.run_maintenance(),
         ])
-        .await;
+        .await
+        {
+            if let Err(err) = result {
+                tracing::error!("maintenance failed with: {}", err);
+            }
+        }
         Ok(())
     }
 }
