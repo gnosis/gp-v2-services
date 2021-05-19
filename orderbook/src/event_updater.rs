@@ -1,26 +1,10 @@
-use crate::database::{
-    Database, Event as DbEvent, EventIndex as DbEventIndex, Invalidation as DbInvalidation,
-    Settlement as DbSettlement, Trade as DbTrade,
-};
-use anyhow::{anyhow, Context, Result};
-use contracts::{
-    g_pv_2_settlement::{
-        event_data::{
-            OrderInvalidated as ContractInvalidation, Settlement as ContractSettlement,
-            Trade as ContractTrade,
-        },
-        Event as ContractEvent,
-    },
-    GPv2Settlement,
-};
+use crate::database::Database;
+use anyhow::{Context, Result};
+use contracts::{g_pv_2_settlement::Event as ContractEvent, GPv2Settlement};
 use ethcontract::contract::AllEventsBuilder;
-use ethcontract::{dyns::DynTransport, Event as EthcontractEvent, EventMetadata};
-use model::order::OrderUid;
+use ethcontract::{dyns::DynTransport, Event};
 use shared::event_handling::{BlockNumber, EventHandler, EventRetrieving, EventStoring};
-use std::{
-    convert::TryInto,
-    ops::{Deref, DerefMut, RangeInclusive},
-};
+use std::ops::{Deref, DerefMut, RangeInclusive};
 use web3::Web3;
 
 pub struct EventUpdater(EventHandler<GPv2SettlementContract, Database>);
@@ -41,42 +25,33 @@ impl DerefMut for EventUpdater {
 
 #[async_trait::async_trait]
 impl EventStoring<ContractEvent> for Database {
-    async fn save_events(
+    async fn replace_events(
         &self,
-        events: Vec<EthcontractEvent<ContractEvent>>,
-        range: Option<RangeInclusive<BlockNumber>>,
+        events: Vec<Event<ContractEvent>>,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<()> {
-        let db_events = events
-            .into_iter()
-            .filter_map(|EthcontractEvent { data, meta }| {
-                let meta = match meta {
-                    Some(meta) => meta,
-                    None => return Some(Err(anyhow!("event without metadata"))),
-                };
-                match data {
-                    ContractEvent::Trade(event) => Some(convert_trade(&event, &meta)),
-                    ContractEvent::Settlement(event) => Some(Ok(convert_settlement(&event, &meta))),
-                    ContractEvent::OrderInvalidated(event) => {
-                        Some(convert_invalidation(&event, &meta))
-                    }
-                    // TODO: handle new events
-                    ContractEvent::Interaction(_) => None,
-                    ContractEvent::PreSignature(_) => None,
-                }
-            })
-            .collect::<Result<Vec<_>>>()
+        let db_events = self
+            .contract_to_db_events(events)
             .context("failed to get event")?;
-        // This is the event saving for Trades.
+        tracing::debug!(
+            "replacing {} events from block number {}",
+            db_events.len(),
+            range.start().to_u64()
+        );
+        self.replace_events(range.start().to_u64(), db_events)
+            .await
+            .context("failed to replace trades")?;
+        Ok(())
+    }
+
+    async fn append_events(&self, events: Vec<Event<ContractEvent>>) -> Result<()> {
+        let db_events = self
+            .contract_to_db_events(events)
+            .context("failed to get event")?;
         tracing::debug!("inserting {} new events", db_events.len());
-        if let Some(range) = range {
-            self.replace_events(range.start().to_u64(), db_events)
-                .await
-                .context("failed to replace trades")?;
-        } else {
-            self.insert_events(db_events)
-                .await
-                .context("failed to insert trades")?;
-        }
+        self.insert_events(db_events)
+            .await
+            .context("failed to insert trades")?;
         Ok(())
     }
 
@@ -105,56 +80,5 @@ impl EventUpdater {
             db,
             start_sync_at_block,
         ))
-    }
-}
-
-fn convert_trade(trade: &ContractTrade, meta: &EventMetadata) -> Result<(DbEventIndex, DbEvent)> {
-    let order_uid = OrderUid(
-        trade
-            .order_uid
-            .as_slice()
-            .try_into()
-            .context("trade event order_uid has wrong number of bytes")?,
-    );
-    let event = DbTrade {
-        order_uid,
-        sell_amount_including_fee: trade.sell_amount,
-        buy_amount: trade.buy_amount,
-        fee_amount: trade.fee_amount,
-    };
-    Ok((event_meta_to_index(meta), DbEvent::Trade(event)))
-}
-
-fn convert_settlement(
-    settlement: &ContractSettlement,
-    meta: &EventMetadata,
-) -> (DbEventIndex, DbEvent) {
-    let event = DbSettlement {
-        solver: settlement.solver,
-        transaction_hash: meta.transaction_hash,
-    };
-    (event_meta_to_index(meta), DbEvent::Settlement(event))
-}
-
-fn convert_invalidation(
-    invalidation: &ContractInvalidation,
-    meta: &EventMetadata,
-) -> Result<(DbEventIndex, DbEvent)> {
-    let order_uid = OrderUid(
-        invalidation
-            .order_uid
-            .as_slice()
-            .try_into()
-            .context("invalidation event order_uid has wrong number of bytes")?,
-    );
-    let event = DbInvalidation { order_uid };
-    Ok((event_meta_to_index(meta), DbEvent::Invalidation(event)))
-}
-
-// Converts EventMetaData to DbEventIndex struct
-fn event_meta_to_index(meta: &EventMetadata) -> DbEventIndex {
-    DbEventIndex {
-        block_number: meta.block_number,
-        log_index: meta.log_index as u64,
     }
 }

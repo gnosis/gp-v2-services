@@ -8,8 +8,7 @@ use web3::Web3;
 
 // We expect that there is never a reorg that changes more than the last n blocks.
 const MAX_REORG_BLOCK_COUNT: u64 = 25;
-// When we insert new trade events into the database we will insert at most this many in one
-// transaction.
+// Saving events, we process at most this many at a time.
 const INSERT_EVENT_BATCH_SIZE: usize = 10_000;
 
 pub struct EventHandler<C: EventRetrieving, S: EventStoring<C::Event>> {
@@ -29,13 +28,19 @@ pub trait EventStoring<T> {
     /// Returns ok, on successful execution, otherwise an appropriate error
     ///
     /// # Arguments
-    /// * `events` the contract events to be saved by the implementer
-    /// * `range` optionally indicates a particular range of blocks on which to operate.
-    async fn save_events(
+    /// * `events` the contract events to be replaced by the implementer
+    /// * `range` indicates a particular range of blocks on which to operate.
+    async fn replace_events(
         &self,
         events: Vec<EthcontractEvent<T>>,
-        range: Option<RangeInclusive<BlockNumber>>,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<()>;
+
+    /// Returns ok, on successful execution, otherwise an appropriate error
+    ///
+    /// # Arguments
+    /// * `events` the contract events to be appended by the implementer
+    async fn append_events(&self, events: Vec<EthcontractEvent<T>>) -> Result<()>;
 
     async fn last_event_block(&self) -> Result<u64>;
 }
@@ -119,18 +124,15 @@ where
         // in one transaction.
         let mut have_deleted_old_events = false;
         while let Some(events_chunk) = events.next().await {
-            let replace_events_range = if !have_deleted_old_events {
+            let unwrapped_events = events_chunk.context("Failed to get next chunk of events")?;
+            if !have_deleted_old_events {
+                self.store
+                    .replace_events(unwrapped_events, range.clone())
+                    .await?;
                 have_deleted_old_events = true;
-                Some(range.clone())
             } else {
-                None
+                self.store.append_events(unwrapped_events).await?;
             };
-            self.store
-                .save_events(
-                    events_chunk.context("Failed to get next chunk of events")?,
-                    replace_events_range,
-                )
-                .await?;
         }
         self.last_handled_block = Some(range.end().to_u64());
         Ok(())
