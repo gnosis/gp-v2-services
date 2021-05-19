@@ -4,6 +4,7 @@ use prometheus::Registry;
 use reqwest::Url;
 use shared::{
     amm_pair_provider::{SushiswapPairProvider, UniswapPairProvider},
+    bad_token::list_based::ListBasedDetector,
     metrics::serve_metrics,
     network::network_name,
     pool_aggregating::{self, BaselineSources, PoolAggregator},
@@ -195,7 +196,7 @@ async fn main() {
         Box::new(pool_aggregator),
         gas_price_estimator.clone(),
         base_tokens.clone(),
-        args.shared.unsupported_tokens.into_iter().collect(),
+        Arc::new(ListBasedDetector::deny_list(args.shared.unsupported_tokens)),
         native_token_contract.address(),
     ));
     let uniswap_like_liquidity = build_amm_artifacts(
