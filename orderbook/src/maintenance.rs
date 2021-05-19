@@ -6,6 +6,7 @@ use futures::try_join;
 use shared::current_block::Maintaining;
 use std::sync::Arc;
 
+/// Collects all service components requiring maintenance on each new block
 pub struct ServiceMaintenance {
     storage: Arc<Orderbook>,
     database: Database,
@@ -29,6 +30,8 @@ impl Maintaining for ServiceMaintenance {
             self.storage.run_maintenance(),
             self.event_updater.run_maintenance()
         )?;
+        // event_updater and database both potentially write to
+        // the database, so should not be run in parallel.
         self.database.run_maintenance().await
     }
 }
