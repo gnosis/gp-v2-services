@@ -45,7 +45,6 @@ pub enum OrderCancellationResult {
 pub struct Orderbook {
     domain_separator: DomainSeparator,
     database: Database,
-    // event_updater: Mutex<EventUpdater>,
     balance_fetcher: Box<dyn BalanceFetching>,
     fee_validator: Arc<EthAwareMinFeeCalculator>,
     unsupported_tokens: HashSet<H160>,
@@ -56,7 +55,6 @@ impl Orderbook {
     pub fn new(
         domain_separator: DomainSeparator,
         database: Database,
-        // event_updater: EventUpdater,
         balance_fetcher: Box<dyn BalanceFetching>,
         fee_validator: Arc<EthAwareMinFeeCalculator>,
         unsupported_tokens: HashSet<H160>,
@@ -65,7 +63,6 @@ impl Orderbook {
         Self {
             domain_separator,
             database,
-            // event_updater: Mutex::new(event_updater),
             balance_fetcher,
             fee_validator,
             unsupported_tokens,
