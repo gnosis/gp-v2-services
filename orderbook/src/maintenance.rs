@@ -2,7 +2,7 @@ use crate::database::Database;
 use crate::event_updater::EventUpdater;
 use crate::orderbook::Orderbook;
 use anyhow::Result;
-use futures::try_join;
+use futures::future::join_all;
 use shared::current_block::Maintaining;
 use std::sync::Arc;
 
@@ -26,12 +26,12 @@ impl ServiceMaintenance {
 #[async_trait::async_trait]
 impl Maintaining for ServiceMaintenance {
     async fn run_maintenance(&self) -> Result<()> {
-        try_join!(
+        join_all(vec![
             self.storage.run_maintenance(),
-            self.event_updater.run_maintenance()
-        )?;
-        // event_updater and database both potentially write to
-        // the database, so should not be run in parallel.
-        self.database.run_maintenance().await
+            self.event_updater.run_maintenance(),
+            self.database.run_maintenance(),
+        ])
+        .await;
+        Ok(())
     }
 }
