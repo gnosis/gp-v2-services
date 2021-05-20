@@ -34,7 +34,7 @@ impl Maintaining for ServiceMaintenance {
         .await
         {
             if let Err(err) = result {
-                tracing::error!("maintenance failed with: {}", err);
+                tracing::error!("failed with: {}", err);
             }
         }
         Ok(())

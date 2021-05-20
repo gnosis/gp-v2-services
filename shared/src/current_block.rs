@@ -116,7 +116,9 @@ impl CurrentBlockStream {
                 block.number,
                 block.hash
             );
-            maintainer.run_maintenance().await.unwrap();
+            if let Err(err) = maintainer.run_maintenance().await {
+                tracing::error!(?err, "maintenance error");
+            }
         }
         unreachable!()
     }
