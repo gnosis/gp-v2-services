@@ -128,6 +128,15 @@ struct Arguments {
         default_value = "https://tokens.coingecko.com/uniswap/all.json"
     )]
     market_makable_token_list: String,
+
+    /// The maximum gas price the solver is willing to pay in a settlement
+    #[structopt(
+        long,
+        env = "GAS_PRICE_CAP_GWEI",
+        default_value = "1500",
+        parse(try_from_str = shared::arguments::wei_from_gwei)
+    )]
+    gas_price_cap: f64,
 }
 
 #[tokio::main]
@@ -245,6 +254,7 @@ async fn main() {
         network_id,
         args.max_merged_settlements,
         args.solver_time_limit,
+        args.gas_price_cap,
         market_makable_token_list,
     );
 
