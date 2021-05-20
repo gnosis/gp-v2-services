@@ -267,8 +267,11 @@ impl Driver {
     ) -> Vec<RatedSettlement> {
         use futures::stream::StreamExt;
 
-        let gas_price_wei = BigRational::from_float(gas_price_wei).unwrap()
-            * prices.get(&self.native_token).unwrap();
+        // Normalize gas_price_wei to the native token price in the prices vector.
+        let gas_price_wei = BigRational::from_float(gas_price_wei).expect("Invalid gas price.")
+            * prices
+                .get(&self.native_token)
+                .expect("Price of native token must be known.");
 
         futures::stream::iter(settlements)
             .filter_map(|settlement| async {
@@ -287,7 +290,7 @@ impl Driver {
                     gas_price: gas_price_wei.clone(),
                 };
                 tracing::info!(
-                    "Objective value for solver {} is {}: surplus={}, gas_estimate={}, gas_price_normalized={}",
+                    "Objective value for solver {} is {}: surplus={}, gas_estimate={}, gas_price={}",
                     solver_name,
                     rated_settlement.objective_value(),
                     rated_settlement.surplus,
@@ -314,6 +317,8 @@ impl Driver {
         let estimated_prices =
             collect_estimated_prices(self.price_estimator.as_ref(), self.native_token, &liquidity)
                 .await;
+        tracing::debug!("estimated prices: {:?}", estimated_prices);
+
         let liquidity = liquidity_with_price(liquidity, &estimated_prices);
         self.metrics.liquidity_fetched(&liquidity);
 
@@ -382,6 +387,7 @@ impl Driver {
                 settlement = settlement.without_onchain_liquidity();
                 tracing::info!("settlement without onchain liquidity");
             }
+            tracing::debug!("winning settlement: {:?}", settlement);
             self.submit_settlement(settlement).await;
         }
 
