@@ -562,4 +562,53 @@ mod tests {
             vec![]
         );
     }
+
+    #[tokio::test]
+    async fn caching_pool_fetcher_invalidates_if_latest_block_reorgs() {
+        let token_a = H160::from_low_u64_be(1);
+        let token_b = H160::from_low_u64_be(2);
+        let pair = TokenPair::new(token_a, token_b).unwrap();
+
+        let pools = Arc::new(Mutex::new(vec![Pool::uniswap(pair, (1, 1))]));
+
+        let starting_block = CurrentBlock {
+            hash: Some(H256::from_low_u64_be(0)),
+            number: Some(0.into()),
+            ..Default::default()
+        };
+
+        let current_block = Arc::new(std::sync::Mutex::new(starting_block.clone()));
+
+        let (_, receiver) = watch::channel::<CurrentBlock>(Default::default());
+        let block_stream = CurrentBlockStream::new(receiver, current_block.clone());
+
+        let inner = Box::new(FakePoolFetcher(pools.clone()));
+        let instance = CachedPoolFetcher::new(inner, block_stream);
+
+        // Read Through
+        assert_eq!(
+            instance.fetch(hashset!(pair), BlockNumber::Latest).await,
+            vec![Pool::uniswap(pair, (1, 1))]
+        );
+
+        // simulate reorg on latest block
+        *current_block.lock().unwrap() = CurrentBlock {
+            hash: Some(H256::from_low_u64_be(1)),
+            number: starting_block.number,
+            ..Default::default()
+        };
+
+        // clear inner, to test we are not using cache
+        pools.lock().await.clear();
+        assert_eq!(
+            instance
+                .fetch(hashset!(pair), BlockNumber::Number(0.into()))
+                .await,
+            vec![]
+        );
+        assert_eq!(
+            instance.fetch(hashset!(pair), BlockNumber::Latest).await,
+            vec![]
+        );
+    }
 }
