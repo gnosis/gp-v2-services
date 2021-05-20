@@ -55,14 +55,13 @@ fn main() {
         },
     );
     generate_contract("SushiswapV2Pair", hashmap! {});
-    generate_contract_with_config(
+    generate_contract(
         "GPv2Settlement",
         hashmap! {
             1 => (Address::from_str("0x3328f5f2cEcAF00a2443082B657CedEAf70bfAEf").unwrap(), Some("0x34b7f9a340e663df934fcc662b3ec5fcd7cd0c93d3c46f8ce612e94fff803909".parse().unwrap())),
             4 => (Address::from_str("0x3328f5f2cEcAF00a2443082B657CedEAf70bfAEf").unwrap(), Some("0x52badda922fd91052e6682d125daa59dea3ce5c57add5a9d362bec2d6ccfd2b1".parse().unwrap())),
             100 => (Address::from_str("0x3328f5f2cEcAF00a2443082B657CedEAf70bfAEf").unwrap(), Some("0x95bbefbca7162435eeb71bac6960aae4d7112abce87a51ad3952d7b7af0279e3".parse().unwrap())),
         },
-        |builder| builder.with_contract_mod_override(Some("gpv2_settlement")),
     );
     generate_contract("GPv2AllowListAuthentication", hashmap! {});
     generate_contract(
@@ -77,14 +76,6 @@ fn main() {
 fn generate_contract(
     name: &str,
     deployment_overrides: HashMap<u32, (Address, Option<TransactionHash>)>,
-) {
-    generate_contract_with_config(name, deployment_overrides, |builder| builder)
-}
-
-fn generate_contract_with_config(
-    name: &str,
-    deployment_overrides: HashMap<u32, (Address, Option<TransactionHash>)>,
-    config: impl FnOnce(Builder) -> Builder,
 ) {
     let artifact = paths::contract_artifacts_dir().join(format!("{}.json", name));
     let address_file = paths::contract_address_file(name);
@@ -110,7 +101,7 @@ fn generate_contract_with_config(
         );
     }
 
-    config(builder)
+    builder
         .generate()
         .unwrap()
         .write_to_file(Path::new(&dest).join(format!("{}.rs", name)))
