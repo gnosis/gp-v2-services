@@ -135,7 +135,7 @@ impl Stream for CurrentBlockStream {
 }
 
 #[async_trait::async_trait]
-pub trait Maintaining {
+pub trait Maintaining: Send + Sync {
     async fn run_maintenance(&self) -> Result<()>;
 }
 

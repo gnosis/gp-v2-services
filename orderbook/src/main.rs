@@ -1,6 +1,5 @@
 use contracts::{GPv2Settlement, WETH9};
 use model::{order::OrderUid, DomainSeparator};
-use orderbook::maintenance::ServiceMaintenance;
 use orderbook::{
     account_balances::Web3BalanceFetcher,
     database::{Database, OrderFilter},
@@ -13,6 +12,7 @@ use orderbook::{
 use prometheus::Registry;
 use shared::{
     current_block::current_block_stream,
+    maintenance::ServiceMaintenance,
     pool_aggregating::{self, PoolAggregator},
     pool_fetching::{CachedPoolFetcher, FilteredPoolFetcher},
     price_estimate::BaselinePriceEstimator,
@@ -184,8 +184,13 @@ async fn main() {
         unsupported_tokens,
         args.min_order_validity_period,
     ));
-    let service_maintainer =
-        ServiceMaintenance::new(orderbook.clone(), database.clone(), event_updater);
+    let service_maintainer = ServiceMaintenance {
+        maintainers: vec![
+            orderbook.clone(),
+            Arc::new(database.clone()),
+            Arc::new(event_updater),
+        ],
+    };
     check_database_connection(orderbook.as_ref()).await;
 
     let registry = Registry::default();

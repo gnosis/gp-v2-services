@@ -4,7 +4,6 @@ use ethcontract::{
     H160,
 };
 use model::DomainSeparator;
-use orderbook::maintenance::ServiceMaintenance;
 use orderbook::{
     account_balances::Web3BalanceFetcher, database::Database, event_updater::EventUpdater,
     fee::EthAwareMinFeeCalculator, metrics::Metrics, orderbook::Orderbook,
@@ -13,6 +12,7 @@ use prometheus::Registry;
 use shared::{
     amm_pair_provider::UniswapPairProvider,
     current_block::current_block_stream,
+    maintenance::ServiceMaintenance,
     pool_fetching::{CachedPoolFetcher, PoolFetcher},
     price_estimate::BaselinePriceEstimator,
     Web3,
@@ -122,7 +122,7 @@ impl OrderbookServices {
             .as_u64();
         let db = Database::new("postgresql://").unwrap();
         db.clear().await.unwrap();
-        let event_updater = EventUpdater::new(gpv2.settlement.clone(), db.clone(), None);
+        let event_updater = Arc::new(EventUpdater::new(gpv2.settlement.clone(), db.clone(), None));
         let current_block_stream = current_block_stream(web3.clone()).await.unwrap();
         let pair_provider = Arc::new(UniswapPairProvider {
             factory: uniswap_factory.clone(),
@@ -164,7 +164,9 @@ impl OrderbookServices {
             HashSet::new(),
             Duration::from_secs(120),
         ));
-        let maintenance = ServiceMaintenance::new(orderbook.clone(), db.clone(), event_updater);
+        let maintenance = ServiceMaintenance {
+            maintainers: vec![orderbook.clone(), Arc::new(db.clone()), event_updater],
+        };
         let registry = Registry::default();
         let metrics = Arc::new(Metrics::new(&registry).unwrap());
         orderbook::serve_task(
