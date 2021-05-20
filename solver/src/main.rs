@@ -1,14 +1,15 @@
 use contracts::{IUniswapLikeRouter, WETH9};
-use ethcontract::{Account, PrivateKey, H160};
+use ethcontract::{Account, PrivateKey, H160, U256};
 use prometheus::Registry;
 use reqwest::Url;
 use shared::{
     amm_pair_provider::{SushiswapPairProvider, UniswapPairProvider},
     metrics::serve_metrics,
     network::network_name,
-    pool_aggregating::{BaselineSources, PoolAggregator},
+    pool_aggregating::{self, BaselineSources, PoolAggregator},
     price_estimate::BaselinePriceEstimator,
     token_info::{CachedTokenInfoFetcher, TokenInfoFetcher},
+    token_list::TokenList,
     transport::LoggingTransport,
 };
 use solver::{
@@ -98,6 +99,34 @@ struct Arguments {
     /// The port at which we serve our metrics
     #[structopt(long, env = "MAX_MERGED_SETTLEMENTS", default_value = "5")]
     max_merged_settlements: usize,
+
+    /// The maximum amount of time a solver is allowed to take.
+    #[structopt(
+        long,
+        env = "SOLVER_TIME_LIMIT",
+        default_value = "30",
+        parse(try_from_str = shared::arguments::duration_from_seconds),
+    )]
+    solver_time_limit: Duration,
+
+    /// The minimum amount of sell volume (in ETH) that needs to be
+    /// traded in order to use the 1Inch solver.
+    #[structopt(
+        long,
+        env = "MIN_ORDER_SIZE_ONE_INCH",
+        default_value = "5",
+        parse(try_from_str = shared::arguments::wei_from_base_unit)
+    )]
+    min_order_size_one_inch: U256,
+
+    /// The list of tokens our settlement contract is willing to buy when settling trades
+    /// without external liquidity
+    #[structopt(
+        long,
+        env = "MARKET_MAKEABLE_TOKEN_LIST",
+        default_value = "https://tokens.coingecko.com/uniswap/all.json"
+    )]
+    market_makable_token_list: String,
 }
 
 #[tokio::main]
@@ -146,22 +175,28 @@ async fn main() {
     let token_info_fetcher = Arc::new(CachedTokenInfoFetcher::new(Box::new(TokenInfoFetcher {
         web3: web3.clone(),
     })));
-    let gas_price_estimator = shared::gas_price_estimation::create_priority_estimator(
-        &reqwest::Client::new(),
-        &web3,
-        args.shared.gas_estimators.as_slice(),
-    )
-    .await
-    .expect("failed to create gas price estimator");
+    let gas_price_estimator = Arc::new(
+        shared::gas_price_estimation::create_priority_estimator(
+            &reqwest::Client::new(),
+            &web3,
+            args.shared.gas_estimators.as_slice(),
+        )
+        .await
+        .expect("failed to create gas price estimator"),
+    );
 
-    let pool_aggregator =
-        PoolAggregator::from_sources(args.shared.baseline_sources.clone(), chain_id, web3.clone())
-            .await;
+    let pair_providers =
+        pool_aggregating::pair_providers(&args.shared.baseline_sources, chain_id, &web3).await;
+
+    let pool_aggregator = PoolAggregator::from_providers(&pair_providers, &web3).await;
+
     // TODO - use Filtered-Cached PoolFetchers here too.
     let price_estimator = Arc::new(BaselinePriceEstimator::new(
         Box::new(pool_aggregator),
+        gas_price_estimator.clone(),
         base_tokens.clone(),
         args.shared.unsupported_tokens.into_iter().collect(),
+        native_token_contract.address(),
     ));
     let uniswap_like_liquidity = build_amm_artifacts(
         args.shared.baseline_sources,
@@ -182,18 +217,24 @@ async fn main() {
         network_name.to_string(),
         chain_id,
         args.shared.fee_discount_factor,
+        args.solver_time_limit,
+        args.min_order_size_one_inch,
     )
     .expect("failure creating solvers");
     let liquidity_collector = LiquidityCollector {
         uniswap_like_liquidity,
         orderbook_api,
     };
+    let market_makable_token_list = TokenList::from_url(&args.market_makable_token_list, chain_id)
+        .await
+        .map_err(|err| tracing::error!("Couldn't fetch market makable token list: {}", err))
+        .ok();
     let mut driver = Driver::new(
         settlement_contract,
         liquidity_collector,
         price_estimator,
         solver,
-        Box::new(gas_price_estimator),
+        gas_price_estimator,
         args.target_confirm_time,
         args.settle_interval,
         native_token_contract.address(),
@@ -202,6 +243,8 @@ async fn main() {
         web3,
         network_id,
         args.max_merged_settlements,
+        args.solver_time_limit,
+        market_makable_token_list,
     );
 
     serve_metrics(registry, ([0, 0, 0, 0], args.metrics_port).into());

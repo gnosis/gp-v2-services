@@ -3,7 +3,7 @@ use crate::{
 };
 use crate::{
     database::{Database, InsertionError},
-    fee::MinFeeCalculator,
+    fee::{EthAwareMinFeeCalculator, MinFeeCalculating},
 };
 use anyhow::Result;
 use chrono::Utc;
@@ -50,7 +50,7 @@ pub struct Orderbook {
     database: Database,
     event_updater: Mutex<EventUpdater>,
     balance_fetcher: Box<dyn BalanceFetching>,
-    fee_validator: Arc<MinFeeCalculator>,
+    fee_validator: Arc<EthAwareMinFeeCalculator>,
     unsupported_tokens: HashSet<H160>,
     min_order_validity_period: Duration,
 }
@@ -61,7 +61,7 @@ impl Orderbook {
         database: Database,
         event_updater: EventUpdater,
         balance_fetcher: Box<dyn BalanceFetching>,
-        fee_validator: Arc<MinFeeCalculator>,
+        fee_validator: Arc<EthAwareMinFeeCalculator>,
         unsupported_tokens: HashSet<H160>,
         min_order_validity_period: Duration,
     ) -> Self {
@@ -89,19 +89,9 @@ impl Orderbook {
         {
             return Ok(AddOrderResult::InsufficientValidTo);
         }
-        let amount = match order.kind {
-            model::order::OrderKind::Buy => order.buy_amount,
-            model::order::OrderKind::Sell => order.sell_amount,
-        };
         if !self
             .fee_validator
-            .is_valid_fee(
-                order.sell_token,
-                order.buy_token,
-                amount,
-                order.kind,
-                order.fee_amount,
-            )
+            .is_valid_fee(order.sell_token, order.fee_amount)
             .await
         {
             return Ok(AddOrderResult::InsufficientFee);
@@ -126,6 +116,7 @@ impl Orderbook {
                 min_balance,
             )
             .await
+            .unwrap_or(false)
         {
             return Ok(AddOrderResult::InsufficientFunds);
         }

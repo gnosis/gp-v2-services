@@ -53,6 +53,7 @@ paths:
         By default all currently valid orders are returned. The set of returned orders can be
         reduced by setting owner, sell token, buy token filters. It can be increased by disabling
         different order validity exclusion criteria.
+        At least one of owner, sellToken, buyToken has to be set.
       parameters:
         - name: owner
           in: query
@@ -156,12 +157,32 @@ paths:
           description: Invalid signature
         404:
           description: Order was not found
+  /api/v1/tokens/{sellToken}/fee:
+    get:
+      description: |
+        The fee that is charged for placing an order.
+        The fee is described by a minimum fee - in order to cover the gas costs for onchain settling - and
+        a feeRatio charged to the users for using the service.
+      parameters:
+        - name: sellToken
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/Address"
+      responses:
+        200:
+          description: the fee
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegacyFeeInformation"
+        404:
+          description: sellToken non-existent
   /api/v1/trades:
     get:
       summary: Get existing Trades.
       description: |
-        By default all trades are returned.
-        Queries can be refined by specifiying owner or order_uid.
+        Exactly one of owner or order_uid has to be set.
       parameters:
         - name: owner
           in: query
@@ -312,6 +333,29 @@ components:
       required:
         - expirationDate
         - amount
+    LegacyFeeInformation:
+      description: |
+        Provides the information to calculate the fees.
+      type: object
+      properties:
+        expirationDate:
+          description: |
+            Expiration date of the offered fee. Order service might not accept
+            the fee after this expiration date. Encoded as ISO 8601 UTC.
+          type: string
+          example: "2020-12-03T18:35:18.814523Z"
+        minimalFee:
+          description: Absolute amount of minimal fee charged per order in specified sellToken
+          $ref: "#/components/schemas/TokenAmount"
+        feeRatio:
+          description: The fee ratio charged on a sellAmount. Denoted in basis points
+          example: 10
+          type: number
+          format: int32
+      required:
+        - expirationDate
+        - minimalFee
+        - feeRatio
     OrderType:
       description: Is this a buy order or sell order?
       type: string

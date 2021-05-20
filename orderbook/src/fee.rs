@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
-use model::order::OrderKind;
+use model::order::{OrderKind, BUY_ETH_ADDRESS};
 use primitive_types::{H160, U256};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
@@ -13,14 +13,40 @@ use shared::price_estimate::PriceEstimating;
 
 type Measurement = (U256, DateTime<Utc>);
 
+pub type EthAwareMinFeeCalculator = EthAdapter<MinFeeCalculator>;
+
+pub struct EthAdapter<T> {
+    calculator: T,
+    weth: H160,
+}
+
 pub struct MinFeeCalculator {
     price_estimator: Arc<dyn PriceEstimating>,
-    gas_estimator: Box<dyn GasPriceEstimating>,
+    gas_estimator: Arc<dyn GasPriceEstimating>,
     native_token: H160,
     measurements: Box<dyn MinFeeStoring>,
     now: Box<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     discount_factor: f64,
     unsupported_tokens: HashSet<H160>,
+}
+
+#[cfg_attr(test, mockall::automock)]
+#[async_trait::async_trait]
+pub trait MinFeeCalculating {
+    // Returns the minimum amount of fee required to accept an order selling the specified order
+    // and an expiry date for the estimate.
+    // Returns an error if there is some estimation error and Ok(None) if no information about the given
+    // token exists
+    async fn min_fee(
+        &self,
+        sell_token: H160,
+        buy_token: Option<H160>,
+        amount: Option<U256>,
+        kind: Option<OrderKind>,
+    ) -> Result<Measurement, MinFeeCalculationError>;
+
+    // Returns true if the fee satisfies a previous not yet expired estimate, or the fee is high enough given the current estimate.
+    async fn is_valid_fee(&self, sell_token: H160, fee: U256) -> bool;
 }
 
 #[async_trait::async_trait]
@@ -29,9 +55,9 @@ pub trait MinFeeStoring: Send + Sync {
     async fn save_fee_measurement(
         &self,
         sell_token: H160,
-        buy_token: H160,
-        amount: U256,
-        kind: OrderKind,
+        buy_token: Option<H160>,
+        amount: Option<U256>,
+        kind: Option<OrderKind>,
         expiry: DateTime<Utc>,
         min_fee: U256,
     ) -> Result<()>;
@@ -41,12 +67,14 @@ pub trait MinFeeStoring: Send + Sync {
     async fn get_min_fee(
         &self,
         sell_token: H160,
-        buy_token: H160,
-        amount: U256,
-        kind: OrderKind,
+        buy_token: Option<H160>,
+        amount: Option<U256>,
+        kind: Option<OrderKind>,
         min_expiry: DateTime<Utc>,
     ) -> Result<Option<U256>>;
 }
+
+const GAS_PER_ORDER: f64 = 100_000.0;
 
 // We use a longer validity internally for persistence to avoid writing a value to storage on every request
 // This way we can serve a previous estimate if the same token is queried again shortly after
@@ -67,10 +95,68 @@ pub enum MinFeeCalculationError {
     Other(#[from] anyhow::Error),
 }
 
-impl MinFeeCalculator {
+fn normalize_buy_token(buy_token: H160, weth: H160) -> H160 {
+    if buy_token == BUY_ETH_ADDRESS {
+        weth
+    } else {
+        buy_token
+    }
+}
+
+impl EthAwareMinFeeCalculator {
     pub fn new(
         price_estimator: Arc<dyn PriceEstimating>,
-        gas_estimator: Box<dyn GasPriceEstimating>,
+        gas_estimator: Arc<dyn GasPriceEstimating>,
+        native_token: H160,
+        database: Database,
+        discount_factor: f64,
+        unsupported_tokens: HashSet<H160>,
+    ) -> Self {
+        Self {
+            calculator: MinFeeCalculator::new(
+                price_estimator,
+                gas_estimator,
+                native_token,
+                database,
+                discount_factor,
+                unsupported_tokens,
+            ),
+            weth: native_token,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl<T> MinFeeCalculating for EthAdapter<T>
+where
+    T: MinFeeCalculating + Send + Sync,
+{
+    async fn min_fee(
+        &self,
+        sell_token: H160,
+        buy_token: Option<H160>,
+        amount: Option<U256>,
+        kind: Option<OrderKind>,
+    ) -> Result<Measurement, MinFeeCalculationError> {
+        self.calculator
+            .min_fee(
+                sell_token,
+                buy_token.map(|token| normalize_buy_token(token, self.weth)),
+                amount,
+                kind,
+            )
+            .await
+    }
+
+    async fn is_valid_fee(&self, sell_token: H160, fee: U256) -> bool {
+        self.calculator.is_valid_fee(sell_token, fee).await
+    }
+}
+
+impl MinFeeCalculator {
+    fn new(
+        price_estimator: Arc<dyn PriceEstimating>,
+        gas_estimator: Arc<dyn GasPriceEstimating>,
         native_token: H160,
         database: Database,
         discount_factor: f64,
@@ -87,22 +173,77 @@ impl MinFeeCalculator {
         }
     }
 
+    async fn compute_min_fee(
+        &self,
+        sell_token: H160,
+        buy_token: Option<H160>,
+        amount: Option<U256>,
+        kind: Option<OrderKind>,
+    ) -> Result<Option<U256>> {
+        let gas_price = self.gas_estimator.estimate().await?;
+        let gas_amount =
+            if let (Some(buy_token), Some(amount), Some(kind)) = (buy_token, amount, kind) {
+                // We only apply the discount to the more sophisticated fee estimation, as the legacy one is already very favorable to the user in most cases
+                match self
+                    .price_estimator
+                    .estimate_gas(sell_token, buy_token, amount, kind)
+                    .await
+                {
+                    Ok(amount) => amount.to_f64_lossy() * self.discount_factor,
+                    Err(err) => {
+                        tracing::warn!("Failed to estimate gas amount: {}", err);
+                        return Ok(None);
+                    }
+                }
+            } else {
+                GAS_PER_ORDER
+            };
+        let fee_in_eth = gas_price * gas_amount;
+        let token_price = match self
+            .price_estimator
+            .estimate_price_as_f64(
+                sell_token,
+                self.native_token,
+                U256::from_f64_lossy(fee_in_eth),
+                model::order::OrderKind::Buy,
+            )
+            .await
+        {
+            Ok(price) => price,
+            Err(err) => {
+                tracing::warn!("Failed to estimate sell token price: {}", err);
+                return Ok(None);
+            }
+        };
+
+        Ok(Some(U256::from_f64_lossy(fee_in_eth * token_price)))
+    }
+}
+
+#[async_trait::async_trait]
+impl MinFeeCalculating for MinFeeCalculator {
     // Returns the minimum amount of fee required to accept an order selling the specified order
     // and an expiry date for the estimate.
     // Returns an error if there is some estimation error and Ok(None) if no information about the given
     // token exists
-    pub async fn min_fee(
+    async fn min_fee(
         &self,
         sell_token: H160,
-        buy_token: H160,
-        amount: U256,
-        kind: OrderKind,
+        buy_token: Option<H160>,
+        amount: Option<U256>,
+        kind: Option<OrderKind>,
     ) -> Result<Measurement, MinFeeCalculationError> {
         if self.unsupported_tokens.contains(&sell_token) {
             return Err(MinFeeCalculationError::UnsupportedToken(sell_token));
         }
-        if self.unsupported_tokens.contains(&buy_token) {
-            return Err(MinFeeCalculationError::UnsupportedToken(buy_token));
+
+        if buy_token
+            .map(|t| self.unsupported_tokens.contains(&t))
+            .unwrap_or_default()
+        {
+            return Err(MinFeeCalculationError::UnsupportedToken(
+                buy_token.expect("Must exist"),
+            ));
         }
 
         let now = (self.now)();
@@ -139,68 +280,18 @@ impl MinFeeCalculator {
         Ok((min_fee, official_valid_until))
     }
 
-    async fn compute_min_fee(
-        &self,
-        sell_token: H160,
-        buy_token: H160,
-        amount: U256,
-        kind: OrderKind,
-    ) -> Result<Option<U256>> {
-        let gas_price = self.gas_estimator.estimate().await?;
-        let gas_amount = match self
-            .price_estimator
-            .estimate_gas(sell_token, buy_token, amount, kind)
-            .await
-        {
-            Ok(amount) => amount.to_f64_lossy() * self.discount_factor,
-            Err(err) => {
-                tracing::warn!("Failed to estimate gas amount: {}", err);
-                return Ok(None);
-            }
-        };
-        let fee_in_eth = gas_price * gas_amount;
-        let token_price = match self
-            .price_estimator
-            .estimate_price_as_f64(
-                sell_token,
-                self.native_token,
-                U256::from_f64_lossy(fee_in_eth),
-                model::order::OrderKind::Buy,
-            )
-            .await
-        {
-            Ok(price) => price,
-            Err(err) => {
-                tracing::warn!("Failed to estimate sell token price: {}", err);
-                return Ok(None);
-            }
-        };
-
-        Ok(Some(U256::from_f64_lossy(fee_in_eth * token_price)))
-    }
-
     // Returns true if the fee satisfies a previous not yet expired estimate, or the fee is high enough given the current estimate.
-    pub async fn is_valid_fee(
-        &self,
-        sell_token: H160,
-        buy_token: H160,
-        amount: U256,
-        kind: OrderKind,
-        fee: U256,
-    ) -> bool {
+    async fn is_valid_fee(&self, sell_token: H160, fee: U256) -> bool {
         if let Ok(Some(past_fee)) = self
             .measurements
-            .get_min_fee(sell_token, buy_token, amount, kind, (self.now)())
+            .get_min_fee(sell_token, None, None, None, (self.now)())
             .await
         {
             if fee >= past_fee {
                 return true;
             }
         }
-        if let Ok(Some(current_fee)) = self
-            .compute_min_fee(sell_token, buy_token, amount, kind)
-            .await
-        {
+        if let Ok(Some(current_fee)) = self.compute_min_fee(sell_token, None, None, None).await {
             return fee >= current_fee;
         }
         false
@@ -208,9 +299,9 @@ impl MinFeeCalculator {
 }
 
 struct FeeMeasurement {
-    buy_token: H160,
-    amount: U256,
-    kind: OrderKind,
+    buy_token: Option<H160>,
+    amount: Option<U256>,
+    kind: Option<OrderKind>,
     expiry: DateTime<Utc>,
     min_fee: U256,
 }
@@ -222,9 +313,9 @@ impl MinFeeStoring for InMemoryFeeStore {
     async fn save_fee_measurement(
         &self,
         sell_token: H160,
-        buy_token: H160,
-        amount: U256,
-        kind: OrderKind,
+        buy_token: Option<H160>,
+        amount: Option<U256>,
+        kind: Option<OrderKind>,
         expiry: DateTime<Utc>,
         min_fee: U256,
     ) -> Result<()> {
@@ -246,21 +337,21 @@ impl MinFeeStoring for InMemoryFeeStore {
     async fn get_min_fee(
         &self,
         sell_token: H160,
-        buy_token: H160,
-        amount: U256,
-        kind: OrderKind,
+        buy_token: Option<H160>,
+        amount: Option<U256>,
+        kind: Option<OrderKind>,
         min_expiry: DateTime<Utc>,
     ) -> Result<Option<U256>> {
         let mut guard = self.0.lock().expect("Thread holding Mutex panicked");
         let measurements = guard.entry(sell_token).or_default();
         measurements.retain(|measurement| {
-            if buy_token != measurement.buy_token {
+            if buy_token.is_some() && buy_token != measurement.buy_token {
                 return false;
             }
-            if amount != measurement.amount {
+            if amount.is_some() && amount != measurement.amount {
                 return false;
             }
-            if kind != measurement.kind {
+            if kind.is_some() && kind != measurement.kind {
                 return false;
             }
             measurement.expiry >= min_expiry
@@ -275,6 +366,7 @@ impl MinFeeStoring for InMemoryFeeStore {
 #[cfg(test)]
 mod tests {
     use chrono::Duration;
+    use chrono::NaiveDateTime;
     use maplit::hashset;
     use shared::gas_price_estimation::FakeGasPriceEstimator;
     use shared::price_estimate::mocks::FakePriceEstimator;
@@ -282,9 +374,57 @@ mod tests {
 
     use super::*;
 
+    #[tokio::test]
+    async fn eth_aware_min_fees() {
+        let weth = H160([0x42; 20]);
+        let token = H160([0x21; 20]);
+        let mut calculator = MockMinFeeCalculating::default();
+        calculator
+            .expect_min_fee()
+            .withf(move |&sell_token, &buy_token, &amount, &kind| {
+                sell_token == token
+                    && buy_token == Some(weth)
+                    && amount == Some(1337.into())
+                    && kind == Some(OrderKind::Sell)
+            })
+            .times(1)
+            .returning(|_, _, _, _| {
+                Ok((
+                    0.into(),
+                    DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc),
+                ))
+            });
+
+        let eth_aware = EthAdapter { calculator, weth };
+        assert!(eth_aware
+            .min_fee(
+                token,
+                Some(BUY_ETH_ADDRESS),
+                Some(1337.into()),
+                Some(OrderKind::Sell)
+            )
+            .await
+            .is_ok());
+    }
+
+    #[tokio::test]
+    async fn eth_aware_is_valid_fee() {
+        let weth = H160([0x42; 20]);
+        let token = H160([0x21; 20]);
+        let mut calculator = MockMinFeeCalculating::default();
+        calculator
+            .expect_is_valid_fee()
+            .withf(move |&sell_token, &fee| sell_token == token && fee == 42.into())
+            .times(1)
+            .returning(|_, _| true);
+
+        let eth_aware = EthAdapter { calculator, weth };
+        assert!(eth_aware.is_valid_fee(token, 42.into()).await);
+    }
+
     impl MinFeeCalculator {
         fn new_for_test(
-            gas_estimator: Box<dyn GasPriceEstimating>,
+            gas_estimator: Arc<dyn GasPriceEstimating>,
             price_estimator: Arc<dyn PriceEstimating>,
             now: Box<dyn Fn() -> DateTime<Utc> + Send + Sync>,
         ) -> Self {
@@ -305,7 +445,7 @@ mod tests {
         let gas_price = Arc::new(Mutex::new(100.0));
         let time = Arc::new(Mutex::new(Utc::now()));
 
-        let gas_price_estimator = Box::new(FakeGasPriceEstimator(gas_price.clone()));
+        let gas_price_estimator = Arc::new(FakeGasPriceEstimator(gas_price.clone()));
         let price_estimator = Arc::new(FakePriceEstimator(num::one()));
         let time_copy = time.clone();
         let now = move || *time_copy.lock().unwrap();
@@ -313,10 +453,9 @@ mod tests {
         let fee_estimator =
             MinFeeCalculator::new_for_test(gas_price_estimator, price_estimator, Box::new(now));
 
-        let sell_token = H160::from_low_u64_be(1);
-        let buy_token = H160::from_low_u64_be(2);
+        let token = H160::from_low_u64_be(1);
         let (fee, expiry) = fee_estimator
-            .min_fee(sell_token, buy_token, 100.into(), OrderKind::Sell)
+            .min_fee(token, None, None, None)
             .await
             .unwrap();
 
@@ -325,27 +464,18 @@ mod tests {
 
         // fee is valid before expiry
         *time.lock().unwrap() = expiry - Duration::seconds(10);
-        assert!(
-            fee_estimator
-                .is_valid_fee(sell_token, buy_token, 100.into(), OrderKind::Sell, fee)
-                .await
-        );
+        assert!(fee_estimator.is_valid_fee(token, fee).await);
 
         // fee is invalid for some uncached token
         let token = H160::from_low_u64_be(2);
-        assert_eq!(
-            fee_estimator
-                .is_valid_fee(token, buy_token, 100.into(), OrderKind::Sell, fee)
-                .await,
-            false
-        );
+        assert_eq!(fee_estimator.is_valid_fee(token, fee).await, false);
     }
 
     #[tokio::test]
     async fn accepts_fee_if_higher_than_current_min_fee() {
         let gas_price = Arc::new(Mutex::new(100.0));
 
-        let gas_price_estimator = Box::new(FakeGasPriceEstimator(gas_price.clone()));
+        let gas_price_estimator = Arc::new(FakeGasPriceEstimator(gas_price.clone()));
         let price_estimator = Arc::new(FakePriceEstimator(num::one()));
 
         let fee_estimator = MinFeeCalculator::new_for_test(
@@ -354,42 +484,20 @@ mod tests {
             Box::new(Utc::now),
         );
 
-        let sell_token = H160::from_low_u64_be(1);
-        let buy_token = H160::from_low_u64_be(2);
+        let token = H160::from_low_u64_be(1);
         let (fee, _) = fee_estimator
-            .min_fee(sell_token, buy_token, 100.into(), OrderKind::Sell)
+            .min_fee(token, None, None, None)
             .await
             .unwrap();
 
         let lower_fee = fee - U256::one();
 
         // slightly lower fee is not valid
-        assert_eq!(
-            fee_estimator
-                .is_valid_fee(
-                    sell_token,
-                    buy_token,
-                    100.into(),
-                    OrderKind::Sell,
-                    lower_fee
-                )
-                .await,
-            false
-        );
+        assert_eq!(fee_estimator.is_valid_fee(token, lower_fee).await, false);
 
         // Gas price reduces, and slightly lower fee is now valid
         *gas_price.lock().unwrap() /= 2.0;
-        assert!(
-            fee_estimator
-                .is_valid_fee(
-                    sell_token,
-                    buy_token,
-                    100.into(),
-                    OrderKind::Sell,
-                    lower_fee
-                )
-                .await
-        );
+        assert!(fee_estimator.is_valid_fee(token, lower_fee).await);
     }
 
     #[tokio::test]
@@ -397,7 +505,7 @@ mod tests {
         let unsupported_token = H160::from_low_u64_be(1);
         let supported_token = H160::from_low_u64_be(2);
 
-        let gas_price_estimator = Box::new(FakeGasPriceEstimator(Arc::new(Mutex::new(100.0))));
+        let gas_price_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(100.0))));
         let price_estimator = Arc::new(FakePriceEstimator(num::one()));
         let unsupported_tokens = hashset! {unsupported_token};
 
@@ -416,9 +524,10 @@ mod tests {
             fee_estimator
                 .min_fee(
                     unsupported_token,
-                    supported_token,
-                    100.into(),
-                    OrderKind::Sell)
+                    Some(supported_token),
+                    Some(100.into()),
+                    Some(OrderKind::Sell)
+                )
                 .await,
             Err(MinFeeCalculationError::UnsupportedToken(t)) if t == unsupported_token
         ));
@@ -428,9 +537,9 @@ mod tests {
             fee_estimator
                 .min_fee(
                     supported_token,
-                    unsupported_token,
-                    100.into(),
-                    OrderKind::Sell
+                    Some(unsupported_token),
+                    Some(100.into()),
+                    Some(OrderKind::Sell)
                 )
                 .await,
             Err(MinFeeCalculationError::UnsupportedToken(t)) if t == unsupported_token

@@ -5,7 +5,7 @@
 
 pub mod api;
 
-use self::api::{OneInchClient, Slippage, Swap, SwapQuery};
+use self::api::{Amount, OneInchClient, Slippage, Swap, SwapQuery};
 use crate::{
     encoding::EncodedInteraction,
     interactions::Erc20ApproveInteraction,
@@ -73,6 +73,13 @@ impl OneInchSolver {
                 // Disable balance/allowance checks, as the settlement contract
                 // does not hold balances to traded tokens.
                 disable_estimate: Some(true),
+                // Use at most 2 connector tokens
+                complexity_level: Some(Amount::new(2).unwrap()),
+                // Cap swap gas to 750K.
+                gas_limit: Some(750_000),
+                // Use only 3 main route for cheaper trades.
+                main_route_parts: Some(Amount::new(3).unwrap()),
+                parts: Some(Amount::new(3).unwrap()),
             })
             .await?;
 
@@ -157,6 +164,10 @@ impl Solver for OneInchSolver {
             })
             .collect())
     }
+
+    fn name(&self) -> &'static str {
+        "1Inch"
+    }
 }
 
 impl Display for OneInchSolver {
@@ -221,7 +232,7 @@ mod tests {
         let settlement = GPv2Settlement::deployed(&web3).await.unwrap();
 
         let weth = WETH9::deployed(&web3).await.unwrap();
-        let gno = addr!("6810e776880c02933d47db1b9fc05908e5386b96");
+        let gno = shared::addr!("6810e776880c02933d47db1b9fc05908e5386b96");
 
         let solver = OneInchSolver::new(settlement, chain_id).unwrap();
         let settlement = solver

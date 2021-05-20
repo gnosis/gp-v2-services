@@ -9,7 +9,7 @@ mod get_trades;
 
 use crate::metrics::{end_request, LabelledReply, Metrics};
 use crate::{database::Database, metrics::start_request};
-use crate::{fee::MinFeeCalculator, orderbook::Orderbook};
+use crate::{fee::EthAwareMinFeeCalculator, orderbook::Orderbook};
 use anyhow::Error as anyhowError;
 use hex::{FromHex, FromHexError};
 use model::h160_hexadecimal;
@@ -27,12 +27,13 @@ use warp::{
 pub fn handle_all_routes(
     database: Database,
     orderbook: Arc<Orderbook>,
-    fee_calculator: Arc<MinFeeCalculator>,
+    fee_calculator: Arc<EthAwareMinFeeCalculator>,
     price_estimator: Arc<dyn PriceEstimating>,
     metrics: Arc<Metrics>,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
     let create_order = create_order::create_order(orderbook.clone());
     let get_orders = get_orders::get_orders(orderbook.clone());
+    let legacy_fee_info = get_fee_info::legacy_get_fee_info(fee_calculator.clone());
     let fee_info = get_fee_info::get_fee_info(fee_calculator);
     let get_order = get_order_by_uid::get_order_by_uid(orderbook.clone());
     let get_solvable_orders = get_solvable_orders::get_solvable_orders(orderbook.clone());
@@ -48,6 +49,8 @@ pub fn handle_all_routes(
             .or(get_orders.map(|reply| LabelledReply::new(reply, "get_orders")))
             .unify()
             .or(fee_info.map(|reply| LabelledReply::new(reply, "fee_info")))
+            .unify()
+            .or(legacy_fee_info.map(|reply| LabelledReply::new(reply, "legacy_fee_info")))
             .unify()
             .or(get_order.map(|reply| LabelledReply::new(reply, "get_order")))
             .unify()

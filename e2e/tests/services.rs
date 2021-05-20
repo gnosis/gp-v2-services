@@ -6,8 +6,9 @@ use ethcontract::{
 use model::DomainSeparator;
 use orderbook::{
     account_balances::Web3BalanceFetcher, database::Database, event_updater::EventUpdater,
-    fee::MinFeeCalculator, orderbook::Orderbook,
+    fee::EthAwareMinFeeCalculator, metrics::Metrics, orderbook::Orderbook,
 };
+use prometheus::Registry;
 use shared::{
     amm_pair_provider::UniswapPairProvider,
     current_block::current_block_stream,
@@ -134,14 +135,17 @@ impl OrderbookServices {
             }),
             current_block_stream,
         );
+        let gas_estimator = Arc::new(web3.clone());
         let price_estimator = Arc::new(BaselinePriceEstimator::new(
             Box::new(pool_fetcher),
+            gas_estimator.clone(),
             HashSet::new(),
             HashSet::new(),
+            native_token,
         ));
-        let fee_calculator = Arc::new(MinFeeCalculator::new(
+        let fee_calculator = Arc::new(EthAwareMinFeeCalculator::new(
             price_estimator.clone(),
-            Box::new(web3.clone()),
+            gas_estimator,
             native_token,
             db.clone(),
             1.0,
@@ -155,18 +159,23 @@ impl OrderbookServices {
                 web3.clone(),
                 gpv2.allowance,
                 gpv2.settlement.address(),
+                true,
             )),
             fee_calculator.clone(),
             HashSet::new(),
             Duration::from_secs(120),
         ));
 
+        let registry = Registry::default();
+        let metrics = Arc::new(Metrics::new(&registry).unwrap());
         orderbook::serve_task(
             db.clone(),
             orderbook.clone(),
             fee_calculator,
             price_estimator.clone(),
             API_HOST[7..].parse().expect("Couldn't parse API address"),
+            registry,
+            metrics,
         );
 
         Self {

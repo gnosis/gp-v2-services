@@ -169,7 +169,7 @@ async fn onchain_settlement(web3: Web3) {
         liquidity_collector,
         price_estimator,
         vec![Box::new(solver)],
-        Box::new(web3.clone()),
+        Arc::new(web3.clone()),
         Duration::from_secs(1),
         Duration::from_secs(30),
         native_token,
@@ -178,6 +178,8 @@ async fn onchain_settlement(web3: Web3) {
         web3.clone(),
         network_id,
         1,
+        Duration::from_secs(30),
+        None,
     );
     driver.single_run().await.unwrap();
 

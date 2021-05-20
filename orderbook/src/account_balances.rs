@@ -25,12 +25,12 @@ pub trait BalanceFetching: Send + Sync {
     // Called periodically to perform potential updates on registered balances
     async fn update(&self);
 
-    // Check if the allowance manager would be able to call transfer_from with these parameters.
-    // This is useful for tokens that are not consistent about their internal checks and what they
-    // report as balance and allowance. By checking whether the actual transfer would succeed we can
-    // be more certain (but still not 100%) that the balance really is available to the settlement
-    // contract.
-    async fn can_transfer(&self, token: H160, from: H160, amount: U256) -> bool;
+    // Check that the settlement contract can make use of this user's token balance. This check
+    // could fail if the user does not have enough balance, has not given the allowance to the
+    // allowance manager or if the token does not allow freely transferring amounts around for
+    // for example if it is paused or takes a fee on transfer.
+    // If the node supports the trace_callMany we can perform more extensive tests.
+    async fn can_transfer(&self, token: H160, from: H160, amount: U256) -> Result<bool>;
 }
 
 pub struct Web3BalanceFetcher {
@@ -39,6 +39,7 @@ pub struct Web3BalanceFetcher {
     settlement_contract: H160,
     // Mapping of address, token to balance, allowance
     balances: Mutex<HashMap<SubscriptionKey, SubscriptionValue>>,
+    use_trace_api: bool,
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -54,12 +55,18 @@ struct SubscriptionValue {
 }
 
 impl Web3BalanceFetcher {
-    pub fn new(web3: Web3, allowance_manager: H160, settlement_contract: H160) -> Self {
+    pub fn new(
+        web3: Web3,
+        allowance_manager: H160,
+        settlement_contract: H160,
+        use_trace_api: bool,
+    ) -> Self {
         Self {
             web3,
             allowance_manager,
             settlement_contract,
             balances: Default::default(),
+            use_trace_api,
         }
     }
 
@@ -114,6 +121,64 @@ impl Web3BalanceFetcher {
         }
         Ok(())
     }
+
+    async fn can_transfer_call(&self, token: H160, from: H160, amount: U256) -> bool {
+        let instance = ERC20::at(&self.web3, token);
+        let calldata = instance
+            .transfer_from(from, self.settlement_contract, amount)
+            .tx
+            .data
+            .unwrap();
+        let call_request = CallRequest {
+            from: Some(self.allowance_manager),
+            to: Some(token),
+            data: Some(calldata),
+            ..Default::default()
+        };
+        let block = Some(BlockId::Number(BlockNumber::Latest));
+        let response = self.web3.eth().call(call_request, block).await;
+        response
+            .map(|bytes| is_empty_or_truthy(bytes.0.as_slice()))
+            .unwrap_or(false)
+    }
+
+    async fn can_transfer_trace(&self, token: H160, from: H160, amount: U256) -> Result<bool> {
+        let instance = ERC20::at(&self.web3, token);
+
+        // A random account that doesn't hold any balances. Don't use the zero address as that is
+        // commonly checked against in ERC20 implementations.
+        // In addition to just transferring the balance in like can_transfer_call does, we also
+        // attempt to transfer the same balance away again. This fails for example if the token
+        // takes a fee on transfer as the full amount would be no longer be available.
+        // We use a custom recipient instead of the settlement contract because the latter might
+        // already hold some balance in the token in which case we might make up for an outgoing
+        // fee.
+        let recipient = H160::from_low_u64_le(1);
+
+        let calldata = instance
+            .transfer_from(from, recipient, amount)
+            .tx
+            .data
+            .unwrap();
+        let transfer_in = CallRequest {
+            from: Some(self.allowance_manager),
+            to: Some(token),
+            data: Some(calldata),
+            ..Default::default()
+        };
+
+        let calldata = instance.transfer(from, amount).tx.data.unwrap();
+        let transfer_out = CallRequest {
+            from: Some(recipient),
+            to: Some(token),
+            data: Some(calldata),
+            ..Default::default()
+        };
+
+        let traces =
+            crate::trace_many::trace_many(vec![transfer_in, transfer_out], &self.web3).await?;
+        crate::trace_many::all_calls_succeeded(&traces)
+    }
 }
 
 #[async_trait::async_trait]
@@ -152,24 +217,17 @@ impl BalanceFetching for Web3BalanceFetcher {
         let _ = self._register_many(subscriptions.into_iter()).await;
     }
 
-    async fn can_transfer(&self, token: H160, from: H160, amount: U256) -> bool {
-        let instance = ERC20::at(&self.web3, token);
-        let calldata = instance
-            .transfer_from(from, self.settlement_contract, amount)
-            .tx
-            .data
-            .unwrap();
-        let call_request = CallRequest {
-            from: Some(self.allowance_manager),
-            to: Some(token),
-            data: Some(calldata),
-            ..Default::default()
-        };
-        let block = Some(BlockId::Number(BlockNumber::Latest));
-        let response = self.web3.eth().call(call_request, block).await;
-        response
-            .map(|bytes| is_empty_or_truthy(bytes.0.as_slice()))
-            .unwrap_or(false)
+    async fn can_transfer(&self, token: H160, from: H160, amount: U256) -> Result<bool> {
+        if self.use_trace_api {
+            match self.can_transfer_trace(token, from, amount).await {
+                Ok(result) => {
+                    tracing::info!("can_transfer_trace token {:?} {}", token, result);
+                    return Ok(result);
+                }
+                Err(err) => tracing::warn!(?err, "failed to use trace api"),
+            }
+        }
+        Ok(self.can_transfer_call(token, from, amount).await)
     }
 }
 
@@ -191,19 +249,24 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
-    async fn rinkeby_can_transfer() {
+    async fn mainnet_can_transfer() {
         let http = LoggingTransport::new(
-            Http::new("https://dev-openethereum.rinkeby.gnosisdev.com/").unwrap(),
+            Http::new("https://dev-openethereum.mainnet.gnosisdev.com/").unwrap(),
         );
         let web3 = Web3::new(http);
         let settlement = contracts::GPv2Settlement::deployed(&web3).await.unwrap();
         let allowance = settlement.allowance_manager().call().await.unwrap();
-        let fetcher = Web3BalanceFetcher::new(web3, allowance, settlement.address());
-        let owner = H160(hex!("52DF85E9De71aa1C210873bcF37EC46d36c99dc2"));
-        let token = H160(hex!("5592ec0cfb4dbc12d3ab100b257153436a1f0fea"));
+        let fetcher = Web3BalanceFetcher::new(web3, allowance, settlement.address(), true);
+        let owner = H160(hex!("07c2af75788814BA7e5225b2F5c951eD161cB589"));
+        let token = H160(hex!("dac17f958d2ee523a2206206994597c13d831ec7"));
 
-        let result = fetcher.can_transfer(token, owner, 1000.into()).await;
-        assert!(result);
+        fetcher.register(owner, token).await;
+        assert!(fetcher.get_balance(owner, token).unwrap() >= U256::from(1000));
+
+        let call_result = fetcher.can_transfer_call(token, owner, 1000.into()).await;
+        let trace_result = fetcher.can_transfer_trace(token, owner, 1000.into()).await;
+        assert!(call_result);
+        assert!(trace_result.unwrap());
     }
 
     #[tokio::test]
@@ -215,15 +278,20 @@ mod tests {
         let web3 = Web3::new(http);
         let settlement = contracts::GPv2Settlement::deployed(&web3).await.unwrap();
         let allowance = settlement.allowance_manager().call().await.unwrap();
-        let fetcher = Web3BalanceFetcher::new(web3, allowance, settlement.address());
-        let owner = H160(hex!("c978f4364c03a00352e8c7d9619b42e26b6424ab"));
-        let token = H160(hex!("c12d1c73ee7dc3615ba4e37e4abfdbddfa38907e"));
+        let fetcher = Web3BalanceFetcher::new(web3, allowance, settlement.address(), true);
+        let owner = H160(hex!("78045485dc4ad96f60937dad4b01b118958761ae"));
+        // Token takes a fee.
+        let token = H160(hex!("bae5f2d8a1299e5c4963eaff3312399253f27ccb"));
 
-        // The owner has balance and approval but still the transfer fails.
         fetcher.register(owner, token).await;
         assert!(fetcher.get_balance(owner, token).unwrap() >= U256::from(1000));
-        let result = fetcher.can_transfer(token, owner, 1000.into()).await;
-        assert!(!result);
+
+        let call_result = fetcher.can_transfer_call(token, owner, 1000.into()).await;
+        let trace_result = fetcher.can_transfer_trace(token, owner, 1000.into()).await;
+        // The non trace method is less accurate and thinks the transfer is ok even though it isn't.
+        assert!(call_result);
+        // The trace method is more accurate and correctly detects that the transfer is not possible.
+        assert!(!trace_result.unwrap());
     }
 
     #[tokio::test]
@@ -243,8 +311,12 @@ mod tests {
             .await
             .expect("MintableERC20 deployment failed");
 
-        let fetcher =
-            Web3BalanceFetcher::new(web3, allowance_target.address(), H160::from_low_u64_be(1));
+        let fetcher = Web3BalanceFetcher::new(
+            web3,
+            allowance_target.address(),
+            H160::from_low_u64_be(1),
+            true,
+        );
 
         // Not available until registered
         assert_eq!(fetcher.get_balance(trader.address(), token.address()), None,);

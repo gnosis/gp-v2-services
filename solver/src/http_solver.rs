@@ -133,6 +133,7 @@ impl HttpSolver {
                     TokenInfoModel {
                         decimals: token_info.decimals.map(|d| d as u32),
                         external_price,
+                        normalize_priority: Some(if &self.native_token == address { 1 } else { 0 }),
                     },
                 )
             })
@@ -203,7 +204,7 @@ impl HttpSolver {
                         amount: uniswap_cost,
                         token: self.token_to_string(&self.native_token),
                     },
-                    mandatory: true,
+                    mandatory: false,
                 };
                 (index.clone(), uniswap)
             })

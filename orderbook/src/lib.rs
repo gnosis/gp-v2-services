@@ -1,17 +1,19 @@
 pub mod account_balances;
 pub mod api;
+pub mod bad_token;
 pub mod conversions;
 pub mod database;
 pub mod event_updater;
 pub mod fee;
 pub mod metrics;
 pub mod orderbook;
+pub mod trace_many;
 
 use crate::database::Database;
 use crate::orderbook::Orderbook;
 use anyhow::{anyhow, Context as _, Result};
 use contracts::GPv2Settlement;
-use fee::MinFeeCalculator;
+use fee::EthAwareMinFeeCalculator;
 use metrics::Metrics;
 use model::DomainSeparator;
 use prometheus::Registry;
@@ -25,12 +27,12 @@ use tokio::{task, task::JoinHandle};
 pub fn serve_task(
     database: Database,
     orderbook: Arc<Orderbook>,
-    fee_calculator: Arc<MinFeeCalculator>,
+    fee_calculator: Arc<EthAwareMinFeeCalculator>,
     price_estimator: Arc<dyn PriceEstimating>,
     address: SocketAddr,
+    registry: Registry,
+    metrics: Arc<Metrics>,
 ) -> JoinHandle<()> {
-    let registry = Registry::default();
-    let metrics = Arc::new(Metrics::new(&registry));
     let filter = api::handle_all_routes(
         database,
         orderbook,

@@ -6,13 +6,15 @@ use orderbook::{
     account_balances::Web3BalanceFetcher,
     database::{Database, OrderFilter},
     event_updater::EventUpdater,
-    fee::MinFeeCalculator,
+    fee::EthAwareMinFeeCalculator,
+    metrics::Metrics,
     orderbook::Orderbook,
     serve_task, verify_deployed_contract_constants,
 };
+use prometheus::Registry;
 use shared::{
     current_block::{current_block_stream, CurrentBlockStream},
-    pool_aggregating::PoolAggregator,
+    pool_aggregating::{self, PoolAggregator},
     pool_fetching::{CachedPoolFetcher, FilteredPoolFetcher},
     price_estimate::BaselinePriceEstimator,
     transport::LoggingTransport,
@@ -48,6 +50,13 @@ struct Arguments {
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
     min_order_validity_period: Duration,
+
+    /// Don't use the trace_callMany api that only some nodes support to check whether a token
+    /// should be denied.
+    /// Note that if a node does not support the api we still fallback to the less accurate call
+    /// api.
+    #[structopt(long, env = "SKIP_TRACE_API")]
+    skip_trace_api: bool,
 }
 
 pub async fn orderbook_maintenance(
@@ -70,6 +79,20 @@ pub async fn orderbook_maintenance(
         }
     }
     unreachable!()
+}
+
+pub async fn database_metrics(metrics: Arc<Metrics>, database: Database) -> ! {
+    loop {
+        match database.count_rows_in_tables().await {
+            Ok(counts) => {
+                for (table, count) in counts {
+                    metrics.set_table_row_count(table, count);
+                }
+            }
+            Err(err) => tracing::error!(?err, "failed to update db metrics"),
+        };
+        tokio::time::delay_for(Duration::from_secs(10)).await;
+    }
 }
 
 #[tokio::main]
@@ -120,16 +143,22 @@ async fn main() {
 
     let event_updater =
         EventUpdater::new(settlement_contract.clone(), database.clone(), sync_start);
-    let balance_fetcher =
-        Web3BalanceFetcher::new(web3.clone(), gp_allowance, settlement_contract.address());
+    let balance_fetcher = Web3BalanceFetcher::new(
+        web3.clone(),
+        gp_allowance,
+        settlement_contract.address(),
+        !args.skip_trace_api,
+    );
 
-    let gas_price_estimator = shared::gas_price_estimation::create_priority_estimator(
-        &reqwest::Client::new(),
-        &web3,
-        args.shared.gas_estimators.as_slice(),
-    )
-    .await
-    .expect("failed to create gas price estimator");
+    let gas_price_estimator = Arc::new(
+        shared::gas_price_estimation::create_priority_estimator(
+            &reqwest::Client::new(),
+            &web3,
+            args.shared.gas_estimators.as_slice(),
+        )
+        .await
+        .expect("failed to create gas price estimator"),
+    );
 
     let unsupported_tokens = HashSet::from_iter(args.shared.unsupported_tokens);
     let mut base_tokens = HashSet::from_iter(args.shared.base_tokens);
@@ -144,8 +173,11 @@ async fn main() {
     );
 
     let current_block_stream = current_block_stream(web3.clone()).await.unwrap();
-    let pool_aggregator =
-        PoolAggregator::from_sources(args.shared.baseline_sources, chain_id, web3.clone()).await;
+
+    let pair_providers =
+        pool_aggregating::pair_providers(&args.shared.baseline_sources, chain_id, &web3).await;
+
+    let pool_aggregator = PoolAggregator::from_providers(&pair_providers, &web3).await;
     let cached_pool_fetcher =
         CachedPoolFetcher::new(Box::new(pool_aggregator), current_block_stream.clone());
     let pool_fetcher =
@@ -153,12 +185,14 @@ async fn main() {
 
     let price_estimator = Arc::new(BaselinePriceEstimator::new(
         Box::new(pool_fetcher),
+        gas_price_estimator.clone(),
         base_tokens,
         unsupported_tokens.clone(),
+        native_token.address(),
     ));
-    let fee_calculator = Arc::new(MinFeeCalculator::new(
+    let fee_calculator = Arc::new(EthAwareMinFeeCalculator::new(
         price_estimator.clone(),
-        Box::new(gas_price_estimator),
+        gas_price_estimator,
         native_token.address(),
         database.clone(),
         args.shared.fee_discount_factor,
@@ -176,22 +210,30 @@ async fn main() {
     ));
     check_database_connection(orderbook.as_ref()).await;
 
+    let registry = Registry::default();
+    let metrics = Arc::new(Metrics::new(&registry).unwrap());
+
     let serve_task = serve_task(
         database.clone(),
         orderbook.clone(),
         fee_calculator,
         price_estimator,
         args.bind_address,
+        registry,
+        metrics.clone(),
     );
     let maintenance_task = task::spawn(orderbook_maintenance(
         orderbook,
-        database,
+        database.clone(),
         settlement_contract,
         current_block_stream,
     ));
+    let db_metrics_task = task::spawn(database_metrics(metrics, database));
+
     tokio::select! {
         result = serve_task => tracing::error!(?result, "serve task exited"),
         result = maintenance_task => tracing::error!(?result, "maintenance task exited"),
+        result = db_metrics_task => tracing::error!(?result, "database metrics task exited"),
     };
 }
 

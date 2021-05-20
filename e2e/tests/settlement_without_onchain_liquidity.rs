@@ -7,7 +7,11 @@ use model::{
 };
 use secp256k1::SecretKey;
 use serde_json::json;
-use shared::{amm_pair_provider::UniswapPairProvider, Web3};
+use shared::{
+    amm_pair_provider::UniswapPairProvider,
+    token_list::{Token, TokenList},
+    Web3,
+};
 use solver::{
     liquidity::uniswap::UniswapLikeLiquidity, liquidity_collector::LiquidityCollector,
     metrics::NoopMetrics,
@@ -153,12 +157,20 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
         orderbook_api: create_orderbook_api(&web3),
     };
     let network_id = web3.net().version().await.unwrap();
+    let market_makable_token_list = TokenList::new(maplit::hashmap! {
+        token_a.address() => Token {
+            address: token_a.address(),
+            name: "Test Coin".into(),
+            symbol: "TC".into(),
+            decimals: 18,
+        }
+    });
     let mut driver = solver::driver::Driver::new(
         gpv2.settlement.clone(),
         liquidity_collector,
         price_estimator,
         vec![Box::new(solver)],
-        Box::new(web3.clone()),
+        Arc::new(web3.clone()),
         Duration::from_secs(1),
         Duration::from_secs(30),
         native_token,
@@ -167,6 +179,8 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
         web3.clone(),
         network_id,
         1,
+        Duration::from_secs(10),
+        Some(market_makable_token_list),
     );
     driver.single_run().await.unwrap();
 
