@@ -2,7 +2,7 @@ use crate::{current_block::BlockRetrieving, maintenance::Maintaining};
 use anyhow::{Context, Error, Result};
 use ethcontract::contract::{AllEventsBuilder, ParseLog};
 use ethcontract::errors::ExecutionError;
-use ethcontract::{dyns::DynTransport, BlockNumber as Web3BlockNumber, Event as EthcontractEvent};
+use ethcontract::{dyns::DynTransport, BlockNumber as Web3BlockNumber, Event as EthcontractEvent, EventMetadata};
 use futures::{Stream, StreamExt, TryStreamExt};
 use std::ops::RangeInclusive;
 use tokio::sync::Mutex;
@@ -38,7 +38,7 @@ pub trait EventStoring<T> {
     /// * `events` the contract events to be replaced by the implementer
     /// * `range` indicates a particular range of blocks on which to operate.
     async fn replace_events(
-        &self,
+        &mut self,
         events: Vec<EthcontractEvent<T>>,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<()>;
@@ -47,7 +47,7 @@ pub trait EventStoring<T> {
     ///
     /// # Arguments
     /// * `events` the contract events to be appended by the implementer
-    async fn append_events(&self, events: Vec<EthcontractEvent<T>>) -> Result<()>;
+    async fn append_events(&mut self, events: Vec<EthcontractEvent<T>>) -> Result<()>;
 
     async fn last_event_block(&self) -> Result<u64>;
 }
@@ -178,6 +178,21 @@ where
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct EventIndex {
+    pub block_number: u64,
+    pub log_index: u64,
+}
+
+impl From<&EventMetadata> for EventIndex {
+    fn from(meta: &EventMetadata) -> Self {
+        EventIndex {
+            block_number: meta.block_number,
+            log_index: meta.log_index as u64,
+        }
+    }
+}
+
 // Helper type around the Web3BlockNumber that allows us to specify `BlockNumber::Latest` for range queries
 // while still storing concrete block numbers for latest internally. The issue with concrete block numbers for
 // range queries is that e.g. behind a load balancer node A might not yet have seen the block number another
@@ -211,7 +226,7 @@ macro_rules! impl_event_retrieving {
     ($vis:vis $name:ident for $($contract_module:tt)*) => {
         $vis struct $name($($contract_module)*::Contract);
 
-        impl ::shared::event_handling::EventRetrieving for $name {
+        impl $crate::event_handling::EventRetrieving for $name {
             type Event = $($contract_module)*::Event;
 
             fn get_events(&self) -> ::ethcontract::contract::AllEventsBuilder<

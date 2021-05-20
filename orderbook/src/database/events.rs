@@ -13,12 +13,7 @@ use futures::FutureExt;
 use model::order::OrderUid;
 use sqlx::{Connection, Executor, Postgres, Transaction};
 use std::convert::TryInto;
-
-#[derive(Debug, Clone, Copy)]
-pub struct EventIndex {
-    pub block_number: u64,
-    pub log_index: u64,
-}
+use shared::event_handling::EventIndex;
 
 #[derive(Debug)]
 pub enum Event {
@@ -61,7 +56,7 @@ impl Database {
     }
 
     // All insertions happen in one transaction.
-    pub async fn insert_events(&self, events: Vec<(EventIndex, Event)>) -> Result<()> {
+    pub async fn insert_events(&mut self, events: Vec<(EventIndex, Event)>) -> Result<()> {
         let mut connection = self.pool.acquire().await?;
         connection
             .transaction(move |transaction| {
@@ -78,7 +73,7 @@ impl Database {
 
     // The deletion and all insertions happen in one transaction.
     pub async fn replace_events(
-        &self,
+        &mut self,
         delete_from_block_number: u64,
         events: Vec<(EventIndex, Event)>,
     ) -> Result<()> {
@@ -242,7 +237,7 @@ fn convert_trade(trade: &ContractTrade, meta: &EventMetadata) -> Result<(EventIn
         buy_amount: trade.buy_amount,
         fee_amount: trade.fee_amount,
     };
-    Ok((event_meta_to_index(meta), Event::Trade(event)))
+    Ok((EventIndex::from(meta), Event::Trade(event)))
 }
 
 fn convert_settlement(
@@ -253,7 +248,7 @@ fn convert_settlement(
         solver: settlement.solver,
         transaction_hash: meta.transaction_hash,
     };
-    (event_meta_to_index(meta), Event::Settlement(event))
+    (EventIndex::from(meta), Event::Settlement(event))
 }
 
 fn convert_invalidation(
@@ -268,15 +263,7 @@ fn convert_invalidation(
             .context("invalidation event order_uid has wrong number of bytes")?,
     );
     let event = Invalidation { order_uid };
-    Ok((event_meta_to_index(meta), Event::Invalidation(event)))
-}
-
-// Converts EventMetaData to DbEventIndex struct
-fn event_meta_to_index(meta: &EventMetadata) -> EventIndex {
-    EventIndex {
-        block_number: meta.block_number,
-        log_index: meta.log_index as u64,
-    }
+    Ok((EventIndex::from(meta), Event::Invalidation(event)))
 }
 
 #[cfg(test)]
