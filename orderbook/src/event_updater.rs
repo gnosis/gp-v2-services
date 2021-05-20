@@ -6,9 +6,9 @@ use contracts::{
 };
 use ethcontract::{dyns::DynWeb3, Event};
 use shared::{
-    current_block::Maintaining,
     event_handling::{BlockNumber, EventHandler, EventStoring},
     impl_event_retrieving,
+    maintenance::Maintaining,
 };
 use std::ops::RangeInclusive;
 use tokio::sync::Mutex;

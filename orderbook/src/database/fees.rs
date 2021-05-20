@@ -7,7 +7,7 @@ use bigdecimal::BigDecimal;
 use chrono::{DateTime, Utc};
 use ethcontract::{H160, U256};
 use model::order::OrderKind;
-use shared::current_block::Maintaining;
+use shared::maintenance::Maintaining;
 
 #[async_trait::async_trait]
 impl MinFeeStoring for Database {

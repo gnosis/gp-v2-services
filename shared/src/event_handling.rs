@@ -1,4 +1,4 @@
-use crate::current_block::{BlockRetrieving, Maintaining};
+use crate::{current_block::BlockRetrieving, maintenance::Maintaining};
 use anyhow::{Context, Error, Result};
 use ethcontract::contract::{AllEventsBuilder, ParseLog};
 use ethcontract::errors::ExecutionError;

@@ -12,7 +12,7 @@ use model::{
     DomainSeparator,
 };
 use primitive_types::{H160, U256};
-use shared::current_block::Maintaining;
+use shared::maintenance::Maintaining;
 use shared::time::now_in_epoch_seconds;
 use std::{
     collections::{HashMap, HashSet},

@@ -206,7 +206,7 @@ async fn main() {
         metrics.clone(),
     );
     let maintenance_task =
-        task::spawn(current_block_stream.run_maintenance_on_new_block(service_maintainer));
+        task::spawn(service_maintainer.run_maintenance_on_new_block(current_block_stream));
     let db_metrics_task = task::spawn(database_metrics(metrics, database));
 
     tokio::select! {
