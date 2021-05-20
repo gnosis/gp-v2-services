@@ -410,6 +410,7 @@ impl Driver {
                 tracing::info!("settlement without onchain liquidity");
             }
 
+            tracing::debug!("winning settlement: {:?}", settlement);
             self.submit_settlement(settlement.clone()).await;
             self.report_matched_but_unsettled_orders(
                 &Settlement::from(settlement),
