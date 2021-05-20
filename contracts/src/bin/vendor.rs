@@ -26,9 +26,25 @@ fn run() -> Result<()> {
 
     vendor
         .full()
+        .github(
+            "BalancerV2Vault",
+            "balancer-labs/balancer-core-v2/v1.0.0-artifacts/\
+             deployments/artifacts/mainnet/Vault.json",
+        )?
         .npm(
             "ERC20Mintable",
             "@openzeppelin/contracts@2.5.0/build/contracts/ERC20Mintable.json",
+        )?
+        .npm(
+            "GPv2AllowListAuthentication",
+            // We use `_Implementation` because the use of a proxy contract makes
+            // deploying  for the e2e tests more combersome.
+            "@gnosis.pm/gp-v2-contracts@0.0.1-alpha.15/\
+             deployments/mainnet/GPv2AllowListAuthentication_Implementation.json",
+        )?
+        .npm(
+            "GPv2Settlement",
+            "@gnosis.pm/gp-v2-contracts@0.0.1-alpha.15/deployments/mainnet/GPv2Settlement.json",
         )?
         .npm(
             "UniswapV2Factory",
@@ -38,23 +54,7 @@ fn run() -> Result<()> {
             "UniswapV2Router02",
             "@uniswap/v2-periphery@1.1.0-beta.0/build/UniswapV2Router02.json",
         )?
-        .npm(
-            "GPv2Settlement",
-            "@gnosis.pm/gp-v2-contracts@0.0.1-alpha.15/deployments/mainnet/GPv2Settlement.json",
-        )?
-        .npm(
-            "GPv2AllowListAuthentication",
-            // We use `_Implementation` because the use of a proxy contract makes
-            // deploying  for the e2e tests more combersome.
-            "@gnosis.pm/gp-v2-contracts@0.0.1-alpha.15/\
-             deployments/mainnet/GPv2AllowListAuthentication_Implementation.json",
-        )?
-        .npm("WETH9", "canonical-weth@1.4.0/build/contracts/WETH9.json")?
-        .github(
-            "BalancerV2Vault",
-            "balancer-labs/balancer-core-v2/v1.0.0-artifacts/\
-             deployments/artifacts/mainnet/Vault.json",
-        )?;
+        .npm("WETH9", "canonical-weth@1.4.0/build/contracts/WETH9.json")?;
 
     vendor
         .abi_only()
