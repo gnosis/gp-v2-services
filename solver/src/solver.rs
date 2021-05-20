@@ -16,8 +16,9 @@ use shared::{price_estimate::PriceEstimating, token_info::TokenInfoFetching};
 use structopt::clap::arg_enum;
 
 /// Interface that all solvers must implement
-/// A `solve` method which transforms a collection of `Liquidity`
-/// sources into a list of independent `Settlements`
+/// A `solve` method transforming a collection of `Liquidity` (sources) into a list of
+/// independent `Settlements`. Solvers are free to choose which types `Liquidity` they
+/// would like to include/process (i.e. those already supported here or their own private sources)
 /// The `name` method is included for logging purposes.
 #[async_trait::async_trait]
 pub trait Solver {
