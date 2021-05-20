@@ -220,7 +220,7 @@ impl CachedPoolFetcher {
     ) -> Vec<Pool> {
         let mut cache = self.cache.lock().await;
         let block: Block = at_block.into();
-        let mut cached_pools = cache.pools.pop(&block).unwrap_or_else(|| HashMap::new());
+        let mut cached_pools = cache.pools.pop(&block).unwrap_or_else(HashMap::new);
 
         let (cache_hits, cache_misses) = token_pairs
             .into_iter()
