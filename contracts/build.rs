@@ -73,6 +73,7 @@ fn main() {
     });
     generate_contract("GPv2AllowListAuthentication");
     generate_contract_with_config("WETH9", |builder| {
+        // Rinkeby & Mainnet Addresses are part of the artefact
         builder.add_deployment_str(100, "0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d")
     });
 }
