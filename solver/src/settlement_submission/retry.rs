@@ -15,11 +15,15 @@ use transaction_retry::{TransactionResult, TransactionSending};
 /// Failure indicating that some aspect about the signed transaction was wrong (e.g. wrong nonce, gas limit to high)
 /// and that the transaction could not be mined. This doesn't mean the transaction reverted.
 fn is_transaction_error(error: &ExecutionError) -> bool {
-    // This is the error as we've seen it on openethereum nodes. The code and error messages can
-    // be found in openethereum's source code in `rpc/src/v1/helpers/errors.rs`.
-    // TODO: check how this looks on geth and infura. Not recognizing the error is not a serious
+    // TODO: check how this looks on turbogeth and other clients. Not recognizing the error is not a serious
     // problem but it will make us sometimes log an error when there actually was no problem.
-    matches!(error, ExecutionError::Web3(Web3Error::Rpc(RpcError { code, .. })) if code.code() == -32010)
+
+    // Cf. openethereum's source code in `rpc/src/v1/helpers/errors.rs`. This code is not used by geth
+    matches!(error, ExecutionError::Web3(Web3Error::Rpc(RpcError { code, .. })) if code.code() == -32010) ||
+
+    // Geth uses error code -32000 for all kinds of RPC errors (maps to UNSUPPORTED_REQUEST in open ethereum)
+    // cf. https://github.com/ethereum/go-ethereum/blob/9357280fce5c5d57111d690a336cca5f89e34da6/rpc/errors.go#L59
+    matches!(error, ExecutionError::Web3(Web3Error::Rpc(RpcError { code, .. })) if code.code() == -32000)
 }
 
 /// Failure indicating the transaction reverted for some reason
