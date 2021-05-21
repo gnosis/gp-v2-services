@@ -1,19 +1,25 @@
-use chrono::offset::Utc;
 use contracts::{GPv2Settlement, WETH9};
-use futures::StreamExt;
 use model::{order::OrderUid, DomainSeparator};
 use orderbook::{
     account_balances::Web3BalanceFetcher,
     database::{Database, OrderFilter},
     event_updater::EventUpdater,
     fee::EthAwareMinFeeCalculator,
+    metrics::Metrics,
     orderbook::Orderbook,
     serve_task, verify_deployed_contract_constants,
 };
+use prometheus::Registry;
 use shared::{
-    current_block::{current_block_stream, CurrentBlockStream},
-    pool_aggregating::PoolAggregator,
-    pool_fetching::{CachedPoolFetcher, FilteredPoolFetcher},
+    bad_token::{
+        cache::CachingDetector,
+        list_based::{ListBasedDetector, UnknownTokenStrategy},
+        trace_call::TraceCallDetector,
+    },
+    current_block::current_block_stream,
+    maintenance::ServiceMaintenance,
+    pool_aggregating::{self, PoolAggregator},
+    pool_fetching::CachedPoolFetcher,
     price_estimate::BaselinePriceEstimator,
     transport::LoggingTransport,
 };
@@ -48,28 +54,35 @@ struct Arguments {
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
     min_order_validity_period: Duration,
+
+    /// Don't use the trace_callMany api that only some nodes support to check whether a token
+    /// should be denied.
+    /// Note that if a node does not support the api we still use the less accurate call api.
+    #[structopt(long, env = "SKIP_TRACE_API")]
+    skip_trace_api: bool,
+
+    /// The amount of time a classification of a token into good or bad is valid for.
+    #[structopt(
+        long,
+        env = "TOKEN_QUALITY_CACHE_EXPIRY_SECONDS",
+        default_value = "600",
+        parse(try_from_str = shared::arguments::duration_from_seconds),
+    )]
+    token_quality_cache_expiry: Duration,
 }
 
-pub async fn orderbook_maintenance(
-    storage: Arc<Orderbook>,
-    database: Database,
-    settlement_contract: GPv2Settlement,
-    mut current_block_stream: CurrentBlockStream,
-) -> ! {
-    while let Some(block) = current_block_stream.next().await {
-        tracing::debug!(
-            "running maintenance on block number {:?} hash {:?}",
-            block.number,
-            block.hash
-        );
-        if let Err(err) = storage.run_maintenance(&settlement_contract).await {
-            tracing::error!(?err, "orderbook maintenance error");
-        }
-        if let Err(err) = database.remove_expired_fee_measurements(Utc::now()).await {
-            tracing::error!(?err, "fee measurement maintenance error");
-        }
+pub async fn database_metrics(metrics: Arc<Metrics>, database: Database) -> ! {
+    loop {
+        match database.count_rows_in_tables().await {
+            Ok(counts) => {
+                for (table, count) in counts {
+                    metrics.set_table_row_count(table, count);
+                }
+            }
+            Err(err) => tracing::error!(?err, "failed to update db metrics"),
+        };
+        tokio::time::delay_for(Duration::from_secs(10)).await;
     }
-    unreachable!()
 }
 
 #[tokio::main]
@@ -123,58 +136,87 @@ async fn main() {
     let balance_fetcher =
         Web3BalanceFetcher::new(web3.clone(), gp_allowance, settlement_contract.address());
 
-    let gas_price_estimator = shared::gas_price_estimation::create_priority_estimator(
-        &reqwest::Client::new(),
-        &web3,
-        args.shared.gas_estimators.as_slice(),
-    )
-    .await
-    .expect("failed to create gas price estimator");
+    let gas_price_estimator = Arc::new(
+        shared::gas_price_estimation::create_priority_estimator(
+            &reqwest::Client::new(),
+            &web3,
+            args.shared.gas_estimators.as_slice(),
+        )
+        .await
+        .expect("failed to create gas price estimator"),
+    );
 
-    let unsupported_tokens = HashSet::from_iter(args.shared.unsupported_tokens);
+    let pair_providers =
+        pool_aggregating::pair_providers(&args.shared.baseline_sources, chain_id, &web3).await;
+
     let mut base_tokens = HashSet::from_iter(args.shared.base_tokens);
     // We should always use the native token as a base token.
     base_tokens.insert(native_token.address());
-    assert!(
-        unsupported_tokens
-            .intersection(&base_tokens)
-            .collect::<HashSet<_>>()
-            .is_empty(),
-        "Base tokens include at least one unsupported token!"
+    let mut allowed_tokens = args.shared.allowed_tokens;
+    allowed_tokens.extend(base_tokens.iter().copied());
+    let unsupported_tokens = args.shared.unsupported_tokens;
+
+    let trace_call_detector = TraceCallDetector {
+        web3: web3.clone(),
+        pools: pair_providers.clone(),
+        base_tokens: base_tokens.clone(),
+        settlement_contract: settlement_contract.address(),
+    };
+    let caching_detector = CachingDetector::new(
+        Box::new(trace_call_detector),
+        args.token_quality_cache_expiry,
     );
+    let bad_token_detector = Arc::new(ListBasedDetector::new(
+        allowed_tokens,
+        unsupported_tokens,
+        if args.skip_trace_api {
+            UnknownTokenStrategy::Allow
+        } else {
+            UnknownTokenStrategy::Forward(Box::new(caching_detector))
+        },
+    ));
 
     let current_block_stream = current_block_stream(web3.clone()).await.unwrap();
-    let pool_aggregator =
-        PoolAggregator::from_sources(args.shared.baseline_sources, chain_id, web3.clone()).await;
-    let cached_pool_fetcher =
-        CachedPoolFetcher::new(Box::new(pool_aggregator), current_block_stream.clone());
+
+    let pool_aggregator = PoolAggregator::from_providers(&pair_providers, &web3).await;
     let pool_fetcher =
-        FilteredPoolFetcher::new(Box::new(cached_pool_fetcher), unsupported_tokens.clone());
+        CachedPoolFetcher::new(Box::new(pool_aggregator), current_block_stream.clone());
 
     let price_estimator = Arc::new(BaselinePriceEstimator::new(
         Box::new(pool_fetcher),
+        gas_price_estimator.clone(),
         base_tokens,
-        unsupported_tokens.clone(),
+        bad_token_detector.clone(),
+        native_token.address(),
     ));
     let fee_calculator = Arc::new(EthAwareMinFeeCalculator::new(
         price_estimator.clone(),
-        Box::new(gas_price_estimator),
+        gas_price_estimator,
         native_token.address(),
         database.clone(),
         args.shared.fee_discount_factor,
-        unsupported_tokens.clone(),
+        bad_token_detector.clone(),
     ));
 
     let orderbook = Arc::new(Orderbook::new(
         domain_separator,
         database.clone(),
-        event_updater,
         Box::new(balance_fetcher),
         fee_calculator.clone(),
-        unsupported_tokens,
         args.min_order_validity_period,
+        bad_token_detector,
     ));
+    let service_maintainer = ServiceMaintenance {
+        maintainers: vec![
+            orderbook.clone(),
+            Arc::new(database.clone()),
+            Arc::new(event_updater),
+        ],
+    };
     check_database_connection(orderbook.as_ref()).await;
+
+    let registry = Registry::default();
+    let metrics = Arc::new(Metrics::new(&registry).unwrap());
 
     let serve_task = serve_task(
         database.clone(),
@@ -182,16 +224,17 @@ async fn main() {
         fee_calculator,
         price_estimator,
         args.bind_address,
+        registry,
+        metrics.clone(),
     );
-    let maintenance_task = task::spawn(orderbook_maintenance(
-        orderbook,
-        database,
-        settlement_contract,
-        current_block_stream,
-    ));
+    let maintenance_task =
+        task::spawn(service_maintainer.run_maintenance_on_new_block(current_block_stream));
+    let db_metrics_task = task::spawn(database_metrics(metrics, database));
+
     tokio::select! {
         result = serve_task => tracing::error!(?result, "serve task exited"),
         result = maintenance_task => tracing::error!(?result, "maintenance task exited"),
+        result = db_metrics_task => tracing::error!(?result, "database metrics task exited"),
     };
 }
 

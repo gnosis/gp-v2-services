@@ -22,6 +22,7 @@ use crate::services::{
     create_orderbook_api, deploy_mintable_token, to_wei, GPv2, OrderbookServices, UniswapContracts,
     API_HOST,
 };
+use shared::maintenance::Maintaining;
 
 const TRADER_A_PK: [u8; 32] =
     hex!("0000000000000000000000000000000000000000000000000000000000000001");
@@ -98,8 +99,8 @@ async fn onchain_settlement(web3: Web3) {
     // Place Orders
     let native_token = token_a.address();
     let OrderbookServices {
-        orderbook,
         price_estimator,
+        maintenance,
     } = OrderbookServices::new(&web3, &gpv2, &uniswap_factory, native_token).await;
 
     let client = reqwest::Client::new();
@@ -169,7 +170,7 @@ async fn onchain_settlement(web3: Web3) {
         liquidity_collector,
         price_estimator,
         vec![Box::new(solver)],
-        Box::new(web3.clone()),
+        Arc::new(web3.clone()),
         Duration::from_secs(1),
         Duration::from_secs(30),
         native_token,
@@ -179,6 +180,8 @@ async fn onchain_settlement(web3: Web3) {
         network_id,
         1,
         Duration::from_secs(30),
+        f64::MAX,
+        None,
     );
     driver.single_run().await.unwrap();
 
@@ -198,7 +201,7 @@ async fn onchain_settlement(web3: Web3) {
     assert_eq!(balance, U256::from(50_175_363_672_226_073_522u128));
 
     // Drive orderbook in order to check the removal of settled order_b
-    orderbook.run_maintenance(&gpv2.settlement).await.unwrap();
+    maintenance.run_maintenance().await.unwrap();
 
     let orders = create_orderbook_api(&web3, native_token)
         .get_orders()

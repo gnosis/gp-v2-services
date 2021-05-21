@@ -2,34 +2,37 @@ pub mod solver_settlements;
 
 use self::solver_settlements::{RatedSettlement, SettlementWithSolver};
 use crate::{
-    chain, liquidity::Liquidity, liquidity_collector::LiquidityCollector, metrics::SolverMetrics,
-    settlement::Settlement, settlement_simulation, settlement_submission, solver::Solver,
+    chain,
+    liquidity::Liquidity,
+    liquidity_collector::LiquidityCollector,
+    metrics::SolverMetrics,
+    settlement::Settlement,
+    settlement_simulation,
+    settlement_submission::{self, retry::is_transaction_failure},
+    solver::Solver,
 };
 use anyhow::{anyhow, Context, Error, Result};
 use contracts::GPv2Settlement;
+use ethcontract::errors::MethodError;
 use futures::future::join_all;
 use gas_estimation::GasPriceEstimating;
 use itertools::{Either, Itertools};
 use model::order::BUY_ETH_ADDRESS;
 use num::BigRational;
 use primitive_types::H160;
-use shared::{price_estimate::PriceEstimating, Web3};
+use shared::{price_estimate::PriceEstimating, token_list::TokenList, Web3};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
     time::{Duration, Instant},
 };
 
-// There is no economic viability calculation yet so we're using an arbitrary very high cap to
-// protect against a gas estimator giving bogus results that would drain all our funds.
-const GAS_PRICE_CAP: f64 = 500e9;
-
 pub struct Driver {
     settlement_contract: GPv2Settlement,
     liquidity_collector: LiquidityCollector,
     price_estimator: Arc<dyn PriceEstimating>,
     solver: Vec<Box<dyn Solver>>,
-    gas_price_estimator: Box<dyn GasPriceEstimating>,
+    gas_price_estimator: Arc<dyn GasPriceEstimating>,
     target_confirm_time: Duration,
     settle_interval: Duration,
     native_token: H160,
@@ -39,6 +42,8 @@ pub struct Driver {
     network_id: String,
     max_merged_settlements: usize,
     solver_time_limit: Duration,
+    gas_price_cap: f64,
+    market_makable_token_list: Option<TokenList>,
 }
 impl Driver {
     #[allow(clippy::too_many_arguments)]
@@ -47,7 +52,7 @@ impl Driver {
         liquidity_collector: LiquidityCollector,
         price_estimator: Arc<dyn PriceEstimating>,
         solver: Vec<Box<dyn Solver>>,
-        gas_price_estimator: Box<dyn GasPriceEstimating>,
+        gas_price_estimator: Arc<dyn GasPriceEstimating>,
         target_confirm_time: Duration,
         settle_interval: Duration,
         native_token: H160,
@@ -57,6 +62,8 @@ impl Driver {
         network_id: String,
         max_merged_settlements: usize,
         solver_time_limit: Duration,
+        gas_price_cap: f64,
+        market_makable_token_list: Option<TokenList>,
     ) -> Self {
         Self {
             settlement_contract,
@@ -73,6 +80,8 @@ impl Driver {
             network_id,
             max_merged_settlements,
             solver_time_limit,
+            gas_price_cap,
+            market_makable_token_list,
         }
     }
 
@@ -121,7 +130,7 @@ impl Driver {
             &self.settlement_contract,
             self.gas_price_estimator.as_ref(),
             self.target_confirm_time,
-            GAS_PRICE_CAP,
+            self.gas_price_cap,
             rated_settlement,
         )
         .await
@@ -130,14 +139,38 @@ impl Driver {
                 trades
                     .iter()
                     .for_each(|trade| self.metrics.order_settled(&trade.order, name));
+                self.metrics.settlement_submitted(true, name);
             }
-            Err(err) => tracing::error!("Failed to submit settlement: {:?}", err,),
+            Err(err) => {
+                // Since we simulate and only submit solutions when they used to pass before, there is no
+                // point in logging transaction failures in the form of race conditions as hard errors.
+                if err
+                    .downcast_ref::<MethodError>()
+                    .map(|e| is_transaction_failure(&e.inner))
+                    .unwrap_or(false)
+                {
+                    tracing::warn!("Failed to submit settlement: {:?}", err)
+                } else {
+                    tracing::error!("Failed to submit settlement: {:?}", err)
+                };
+                self.metrics.settlement_submitted(false, name);
+            }
         }
     }
 
-    async fn can_settle(&self, settlement: RatedSettlement) -> Result<bool> {
+    async fn can_settle_without_liquidity(&self, settlement: &RatedSettlement) -> Result<bool> {
+        // We don't want to buy tokens that we don't trust. If no list is set, we settle with external liquidity.
+        if !self
+            .market_makable_token_list
+            .as_ref()
+            .map(|list| is_only_selling_trusted_tokens(&settlement.settlement.settlement, list))
+            .unwrap_or(false)
+        {
+            return Ok(false);
+        }
+
         let simulations = settlement_simulation::simulate_settlements(
-            chain![settlement.into()],
+            chain![settlement.without_onchain_liquidity().into()],
             &self.settlement_contract,
             &self.web3,
             &self.network_id,
@@ -224,13 +257,42 @@ impl Driver {
         }
     }
 
+    // Record metric with the amount of orders that were matched but not settled in this runloop (effectively queued for the next one)
+    // Should help us to identify how much we can save by parallelizing execution.
+    fn report_matched_but_unsettled_orders(
+        &self,
+        submitted: &Settlement,
+        all: impl Iterator<Item = Settlement>,
+    ) {
+        let submitted: HashSet<_> = submitted
+            .trades()
+            .iter()
+            .map(|trade| trade.order.order_meta_data.uid)
+            .collect();
+        let all_matched: HashSet<_> = all
+            .flat_map(|solution| solution.trades().to_vec())
+            .map(|trade| trade.order.order_meta_data.uid)
+            .collect();
+        let matched_but_not_settled: HashSet<_> = all_matched.difference(&submitted).collect();
+        self.metrics
+            .orders_matched_but_not_settled(matched_but_not_settled.len())
+    }
+
     // Rate settlements, ignoring those for which the rating procedure failed.
     async fn rate_settlements(
         &self,
         settlements: Vec<SettlementWithSolver>,
         prices: &HashMap<H160, BigRational>,
+        gas_price_wei: f64,
     ) -> Vec<RatedSettlement> {
         use futures::stream::StreamExt;
+
+        // Normalize gas_price_wei to the native token price in the prices vector.
+        let gas_price_wei = BigRational::from_float(gas_price_wei).expect("Invalid gas price.")
+            * prices
+                .get(&self.native_token)
+                .expect("Price of native token must be known.");
+
         futures::stream::iter(settlements)
             .filter_map(|settlement| async {
                 let surplus = settlement.settlement.total_surplus(prices);
@@ -240,11 +302,22 @@ impl Driver {
                 )
                 .await
                 .ok()?;
-                Some(RatedSettlement {
+                let solver_name = settlement.name;
+                let rated_settlement = RatedSettlement {
                     settlement,
                     surplus,
                     gas_estimate,
-                })
+                    gas_price: gas_price_wei.clone(),
+                };
+                tracing::info!(
+                    "Objective value for solver {} is {}: surplus={}, gas_estimate={}, gas_price={}",
+                    solver_name,
+                    rated_settlement.objective_value(),
+                    rated_settlement.surplus,
+                    rated_settlement.gas_estimate,
+                    rated_settlement.gas_price,
+                );
+                Some(rated_settlement)
             })
             .collect::<Vec<_>>()
             .await
@@ -252,7 +325,6 @@ impl Driver {
 
     pub async fn single_run(&mut self) -> Result<()> {
         tracing::debug!("starting single run");
-        let liquidity = self.liquidity_collector.get_liquidity().await?;
         let current_block_during_liquidity_fetch = self
             .web3
             .eth()
@@ -260,22 +332,28 @@ impl Driver {
             .await
             .context("failed to get current block")?
             .as_u64();
+        let liquidity = self
+            .liquidity_collector
+            .get_liquidity(current_block_during_liquidity_fetch.into())
+            .await?;
 
         let estimated_prices =
             collect_estimated_prices(self.price_estimator.as_ref(), self.native_token, &liquidity)
                 .await;
+        tracing::debug!("estimated prices: {:?}", estimated_prices);
+
         let liquidity = liquidity_with_price(liquidity, &estimated_prices);
         self.metrics.liquidity_fetched(&liquidity);
 
-        let gas_price = self
+        let gas_price_wei = self
             .gas_price_estimator
             .estimate()
             .await
             .context("failed to estimate gas price")?;
-        tracing::debug!("solving with gas price of {}", gas_price);
+        tracing::debug!("solving with gas price of {}", gas_price_wei);
 
         let settlements = self
-            .run_solvers(liquidity, gas_price)
+            .run_solvers(liquidity, gas_price_wei)
             .await
             .filter_map(solver_settlements::filter_bad_settlements)
             .inspect(|(name, settlements)| {
@@ -315,22 +393,31 @@ impl Driver {
             self.metrics.settlement_simulation_failed(settlement.name);
         }
 
-        let rated_settlements = self.rate_settlements(settlements, &estimated_prices).await;
+        let rated_settlements = self
+            .rate_settlements(settlements, &estimated_prices, gas_price_wei)
+            .await;
 
-        if let Some(mut settlement) = rated_settlements.into_iter().max_by(|a, b| {
-            a.objective_value(gas_price)
-                .cmp(&b.objective_value(gas_price))
-        }) {
+        if let Some(mut settlement) = rated_settlements
+            .clone()
+            .into_iter()
+            .max_by(|a, b| a.objective_value().cmp(&b.objective_value()))
+        {
             // If we have enough buffer in the settlement contract to not use on-chain interactions, remove those
             if self
-                .can_settle(settlement.without_onchain_liquidity())
+                .can_settle_without_liquidity(&settlement)
                 .await
                 .unwrap_or(false)
             {
                 settlement = settlement.without_onchain_liquidity();
                 tracing::info!("settlement without onchain liquidity");
             }
-            self.submit_settlement(settlement).await;
+
+            tracing::debug!("winning settlement: {:?}", settlement);
+            self.submit_settlement(settlement.clone()).await;
+            self.report_matched_but_unsettled_orders(
+                &Settlement::from(settlement),
+                rated_settlements.into_iter().map(Settlement::from),
+            );
         }
 
         // Happens after settlement submission so that we do not delay it.
@@ -347,6 +434,8 @@ pub async fn collect_estimated_prices(
     liquidity: &[Liquidity],
 ) -> HashMap<H160, BigRational> {
     // Computes set of traded tokens (limit orders only).
+    // NOTE: The native token is always added.
+
     let mut tokens = HashSet::new();
     for liquid in liquidity {
         if let Liquidity::Limit(limit_order) = liquid {
@@ -376,10 +465,12 @@ pub async fn collect_estimated_prices(
         })
         .collect();
 
-    // If the wrapped native token is in the price list (e.g. WETH), so should be the placeholder for its native counterpart
-    if let Some(price) = prices.get(&native_token).cloned() {
-        prices.insert(BUY_ETH_ADDRESS, price);
-    }
+    // Always include the native token.
+    prices.insert(native_token, num::one());
+
+    // And the placeholder for its native counterpart.
+    prices.insert(BUY_ETH_ADDRESS, num::one());
+
     prices
 }
 
@@ -407,14 +498,31 @@ fn liquidity_with_price(
     liquidity
 }
 
+fn is_only_selling_trusted_tokens(settlement: &Settlement, token_list: &TokenList) -> bool {
+    !settlement.encoder.trades().iter().any(|trade| {
+        token_list
+            .get(&trade.order.order_creation.sell_token)
+            .is_none()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::liquidity::{tests::CapturingSettlementHandler, AmmOrder, LimitOrder};
+    use crate::{
+        liquidity::{tests::CapturingSettlementHandler, AmmOrder, LimitOrder},
+        settlement::Trade,
+    };
     use maplit::hashmap;
-    use model::{order::OrderKind, TokenPair};
+    use model::{
+        order::{Order, OrderCreation, OrderKind},
+        TokenPair,
+    };
     use num::{rational::Ratio, traits::One};
-    use shared::price_estimate::mocks::{FailingPriceEstimator, FakePriceEstimator};
+    use shared::{
+        price_estimate::mocks::{FailingPriceEstimator, FakePriceEstimator},
+        token_list::Token,
+    };
 
     #[tokio::test]
     async fn collect_estimated_prices_adds_prices_for_buy_and_sell_token_of_limit_orders() {
@@ -444,7 +552,7 @@ mod tests {
             }),
         ];
         let prices = collect_estimated_prices(&price_estimator, native_token, &liquidity).await;
-        assert_eq!(prices.len(), 2);
+        assert_eq!(prices.len(), 4);
         assert!(prices.contains_key(&sell_token));
         assert!(prices.contains_key(&buy_token));
     }
@@ -469,7 +577,7 @@ mod tests {
             id: "0".into(),
         })];
         let prices = collect_estimated_prices(&price_estimator, native_token, &liquidity).await;
-        assert_eq!(prices.len(), 0);
+        assert_eq!(prices.len(), 2);
     }
 
     #[tokio::test]
@@ -524,5 +632,54 @@ mod tests {
         assert!(
             matches!(&filtered[0], Liquidity::Limit(order) if order.sell_token == tokens[0] && order.buy_token == tokens[1])
         );
+    }
+
+    #[test]
+    fn test_is_only_selling_trusted_tokens() {
+        let good_token = H160::from_low_u64_be(1);
+        let another_good_token = H160::from_low_u64_be(2);
+        let bad_token = H160::from_low_u64_be(3);
+
+        let token_list = TokenList::new(hashmap! {
+            good_token => Token {
+                address: good_token,
+                symbol: "Foo".into(),
+                name: "FooCoin".into(),
+                decimals: 18,
+            },
+            another_good_token => Token {
+                address: another_good_token,
+                symbol: "Bar".into(),
+                name: "BarCoin".into(),
+                decimals: 18,
+            }
+        });
+
+        let trade = |token| Trade {
+            order: Order {
+                order_creation: OrderCreation {
+                    sell_token: token,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let settlement = Settlement::with_trades(
+            HashMap::new(),
+            vec![trade(good_token), trade(another_good_token)],
+        );
+        assert!(is_only_selling_trusted_tokens(&settlement, &token_list));
+
+        let settlement = Settlement::with_trades(
+            HashMap::new(),
+            vec![
+                trade(good_token),
+                trade(another_good_token),
+                trade(bad_token),
+            ],
+        );
+        assert!(!is_only_selling_trusted_tokens(&settlement, &token_list));
     }
 }

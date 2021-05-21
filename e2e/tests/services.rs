@@ -6,11 +6,14 @@ use ethcontract::{
 use model::DomainSeparator;
 use orderbook::{
     account_balances::Web3BalanceFetcher, database::Database, event_updater::EventUpdater,
-    fee::EthAwareMinFeeCalculator, orderbook::Orderbook,
+    fee::EthAwareMinFeeCalculator, metrics::Metrics, orderbook::Orderbook,
 };
+use prometheus::Registry;
 use shared::{
     amm_pair_provider::UniswapPairProvider,
+    bad_token::list_based::ListBasedDetector,
     current_block::current_block_stream,
+    maintenance::ServiceMaintenance,
     pool_fetching::{CachedPoolFetcher, PoolFetcher},
     price_estimate::BaselinePriceEstimator,
     Web3,
@@ -109,8 +112,8 @@ pub async fn deploy_mintable_token(web3: &Web3) -> ERC20Mintable {
 }
 
 pub struct OrderbookServices {
-    pub orderbook: Arc<Orderbook>,
     pub price_estimator: Arc<BaselinePriceEstimator>,
+    pub maintenance: ServiceMaintenance,
 }
 impl OrderbookServices {
     pub async fn new(
@@ -127,8 +130,7 @@ impl OrderbookServices {
             .as_u64();
         let db = Database::new("postgresql://").unwrap();
         db.clear().await.unwrap();
-        let event_updater = EventUpdater::new(gpv2.settlement.clone(), db.clone(), None);
-
+        let event_updater = Arc::new(EventUpdater::new(gpv2.settlement.clone(), db.clone(), None));
         let current_block_stream = current_block_stream(web3.clone()).await.unwrap();
         let pair_provider = Arc::new(UniswapPairProvider {
             factory: uniswap_factory.clone(),
@@ -141,44 +143,53 @@ impl OrderbookServices {
             }),
             current_block_stream,
         );
+        let gas_estimator = Arc::new(web3.clone());
+        let bad_token_detector = Arc::new(ListBasedDetector::deny_list(Vec::new()));
         let price_estimator = Arc::new(BaselinePriceEstimator::new(
             Box::new(pool_fetcher),
+            gas_estimator.clone(),
             HashSet::new(),
-            HashSet::new(),
+            bad_token_detector.clone(),
+            native_token,
         ));
         let fee_calculator = Arc::new(EthAwareMinFeeCalculator::new(
             price_estimator.clone(),
-            Box::new(web3.clone()),
+            gas_estimator,
             native_token,
             db.clone(),
             1.0,
-            HashSet::new(),
+            bad_token_detector.clone(),
         ));
         let orderbook = Arc::new(Orderbook::new(
             gpv2.domain_separator,
             db.clone(),
-            event_updater,
             Box::new(Web3BalanceFetcher::new(
                 web3.clone(),
                 gpv2.allowance,
                 gpv2.settlement.address(),
             )),
             fee_calculator.clone(),
-            HashSet::new(),
             Duration::from_secs(120),
+            bad_token_detector,
         ));
-
+        let maintenance = ServiceMaintenance {
+            maintainers: vec![orderbook.clone(), Arc::new(db.clone()), event_updater],
+        };
+        let registry = Registry::default();
+        let metrics = Arc::new(Metrics::new(&registry).unwrap());
         orderbook::serve_task(
             db.clone(),
-            orderbook.clone(),
+            orderbook,
             fee_calculator,
             price_estimator.clone(),
             API_HOST[7..].parse().expect("Couldn't parse API address"),
+            registry,
+            metrics,
         );
 
         Self {
-            orderbook,
             price_estimator,
+            maintenance,
         }
     }
 }

@@ -7,7 +7,11 @@ use model::{
 };
 use secp256k1::SecretKey;
 use serde_json::json;
-use shared::{amm_pair_provider::UniswapPairProvider, Web3};
+use shared::{
+    amm_pair_provider::UniswapPairProvider,
+    token_list::{Token, TokenList},
+    Web3,
+};
 use solver::{
     liquidity::uniswap::UniswapLikeLiquidity, liquidity_collector::LiquidityCollector,
     metrics::NoopMetrics,
@@ -22,6 +26,7 @@ use crate::services::{
     create_orderbook_api, deploy_mintable_token, to_wei, GPv2, OrderbookServices, UniswapContracts,
     API_HOST,
 };
+use shared::maintenance::Maintaining;
 
 const TRADER_A_PK: [u8; 32] =
     hex!("0000000000000000000000000000000000000000000000000000000000000001");
@@ -107,8 +112,8 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
     // Place Orders
     let native_token = token_a.address();
     let OrderbookServices {
-        orderbook,
         price_estimator,
+        maintenance,
     } = OrderbookServices::new(&web3, &gpv2, &uniswap_factory, native_token).await;
 
     let client = reqwest::Client::new();
@@ -153,12 +158,20 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
         orderbook_api: create_orderbook_api(&web3, native_token),
     };
     let network_id = web3.net().version().await.unwrap();
+    let market_makable_token_list = TokenList::new(maplit::hashmap! {
+        token_a.address() => Token {
+            address: token_a.address(),
+            name: "Test Coin".into(),
+            symbol: "TC".into(),
+            decimals: 18,
+        }
+    });
     let mut driver = solver::driver::Driver::new(
         gpv2.settlement.clone(),
         liquidity_collector,
         price_estimator,
         vec![Box::new(solver)],
-        Box::new(web3.clone()),
+        Arc::new(web3.clone()),
         Duration::from_secs(1),
         Duration::from_secs(30),
         native_token,
@@ -168,6 +181,8 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
         network_id,
         1,
         Duration::from_secs(10),
+        f64::MAX,
+        Some(market_makable_token_list),
     );
     driver.single_run().await.unwrap();
 
@@ -195,7 +210,7 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
     assert_eq!(balance, to_wei(100));
 
     // Drive orderbook in order to check the removal of settled order_b
-    orderbook.run_maintenance(&gpv2.settlement).await.unwrap();
+    maintenance.run_maintenance().await.unwrap();
 
     let orders = create_orderbook_api(&web3, native_token)
         .get_orders()

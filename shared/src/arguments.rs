@@ -1,6 +1,6 @@
 //! Contains command line arguments and related helpers that are shared between the binaries.
 use crate::{gas_price_estimation::GasEstimatorType, pool_aggregating::BaselineSources};
-use ethcontract::H160;
+use ethcontract::{H160, U256};
 use std::{num::ParseFloatError, time::Duration};
 use url::Url;
 
@@ -51,6 +51,11 @@ pub struct Arguments {
     #[structopt(long, env = "UNSUPPORTED_TOKENS", use_delimiter = true)]
     pub unsupported_tokens: Vec<H160>,
 
+    /// List of token addresses that shoud be allowed regardless of whether the bad token detector
+    /// thinks they are bad. Base tokens are automatically allowed.
+    #[structopt(long, env = "ALLOWED_TOKENS", use_delimiter = true)]
+    pub allowed_tokens: Vec<H160>,
+
     /// Fee discount factor: 1 means no discount, 0.9 means 10% discount.
     #[structopt(long, env = "FEE_DISCOUNT_FACTOR", default_value = "1")]
     pub fee_discount_factor: f64,
@@ -69,4 +74,13 @@ pub struct Arguments {
 
 pub fn duration_from_seconds(s: &str) -> Result<Duration, ParseFloatError> {
     Ok(Duration::from_secs_f32(s.parse()?))
+}
+
+pub fn wei_from_base_unit(s: &str) -> anyhow::Result<U256> {
+    Ok(U256::from_dec_str(s)? * U256::exp10(18))
+}
+
+pub fn wei_from_gwei(s: &str) -> anyhow::Result<f64> {
+    let in_gwei: f64 = s.parse()?;
+    Ok(in_gwei * 10e9)
 }

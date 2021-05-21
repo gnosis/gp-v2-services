@@ -1,17 +1,22 @@
-use crate::baseline_solver::{
-    estimate_buy_amount, estimate_sell_amount, estimate_spot_price, path_candidates,
-    token_path_to_pair_path,
+use crate::{
+    bad_token::BadTokenDetecting,
+    baseline_solver::{
+        estimate_buy_amount, estimate_sell_amount, estimate_spot_price, path_candidates,
+        token_path_to_pair_path,
+    },
+    conversions::U256Ext,
+    pool_fetching::{Pool, PoolFetching},
 };
-use crate::conversions::U256Ext;
-use crate::pool_fetching::{Pool, PoolFetching};
 use anyhow::{anyhow, Result};
-use ethcontract::{H160, U256};
+use ethcontract::{BlockNumber, H160, U256};
 use futures::future::join_all;
+use gas_estimation::GasPriceEstimating;
 use model::{order::OrderKind, TokenPair};
 use num::{BigRational, ToPrimitive};
 use std::{
     cmp::Reverse,
     collections::{HashMap, HashSet},
+    sync::Arc,
 };
 use thiserror::Error;
 
@@ -20,7 +25,7 @@ const MAX_HOPS: usize = 2;
 #[derive(Error, Debug)]
 pub enum PriceEstimationError {
     // Represents a failure when no liquidity between sell and buy token via the native token can be found
-    #[error("Token {0} not supported")]
+    #[error("Token {0:?} not supported")]
     UnsupportedToken(H160),
 
     #[error(transparent)]
@@ -85,20 +90,39 @@ pub trait PriceEstimating: Send + Sync {
 
 pub struct BaselinePriceEstimator {
     pool_fetcher: Box<dyn PoolFetching>,
+    gas_estimator: Arc<dyn GasPriceEstimating>,
     base_tokens: HashSet<H160>,
-    unsupported_tokens: HashSet<H160>,
+    bad_token_detector: Arc<dyn BadTokenDetecting>,
+    native_token: H160,
 }
 
 impl BaselinePriceEstimator {
     pub fn new(
         pool_fetcher: Box<dyn PoolFetching>,
+        gas_estimator: Arc<dyn GasPriceEstimating>,
         base_tokens: HashSet<H160>,
-        unsupported_tokens: HashSet<H160>,
+        bad_token_detector: Arc<dyn BadTokenDetecting>,
+        native_token: H160,
     ) -> Self {
         Self {
             pool_fetcher,
+            gas_estimator,
             base_tokens,
-            unsupported_tokens,
+            bad_token_detector,
+            native_token,
+        }
+    }
+
+    async fn ensure_token_supported(&self, token: H160) -> Result<(), PriceEstimationError> {
+        match self.bad_token_detector.detect(token).await {
+            Ok(quality) => {
+                if quality.is_good() {
+                    Ok(())
+                } else {
+                    Err(PriceEstimationError::UnsupportedToken(token))
+                }
+            }
+            Err(err) => Err(PriceEstimationError::Other(err)),
         }
     }
 }
@@ -115,12 +139,8 @@ impl PriceEstimating for BaselinePriceEstimator {
         amount: U256,
         kind: OrderKind,
     ) -> Result<BigRational, PriceEstimationError> {
-        if self.unsupported_tokens.contains(&sell_token) {
-            return Err(PriceEstimationError::UnsupportedToken(sell_token));
-        }
-        if self.unsupported_tokens.contains(&buy_token) {
-            return Err(PriceEstimationError::UnsupportedToken(buy_token));
-        }
+        self.ensure_token_supported(sell_token).await?;
+        self.ensure_token_supported(buy_token).await?;
         if sell_token == buy_token {
             return Ok(num::one());
         }
@@ -130,10 +150,11 @@ impl PriceEstimating for BaselinePriceEstimator {
                 .await
                 .map(|(_, price)| price)?);
         }
+        let gas_price = self.gas_estimator.estimate().await?;
         match kind {
             OrderKind::Buy => {
                 let (_, sell_amount) = self
-                    .best_execution_buy_order(sell_token, buy_token, amount)
+                    .best_execution_buy_order(sell_token, buy_token, amount, gas_price)
                     .await?;
                 Ok(BigRational::new(
                     sell_amount.to_big_int(),
@@ -142,7 +163,7 @@ impl PriceEstimating for BaselinePriceEstimator {
             }
             OrderKind::Sell => {
                 let (_, buy_amount) = self
-                    .best_execution_sell_order(sell_token, buy_token, amount)
+                    .best_execution_sell_order(sell_token, buy_token, amount, gas_price)
                     .await?;
                 if buy_amount.is_zero() {
                     return Err(
@@ -164,24 +185,21 @@ impl PriceEstimating for BaselinePriceEstimator {
         amount: U256,
         kind: OrderKind,
     ) -> Result<U256, PriceEstimationError> {
-        if self.unsupported_tokens.contains(&sell_token) {
-            return Err(PriceEstimationError::UnsupportedToken(sell_token));
-        }
-        if self.unsupported_tokens.contains(&buy_token) {
-            return Err(PriceEstimationError::UnsupportedToken(buy_token));
-        }
+        self.ensure_token_supported(sell_token).await?;
+        self.ensure_token_supported(buy_token).await?;
         if sell_token == buy_token || amount.is_zero() {
             return Ok(U256::zero());
         }
 
+        let gas_price = self.gas_estimator.estimate().await?;
         let path = match kind {
             OrderKind::Buy => {
-                self.best_execution_buy_order(sell_token, buy_token, amount)
+                self.best_execution_buy_order(sell_token, buy_token, amount, gas_price)
                     .await?
                     .0
             }
             OrderKind::Sell => {
-                self.best_execution_sell_order(sell_token, buy_token, amount)
+                self.best_execution_sell_order(sell_token, buy_token, amount, gas_price)
                     .await?
                     .0
             }
@@ -189,7 +207,13 @@ impl PriceEstimating for BaselinePriceEstimator {
         let trades = path.len() - 1;
         // This could be more accurate by actually simulating the settlement (since different tokens might have more or less expensive transfer costs)
         // For the standard OZ token the cost is roughly 110k for a direct trade, 170k for a 1 hop trade, 230k for a 2 hop trade.
-        return Ok(U256::from(50_000) + 60_000 * trades);
+        const BASELINE_GAS_PER_HOP: u64 = 60_000;
+        const BASELINE_FIXED_OVERHEAD: u64 = 50_000;
+        // Extrapolated from gp-v2-contract's `yarn bench:uniswap`
+        const GP_OVERHEAD: u64 = 90_000;
+        return Ok(U256::from(GP_OVERHEAD)
+            + BASELINE_FIXED_OVERHEAD
+            + BASELINE_GAS_PER_HOP * trades as u64);
     }
 }
 
@@ -199,13 +223,24 @@ impl BaselinePriceEstimator {
         sell_token: H160,
         buy_token: H160,
         sell_amount: U256,
+        gas_price: f64,
     ) -> Result<(Vec<H160>, U256)> {
+        // Estimate with amount 0 to get a spot price (avoid potential endless recursion)
+        let buy_token_price_in_native_token = self
+            .estimate_price(self.native_token, buy_token, U256::zero(), OrderKind::Sell)
+            .await?;
         self.best_execution(
             sell_token,
             buy_token,
             sell_amount,
             |amount, path, pools| {
-                estimate_buy_amount(amount, path, pools).map(|estimate| estimate.value)
+                estimate_buy_amount(amount, path, pools).map(|estimate| {
+                    let proceeds_in_native_token =
+                        estimate.value.to_big_rational() * buy_token_price_in_native_token.clone();
+                    let tx_cost_in_native_token = U256::from_f64_lossy(gas_price).to_big_rational()
+                        * BigRational::from_integer(estimate.gas_cost().into());
+                    proceeds_in_native_token - tx_cost_in_native_token
+                })
             },
             |amount, path, pools| {
                 estimate_buy_amount(amount, path, pools).map(|estimate| estimate.value)
@@ -219,7 +254,12 @@ impl BaselinePriceEstimator {
         sell_token: H160,
         buy_token: H160,
         buy_amount: U256,
+        gas_price: f64,
     ) -> Result<(Vec<H160>, U256)> {
+        // Estimate with amount 0 to get a spot price (avoid potential endless recursion)
+        let sell_token_price_in_eth = self
+            .estimate_price(self.native_token, sell_token, U256::zero(), OrderKind::Sell)
+            .await?;
         self.best_execution(
             sell_token,
             buy_token,
@@ -227,8 +267,15 @@ impl BaselinePriceEstimator {
             |amount, path, pools| {
                 Reverse(
                     estimate_sell_amount(amount, path, pools)
-                        .map(|estimate| estimate.value)
-                        .unwrap_or_else(U256::max_value),
+                        .map(|estimate| {
+                            let cost_in_native_token =
+                                estimate.value.to_big_rational() * sell_token_price_in_eth.clone();
+                            let tx_cost_in_native_token = U256::from_f64_lossy(gas_price)
+                                .to_big_rational()
+                                * BigRational::from_integer(estimate.gas_cost().into());
+                            cost_in_native_token + tx_cost_in_native_token
+                        })
+                        .unwrap_or_else(|| U256::max_value().to_big_rational()),
                 )
             },
             |amount, path, pools| {
@@ -271,13 +318,15 @@ impl BaselinePriceEstimator {
             .iter()
             .flat_map(|candidate| token_path_to_pair_path(candidate).into_iter())
             .collect();
-        let pools: HashMap<_, _> = self
+        let pools = self
             .pool_fetcher
-            .fetch(all_pairs)
+            .fetch(all_pairs, BlockNumber::Latest)
             .await
             .into_iter()
-            .map(|pool| (pool.tokens, vec![pool]))
-            .collect();
+            .fold(HashMap::<_, Vec<Pool>>::new(), |mut pools, pool| {
+                pools.entry(pool.tokens).or_default().push(pool);
+                pools
+            });
         let best_path = path_candidates
             .iter()
             .max_by_key(|path| comparison(amount, path, &pools))
@@ -351,17 +400,22 @@ pub mod mocks {
 
 #[cfg(test)]
 mod tests {
+    use crate::{bad_token::list_based::ListBasedDetector, baseline_solver::BaselineSolvable};
     use assert_approx_eq::assert_approx_eq;
     use maplit::hashset;
     use std::collections::HashSet;
+    use std::sync::Mutex;
 
     use super::*;
-    use crate::pool_fetching::{FilteredPoolFetcher, Pool, PoolFetching};
+    use crate::{
+        gas_price_estimation::FakeGasPriceEstimator,
+        pool_fetching::{Pool, PoolFetching},
+    };
 
     struct FakePoolFetcher(Vec<Pool>);
     #[async_trait::async_trait]
     impl PoolFetching for FakePoolFetcher {
-        async fn fetch(&self, token_pairs: HashSet<TokenPair>) -> Vec<Pool> {
+        async fn fetch(&self, token_pairs: HashSet<TokenPair>, _: BlockNumber) -> Vec<Pool> {
             self.0
                 .clone()
                 .into_iter()
@@ -380,7 +434,14 @@ mod tests {
         );
 
         let pool_fetcher = Box::new(FakePoolFetcher(vec![pool]));
-        let estimator = BaselinePriceEstimator::new(pool_fetcher, hashset!(), hashset!());
+        let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
+        let estimator = BaselinePriceEstimator::new(
+            pool_fetcher,
+            gas_estimator,
+            hashset!(),
+            Arc::new(ListBasedDetector::deny_list(Vec::new())),
+            token_b,
+        );
 
         assert_approx_eq!(
             estimator
@@ -440,7 +501,14 @@ mod tests {
         );
 
         let pool_fetcher = Box::new(FakePoolFetcher(vec![pool]));
-        let estimator = BaselinePriceEstimator::new(pool_fetcher, hashset!(), hashset!());
+        let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
+        let estimator = BaselinePriceEstimator::new(
+            pool_fetcher,
+            gas_estimator,
+            hashset!(),
+            Arc::new(ListBasedDetector::deny_list(Vec::new())),
+            Default::default(),
+        );
 
         assert!(estimator
             .estimate_price(token_a, token_b, 0.into(), OrderKind::Buy)
@@ -467,10 +535,13 @@ mod tests {
         );
 
         let pool_fetcher = Box::new(FakePoolFetcher(vec![pool_ab, pool_bc]));
+        let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
         let estimator = BaselinePriceEstimator::new(
             pool_fetcher,
+            gas_estimator,
             hashset!(token_a, token_b, token_c),
-            hashset!(),
+            Arc::new(ListBasedDetector::deny_list(Vec::new())),
+            Default::default(),
         );
 
         let prices = estimator
@@ -489,7 +560,14 @@ mod tests {
         let token_a = H160::from_low_u64_be(1);
         let token_b = H160::from_low_u64_be(2);
         let pool_fetcher = Box::new(FakePoolFetcher(vec![]));
-        let estimator = BaselinePriceEstimator::new(pool_fetcher, hashset!(), hashset!());
+        let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
+        let estimator = BaselinePriceEstimator::new(
+            pool_fetcher,
+            gas_estimator,
+            hashset!(),
+            Arc::new(ListBasedDetector::deny_list(Vec::new())),
+            Default::default(),
+        );
 
         assert!(estimator
             .estimate_price(token_a, token_b, 1.into(), OrderKind::Buy)
@@ -505,19 +583,23 @@ mod tests {
             TokenPair::new(token_a, token_b).unwrap(),
             (10u128.pow(30), 10u128.pow(29)),
         );
-        let pool_fetcher =
-            FilteredPoolFetcher::new(Box::new(FakePoolFetcher(vec![pool_ab])), hashset!(token_a));
-        let estimator = BaselinePriceEstimator::new(Box::new(pool_fetcher), hashset!(), hashset!());
+        let pool_fetcher = FakePoolFetcher(vec![pool_ab]);
+        let bad_token = Arc::new(ListBasedDetector::deny_list(vec![token_a]));
+        let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
+        let estimator = BaselinePriceEstimator::new(
+            Box::new(pool_fetcher),
+            gas_estimator,
+            hashset!(),
+            bad_token,
+            token_a,
+        );
 
         let result = estimator
             .estimate_price(token_a, token_b, 1.into(), OrderKind::Buy)
             .await
             .unwrap_err();
         assert_eq!(
-            format!(
-                "No valid path found between {:#x} and {:#x}",
-                token_a, token_b
-            ),
+            format!("Token {:?} not supported", token_a),
             result.to_string()
         );
         let result = estimator
@@ -525,10 +607,7 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(
-            format!(
-                "No valid path found between {:#x} and {:#x}",
-                token_b, token_a
-            ),
+            format!("Token {:?} not supported", token_a),
             result.to_string()
         );
     }
@@ -540,7 +619,14 @@ mod tests {
         let pool = Pool::uniswap(TokenPair::new(token_a, token_b).unwrap(), (0, 10));
 
         let pool_fetcher = Box::new(FakePoolFetcher(vec![pool]));
-        let estimator = BaselinePriceEstimator::new(pool_fetcher, hashset!(), hashset!());
+        let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
+        let estimator = BaselinePriceEstimator::new(
+            pool_fetcher,
+            gas_estimator,
+            hashset!(),
+            Arc::new(ListBasedDetector::deny_list(Vec::new())),
+            Default::default(),
+        );
 
         assert!(estimator
             .estimate_price(token_a, token_b, 1.into(), OrderKind::Buy)
@@ -562,7 +648,14 @@ mod tests {
         );
 
         let pool_fetcher = Box::new(FakePoolFetcher(vec![pool]));
-        let estimator = BaselinePriceEstimator::new(pool_fetcher, hashset!(base_token), hashset!());
+        let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
+        let estimator = BaselinePriceEstimator::new(
+            pool_fetcher,
+            gas_estimator,
+            hashset!(base_token),
+            Arc::new(ListBasedDetector::deny_list(Vec::new())),
+            token_b,
+        );
 
         assert!(estimator
             .estimate_price(token_a, token_b, 100.into(), OrderKind::Sell)
@@ -572,6 +665,60 @@ mod tests {
             .estimate_price(token_a, token_b, 100.into(), OrderKind::Buy)
             .await
             .is_ok());
+    }
+
+    fn pool_price(
+        pool: &Pool,
+        token_out: H160,
+        amount_in: impl Into<U256>,
+        token_in: H160,
+    ) -> BigRational {
+        let amount_in = amount_in.into();
+        BigRational::new(
+            amount_in.to_big_int(),
+            pool.get_amount_out(token_out, amount_in, token_in)
+                .unwrap()
+                .as_u128()
+                .into(),
+        )
+    }
+
+    #[tokio::test]
+    async fn price_estimate_uses_best_pool() {
+        let token_a = H160([0x0a; 20]);
+        let token_b = H160([0x0b; 20]);
+
+        let pools = vec![
+            Pool::uniswap(
+                TokenPair::new(token_a, token_b).unwrap(),
+                (100_000, 100_000),
+            ),
+            Pool::uniswap(TokenPair::new(token_a, token_b).unwrap(), (100_000, 90_000)),
+        ];
+
+        let pool_fetcher = Box::new(FakePoolFetcher(pools.clone()));
+        let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
+        let estimator = BaselinePriceEstimator::new(
+            pool_fetcher,
+            gas_estimator,
+            HashSet::new(),
+            Arc::new(ListBasedDetector::deny_list(Vec::new())),
+            token_a,
+        );
+
+        let price = estimator
+            .estimate_price(token_a, token_b, 100.into(), OrderKind::Sell)
+            .await
+            .unwrap();
+        // Pool 0 is more favourable for buying token B.
+        assert_eq!(price, pool_price(&pools[0], token_b, 100, token_a));
+
+        let price = estimator
+            .estimate_price(token_b, token_a, 100.into(), OrderKind::Sell)
+            .await
+            .unwrap();
+        // Pool 1 is more favourable for buying token A.
+        assert_eq!(price, pool_price(&pools[1], token_a, 100, token_b));
     }
 
     #[tokio::test]
@@ -588,8 +735,14 @@ mod tests {
         ];
 
         let pool_fetcher = Box::new(FakePoolFetcher(pools));
-        let estimator =
-            BaselinePriceEstimator::new(pool_fetcher, hashset!(intermediate), hashset!());
+        let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
+        let estimator = BaselinePriceEstimator::new(
+            pool_fetcher,
+            gas_estimator,
+            hashset!(intermediate),
+            Arc::new(ListBasedDetector::deny_list(Vec::new())),
+            intermediate,
+        );
 
         // Trade with intermediate hop
         for kind in &[OrderKind::Sell, OrderKind::Buy] {
@@ -598,7 +751,7 @@ mod tests {
                     .estimate_gas(token_a, token_b, 1.into(), *kind)
                     .await
                     .unwrap(),
-                170_000.into()
+                260_000.into()
             );
         }
 
@@ -609,7 +762,7 @@ mod tests {
                     .estimate_gas(token_b, token_a, 1.into(), *kind)
                     .await
                     .unwrap(),
-                110_000.into()
+                200_000.into()
             );
         }
     }
@@ -620,8 +773,14 @@ mod tests {
         let unsupported_token = H160::from_low_u64_be(2);
 
         let pool_fetcher = Box::new(FakePoolFetcher(Vec::new()));
-        let estimator =
-            BaselinePriceEstimator::new(pool_fetcher, hashset!(), hashset!(unsupported_token));
+        let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
+        let estimator = BaselinePriceEstimator::new(
+            pool_fetcher,
+            gas_estimator,
+            hashset!(),
+            Arc::new(ListBasedDetector::deny_list(vec![unsupported_token])),
+            Default::default(),
+        );
 
         // Price estimate selling unsupported
         assert!(matches!(estimator.estimate_price(
@@ -654,5 +813,82 @@ mod tests {
             100.into(),
             OrderKind::Sell
         ).await, Err(PriceEstimationError::UnsupportedToken(t)) if t == unsupported_token));
+    }
+
+    #[tokio::test]
+    async fn price_estimate_takes_gas_costs_into_account() {
+        let token_a = H160::from_low_u64_be(1);
+        let intermediate = H160::from_low_u64_be(2);
+        let token_b = H160::from_low_u64_be(3);
+
+        // Multi-hop offers better price when selling a for b
+        let pools = vec![
+            Pool::uniswap(TokenPair::new(token_a, token_b).unwrap(), (100_000, 90_000)),
+            Pool::uniswap(
+                TokenPair::new(token_a, intermediate).unwrap(),
+                (100_000, 100_000),
+            ),
+            Pool::uniswap(
+                TokenPair::new(intermediate, token_b).unwrap(),
+                (100_000, 100_000),
+            ),
+        ];
+
+        let pool_fetcher = Box::new(FakePoolFetcher(pools.clone()));
+        let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(100.0))));
+        let estimator = BaselinePriceEstimator::new(
+            pool_fetcher,
+            gas_estimator,
+            hashset!(intermediate),
+            Arc::new(ListBasedDetector::deny_list(Vec::new())),
+            intermediate,
+        );
+
+        // Only use 1 hop
+        assert_eq!(
+            estimator
+                .estimate_gas(token_a, token_b, 100.into(), OrderKind::Sell)
+                .await
+                .unwrap(),
+            200_000.into()
+        );
+
+        // Only use 1 hop
+        assert_eq!(
+            estimator
+                .estimate_gas(token_a, token_b, 100.into(), OrderKind::Buy)
+                .await
+                .unwrap(),
+            200_000.into()
+        );
+
+        // Now with a cheap gas price
+        let pool_fetcher = Box::new(FakePoolFetcher(pools));
+        let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
+        let estimator = BaselinePriceEstimator::new(
+            pool_fetcher,
+            gas_estimator,
+            hashset!(intermediate),
+            Arc::new(ListBasedDetector::deny_list(Vec::new())),
+            intermediate,
+        );
+
+        // Use 2 hops
+        assert_eq!(
+            estimator
+                .estimate_gas(token_a, token_b, 100.into(), OrderKind::Sell)
+                .await
+                .unwrap(),
+            260_000.into()
+        );
+
+        // Use 2 hops
+        assert_eq!(
+            estimator
+                .estimate_gas(token_a, token_b, 100.into(), OrderKind::Buy)
+                .await
+                .unwrap(),
+            260_000.into()
+        );
     }
 }
