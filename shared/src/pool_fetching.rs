@@ -165,10 +165,12 @@ impl BaselineSolvable for Pool {
     }
 }
 
+type TokenPoolsMap = HashMap<TokenPair, Vec<Pool>>;
+
 // Read though Pool Fetcher that keeps previously fetched pools in a cache, which get invalidated whenever there is a new block
 pub struct CachedPoolFetcher {
     inner: Box<dyn PoolFetching>,
-    cache: Arc<Mutex<(Block, HashMap<TokenPair, Vec<Pool>>)>>,
+    cache: Arc<Mutex<(Block, TokenPoolsMap)>>,
     block_stream: CurrentBlockStream,
 }
 
