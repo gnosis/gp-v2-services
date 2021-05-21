@@ -318,13 +318,13 @@ impl BaselinePriceEstimator {
             .iter()
             .flat_map(|candidate| token_path_to_pair_path(candidate).into_iter())
             .collect();
-        let pools: HashMap<_, _> = self
-            .pool_fetcher
-            .fetch(all_pairs)
-            .await
-            .into_iter()
-            .map(|pool| (pool.tokens, vec![pool]))
-            .collect();
+        let pools = self.pool_fetcher.fetch(all_pairs).await.into_iter().fold(
+            HashMap::<_, Vec<Pool>>::new(),
+            |mut pools, pool| {
+                pools.entry(pool.tokens).or_default().push(pool);
+                pools
+            },
+        );
         let best_path = path_candidates
             .iter()
             .max_by_key(|path| comparison(amount, path, &pools))
