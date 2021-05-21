@@ -6,7 +6,7 @@ use model::{
 };
 use secp256k1::SecretKey;
 use serde_json::json;
-use shared::{amm_pair_provider::UniswapPairProvider, Web3};
+use shared::{amm_pair_provider::UniswapPairProvider, maintenance::Maintaining, Web3};
 use solver::{
     liquidity::uniswap::UniswapLikeLiquidity, liquidity_collector::LiquidityCollector,
     metrics::NoopMetrics,
@@ -100,8 +100,9 @@ async fn eth_integration(web3: Web3) {
 
     let native_token = weth.address();
     let OrderbookServices {
-        orderbook,
+        maintenance,
         price_estimator,
+        ..
     } = OrderbookServices::new(&web3, &gpv2, &uniswap_factory, native_token).await;
 
     let client = reqwest::Client::new();
@@ -195,7 +196,7 @@ async fn eth_integration(web3: Web3) {
         liquidity_collector,
         price_estimator,
         vec![Box::new(solver)],
-        Box::new(web3.clone()),
+        Arc::new(web3.clone()),
         Duration::from_secs(1),
         Duration::from_secs(30),
         native_token,
@@ -205,6 +206,8 @@ async fn eth_integration(web3: Web3) {
         network_id,
         1,
         Duration::from_secs(30),
+        f64::MAX,
+        None,
     );
     driver.single_run().await.unwrap();
 
@@ -224,7 +227,7 @@ async fn eth_integration(web3: Web3) {
     );
 
     // Drive orderbook in order to check that all orders were settled
-    orderbook.run_maintenance(&gpv2.settlement).await.unwrap();
+    maintenance.run_maintenance().await.unwrap();
 
     let orders = create_orderbook_api(&web3, weth.address())
         .get_orders()
