@@ -715,7 +715,7 @@ mod tests {
             .estimate_price(token_b, token_a, 100.into(), OrderKind::Sell)
             .await
             .unwrap();
-        // Pool 1 is more favourable for buying token B.
+        // Pool 1 is more favourable for buying token A.
         assert_eq!(price, pool_price(&pools[1], token_a, 100, token_b));
     }
 
