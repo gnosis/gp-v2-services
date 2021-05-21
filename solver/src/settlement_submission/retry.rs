@@ -103,11 +103,17 @@ mod tests {
 
     #[test]
     fn test_submission_result_was_mined() {
-        let transaction_error = ExecutionError::Web3(Web3Error::Rpc(RpcError {
+        let transaction_error_open_ethereum = ExecutionError::Web3(Web3Error::Rpc(RpcError {
             code: ErrorCode::from(-32010),
             message: "".into(),
             data: None,
         }));
+        let transaction_error_geth = ExecutionError::Web3(Web3Error::Rpc(RpcError {
+            code: ErrorCode::from(-32000),
+            message: "nonce too low".into(),
+            data: None,
+        }));
+
         let result = SettleResult(Ok(()));
         assert!(result.was_mined());
 
@@ -117,7 +123,16 @@ mod tests {
         )));
         assert!(result.was_mined());
 
-        let result = SettleResult(Err(MethodError::from_parts("".into(), transaction_error)));
+        let result = SettleResult(Err(MethodError::from_parts(
+            "".into(),
+            transaction_error_open_ethereum,
+        )));
+        assert!(!result.was_mined());
+
+        let result = SettleResult(Err(MethodError::from_parts(
+            "".into(),
+            transaction_error_geth,
+        )));
         assert!(!result.was_mined());
     }
 
