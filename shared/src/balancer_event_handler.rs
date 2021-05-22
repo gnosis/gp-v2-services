@@ -1,3 +1,4 @@
+use crate::event_handling::EventIndex;
 use crate::{
     event_handling::{BlockNumber, EventHandler, EventStoring},
     impl_event_retrieving,
@@ -5,14 +6,14 @@ use crate::{
 };
 use anyhow::{anyhow, Context, Result};
 use contracts::{
-    balancer_v2::{self, Event as ContractEvent, event_data::PoolRegistered as ContractPoolRegistered},
-    Vault,
+    balancer_v2_vault::{
+        self, event_data::PoolRegistered as ContractPoolRegistered, Event as ContractEvent,
+    },
+    BalancerV2Vault,
 };
-use ethcontract::{dyns::DynWeb3, Event as EthContractEvent, H160, EventMetadata};
-use std::collections::{HashMap, HashSet};
+use ethcontract::{dyns::DynWeb3, Event as EthContractEvent, EventMetadata, H160};
 use std::ops::RangeInclusive;
 use tokio::sync::Mutex;
-use crate::event_handling::EventIndex;
 
 #[derive(Debug)]
 pub enum BalancerEvent {
@@ -26,27 +27,22 @@ pub struct PoolRegistered {
     pub specialization: u8,
 }
 
-
 #[derive(Default)]
 pub struct WeightedPool {
-    pool_address: H160,
-    tokens: Vec<H160>,
-    // pool_id:
-    // TODO - other stuff
+    // pool_address: H160,
+// tokens: Vec<H160>,
+// pool_id:
+// TODO - other stuff
 }
 
 #[derive(Default)]
 pub struct BalancerPools {
-    pools: HashMap<H160, HashSet<WeightedPool>>,
-    // Block number of last update
-    last_updated: u64,
+    // pools: HashMap<H160, HashSet<WeightedPool>>,
+// Block number of last update
+// last_updated: u64,
 }
 
 impl BalancerPools {
-    fn update_last_block(mut self, value: u64) {
-        self.last_updated = value;
-    }
-
     pub fn contract_to_balancer_events(
         &self,
         contract_events: Vec<EthContractEvent<ContractEvent>>,
@@ -59,7 +55,9 @@ impl BalancerPools {
                     None => return Some(Err(anyhow!("event without metadata"))),
                 };
                 match data {
-                    ContractEvent::PoolRegistered(event) => Some(convert_pool_registered(&event, &meta)),
+                    ContractEvent::PoolRegistered(event) => {
+                        Some(convert_pool_registered(&event, &meta))
+                    }
                     _ => {
                         tracing::info!("Got {:?}", data);
                         None
@@ -70,13 +68,19 @@ impl BalancerPools {
     }
 }
 
-pub struct BalancerEventUpdater(Mutex<EventHandler<DynWeb3, VaultContract, BalancerPools>>);
+pub struct BalancerEventUpdater(
+    Mutex<EventHandler<DynWeb3, BalancerV2VaultContract, BalancerPools>>,
+);
 
 impl BalancerEventUpdater {
-    pub fn new(contract: Vault, pools: BalancerPools, start_sync_at_block: Option<u64>) -> Self {
+    pub fn new(
+        contract: BalancerV2Vault,
+        pools: BalancerPools,
+        start_sync_at_block: Option<u64>,
+    ) -> Self {
         Self(Mutex::new(EventHandler::new(
             contract.raw_instance().web3(),
-            VaultContract(contract),
+            BalancerV2VaultContract(contract),
             pools,
             start_sync_at_block,
         )))
@@ -86,34 +90,36 @@ impl BalancerEventUpdater {
 #[async_trait::async_trait]
 impl EventStoring<ContractEvent> for BalancerPools {
     async fn replace_events(
-        &mut self,
+        &self,
         events: Vec<EthContractEvent<ContractEvent>>,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<()> {
-        let balancer_events = self.contract_to_balancer_events(events).context("failed to convert events")?;
+        let balancer_events = self
+            .contract_to_balancer_events(events)
+            .context("failed to convert events")?;
         tracing::debug!(
             "replacing {} events from block number {}",
             balancer_events.len(),
             range.start().to_u64()
         );
-        // TODO - implement event replace.
-        Ok(())
+        todo!()
     }
 
-    async fn append_events(&mut self, events: Vec<EthContractEvent<ContractEvent>>) -> Result<()> {
-        let balancer_events = self.contract_to_balancer_events(events).context("failed to convert events")?;
+    async fn append_events(&self, events: Vec<EthContractEvent<ContractEvent>>) -> Result<()> {
+        let balancer_events = self
+            .contract_to_balancer_events(events)
+            .context("failed to convert events")?;
         tracing::debug!("inserting {} new events", balancer_events.len());
-        // TODO - implement event append
-        Ok(())
+        todo!()
     }
 
     async fn last_event_block(&self) -> Result<u64> {
-        Ok(self.last_updated)
+        todo!()
     }
 }
 
 impl_event_retrieving! {
-    pub VaultContract for balancer_v2
+    pub BalancerV2VaultContract for balancer_v2_vault
 }
 
 #[async_trait::async_trait]
@@ -123,11 +129,14 @@ impl Maintaining for BalancerEventUpdater {
     }
 }
 
-fn convert_pool_registered(registration: &ContractPoolRegistered, meta: &EventMetadata) -> Result<(EventIndex, BalancerEvent)> {
+fn convert_pool_registered(
+    registration: &ContractPoolRegistered,
+    meta: &EventMetadata,
+) -> Result<(EventIndex, BalancerEvent)> {
     let event = PoolRegistered {
         pool_id: registration.pool_id,
         pool_address: registration.pool_address,
-        specialization: registration.specialization
+        specialization: registration.specialization,
     };
     Ok((EventIndex::from(meta), BalancerEvent::PoolRegistered(event)))
 }

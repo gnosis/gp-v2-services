@@ -1,4 +1,4 @@
-use contracts::{GPv2Settlement, Vault, WETH9};
+use contracts::{BalancerV2Vault, GPv2Settlement, WETH9};
 use model::{order::OrderUid, DomainSeparator};
 use orderbook::{
     account_balances::Web3BalanceFetcher,
@@ -87,7 +87,7 @@ async fn main() {
     let settlement_contract = GPv2Settlement::deployed(&web3)
         .await
         .expect("Couldn't load deployed settlement");
-    let vault_contract = Vault::deployed(&web3)
+    let vault_contract = BalancerV2Vault::deployed(&web3)
         .await
         .expect("Couldn't load deployed balancer vault");
     let gp_allowance = settlement_contract

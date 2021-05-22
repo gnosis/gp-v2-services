@@ -93,24 +93,6 @@ fn main() {
             .add_deployment_str(4, "0xc778417E063141139Fce010982780140Aa0cD5Ab")
             .add_deployment_str(100, "0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d")
     });
-    generate_contract_with_config("Vault", |builder| {
-        builder
-            .with_contract_mod_override(Some("balancer_v2"))
-            .add_deployment(
-                1,
-                addr("0xBA12222222228d8Ba445958a75a0704d566BF2C8"),
-                Some(tx(
-                    "0x28c44bb10d469cbd42accf97bd00b73eabbace138e9d44593e851231fbed1cb7",
-                )),
-            )
-            .add_deployment(
-                4,
-                addr("0xBA12222222228d8Ba445958a75a0704d566BF2C8"),
-                Some(tx(
-                    "0x5fe65a242760f7f32b582dc402a081791d57ea561474617fcd0e763c995cfec7",
-                )),
-            )
-    });
 }
 
 fn generate_contract(name: &str) {

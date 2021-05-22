@@ -18,7 +18,7 @@ pub struct EventUpdater(Mutex<EventHandler<DynWeb3, GPv2SettlementContract, Data
 #[async_trait::async_trait]
 impl EventStoring<ContractEvent> for Database {
     async fn replace_events(
-        &mut self,
+        &self,
         events: Vec<Event<ContractEvent>>,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<()> {
@@ -36,7 +36,7 @@ impl EventStoring<ContractEvent> for Database {
         Ok(())
     }
 
-    async fn append_events(&mut self, events: Vec<Event<ContractEvent>>) -> Result<()> {
+    async fn append_events(&self, events: Vec<Event<ContractEvent>>) -> Result<()> {
         let db_events = self
             .contract_to_db_events(events)
             .context("failed to convert events")?;
