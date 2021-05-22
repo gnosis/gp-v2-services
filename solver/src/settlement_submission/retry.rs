@@ -17,13 +17,21 @@ use transaction_retry::{TransactionResult, TransactionSending};
 fn is_transaction_error(error: &ExecutionError) -> bool {
     // TODO: check how this looks on turbogeth and other clients. Not recognizing the error is not a serious
     // problem but it will make us sometimes log an error when there actually was no problem.
-
-    // Cf. openethereum's source code in `rpc/src/v1/helpers/errors.rs`. This code is not used by geth
-    matches!(error, ExecutionError::Web3(Web3Error::Rpc(RpcError { code, .. })) if code.code() == -32010) ||
-
-    // Geth uses error code -32000 for all kinds of RPC errors (maps to UNSUPPORTED_REQUEST in open ethereum)
-    // cf. https://github.com/ethereum/go-ethereum/blob/9357280fce5c5d57111d690a336cca5f89e34da6/rpc/errors.go#L59
-    matches!(error, ExecutionError::Web3(Web3Error::Rpc(RpcError { code, .. })) if code.code() == -32000)
+    match error {
+        // Cf. openethereum's source code in `rpc/src/v1/helpers/errors.rs`. This code is not used by geth
+        ExecutionError::Web3(Web3Error::Rpc(RpcError { code, .. })) if code.code() == -32010 => {
+            true
+        }
+        // Geth uses error code -32000 for all kinds of RPC errors (maps to UNSUPPORTED_REQUEST in open ethereum)
+        // cf. https://github.com/ethereum/go-ethereum/blob/9357280fce5c5d57111d690a336cca5f89e34da6/rpc/errors.go#L59
+        // Therefore we also require to match on known error message
+        ExecutionError::Web3(Web3Error::Rpc(RpcError { code, message, .. }))
+            if code.code() == -32000 && message == "nonce too low" =>
+        {
+            true
+        }
+        _ => false,
+    }
 }
 
 /// Failure indicating the transaction reverted for some reason
