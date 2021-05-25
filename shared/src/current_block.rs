@@ -132,6 +132,7 @@ impl FusedStream for CurrentBlockStream {
 pub trait BlockRetrieving {
     async fn current_block(&self) -> Result<Block>;
     async fn current_block_number(&self) -> Result<u64>;
+    async fn block_number_from_tx_hash(&self, hash: H256) -> Option<u64>;
 }
 
 #[async_trait::async_trait]
@@ -155,6 +156,23 @@ where
             .await
             .context("failed to get current block")?
             .as_u64())
+    }
+
+    async fn block_number_from_tx_hash(&self, hash: H256) -> Option<u64> {
+        if let Some(receipt) = self
+            .eth()
+            .transaction_receipt(hash)
+            .await
+            .context("failed to get transaction receipt")
+            .ok()?
+        {
+            // Have to unwrap Option<U64> to convert U64 -> u64
+            if let Some(block_number) = receipt.block_number {
+                return Some(block_number.as_u64());
+            }
+            return None;
+        }
+        None
     }
 }
 
