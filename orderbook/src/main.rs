@@ -11,6 +11,11 @@ use orderbook::{
 };
 use prometheus::Registry;
 use shared::{
+    bad_token::{
+        cache::CachingDetector,
+        list_based::{ListBasedDetector, UnknownTokenStrategy},
+        trace_call::TraceCallDetector,
+    },
     current_block::current_block_stream,
     maintenance::ServiceMaintenance,
     pool_aggregating::{self, PoolAggregator},
@@ -52,10 +57,23 @@ struct Arguments {
 
     /// Don't use the trace_callMany api that only some nodes support to check whether a token
     /// should be denied.
-    /// Note that if a node does not support the api we still fallback to the less accurate call
-    /// api.
-    #[structopt(long, env = "SKIP_TRACE_API")]
+    /// Note that if a node does not support the api we still use the less accurate call api.
+    #[structopt(
+        long,
+        env = "SKIP_TRACE_API",
+        parse(try_from_str),
+        default_value = "false"
+    )]
     skip_trace_api: bool,
+
+    /// The amount of time a classification of a token into good or bad is valid for.
+    #[structopt(
+        long,
+        env = "TOKEN_QUALITY_CACHE_EXPIRY_SECONDS",
+        default_value = "600",
+        parse(try_from_str = shared::arguments::duration_from_seconds),
+    )]
+    token_quality_cache_expiry: Duration,
 }
 
 pub async fn database_metrics(metrics: Arc<Metrics>, database: Database) -> ! {
@@ -123,12 +141,8 @@ async fn main() {
 
     let event_updater =
         EventUpdater::new(settlement_contract.clone(), database.clone(), sync_start);
-    let balance_fetcher = Web3BalanceFetcher::new(
-        web3.clone(),
-        gp_allowance,
-        settlement_contract.address(),
-        !args.skip_trace_api,
-    );
+    let balance_fetcher =
+        Web3BalanceFetcher::new(web3.clone(), gp_allowance, settlement_contract.address());
 
     let gas_price_estimator = Arc::new(
         shared::gas_price_estimation::create_priority_estimator(
@@ -140,22 +154,37 @@ async fn main() {
         .expect("failed to create gas price estimator"),
     );
 
-    let unsupported_tokens = HashSet::from_iter(args.shared.unsupported_tokens);
+    let pair_providers =
+        pool_aggregating::pair_providers(&args.shared.baseline_sources, chain_id, &web3).await;
+
     let mut base_tokens = HashSet::from_iter(args.shared.base_tokens);
     // We should always use the native token as a base token.
     base_tokens.insert(native_token.address());
-    assert!(
-        unsupported_tokens
-            .intersection(&base_tokens)
-            .collect::<HashSet<_>>()
-            .is_empty(),
-        "Base tokens include at least one unsupported token!"
+    let mut allowed_tokens = args.shared.allowed_tokens;
+    allowed_tokens.extend(base_tokens.iter().copied());
+    let unsupported_tokens = args.shared.unsupported_tokens;
+
+    let trace_call_detector = TraceCallDetector {
+        web3: web3.clone(),
+        pools: pair_providers.clone(),
+        base_tokens: base_tokens.clone(),
+        settlement_contract: settlement_contract.address(),
+    };
+    let caching_detector = CachingDetector::new(
+        Box::new(trace_call_detector),
+        args.token_quality_cache_expiry,
     );
+    let bad_token_detector = Arc::new(ListBasedDetector::new(
+        allowed_tokens,
+        unsupported_tokens,
+        if args.skip_trace_api {
+            UnknownTokenStrategy::Allow
+        } else {
+            UnknownTokenStrategy::Forward(Box::new(caching_detector))
+        },
+    ));
 
     let current_block_stream = current_block_stream(web3.clone()).await.unwrap();
-
-    let pair_providers =
-        pool_aggregating::pair_providers(&args.shared.baseline_sources, chain_id, &web3).await;
 
     let pool_aggregator = PoolAggregator::from_providers(&pair_providers, &web3).await;
     let pool_fetcher =
@@ -165,7 +194,7 @@ async fn main() {
         Box::new(pool_fetcher),
         gas_price_estimator.clone(),
         base_tokens,
-        unsupported_tokens.clone(),
+        bad_token_detector.clone(),
         native_token.address(),
     ));
     let fee_calculator = Arc::new(EthAwareMinFeeCalculator::new(
@@ -174,7 +203,7 @@ async fn main() {
         native_token.address(),
         database.clone(),
         args.shared.fee_discount_factor,
-        unsupported_tokens.clone(),
+        bad_token_detector.clone(),
     ));
 
     let orderbook = Arc::new(Orderbook::new(
@@ -182,8 +211,8 @@ async fn main() {
         database.clone(),
         Box::new(balance_fetcher),
         fee_calculator.clone(),
-        unsupported_tokens,
         args.min_order_validity_period,
+        bad_token_detector,
     ));
     let service_maintainer = ServiceMaintenance {
         maintainers: vec![

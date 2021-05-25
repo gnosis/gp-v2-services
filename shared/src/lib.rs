@@ -8,6 +8,7 @@ pub mod http;
 #[macro_use]
 pub mod macros;
 pub mod balancer_event_handler;
+pub mod bad_token;
 pub mod event_handling;
 pub mod maintenance;
 pub mod metrics;
@@ -18,6 +19,7 @@ pub mod price_estimate;
 pub mod time;
 pub mod token_info;
 pub mod token_list;
+pub mod trace_many;
 pub mod tracing;
 pub mod transport;
 

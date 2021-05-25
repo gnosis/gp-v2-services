@@ -902,7 +902,7 @@ dependencies = [
 [[package]]
 name = "gas-estimation"
 version = "0.1.0"
-source = "git+https://github.com/gnosis/gp-gas-estimation.git?tag=v0.1.1#ebb760eb9db27e97cb6646c2db80e632bebdf4c8"
+source = "git+https://github.com/gnosis/gp-gas-estimation.git?tag=v0.1.2#e7186a1573ba9ab77096c1ec13e4628ef309eae4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1342,6 +1342,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51b9bbe6c47d51fc3e1a9b945965946b4c44142ab8792c50835a980d362c2710"
 dependencies = [
  "cfg-if 1.0.0",
+]
+
+[[package]]
+name = "lru"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f374d42cdfc1d7dbf3d3dec28afab2eb97ffbf43a3234d795b5986dbf4b90ba"
+dependencies = [
+ "hashbrown",
 ]
 
 [[package]]
@@ -2446,6 +2455,7 @@ dependencies = [
  "futures",
  "gas-estimation",
  "hex-literal",
+ "lru",
  "maplit",
  "mockall",
  "model",
@@ -2754,18 +2764,18 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "1.0.24"
+version = "1.0.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0f4a65597094d4483ddaed134f409b2cb7c1beccf25201a9f73c719254fa98e"
+checksum = "fa6f76457f59514c7eeb4e59d891395fab0b2fd1d40723ae737d64153392e9c6"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.24"
+version = "1.0.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7765189610d8241a44529806d6fd1f2e0a08734313a35d5b3a556f92b381f3c0"
+checksum = "8a36768c0fbf1bb15eca10defa29526bda730a2376c2ab4393ccfa16fb1a318d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2989,7 +2999,7 @@ dependencies = [
 [[package]]
 name = "transaction-retry"
 version = "0.1.0"
-source = "git+https://github.com/gnosis/gp-transaction-retry.git?tag=v0.1.0#31b32869dbc773d62c11e91dac4d66aaa691faa2"
+source = "git+https://github.com/gnosis/gp-transaction-retry.git?tag=v0.1.1#6c94d9d2e2a8314f85b5aec4ca0a96185110bd98"
 dependencies = [
  "async-trait",
  "futures",

@@ -27,10 +27,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-// There is no economic viability calculation yet so we're using an arbitrary very high cap to
-// protect against a gas estimator giving bogus results that would drain all our funds.
-const GAS_PRICE_CAP: f64 = 500e9;
-
 pub struct Driver {
     settlement_contract: GPv2Settlement,
     liquidity_collector: LiquidityCollector,
@@ -46,6 +42,7 @@ pub struct Driver {
     network_id: String,
     max_merged_settlements: usize,
     solver_time_limit: Duration,
+    gas_price_cap: f64,
     market_makable_token_list: Option<TokenList>,
 }
 impl Driver {
@@ -65,6 +62,7 @@ impl Driver {
         network_id: String,
         max_merged_settlements: usize,
         solver_time_limit: Duration,
+        gas_price_cap: f64,
         market_makable_token_list: Option<TokenList>,
     ) -> Self {
         Self {
@@ -82,6 +80,7 @@ impl Driver {
             network_id,
             max_merged_settlements,
             solver_time_limit,
+            gas_price_cap,
             market_makable_token_list,
         }
     }
@@ -131,7 +130,7 @@ impl Driver {
             &self.settlement_contract,
             self.gas_price_estimator.as_ref(),
             self.target_confirm_time,
-            GAS_PRICE_CAP,
+            self.gas_price_cap,
             rated_settlement,
         )
         .await
@@ -326,7 +325,6 @@ impl Driver {
 
     pub async fn single_run(&mut self) -> Result<()> {
         tracing::debug!("starting single run");
-        let liquidity = self.liquidity_collector.get_liquidity().await?;
         let current_block_during_liquidity_fetch = self
             .web3
             .eth()
@@ -334,6 +332,10 @@ impl Driver {
             .await
             .context("failed to get current block")?
             .as_u64();
+        let liquidity = self
+            .liquidity_collector
+            .get_liquidity(current_block_during_liquidity_fetch.into())
+            .await?;
 
         let estimated_prices =
             collect_estimated_prices(self.price_estimator.as_ref(), self.native_token, &liquidity)

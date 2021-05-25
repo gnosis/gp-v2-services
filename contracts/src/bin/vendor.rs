@@ -86,6 +86,8 @@ impl Vendor {
         Ok(Self { artifacts })
     }
 
+    /// Creates a context for vendoring "full" contract data, including bytecode
+    /// used for deploying the contract for end-to-end test.
     fn full(&self) -> VendorContext {
         VendorContext {
             artifacts: &self.artifacts,
@@ -93,6 +95,11 @@ impl Vendor {
         }
     }
 
+    /// Creates a context for vendoring only the contract ABI for generating
+    /// bindings. This is preferred over [`Vendor::full`] for contracts that do
+    /// not need to be deployed for tests, or get created by alternative means
+    /// (e.g. `UniswapV2Pair` contracts don't require bytecode as they get
+    /// created by `UniswapV2Factory` instances on-chain).
     fn abi_only(&self) -> VendorContext {
         VendorContext {
             artifacts: &self.artifacts,
