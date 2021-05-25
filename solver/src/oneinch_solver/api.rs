@@ -379,7 +379,7 @@ mod tests {
                 &amount=1000000000000000000\
                 &fromAddress=0x00000000219ab540356cbb839cbe05303d7705fa\
                 &slippage=0.5\
-                &protocols=WETH,UNISWAP_V3\
+                &protocols=WETH%2CUNISWAP_V3\
                 &disableEstimate=true\
                 &complexityLevel=%271%27\
                 &gasLimit=133700\
