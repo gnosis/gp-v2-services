@@ -124,6 +124,10 @@ impl SwapQuery {
             .append_pair("fromAddress", &addr2str(self.from_address))
             .append_pair("slippage", &self.slippage.to_string());
 
+        if let Some(protocols) = self.protocols {
+            url.query_pairs_mut()
+                .append_pair("protocols", &protocols.join(","));
+        }
         if let Some(disable_estimate) = self.disable_estimate {
             url.query_pairs_mut()
                 .append_pair("disableEstimate", &disable_estimate.to_string());
@@ -378,6 +382,7 @@ mod tests {
                 &amount=1000000000000000000\
                 &fromAddress=0x00000000219ab540356cbb839cbe05303d7705fa\
                 &slippage=0.5\
+                &protocols=WETH,UNISWAP_V3\
                 &disableEstimate=true\
                 &complexityLevel=%271%27\
                 &gasLimit=133700\
@@ -529,7 +534,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
-    async fn oneinch_swap_without_amount_checks_and_splitting() {
+    async fn oneinch_swap_fully_parameterized() {
         let swap = OneInchClient::default()
             .get_swap(SwapQuery {
                 from_token_address: shared::addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
@@ -539,8 +544,7 @@ mod tests {
                 slippage: Slippage::basis_points(50).unwrap(),
                 protocols: Some(vec![
                     "WETH".to_string(),
-                    "BALANCER_V2".to_string(),
-                    "UNISWAP_V3".to_string(),
+                    "UNISWAP_V2".to_string(),
                 ]),
                 disable_estimate: Some(true),
                 complexity_level: Some(Amount::new(2).unwrap()),
