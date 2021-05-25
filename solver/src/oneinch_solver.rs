@@ -288,7 +288,7 @@ mod tests {
     async fn filters_out_private_market_makers() {
         let protocols = dummy_solver().supported_protocols().await.unwrap();
 
-        assert!(protocols.len() > 0);
+        assert!(!protocols.is_empty());
         assert!(protocols.iter().all(|p| p != "PMM1"));
 
         println!("{:#?}", protocols);
