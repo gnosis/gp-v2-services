@@ -4,6 +4,7 @@ use prometheus::Registry;
 use reqwest::Url;
 use shared::{
     amm_pair_provider::{SushiswapPairProvider, UniswapPairProvider},
+    bad_token::list_based::ListBasedDetector,
     metrics::serve_metrics,
     network::network_name,
     pool_aggregating::{self, BaselineSources, PoolAggregator},
@@ -127,6 +128,15 @@ struct Arguments {
         default_value = "https://tokens.coingecko.com/uniswap/all.json"
     )]
     market_makable_token_list: String,
+
+    /// The maximum gas price the solver is willing to pay in a settlement
+    #[structopt(
+        long,
+        env = "GAS_PRICE_CAP_GWEI",
+        default_value = "1500",
+        parse(try_from_str = shared::arguments::wei_from_gwei)
+    )]
+    gas_price_cap: f64,
 }
 
 #[tokio::main]
@@ -195,7 +205,7 @@ async fn main() {
         Box::new(pool_aggregator),
         gas_price_estimator.clone(),
         base_tokens.clone(),
-        args.shared.unsupported_tokens.into_iter().collect(),
+        Arc::new(ListBasedDetector::deny_list(args.shared.unsupported_tokens)),
         native_token_contract.address(),
     ));
     let uniswap_like_liquidity = build_amm_artifacts(
@@ -244,6 +254,7 @@ async fn main() {
         network_id,
         args.max_merged_settlements,
         args.solver_time_limit,
+        args.gas_price_cap,
         market_makable_token_list,
     );
 
