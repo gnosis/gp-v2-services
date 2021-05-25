@@ -7,8 +7,8 @@ pub mod gas_price_estimation;
 pub mod http;
 #[macro_use]
 pub mod macros;
-pub mod balancer_event_handler;
 pub mod bad_token;
+pub mod balancer_event_handler;
 pub mod event_handling;
 pub mod maintenance;
 pub mod metrics;
