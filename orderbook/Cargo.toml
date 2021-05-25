@@ -44,7 +44,7 @@ tokio = { version = "0.2", features = ["macros", "rt-threaded", "sync", "time"] 
 tracing = "0.1"
 url = "2.2"
 warp = "0.2"
-web3 = { version = "0.15", default-features = false, features = ["http-tls"] }
+web3 = { version = "0.16", default-features = false, features = ["http-tls"] }
 
 [dev-dependencies]
 secp256k1 = "0.20"
