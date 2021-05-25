@@ -282,4 +282,16 @@ mod tests {
 
         assert!(OneInchSolver::new(settlement, chain_id).is_err())
     }
+
+    #[tokio::test]
+    #[ignore]
+    async fn filters_out_private_market_makers() {
+        let protocols = dummy_solver()
+            .supported_protocols().await.unwrap();
+
+        assert!(protocols.len() > 0);
+        assert!(protocols.iter().all(|p| p != "PMM1"));
+
+        println!("{:#?}", protocols);
+    }
 }
