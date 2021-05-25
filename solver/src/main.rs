@@ -200,12 +200,12 @@ async fn main() {
 
     let pool_aggregator = PoolAggregator::from_providers(&pair_providers, &web3).await;
 
-    // TODO - use Filtered-Cached PoolFetchers here too.
+    // TODO: use caching pool fetcher
     let price_estimator = Arc::new(BaselinePriceEstimator::new(
         Box::new(pool_aggregator),
         gas_price_estimator.clone(),
         base_tokens.clone(),
-        Arc::new(ListBasedDetector::deny_list(args.shared.unsupported_tokens)),
+        Arc::new(ListBasedDetector::deny_list(Vec::new())),
         native_token_contract.address(),
     ));
     let uniswap_like_liquidity = build_amm_artifacts(
