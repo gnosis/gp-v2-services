@@ -362,10 +362,7 @@ mod tests {
             amount: 1_000_000_000_000_000_000u128.into(),
             from_address: shared::addr!("00000000219ab540356cBB839Cbe05303d7705Fa"),
             slippage: Slippage::basis_points(50).unwrap(),
-            protocols: Some(vec![
-                "WETH".to_string(),
-                "UNISWAP_V3".to_string(),
-            ]),
+            protocols: Some(vec!["WETH".to_string(), "UNISWAP_V3".to_string()]),
             disable_estimate: Some(true),
             complexity_level: Some(Amount::new(1).unwrap()),
             gas_limit: Some(133700),
@@ -542,10 +539,7 @@ mod tests {
                 amount: 100_000_000_000_000_000_000u128.into(),
                 from_address: shared::addr!("4e608b7da83f8e9213f554bdaa77c72e125529d0"),
                 slippage: Slippage::basis_points(50).unwrap(),
-                protocols: Some(vec![
-                    "WETH".to_string(),
-                    "UNISWAP_V2".to_string(),
-                ]),
+                protocols: Some(vec!["WETH".to_string(), "UNISWAP_V2".to_string()]),
                 disable_estimate: Some(true),
                 complexity_level: Some(Amount::new(2).unwrap()),
                 gas_limit: Some(750_000),
