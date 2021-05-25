@@ -47,7 +47,22 @@ impl OneInchSolver {
         })
     }
 
-    /// Settles a single sell order against a 1Inch swap.
+    /// Gets the list of supported protocols for the 1Inch solver.
+    async fn supported_protocols(&self) -> Result<Vec<String>> {
+        // Filter out private market makers from the complete list of supported
+        // protocols as they seem to cause issues for swaps.
+        Ok(self
+            .client
+            .get_protocols()
+            .await?
+            .protocols
+            .into_iter()
+            .filter(|protocol| !protocol.starts_with("PMM"))
+            .collect())
+    }
+
+    /// Settles a single sell order against a 1Inch swap using the spcified
+    /// protocols.
     async fn settle_order(&self, order: LimitOrder) -> Result<Settlement> {
         debug_assert_eq!(
             order.kind,
@@ -62,6 +77,7 @@ impl OneInchSolver {
             .call()
             .await?;
 
+        let protocols = self.supported_protocols().await?;
         let swap = self
             .client
             .get_swap(SwapQuery {
@@ -70,6 +86,7 @@ impl OneInchSolver {
                 amount: order.sell_amount,
                 from_address: self.settlement_contract.address(),
                 slippage: Slippage::basis_points(MAX_SLIPPAGE_BPS).unwrap(),
+                protocols: Some(protocols),
                 // Disable balance/allowance checks, as the settlement contract
                 // does not hold balances to traded tokens.
                 disable_estimate: Some(true),
