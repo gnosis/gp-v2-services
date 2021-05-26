@@ -20,13 +20,18 @@ use futures::future;
 use maplit::hashmap;
 use model::order::OrderKind;
 use rand::seq::SliceRandom as _;
-use std::fmt::{self, Display, Formatter};
+use std::{
+    collections::HashSet,
+    fmt::{self, Display, Formatter},
+    iter,
+};
 
 /// A GPv2 solver that matches GP **sell** orders to direct 1Inch swaps.
 #[derive(Debug)]
 pub struct OneInchSolver {
     settlement_contract: GPv2Settlement,
     client: OneInchClient,
+    disabled_protocols: HashSet<String>,
 }
 
 /// Chain ID for Mainnet.
@@ -36,6 +41,15 @@ impl OneInchSolver {
     /// Creates a new 1Inch solver instance for specified settlement contract
     /// instance.
     pub fn new(settlement_contract: GPv2Settlement, chain_id: u64) -> Result<Self> {
+        Self::with_disabled_protocols(settlement_contract, chain_id, iter::empty())
+    }
+
+    /// Creates a new 1Inch solver with a list of disabled protocols.
+    pub fn with_disabled_protocols(
+        settlement_contract: GPv2Settlement,
+        chain_id: u64,
+        disabled_protocols: impl IntoIterator<Item = String>,
+    ) -> Result<Self> {
         ensure!(
             chain_id == MAINNET_CHAIN_ID,
             "1Inch solver only supported on Mainnet",
@@ -44,21 +58,26 @@ impl OneInchSolver {
         Ok(Self {
             settlement_contract,
             client: Default::default(),
+            disabled_protocols: disabled_protocols.into_iter().collect(),
         })
     }
 
     /// Gets the list of supported protocols for the 1Inch solver.
-    async fn supported_protocols(&self) -> Result<Vec<String>> {
-        // Filter out private market makers from the complete list of supported
-        // protocols as they seem to cause issues for swaps.
-        Ok(self
-            .client
-            .get_protocols()
-            .await?
-            .protocols
-            .into_iter()
-            .filter(|protocol| !protocol.starts_with("PMM"))
-            .collect())
+    async fn supported_protocols(&self) -> Result<Option<Vec<String>>> {
+        let protocols = if self.disabled_protocols.is_empty() {
+            None
+        } else {
+            Some(
+                self.client
+                    .get_protocols()
+                    .await?
+                    .protocols
+                    .into_iter()
+                    .filter(|protocol| !self.disabled_protocols.contains(protocol))
+                    .collect(),
+            )
+        };
+        Ok(protocols)
     }
 
     /// Settles a single sell order against a 1Inch swap using the spcified
@@ -78,27 +97,27 @@ impl OneInchSolver {
             .await?;
 
         let protocols = self.supported_protocols().await?;
-        let swap = self
-            .client
-            .get_swap(SwapQuery {
-                from_token_address: order.sell_token,
-                to_token_address: order.buy_token,
-                amount: order.sell_amount,
-                from_address: self.settlement_contract.address(),
-                slippage: Slippage::basis_points(MAX_SLIPPAGE_BPS).unwrap(),
-                protocols: Some(protocols),
-                // Disable balance/allowance checks, as the settlement contract
-                // does not hold balances to traded tokens.
-                disable_estimate: Some(true),
-                // Use at most 2 connector tokens
-                complexity_level: Some(Amount::new(2).unwrap()),
-                // Cap swap gas to 750K.
-                gas_limit: Some(750_000),
-                // Use only 3 main route for cheaper trades.
-                main_route_parts: Some(Amount::new(3).unwrap()),
-                parts: Some(Amount::new(3).unwrap()),
-            })
-            .await?;
+        let query = SwapQuery {
+            from_token_address: order.sell_token,
+            to_token_address: order.buy_token,
+            amount: order.sell_amount,
+            from_address: self.settlement_contract.address(),
+            slippage: Slippage::basis_points(MAX_SLIPPAGE_BPS).unwrap(),
+            protocols,
+            // Disable balance/allowance checks, as the settlement contract
+            // does not hold balances to traded tokens.
+            disable_estimate: Some(true),
+            // Use at most 2 connector tokens
+            complexity_level: Some(Amount::new(2).unwrap()),
+            // Cap swap gas to 750K.
+            gas_limit: Some(750_000),
+            // Use only 3 main route for cheaper trades.
+            main_route_parts: Some(Amount::new(3).unwrap()),
+            parts: Some(Amount::new(3).unwrap()),
+        };
+
+        tracing::debug!("querying 1Inch swap api with {:?}", query);
+        let swap = self.client.get_swap(query).await?;
 
         ensure!(
             swap.to_token_amount >= order.buy_amount,
@@ -242,6 +261,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn returns_none_when_no_protocols_are_disabled() {
+        let protocols = dummy_solver().supported_protocols().await.unwrap();
+        assert!(protocols.is_none());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn filters_disabled_protocols() {
+        let mut solver = dummy_solver();
+
+        let all_protocols = solver.client.get_protocols().await.unwrap().protocols;
+
+        solver.disabled_protocols.insert(all_protocols[0].clone());
+        let filtered_protocols = solver.supported_protocols().await.unwrap().unwrap();
+
+        assert_eq!(all_protocols[1..], filtered_protocols[..]);
+    }
+
+    #[tokio::test]
     #[ignore]
     async fn solve_order_on_oneinch() {
         let web3 = testutil::infura("mainnet");
@@ -281,16 +319,5 @@ mod tests {
         let settlement = GPv2Settlement::deployed(&web3).await.unwrap();
 
         assert!(OneInchSolver::new(settlement, chain_id).is_err())
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn filters_out_private_market_makers() {
-        let protocols = dummy_solver().supported_protocols().await.unwrap();
-
-        assert!(!protocols.is_empty());
-        assert!(protocols.iter().all(|p| p != "PMM1"));
-
-        println!("{:#?}", protocols);
     }
 }
