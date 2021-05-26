@@ -205,6 +205,7 @@ async fn main() {
         Box::new(pool_aggregator),
         gas_price_estimator.clone(),
         base_tokens.clone(),
+        // Order book already filters bad tokens
         Arc::new(ListBasedDetector::deny_list(Vec::new())),
         native_token_contract.address(),
     ));
