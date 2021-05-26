@@ -12,7 +12,8 @@ use contracts::{
     BalancerV2Vault,
 };
 use ethcontract::common::DeploymentInformation;
-use ethcontract::{dyns::DynWeb3, Event as EthContractEvent, EventMetadata, H160};
+use ethcontract::{dyns::DynWeb3, Event as EthContractEvent, EventMetadata, H160, H256};
+use std::fmt::{Debug, Formatter};
 use std::ops::RangeInclusive;
 use tokio::sync::Mutex;
 
@@ -21,27 +22,63 @@ pub enum BalancerEvent {
     PoolRegistered(PoolRegistered),
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct PoolRegistered {
-    pub pool_id: [u8; 32],
+    pub pool_id: H256,
     pub pool_address: H160,
-    pub specialization: u8,
+    pub specialization: PoolSpecialization,
+}
+
+/// There are three specialization settings for Pools, which allow for cheaper swaps at the cost of reduced
+/// functionality:
+///
+///  - General: no specialization, suited for all Pools. IGeneralPool is used for swap request callbacks, passing the
+/// balance of all tokens in the Pool. These Pools have the largest swap costs (because of the extra storage reads),
+/// which increase with the number of registered tokens.
+///
+///  - Minimal Swap Info: IMinimalSwapInfoPool is used instead of IGeneralPool, which saves gas by only passing the
+/// balance of the two tokens involved in the swap. This is suitable for some pricing algorithms, like the weighted
+/// constant product one popularized by Balancer V1. Swap costs are smaller compared to general Pools, and are
+/// independent of the number of registered tokens.
+///
+///  - Two Token: only allows two tokens to be registered. This achieves the lowest possible swap gas cost. Like
+/// minimal swap info Pools, these are called via IMinimalSwapInfoPool.
+#[repr(u8)]
+pub enum PoolSpecialization {
+    General = 0,
+    MinimalSwapInfo = 1,
+    TwoToken = 2,
+}
+
+impl PoolSpecialization {
+    fn new(specialization: u8) -> Result<Self> {
+        match specialization {
+            0 => Ok(Self::General),
+            1 => Ok(Self::MinimalSwapInfo),
+            2 => Ok(Self::TwoToken),
+            t => Err(anyhow!("Invalid PoolSpecialization value {}", t)),
+        }
+    }
+}
+
+impl std::fmt::Debug for PoolSpecialization {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PoolSpecialization::General => {
+                write!(f, "General")
+            }
+            PoolSpecialization::MinimalSwapInfo => {
+                write!(f, "MinimalSwapInfo")
+            }
+            PoolSpecialization::TwoToken => {
+                write!(f, "TwoToken")
+            }
+        }
+    }
 }
 
 #[derive(Default)]
-pub struct WeightedPool {
-    // pool_address: H160,
-// tokens: Vec<H160>,
-// pool_id:
-// TODO - other stuff
-}
-
-#[derive(Default)]
-pub struct BalancerPools {
-    // pools: HashMap<H160, HashSet<WeightedPool>>,
-// Block number of last update
-// last_updated: u64,
-}
+pub struct BalancerPools {}
 
 impl BalancerPools {
     fn contract_to_balancer_events(
@@ -153,9 +190,9 @@ fn convert_pool_registered(
     meta: &EventMetadata,
 ) -> Result<(EventIndex, BalancerEvent)> {
     let event = PoolRegistered {
-        pool_id: registration.pool_id,
+        pool_id: H256::from(registration.pool_id),
         pool_address: registration.pool_address,
-        specialization: registration.specialization,
+        specialization: PoolSpecialization::new(registration.specialization)?,
     };
     Ok((EventIndex::from(meta), BalancerEvent::PoolRegistered(event)))
 }
