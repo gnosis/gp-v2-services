@@ -8,7 +8,7 @@ use shared::token_list::TokenList;
 use tokio::runtime::Runtime;
 
 const TOKEN_LIST: &str = "https://gateway.ipfs.io/ipns/tokens.uniswap.org";
-const BASE_URL: &str = "https://protocol-mainnet.dev.gnosisdev.com/api/v1";
+const BASE_URL: &str = "http://localhost:8080/api/v1";
 
 pub fn criterion_benchmark(c: &mut Criterion) {
     let mut rt = Runtime::new().unwrap();
@@ -19,7 +19,6 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("e2e API requests");
     group
         .measurement_time(Duration::from_secs(300))
-        .sample_size(500)
         .bench_function("Estimate Price", |b| {
             b.to_async(FuturesExecutor)
                 .iter(|| estimate_fee_and_price_estimate(&token_list));
