@@ -170,10 +170,7 @@ where
     S: EventStoring<C::Event> + Send + Sync,
 {
     async fn run_maintenance(&self) -> Result<()> {
-        self.lock()
-            .await
-            .update_events()
-            .await
+        self.lock().await.update_events().await
     }
 }
 
