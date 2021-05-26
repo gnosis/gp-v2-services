@@ -75,20 +75,27 @@ pub struct BalancerEventUpdater(
 
 impl BalancerEventUpdater {
     pub async fn new(contract: BalancerV2Vault, pools: BalancerPools) -> Self {
-        let mut deployment_block = None;
-        if let Some(deployment_info) = contract.deployment_information() {
-            match deployment_info {
-                DeploymentInformation::BlockNumber(block_number) => {
-                    deployment_block = Some(block_number);
-                }
-                DeploymentInformation::TransactionHash(hash) => {
-                    deployment_block = contract
-                        .raw_instance()
-                        .web3()
-                        .block_number_from_tx_hash(hash)
-                        .await;
+        let deployment_block = match contract.deployment_information() {
+            Some(DeploymentInformation::BlockNumber(block_number)) => Some(block_number),
+            Some(DeploymentInformation::TransactionHash(hash)) => {
+                match contract
+                    .raw_instance()
+                    .web3()
+                    .block_number_from_tx_hash(hash)
+                    .await
+                {
+                    Ok(block_number) => Some(block_number),
+                    Err(err) => {
+                        tracing::warn!(
+                            "no deployment block found for transaction hash {}: {}",
+                            hash,
+                            err
+                        );
+                        None
+                    }
                 }
             }
+            None => None,
         };
         Self(Mutex::new(EventHandler::new(
             contract.raw_instance().web3(),

@@ -132,7 +132,9 @@ impl FusedStream for CurrentBlockStream {
 pub trait BlockRetrieving {
     async fn current_block(&self) -> Result<Block>;
     async fn current_block_number(&self) -> Result<u64>;
-    async fn block_number_from_tx_hash(&self, hash: H256) -> Option<u64>;
+    // TODO - break down next method into testable components
+    // https://github.com/gnosis/gp-v2-services/issues/659
+    async fn block_number_from_tx_hash(&self, hash: H256) -> Result<u64>;
 }
 
 #[async_trait::async_trait]
@@ -158,21 +160,16 @@ where
             .as_u64())
     }
 
-    async fn block_number_from_tx_hash(&self, hash: H256) -> Option<u64> {
-        if let Some(receipt) = self
-            .eth()
-            .transaction_receipt(hash)
-            .await
-            .context("failed to get transaction receipt")
-            .ok()?
-        {
-            // Have to unwrap Option<U64> to convert U64 -> u64
+    async fn block_number_from_tx_hash(&self, hash: H256) -> Result<u64> {
+        let potential_receipt = self.eth().transaction_receipt(hash).await?;
+        if let Some(receipt) = potential_receipt {
+            // Need to unwrap Option<U64> to convert U64 -> u64
             if let Some(block_number) = receipt.block_number {
-                return Some(block_number.as_u64());
+                return Ok(block_number.as_u64());
             }
-            return None;
+            return Err(anyhow!("no block number with transaction receipt"));
         }
-        None
+        return Err(anyhow!("no transaction receipt found"));
     }
 }
 
@@ -181,6 +178,7 @@ mod tests {
     use crate::transport::LoggingTransport;
 
     use super::*;
+    use ethcontract::TransactionHash;
     use futures::FutureExt;
     use primitive_types::H256;
 
