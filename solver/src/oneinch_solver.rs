@@ -289,7 +289,9 @@ mod tests {
         let weth = WETH9::deployed(&web3).await.unwrap();
         let gno = shared::addr!("6810e776880c02933d47db1b9fc05908e5386b96");
 
-        let solver = OneInchSolver::new(settlement, chain_id).unwrap();
+        let solver =
+            OneInchSolver::with_disabled_protocols(settlement, chain_id, vec!["PMM1".to_string()])
+                .unwrap();
         let settlement = solver
             .settle_order(
                 Order {
