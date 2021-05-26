@@ -174,7 +174,6 @@ where
             .await
             .update_events()
             .await
-            .context("event update error")
     }
 }
 
