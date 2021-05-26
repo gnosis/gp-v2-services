@@ -1,6 +1,13 @@
-use crate::{baseline_solver::BaselineSolvable, Web3};
+use crate::{
+    amm_pair_provider::AmmPairProvider,
+    baseline_solver::BaselineSolvable,
+    current_block::{Block as CurrentBlock, CurrentBlockStream},
+    ethcontract_error::EthcontractErrorType,
+    Web3,
+};
+use anyhow::Result;
 use contracts::{IUniswapLikePair, ERC20};
-use ethcontract::{batch::CallBatch, BlockNumber, H160, U256};
+use ethcontract::{batch::CallBatch, errors::MethodError, BlockNumber, H160, U256};
 use lru::LruCache;
 use model::TokenPair;
 use num::{rational::Ratio, BigInt, BigRational, Zero};
@@ -9,9 +16,6 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::Mutex;
-
-use crate::amm_pair_provider::AmmPairProvider;
-use crate::current_block::{Block as CurrentBlock, CurrentBlockStream};
 
 const MAX_BATCH_SIZE: usize = 100;
 const POOL_SWAP_GAS_COST: usize = 60_000;
@@ -22,7 +26,11 @@ type RelativeReserves = (U256, U256, H160);
 
 #[async_trait::async_trait]
 pub trait PoolFetching: Send + Sync {
-    async fn fetch(&self, token_pairs: HashSet<TokenPair>, at_block: BlockNumber) -> Vec<Pool>;
+    async fn fetch(
+        &self,
+        token_pairs: HashSet<TokenPair>,
+        at_block: BlockNumber,
+    ) -> Result<Vec<Pool>>;
 }
 
 #[derive(Clone, Hash, PartialEq, Debug)]
@@ -207,7 +215,7 @@ impl CachedPoolFetcher {
         &self,
         token_pairs: HashSet<TokenPair>,
         at_block: BlockNumber,
-    ) -> Vec<Pool> {
+    ) -> Result<Vec<Pool>> {
         let mut cache = self.cache.lock().await;
         let block = match at_block {
             BlockNumber::Earliest => 0,
@@ -246,10 +254,10 @@ impl CachedPoolFetcher {
         }
 
         if cache_misses.is_empty() {
-            return cache_hits;
+            return Ok(cache_hits);
         }
 
-        let mut inner_results = self.inner.fetch(cache_misses, at_block).await;
+        let mut inner_results = self.inner.fetch(cache_misses, at_block).await?;
         for miss in &inner_results {
             // Unwrap because the loop above guarantees that the cache has an entry for all pairs.
             cached_pools
@@ -259,7 +267,7 @@ impl CachedPoolFetcher {
         }
 
         inner_results.append(&mut cache_hits);
-        inner_results
+        Ok(inner_results)
     }
 
     async fn clear_cache_if_necessary(&self) {
@@ -275,7 +283,11 @@ impl CachedPoolFetcher {
 
 #[async_trait::async_trait]
 impl PoolFetching for CachedPoolFetcher {
-    async fn fetch(&self, token_pairs: HashSet<TokenPair>, at_block: BlockNumber) -> Vec<Pool> {
+    async fn fetch(
+        &self,
+        token_pairs: HashSet<TokenPair>,
+        at_block: BlockNumber,
+    ) -> Result<Vec<Pool>> {
         self.clear_cache_if_necessary().await;
         self.fetch_inner(token_pairs, at_block).await
     }
@@ -288,7 +300,11 @@ pub struct PoolFetcher {
 
 #[async_trait::async_trait]
 impl PoolFetching for PoolFetcher {
-    async fn fetch(&self, token_pairs: HashSet<TokenPair>, at_block: BlockNumber) -> Vec<Pool> {
+    async fn fetch(
+        &self,
+        token_pairs: HashSet<TokenPair>,
+        at_block: BlockNumber,
+    ) -> Result<Vec<Pool>> {
         let mut batch = CallBatch::new(self.web3.transport());
         let futures = token_pairs
             .into_iter()
@@ -299,57 +315,81 @@ impl PoolFetching for PoolFetcher {
                 // Fetch ERC20 token balances of the pools to sanity check with reserves
                 let token0 = ERC20::at(&self.web3, pair.get().0);
                 let token1 = ERC20::at(&self.web3, pair.get().1);
-                (
-                    pair,
-                    pair_contract
-                        .get_reserves()
-                        .block(at_block.into())
-                        .batch_call(&mut batch),
-                    token0
-                        .balance_of(pair_address)
-                        .block(at_block.into())
-                        .batch_call(&mut batch),
-                    token1
-                        .balance_of(pair_address)
-                        .block(at_block.into())
-                        .batch_call(&mut batch),
-                )
+
+                let reserves = pair_contract
+                    .get_reserves()
+                    .block(at_block.into())
+                    .batch_call(&mut batch);
+                let token0_balance = token0
+                    .balance_of(pair_address)
+                    .block(at_block.into())
+                    .batch_call(&mut batch);
+                let token1_balance = token1
+                    .balance_of(pair_address)
+                    .block(at_block.into())
+                    .batch_call(&mut batch);
+
+                async move {
+                    // Clippy is wrong about this being eval order depndendent.
+                    #[allow(clippy::eval_order_dependence)]
+                    FetchedPool {
+                        pair,
+                        reserves: reserves.await,
+                        token0_balance: token0_balance.await,
+                        token1_balance: token1_balance.await,
+                    }
+                }
             })
             .collect::<Vec<_>>();
-
         batch.execute_all(MAX_BATCH_SIZE).await;
 
-        let mut results = Vec::with_capacity(futures.len());
-        for (pair, get_reserves, token0_balance, token1_balance) in futures {
-            let reserves = get_reserves.await;
-            let token0_balance = token0_balance.await;
-            let token1_balance = token1_balance.await;
-            if let (Ok(reserves), Ok(token0_balance), Ok(token1_balance)) =
-                (reserves, token0_balance, token1_balance)
-            {
-                // Some ERC20s (e.g. AMPL) have an elastic supply and can thus reduce the balance of their owners without any transfer or other interaction ("rebase").
-                // Such behavior can implicitly change the *k* in the pool's constant product formula. E.g. a pool with 10 USDC and 10 AMPL has k = 100. After a negative
-                // rebase the pool's AMPL balance may reduce to 9, thus k should be implicitly updated to 90 (figuratively speaking the pool is undercollateralized).
-                // Uniswap pools however only update their reserves upon swaps. Such an "out of sync" pool has numerical issues when computing the right clearing price.
-                // Note, that a positive rebase is not problematic as k would increase in this case giving the pool excess in the elastic token (an arbitrageur could
-                // benefit by withdrawing the excess from the pool without selling anything).
-                // We therefore exclude all pools where the pool's token balance of either token in the pair is less than the cached reserve.
-                if U256::from(reserves.0) <= token0_balance
-                    && U256::from(reserves.1) <= token1_balance
-                {
-                    results.push(Pool::uniswap(pair, (reserves.0, reserves.1)));
-                }
-            }
+        let mut results = Vec::new();
+        for future in futures {
+            results.push(future.await);
         }
-        results
+        handle_results(results)
     }
+}
+
+struct FetchedPool {
+    pair: TokenPair,
+    reserves: Result<(u128, u128, u32), MethodError>,
+    token0_balance: Result<U256, MethodError>,
+    token1_balance: Result<U256, MethodError>,
+}
+
+fn handle_results(results: Vec<FetchedPool>) -> Result<Vec<Pool>> {
+    // Helper for the fold below.
+    // If the result is a node error then return it.
+    // If it is a contract error then skip this pool.
+    macro_rules! forward_error_or_skip {
+        ($result:expr, $acc:ident) => {
+            match $result {
+                Ok(t) => t,
+                Err(err) => match EthcontractErrorType::classify(&err) {
+                    EthcontractErrorType::Node => return Err(err.into()),
+                    EthcontractErrorType::Contract => return Ok($acc),
+                },
+            }
+        };
+    }
+
+    results.into_iter().try_fold(Vec::new(), |mut acc, pool| {
+        let reserves = forward_error_or_skip!(pool.reserves, acc);
+        let token0_balance = forward_error_or_skip!(pool.token0_balance, acc);
+        let token1_balance = forward_error_or_skip!(pool.token1_balance, acc);
+        if U256::from(reserves.0) <= token0_balance && U256::from(reserves.1) <= token1_balance {
+            acc.push(Pool::uniswap(pool.pair, (reserves.0, reserves.1)));
+        }
+        Ok(acc)
+    })
 }
 
 #[cfg(test)]
 mod tests {
 
     use super::*;
-    use crate::conversions::big_rational_to_float;
+    use crate::{conversions::big_rational_to_float, ethcontract_error};
     use assert_approx_eq::assert_approx_eq;
     use ethcontract::H256;
     use maplit::hashset;
@@ -472,8 +512,8 @@ mod tests {
     struct FakePoolFetcher(Arc<Mutex<Vec<Pool>>>);
     #[async_trait::async_trait]
     impl PoolFetching for FakePoolFetcher {
-        async fn fetch(&self, _: HashSet<TokenPair>, _: BlockNumber) -> Vec<Pool> {
-            self.0.lock().await.clone()
+        async fn fetch(&self, _: HashSet<TokenPair>, _: BlockNumber) -> Result<Vec<Pool>> {
+            Ok(self.0.lock().await.clone())
         }
     }
 
@@ -504,26 +544,34 @@ mod tests {
 
         // Read Through
         assert_eq!(
-            instance.fetch(hashset!(pair), BlockNumber::Latest).await,
+            instance
+                .fetch(hashset!(pair), BlockNumber::Latest)
+                .await
+                .unwrap(),
             vec![Pool::uniswap(pair, (1, 1)), Pool::uniswap(pair, (2, 2))]
         );
         assert_eq!(
             instance
                 .fetch(hashset!(pair), BlockNumber::Number(42.into()))
-                .await,
+                .await
+                .unwrap(),
             vec![Pool::uniswap(pair, (1, 1)), Pool::uniswap(pair, (2, 2))]
         );
 
         // clear inner to test caching
         pools.lock().await.clear();
         assert_eq!(
-            instance.fetch(hashset!(pair), BlockNumber::Latest).await,
+            instance
+                .fetch(hashset!(pair), BlockNumber::Latest)
+                .await
+                .unwrap(),
             vec![Pool::uniswap(pair, (1, 1)), Pool::uniswap(pair, (2, 2))]
         );
         assert_eq!(
             instance
                 .fetch(hashset!(pair), BlockNumber::Number(42.into()))
-                .await,
+                .await
+                .unwrap(),
             vec![Pool::uniswap(pair, (1, 1)), Pool::uniswap(pair, (2, 2))]
         );
 
@@ -534,7 +582,10 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            instance.fetch(hashset!(pair), BlockNumber::Latest).await,
+            instance
+                .fetch(hashset!(pair), BlockNumber::Latest)
+                .await
+                .unwrap(),
             vec![]
         );
 
@@ -542,7 +593,8 @@ mod tests {
         assert_eq!(
             instance
                 .fetch(hashset!(pair), BlockNumber::Number(42.into()))
-                .await,
+                .await
+                .unwrap(),
             vec![Pool::uniswap(pair, (1, 1)), Pool::uniswap(pair, (2, 2))]
         );
     }
@@ -571,14 +623,20 @@ mod tests {
 
         // Read Through
         assert_eq!(
-            instance.fetch(hashset!(pair), BlockNumber::Pending).await,
+            instance
+                .fetch(hashset!(pair), BlockNumber::Pending)
+                .await
+                .unwrap(),
             vec![Pool::uniswap(pair, (1, 1))]
         );
 
         // clear inner to test we are not using cache
         pools.lock().await.clear();
         assert_eq!(
-            instance.fetch(hashset!(pair), BlockNumber::Pending).await,
+            instance
+                .fetch(hashset!(pair), BlockNumber::Pending)
+                .await
+                .unwrap(),
             vec![]
         );
     }
@@ -607,7 +665,10 @@ mod tests {
 
         // Read Through
         assert_eq!(
-            instance.fetch(hashset!(pair), BlockNumber::Latest).await,
+            instance
+                .fetch(hashset!(pair), BlockNumber::Latest)
+                .await
+                .unwrap(),
             vec![Pool::uniswap(pair, (1, 1))]
         );
 
@@ -623,11 +684,15 @@ mod tests {
         assert_eq!(
             instance
                 .fetch(hashset!(pair), BlockNumber::Number(0.into()))
-                .await,
+                .await
+                .unwrap(),
             vec![]
         );
         assert_eq!(
-            instance.fetch(hashset!(pair), BlockNumber::Latest).await,
+            instance
+                .fetch(hashset!(pair), BlockNumber::Latest)
+                .await
+                .unwrap(),
             vec![]
         );
     }
@@ -655,6 +720,7 @@ mod tests {
         assert!(instance
             .fetch(hashset!(pair), BlockNumber::Latest)
             .await
+            .unwrap()
             .is_empty());
         // Change inner to return a new pool if it was called.
         pools.lock().await.push(Pool::uniswap(pair, (1, 1)));
@@ -662,6 +728,37 @@ mod tests {
         assert!(instance
             .fetch(hashset!(pair), BlockNumber::Latest)
             .await
+            .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn pool_fetcher_forwards_node_error() {
+        let results = vec![FetchedPool {
+            reserves: Err(ethcontract_error::testing_node_error()),
+            pair: Default::default(),
+            token0_balance: Ok(1.into()),
+            token1_balance: Ok(1.into()),
+        }];
+        assert!(handle_results(results).is_err());
+    }
+
+    #[test]
+    fn pool_fetcher_skips_contract_error() {
+        let results = vec![
+            FetchedPool {
+                reserves: Err(ethcontract_error::testing_contract_error()),
+                pair: Default::default(),
+                token0_balance: Ok(1.into()),
+                token1_balance: Ok(1.into()),
+            },
+            FetchedPool {
+                reserves: Ok((1, 1, 0)),
+                pair: Default::default(),
+                token0_balance: Ok(1.into()),
+                token1_balance: Ok(1.into()),
+            },
+        ];
+        assert_eq!(handle_results(results).unwrap().len(), 1);
     }
 }
