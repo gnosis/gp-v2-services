@@ -626,7 +626,6 @@ dependencies = [
  "contracts",
  "criterion",
  "ethcontract",
- "futures",
  "hex-literal",
  "lazy_static",
  "maplit",

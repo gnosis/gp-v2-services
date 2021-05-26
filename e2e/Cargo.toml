@@ -13,7 +13,6 @@ harness = false
 contracts = { path = "../contracts" }
 criterion = { version = "0.3", features = ["async_futures"] }
 ethcontract = { version = "0.11",  default-features = false, features = ["http"] }
-futures = "0.3"
 hex-literal = "0.3"
 lazy_static = "1.4"
 maplit = "1.0"
