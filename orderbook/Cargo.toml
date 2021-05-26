@@ -26,6 +26,7 @@ futures = "0.3.15"
 gas-estimation = { git = "https://github.com/gnosis/gp-gas-estimation.git", tag = "v0.1.2", features = ["web3_"] }
 hex = { version = "0.4", default-features = false }
 hex-literal = "0.3"
+lru = "0.6"
 maplit = "1.0"
 model = { path = "../model" }
 num = "0.4"

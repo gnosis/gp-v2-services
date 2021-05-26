@@ -7,16 +7,13 @@ use model::DomainSeparator;
 use orderbook::{
     account_balances::Web3BalanceFetcher, database::Database, event_updater::EventUpdater,
     fee::EthAwareMinFeeCalculator, metrics::Metrics, orderbook::Orderbook,
+    orderbook_pool_fetcher::OrderbookPoolFetcher,
 };
 use prometheus::Registry;
 use shared::{
-    amm_pair_provider::UniswapPairProvider,
-    bad_token::list_based::ListBasedDetector,
-    current_block::current_block_stream,
-    maintenance::ServiceMaintenance,
-    pool_fetching::{CachedPoolFetcher, PoolFetcher},
-    price_estimate::BaselinePriceEstimator,
-    Web3,
+    amm_pair_provider::UniswapPairProvider, bad_token::list_based::ListBasedDetector,
+    maintenance::ServiceMaintenance, pool_fetching::PoolFetcher,
+    price_estimate::BaselinePriceEstimator, Web3,
 };
 use solver::orderbook::OrderBookApi;
 use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
@@ -131,24 +128,18 @@ impl OrderbookServices {
         let db = Database::new("postgresql://").unwrap();
         db.clear().await.unwrap();
         let event_updater = Arc::new(EventUpdater::new(gpv2.settlement.clone(), db.clone(), None));
-        let current_block_stream = current_block_stream(web3.clone(), Duration::from_secs(1))
-            .await
-            .unwrap();
         let pair_provider = Arc::new(UniswapPairProvider {
             factory: uniswap_factory.clone(),
             chain_id,
         });
-        let pool_fetcher = CachedPoolFetcher::new(
-            Box::new(PoolFetcher {
-                pair_provider,
-                web3: web3.clone(),
-            }),
-            current_block_stream,
-        );
+        let pool_fetcher = OrderbookPoolFetcher::new(Box::new(PoolFetcher {
+            pair_provider,
+            web3: web3.clone(),
+        }));
         let gas_estimator = Arc::new(web3.clone());
         let bad_token_detector = Arc::new(ListBasedDetector::deny_list(Vec::new()));
         let price_estimator = Arc::new(BaselinePriceEstimator::new(
-            Box::new(pool_fetcher),
+            Arc::new(pool_fetcher),
             gas_estimator.clone(),
             HashSet::new(),
             bad_token_detector.clone(),

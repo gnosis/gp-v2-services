@@ -6,6 +6,7 @@ pub mod event_updater;
 pub mod fee;
 pub mod metrics;
 pub mod orderbook;
+pub mod orderbook_pool_fetcher;
 
 use crate::database::Database;
 use crate::orderbook::Orderbook;
