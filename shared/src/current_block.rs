@@ -178,7 +178,6 @@ mod tests {
     use crate::transport::LoggingTransport;
 
     use super::*;
-    use ethcontract::TransactionHash;
     use futures::FutureExt;
     use primitive_types::H256;
 
