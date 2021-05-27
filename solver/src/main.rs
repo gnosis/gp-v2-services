@@ -130,7 +130,7 @@ struct Arguments {
     /// without external liquidity
     #[structopt(
         long,
-        env = "MARKET_MAKEABLE_TOKEN_LIST",
+        env = "MARKET_MAKABLE_TOKEN_LIST",
         default_value = "https://tokens.coingecko.com/uniswap/all.json"
     )]
     market_makable_token_list: String,
@@ -206,12 +206,13 @@ async fn main() {
 
     let pool_aggregator = PoolAggregator::from_providers(&pair_providers, &web3).await;
 
-    // TODO - use Filtered-Cached PoolFetchers here too.
+    // TODO: use caching pool fetcher
     let price_estimator = Arc::new(BaselinePriceEstimator::new(
         Box::new(pool_aggregator),
         gas_price_estimator.clone(),
         base_tokens.clone(),
-        Arc::new(ListBasedDetector::deny_list(args.shared.unsupported_tokens)),
+        // Order book already filters bad tokens
+        Arc::new(ListBasedDetector::deny_list(Vec::new())),
         native_token_contract.address(),
     ));
     let uniswap_like_liquidity = build_amm_artifacts(
