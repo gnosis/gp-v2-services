@@ -13,7 +13,7 @@ use contracts::{
 };
 use ethcontract::common::DeploymentInformation;
 use ethcontract::{dyns::DynWeb3, Event as EthContractEvent, EventMetadata, H160, H256};
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
 use std::ops::RangeInclusive;
 use tokio::sync::Mutex;
 
@@ -29,24 +29,22 @@ pub struct PoolRegistered {
     pub specialization: PoolSpecialization,
 }
 
-/// There are three specialization settings for Pools, which allow for cheaper swaps at the cost of reduced
-/// functionality:
-///
-///  - General: no specialization, suited for all Pools. IGeneralPool is used for swap request callbacks, passing the
-/// balance of all tokens in the Pool. These Pools have the largest swap costs (because of the extra storage reads),
-/// which increase with the number of registered tokens.
-///
-///  - Minimal Swap Info: IMinimalSwapInfoPool is used instead of IGeneralPool, which saves gas by only passing the
-/// balance of the two tokens involved in the swap. This is suitable for some pricing algorithms, like the weighted
-/// constant product one popularized by Balancer V1. Swap costs are smaller compared to general Pools, and are
-/// independent of the number of registered tokens.
-///
-///  - Two Token: only allows two tokens to be registered. This achieves the lowest possible swap gas cost. Like
-/// minimal swap info Pools, these are called via IMinimalSwapInfoPool.
+/// There are three specialization settings for Pools,
+/// which allow for cheaper swaps at the cost of reduced functionality:
+#[derive(Debug)]
 #[repr(u8)]
 pub enum PoolSpecialization {
+    /// no specialization, suited for all Pools. IGeneralPool is used for swap request callbacks,
+    /// passing the balance of all tokens in the Pool. These Pools have the largest swap costs
+    /// (because of the extra storage reads), which increase with the number of registered tokens.
     General = 0,
+    /// IMinimalSwapInfoPool is used instead of IGeneralPool, which saves gas by only passing the
+    /// balance of the two tokens involved in the swap. This is suitable for some pricing algorithms,
+    /// like the weighted constant product one popularized by Balancer V1. Swap costs are
+    /// smaller compared to general Pools, and are independent of the number of registered tokens.
     MinimalSwapInfo = 1,
+    /// only allows two tokens to be registered. This achieves the lowest possible swap gas cost.
+    /// Like minimal swap info Pools, these are called via IMinimalSwapInfoPool.
     TwoToken = 2,
 }
 
@@ -57,22 +55,6 @@ impl PoolSpecialization {
             1 => Ok(Self::MinimalSwapInfo),
             2 => Ok(Self::TwoToken),
             t => Err(anyhow!("Invalid PoolSpecialization value {}", t)),
-        }
-    }
-}
-
-impl std::fmt::Debug for PoolSpecialization {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PoolSpecialization::General => {
-                write!(f, "General")
-            }
-            PoolSpecialization::MinimalSwapInfo => {
-                write!(f, "MinimalSwapInfo")
-            }
-            PoolSpecialization::TwoToken => {
-                write!(f, "TwoToken")
-            }
         }
     }
 }
