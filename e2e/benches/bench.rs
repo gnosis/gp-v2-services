@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use ethcontract::U256;
 use rand::seq::SliceRandom as _;
@@ -20,13 +19,12 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     group
         .measurement_time(Duration::from_secs(300))
         .bench_function("Estimate Price", |b| {
-            b.to_async(FuturesExecutor)
-                .iter(|| estimate_fee_and_price_estimate(&token_list));
+            b.iter(|| estimate_fee_and_price_estimate(&token_list));
         });
     group.finish();
 }
 
-async fn estimate_fee_and_price_estimate(token_list: &TokenList) {
+fn estimate_fee_and_price_estimate(token_list: &TokenList) {
     let mut rng = rand::thread_rng();
     let base_token = token_list
         .all()

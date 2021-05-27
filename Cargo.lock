@@ -390,7 +390,6 @@ dependencies = [
  "clap",
  "criterion-plot",
  "csv",
- "futures",
  "itertools 0.10.0",
  "lazy_static",
  "num-traits",
