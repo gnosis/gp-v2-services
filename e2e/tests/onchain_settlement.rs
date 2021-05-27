@@ -183,7 +183,7 @@ async fn onchain_settlement(web3: Web3) {
         f64::MAX,
         None,
     );
-    driver.single_run(&HashSet::new()).await.unwrap();
+    driver.single_run().await.unwrap();
 
     // Check matching
     let balance = token_b
@@ -210,5 +210,5 @@ async fn onchain_settlement(web3: Web3) {
     assert!(orders.is_empty());
 
     // Drive again to ensure we can continue solution finding
-    driver.single_run(&HashSet::new()).await.unwrap();
+    driver.single_run().await.unwrap();
 }

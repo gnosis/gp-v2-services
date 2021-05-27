@@ -44,6 +44,7 @@ pub struct Driver {
     solver_time_limit: Duration,
     gas_price_cap: f64,
     market_makable_token_list: Option<TokenList>,
+    inflight_orders: HashSet<OrderUid>,
 }
 impl Driver {
     #[allow(clippy::too_many_arguments)]
@@ -82,17 +83,14 @@ impl Driver {
             solver_time_limit,
             gas_price_cap,
             market_makable_token_list,
+            inflight_orders: HashSet::new(),
         }
     }
 
     pub async fn run_forever(&mut self) -> ! {
-        let mut inflight_orders = HashSet::new();
         loop {
-            match self.single_run(&inflight_orders).await {
-                Ok(matched_orders) => {
-                    tracing::debug!("single run finished ok");
-                    inflight_orders = matched_orders;
-                }
+            match self.single_run().await {
+                Ok(()) => tracing::debug!("single run finished ok"),
                 Err(err) => tracing::error!("single run errored: {:?}", err),
             }
             tokio::time::delay_for(self.settle_interval).await;
@@ -327,10 +325,7 @@ impl Driver {
             .await
     }
 
-    pub async fn single_run(
-        &mut self,
-        inflight_orders: &HashSet<OrderUid>,
-    ) -> Result<HashSet<OrderUid>> {
+    pub async fn single_run(&mut self) -> Result<()> {
         tracing::debug!("starting single run");
         let current_block_during_liquidity_fetch = self
             .web3
@@ -341,8 +336,13 @@ impl Driver {
             .as_u64();
         let liquidity = self
             .liquidity_collector
-            .get_liquidity(current_block_during_liquidity_fetch.into(), inflight_orders)
+            .get_liquidity(
+                current_block_during_liquidity_fetch.into(),
+                &self.inflight_orders,
+            )
             .await?;
+        // Reset the inflight orders after use.
+        self.inflight_orders = HashSet::new();
 
         let estimated_prices =
             collect_estimated_prices(self.price_estimator.as_ref(), self.native_token, &liquidity)
@@ -403,7 +403,6 @@ impl Driver {
         let rated_settlements = self
             .rate_settlements(settlements, &estimated_prices, gas_price_wei)
             .await;
-        let mut inflight_orders = HashSet::new();
         if let Some(mut settlement) = rated_settlements
             .clone()
             .into_iter()
@@ -421,7 +420,7 @@ impl Driver {
 
             tracing::debug!("winning settlement: {:?}", settlement);
             self.submit_settlement(settlement.clone()).await;
-            inflight_orders = settlement
+            self.inflight_orders = settlement
                 .settlement
                 .settlement
                 .trades()
@@ -439,7 +438,7 @@ impl Driver {
         self.report_simulation_errors(errors, current_block_during_liquidity_fetch)
             .await;
 
-        Ok(inflight_orders)
+        Ok(())
     }
 }
 
