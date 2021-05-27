@@ -160,7 +160,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::transport::LoggingTransport;
+    use crate::transport::create_test_transport;
 
     use super::*;
     use futures::FutureExt;
@@ -196,7 +196,7 @@ mod tests {
     #[ignore]
     async fn mainnet() {
         let node = "https://dev-openethereum.mainnet.gnosisdev.com";
-        let transport = LoggingTransport::new(web3::transports::Http::new(node).unwrap());
+        let transport = create_test_transport(node);
         let web3 = Web3::new(transport);
         let mut stream = current_block_stream(web3).await.unwrap();
         for _ in 0..3 {
