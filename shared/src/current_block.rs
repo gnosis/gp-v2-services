@@ -161,16 +161,13 @@ where
     }
 
     async fn block_number_from_tx_hash(&self, hash: H256) -> Result<u64> {
-        let potential_receipt = self.eth().transaction_receipt(hash).await?;
-        if let Some(receipt) = potential_receipt {
-            // Need to unwrap Option<U64> to convert U64 -> u64
-            if let Some(block_number) = receipt.block_number {
-                return Ok(block_number.as_u64());
-            }
-            return Err(anyhow!("no block number with transaction receipt"));
-        }
-        return Err(anyhow!("no transaction receipt found"));
-    }
+        Ok(self.eth()
+            .transaction_receipt(hash)
+            .await?
+            .ok_or_else(|| anyhow!("no transaction receipt found"))?
+            .block_number
+            .ok_or_else(|| anyhow("no block number with transaction receipt"))?
+            .as_u64())
 }
 
 #[cfg(test)]
