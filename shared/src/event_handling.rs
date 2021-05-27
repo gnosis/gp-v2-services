@@ -133,7 +133,7 @@ where
         // in one transaction.
         let mut have_deleted_old_events = false;
         while let Some(events_chunk) = events.next().await {
-            let unwrapped_events = events_chunk.context("Failed to get next chunk of events")?;
+            let unwrapped_events = events_chunk.context("failed to get next chunk of events")?;
             if !have_deleted_old_events {
                 self.store
                     .replace_events(unwrapped_events, range.clone())
@@ -172,11 +172,7 @@ where
     S: EventStoring<C::Event> + Send + Sync,
 {
     async fn run_maintenance(&self) -> Result<()> {
-        self.lock()
-            .await
-            .update_events()
-            .await
-            .context("event update error")
+        self.lock().await.update_events().await
     }
 }
 
