@@ -82,7 +82,11 @@ impl OneInchSolver {
 
     /// Settles a single sell order against a 1Inch swap using the spcified
     /// protocols.
-    async fn settle_order(&self, order: LimitOrder) -> Result<Settlement> {
+    async fn settle_order(
+        &self,
+        order: LimitOrder,
+        protocols: Option<Vec<String>>,
+    ) -> Result<Settlement> {
         debug_assert_eq!(
             order.kind,
             OrderKind::Sell,
@@ -96,7 +100,6 @@ impl OneInchSolver {
             .call()
             .await?;
 
-        let protocols = self.supported_protocols().await?;
         let query = SwapQuery {
             from_token_address: order.sell_token,
             to_token_address: order.buy_token,
@@ -178,11 +181,12 @@ impl Solver for OneInchSolver {
             sell_orders.shuffle(&mut rand::thread_rng());
         }
 
+        let protocols = self.supported_protocols().await?;
         let settlements = future::join_all(
             sell_orders
                 .into_iter()
                 .take(MAX_SETTLEMENTS)
-                .map(|sell_order| self.settle_order(sell_order)),
+                .map(|sell_order| self.settle_order(sell_order, protocols.clone())),
         )
         .await;
 
@@ -234,10 +238,13 @@ mod tests {
     #[should_panic]
     async fn panics_when_settling_buy_orders() {
         let _ = dummy_solver()
-            .settle_order(LimitOrder {
-                kind: OrderKind::Buy,
-                ..Default::default()
-            })
+            .settle_order(
+                LimitOrder {
+                    kind: OrderKind::Buy,
+                    ..Default::default()
+                },
+                None,
+            )
             .await;
     }
 
@@ -306,6 +313,7 @@ mod tests {
                     ..Default::default()
                 }
                 .into(),
+                None,
             )
             .await
             .unwrap();

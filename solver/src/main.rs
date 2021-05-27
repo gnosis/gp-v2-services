@@ -123,7 +123,7 @@ struct Arguments {
     /// The list of disabled 1Inch protocols. By default, the `PMM1` protocol
     /// (representing a private market maker) is disabled as it seems to
     /// produce invalid swaps.
-    #[structopt(long, env, default_value = "PMM1")]
+    #[structopt(long, env, default_value = "PMM1", use_delimiter = true)]
     disabled_one_inch_protocols: Vec<String>,
 
     /// The list of tokens our settlement contract is willing to buy when settling trades
