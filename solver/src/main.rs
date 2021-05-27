@@ -120,11 +120,17 @@ struct Arguments {
     )]
     min_order_size_one_inch: U256,
 
+    /// The list of disabled 1Inch protocols. By default, the `PMM1` protocol
+    /// (representing a private market maker) is disabled as it seems to
+    /// produce invalid swaps.
+    #[structopt(long, env, default_value = "PMM1", use_delimiter = true)]
+    disabled_one_inch_protocols: Vec<String>,
+
     /// The list of tokens our settlement contract is willing to buy when settling trades
     /// without external liquidity
     #[structopt(
         long,
-        env = "MARKET_MAKEABLE_TOKEN_LIST",
+        env = "MARKET_MAKABLE_TOKEN_LIST",
         default_value = "https://tokens.coingecko.com/uniswap/all.json"
     )]
     market_makable_token_list: String,
@@ -200,12 +206,13 @@ async fn main() {
 
     let pool_aggregator = PoolAggregator::from_providers(&pair_providers, &web3).await;
 
-    // TODO - use Filtered-Cached PoolFetchers here too.
+    // TODO: use caching pool fetcher
     let price_estimator = Arc::new(BaselinePriceEstimator::new(
         Box::new(pool_aggregator),
         gas_price_estimator.clone(),
         base_tokens.clone(),
-        Arc::new(ListBasedDetector::deny_list(args.shared.unsupported_tokens)),
+        // Order book already filters bad tokens
+        Arc::new(ListBasedDetector::deny_list(Vec::new())),
         native_token_contract.address(),
     ));
     let uniswap_like_liquidity = build_amm_artifacts(
@@ -229,6 +236,7 @@ async fn main() {
         args.shared.fee_discount_factor,
         args.solver_time_limit,
         args.min_order_size_one_inch,
+        args.disabled_one_inch_protocols,
     )
     .expect("failure creating solvers");
     let liquidity_collector = LiquidityCollector {
