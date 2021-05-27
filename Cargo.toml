@@ -3,6 +3,7 @@ members = [
     "contracts",
     "e2e",
     "model",
+    "monitor",
     "orderbook",
     "shared",
     "solver",
@@ -11,6 +12,7 @@ members = [
 default-members = [
     "contracts",
     "model",
+    "monitor",
     "orderbook",
     "shared",
     "solver",

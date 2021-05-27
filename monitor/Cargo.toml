@@ -1,0 +1,17 @@
+[package]
+name = "monitor"
+version = "0.0.1"
+authors = ["Gnosis Developers <developers@gnosis.io>"]
+edition = "2018"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+anyhow = "1.0"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+contracts = { path = "../contracts" }
+futures = "0.3.15"
+shared = { path = "../shared" }
+tokio = { version = "0.2", features = ["stream", "time"] }
+structopt = "0.3"
+tracing = "0.1"
+web3 = { version = "0.15", default-features = false, features = ["http-tls"] }

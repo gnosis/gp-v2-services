@@ -1661,6 +1661,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "monitor"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "contracts",
+ "futures",
+ "shared",
+ "structopt",
+ "tokio",
+ "tracing",
+ "web3",
+]
+
+[[package]]
 name = "multipart"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
