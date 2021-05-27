@@ -2,7 +2,9 @@ use crate::{current_block::BlockRetrieving, maintenance::Maintaining};
 use anyhow::{Context, Error, Result};
 use ethcontract::contract::{AllEventsBuilder, ParseLog};
 use ethcontract::errors::ExecutionError;
-use ethcontract::{dyns::DynTransport, BlockNumber as Web3BlockNumber, Event as EthcontractEvent};
+use ethcontract::{
+    dyns::DynTransport, BlockNumber as Web3BlockNumber, Event as EthcontractEvent, EventMetadata,
+};
 use futures::{Stream, StreamExt, TryStreamExt};
 use std::ops::RangeInclusive;
 use tokio::sync::Mutex;
@@ -131,7 +133,7 @@ where
         // in one transaction.
         let mut have_deleted_old_events = false;
         while let Some(events_chunk) = events.next().await {
-            let unwrapped_events = events_chunk.context("Failed to get next chunk of events")?;
+            let unwrapped_events = events_chunk.context("failed to get next chunk of events")?;
             if !have_deleted_old_events {
                 self.store
                     .replace_events(unwrapped_events, range.clone())
@@ -170,11 +172,22 @@ where
     S: EventStoring<C::Event> + Send + Sync,
 {
     async fn run_maintenance(&self) -> Result<()> {
-        self.lock()
-            .await
-            .update_events()
-            .await
-            .context("event update error")
+        self.lock().await.update_events().await
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct EventIndex {
+    pub block_number: u64,
+    pub log_index: u64,
+}
+
+impl From<&EventMetadata> for EventIndex {
+    fn from(meta: &EventMetadata) -> Self {
+        EventIndex {
+            block_number: meta.block_number,
+            log_index: meta.log_index as u64,
+        }
     }
 }
 
@@ -211,7 +224,7 @@ macro_rules! impl_event_retrieving {
     ($vis:vis $name:ident for $($contract_module:tt)*) => {
         $vis struct $name($($contract_module)*::Contract);
 
-        impl ::shared::event_handling::EventRetrieving for $name {
+        impl $crate::event_handling::EventRetrieving for $name {
             type Event = $($contract_module)*::Event;
 
             fn get_events(&self) -> ::ethcontract::contract::AllEventsBuilder<
