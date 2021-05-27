@@ -91,11 +91,11 @@ struct Arguments {
     /// The amount of time a classification of a token into good or bad is valid for.
     #[structopt(
         long,
-        env = "BLOCK_STREAM_POLL_INTERVAL_SECONDS",
+        env,
         default_value = "5",
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
-    block_stream_poll_interval: Duration,
+    block_stream_poll_interval_seconds: Duration,
 }
 
 pub async fn database_metrics(metrics: Arc<Metrics>, database: Database) -> ! {
@@ -204,9 +204,10 @@ async fn main() {
         },
     ));
 
-    let current_block_stream = current_block_stream(web3.clone(), args.block_stream_poll_interval)
-        .await
-        .unwrap();
+    let current_block_stream =
+        current_block_stream(web3.clone(), args.block_stream_poll_interval_seconds)
+            .await
+            .unwrap();
 
     let pool_aggregator = PoolAggregator::from_providers(&pair_providers, &web3).await;
     let pool_fetcher =
