@@ -4,20 +4,25 @@ use crate::settlement::SettlementEncoder;
 use anyhow::{anyhow, Context, Result};
 use contracts::WETH9;
 use ethcontract::H160;
-use model::order::{Order, OrderKind, BUY_ETH_ADDRESS};
+use model::order::{Order, OrderKind, OrderUid, BUY_ETH_ADDRESS};
 use primitive_types::U256;
 use std::{collections::HashMap, sync::Arc};
 
 use super::{LimitOrder, SettlementHandling};
+use std::collections::HashSet;
 
 impl OrderBookApi {
     /// Returns a list of limit orders coming from the offchain orderbook API
-    pub async fn get_liquidity(&self) -> Result<Vec<LimitOrder>> {
+    pub async fn get_liquidity(
+        &self,
+        excluded_orders: &HashSet<OrderUid>,
+    ) -> Result<Vec<LimitOrder>> {
         Ok(self
             .get_orders()
             .await
             .context("failed to get orderbook")?
             .into_iter()
+            .filter(|order| !excluded_orders.contains(&order.order_meta_data.uid))
             .map(|order| normalize_limit_order(order, self.get_native_token()))
             .collect())
     }

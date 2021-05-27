@@ -209,7 +209,7 @@ async fn eth_integration(web3: Web3) {
         f64::MAX,
         None,
     );
-    driver.single_run().await.unwrap();
+    driver.single_run(&HashSet::new()).await.unwrap();
 
     // Check matching
     let web3_ref = &web3;

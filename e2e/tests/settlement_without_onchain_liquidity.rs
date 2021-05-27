@@ -184,7 +184,7 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
         f64::MAX,
         Some(market_makable_token_list),
     );
-    driver.single_run().await.unwrap();
+    driver.single_run(&HashSet::new()).await.unwrap();
 
     // Check that trader traded.
     let balance = token_a
@@ -219,5 +219,5 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
     assert!(orders.is_empty());
 
     // Drive again to ensure we can continue solution finding
-    driver.single_run().await.unwrap();
+    driver.single_run(&HashSet::new()).await.unwrap();
 }

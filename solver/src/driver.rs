@@ -17,7 +17,7 @@ use ethcontract::errors::MethodError;
 use futures::future::join_all;
 use gas_estimation::GasPriceEstimating;
 use itertools::{Either, Itertools};
-use model::order::BUY_ETH_ADDRESS;
+use model::order::{OrderUid, BUY_ETH_ADDRESS};
 use num::BigRational;
 use primitive_types::H160;
 use shared::{price_estimate::PriceEstimating, token_list::TokenList, Web3};
@@ -86,9 +86,13 @@ impl Driver {
     }
 
     pub async fn run_forever(&mut self) -> ! {
+        let mut inflight_orders = HashSet::new();
         loop {
-            match self.single_run().await {
-                Ok(()) => tracing::debug!("single run finished ok"),
+            match self.single_run(&inflight_orders).await {
+                Ok(matched_orders) => {
+                    tracing::debug!("single run finished ok");
+                    inflight_orders = matched_orders;
+                }
                 Err(err) => tracing::error!("single run errored: {:?}", err),
             }
             tokio::time::delay_for(self.settle_interval).await;
@@ -323,7 +327,10 @@ impl Driver {
             .await
     }
 
-    pub async fn single_run(&mut self) -> Result<()> {
+    pub async fn single_run(
+        &mut self,
+        inflight_orders: &HashSet<OrderUid>,
+    ) -> Result<HashSet<OrderUid>> {
         tracing::debug!("starting single run");
         let current_block_during_liquidity_fetch = self
             .web3
@@ -334,7 +341,7 @@ impl Driver {
             .as_u64();
         let liquidity = self
             .liquidity_collector
-            .get_liquidity(current_block_during_liquidity_fetch.into())
+            .get_liquidity(current_block_during_liquidity_fetch.into(), inflight_orders)
             .await?;
 
         let estimated_prices =
@@ -396,7 +403,7 @@ impl Driver {
         let rated_settlements = self
             .rate_settlements(settlements, &estimated_prices, gas_price_wei)
             .await;
-
+        let mut inflight_orders = HashSet::new();
         if let Some(mut settlement) = rated_settlements
             .clone()
             .into_iter()
@@ -414,6 +421,14 @@ impl Driver {
 
             tracing::debug!("winning settlement: {:?}", settlement);
             self.submit_settlement(settlement.clone()).await;
+            inflight_orders = settlement
+                .settlement
+                .settlement
+                .trades()
+                .iter()
+                .map(|t| t.order.order_meta_data.uid)
+                .collect::<HashSet<_>>();
+
             self.report_matched_but_unsettled_orders(
                 &Settlement::from(settlement),
                 rated_settlements.into_iter().map(Settlement::from),
@@ -424,7 +439,7 @@ impl Driver {
         self.report_simulation_errors(errors, current_block_during_liquidity_fetch)
             .await;
 
-        Ok(())
+        Ok(inflight_orders)
     }
 }
 
