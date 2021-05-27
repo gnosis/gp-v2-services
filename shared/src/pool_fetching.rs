@@ -359,25 +359,37 @@ struct FetchedPool {
 }
 
 fn handle_results(results: Vec<FetchedPool>) -> Result<Vec<Pool>> {
-    // Helper for the fold below.
-    // If the result is a node error then return it.
-    // If it is a contract error then skip this pool.
-    macro_rules! forward_error_or_skip {
-        ($result:expr, $acc:ident) => {
-            match $result {
-                Ok(t) => t,
-                Err(err) => match EthcontractErrorType::classify(&err) {
-                    EthcontractErrorType::Node => return Err(err.into()),
-                    EthcontractErrorType::Contract => return Ok($acc),
-                },
-            }
-        };
+    // Node errors should be bubbled up but contract errors should lead to the pool being skipped.
+    fn handle_contract_error<T>(result: Result<T, MethodError>) -> Result<Option<T>> {
+        match result {
+            Ok(t) => Ok(Some(t)),
+            Err(err) => match EthcontractErrorType::classify(&err) {
+                EthcontractErrorType::Node => Err(err.into()),
+                EthcontractErrorType::Contract => Ok(None),
+            },
+        }
     }
 
     results.into_iter().try_fold(Vec::new(), |mut acc, pool| {
-        let reserves = forward_error_or_skip!(pool.reserves, acc);
-        let token0_balance = forward_error_or_skip!(pool.token0_balance, acc);
-        let token1_balance = forward_error_or_skip!(pool.token1_balance, acc);
+        let reserves = match handle_contract_error(pool.reserves)? {
+            Some(reserves) => reserves,
+            None => return Ok(acc),
+        };
+        let token0_balance = match handle_contract_error(pool.token0_balance)? {
+            Some(balance) => balance,
+            None => return Ok(acc),
+        };
+        let token1_balance = match handle_contract_error(pool.token1_balance)? {
+            Some(balance) => balance,
+            None => return Ok(acc),
+        };
+        // Some ERC20s (e.g. AMPL) have an elastic supply and can thus reduce the balance of their owners without any transfer or other interaction ("rebase").
+        // Such behavior can implicitly change the *k* in the pool's constant product formula. E.g. a pool with 10 USDC and 10 AMPL has k = 100. After a negative
+        // rebase the pool's AMPL balance may reduce to 9, thus k should be implicitly updated to 90 (figuratively speaking the pool is undercollateralized).
+        // Uniswap pools however only update their reserves upon swaps. Such an "out of sync" pool has numerical issues when computing the right clearing price.
+        // Note, that a positive rebase is not problematic as k would increase in this case giving the pool excess in the elastic token (an arbitrageur could
+        // benefit by withdrawing the excess from the pool without selling anything).
+        // We therefore exclude all pools where the pool's token balance of either token in the pair is less than the cached reserve.
         if U256::from(reserves.0) <= token0_balance && U256::from(reserves.1) <= token1_balance {
             acc.push(Pool::uniswap(pool.pair, (reserves.0, reserves.1)));
         }
