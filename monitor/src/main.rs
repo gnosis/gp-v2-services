@@ -62,18 +62,14 @@ async fn extract_transactions_to(
     stream::unfold(transactions, move |mut txs| {
         let eth = web3.eth();
         async move {
-            if let Some(tx) = txs.next() {
-                let receipt = eth
-                    .transaction_receipt(tx.hash)
-                    .await
-                    .unwrap_or_else(|err| {
-                        tracing::warn!("error connecting to node: {:?}", err);
-                        None
-                    });
-                Some((receipt, txs))
-            } else {
-                None
-            }
+            let receipt = eth
+                .transaction_receipt(txs.next()?.hash)
+                .await
+                .unwrap_or_else(|err| {
+                    tracing::warn!("error connecting to node: {:?}", err);
+                    None
+                });
+            Some((receipt, txs))
         }
     })
 }
