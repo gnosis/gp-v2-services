@@ -4,26 +4,41 @@ use crate::settlement::SettlementEncoder;
 use anyhow::{anyhow, Context, Result};
 use contracts::WETH9;
 use ethcontract::H160;
-use model::order::{Order, OrderKind, OrderUid, BUY_ETH_ADDRESS};
+use model::order::{InflightOrders, Order, OrderKind, BUY_ETH_ADDRESS};
 use primitive_types::U256;
 use std::{collections::HashMap, sync::Arc};
 
 use super::{LimitOrder, SettlementHandling};
-use std::collections::HashSet;
 
 impl OrderBookApi {
     /// Returns a list of limit orders coming from the offchain orderbook API
-    pub async fn get_liquidity(
-        &self,
-        excluded_orders: &HashSet<OrderUid>,
-    ) -> Result<Vec<LimitOrder>> {
+    pub async fn get_liquidity(&self, inflight_orders: &InflightOrders) -> Result<Vec<LimitOrder>> {
         Ok(self
             .get_orders()
             .await
             .context("failed to get orderbook")?
             .into_iter()
-            .filter(|order| !excluded_orders.contains(&order.order_meta_data.uid))
-            .map(|order| normalize_limit_order(order, self.get_native_token()))
+            .filter_map(|order| {
+                if inflight_orders.contains_key(&order.order_meta_data.uid) {
+                    if order.order_creation.partially_fillable {
+                        // TODO - update order in a way that inflight executed amounts are deducted
+                        // and the output of this method (LimitOrder is aware of this).
+                        // let executed_sell_amount = inflight_orders
+                        //     .get(&order.order_meta_data.uid)
+                        //     .expect(&U256::zero());
+                        // // temp_update_inflight_status(order);
+                        // TODO - Not sure if LimitOrder is aware of the contents of OrderMetaData
+                        // order.order_meta_data.executed_sell_amount += executed_sell_amount;
+                        // order.order_meta_data.executed_buy_amount += executed_buy_amount;
+                    } else {
+                        // Fully filled, inflight orders are excluded from consideration
+                        return None;
+                    }
+                }
+                Some(normalize_limit_order(order, self.get_native_token()))
+            })
+            // .filter(|order| !excluded_orders.contains(&order.order_meta_data.uid))
+            // .map(|order| normalize_limit_order(order, self.get_native_token()))
             .collect())
     }
 }

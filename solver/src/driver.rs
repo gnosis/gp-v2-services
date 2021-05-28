@@ -14,10 +14,11 @@ use crate::{
 use anyhow::{anyhow, Context, Error, Result};
 use contracts::GPv2Settlement;
 use ethcontract::errors::MethodError;
+use ethcontract::U256;
 use futures::future::join_all;
 use gas_estimation::GasPriceEstimating;
 use itertools::{Either, Itertools};
-use model::order::{OrderUid, BUY_ETH_ADDRESS};
+use model::order::{InflightOrders, OrderUid, BUY_ETH_ADDRESS};
 use num::BigRational;
 use primitive_types::H160;
 use shared::{price_estimate::PriceEstimating, token_list::TokenList, Web3};
@@ -44,7 +45,7 @@ pub struct Driver {
     solver_time_limit: Duration,
     gas_price_cap: f64,
     market_makable_token_list: Option<TokenList>,
-    inflight_orders: HashSet<OrderUid>,
+    inflight_orders: InflightOrders,
 }
 impl Driver {
     #[allow(clippy::too_many_arguments)]
@@ -83,7 +84,7 @@ impl Driver {
             solver_time_limit,
             gas_price_cap,
             market_makable_token_list,
-            inflight_orders: HashSet::new(),
+            inflight_orders: HashMap::new(),
         }
     }
 
@@ -342,7 +343,7 @@ impl Driver {
             )
             .await?;
         // Reset the inflight orders after use.
-        self.inflight_orders = HashSet::new();
+        self.inflight_orders = HashMap::new();
 
         let estimated_prices =
             collect_estimated_prices(self.price_estimator.as_ref(), self.native_token, &liquidity)
@@ -425,8 +426,8 @@ impl Driver {
                 .settlement
                 .trades()
                 .iter()
-                .map(|t| t.order.order_meta_data.uid)
-                .collect::<HashSet<_>>();
+                .map(|t| (t.order.order_meta_data.uid, t.executed_amount))
+                .collect::<HashMap<OrderUid, U256>>();
 
             self.report_matched_but_unsettled_orders(
                 &Settlement::from(settlement),
