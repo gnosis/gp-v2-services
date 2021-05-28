@@ -1,7 +1,7 @@
 use anyhow::bail;
 use chrono::{offset::Utc, DateTime, TimeZone};
 use contracts::GPv2Settlement;
-use futures::{stream, Stream, StreamExt};
+use futures::{pin_mut, stream, Stream, StreamExt};
 use shared::{transport::LoggingTransport, Web3};
 use std::time::Duration;
 use structopt::StructOpt;
@@ -230,22 +230,21 @@ async fn main() {
         .await
         .filter_map(|x| async { x.ok() });
 
-    let mut txs = Box::pin(
-        blocks
-            .then(|block| async {
-                tracing::info!(
-                    "processing block {:?} at timestamp {:?}, hash {:?}",
-                    block.number,
-                    block.timestamp,
-                    block.hash
-                );
-                let time = Utc.timestamp(block.timestamp.as_u64() as i64, 0);
-                extract_transactions_to(block, settlement_contract.address(), &web3)
-                    .await
-                    .map(move |receipt| (time, receipt))
-            })
-            .flatten(),
-    );
+    let txs = blocks
+        .then(|block| async {
+            tracing::info!(
+                "processing block {:?} at timestamp {:?}, hash {:?}",
+                block.number,
+                block.timestamp,
+                block.hash
+            );
+            let time = Utc.timestamp(block.timestamp.as_u64() as i64, 0);
+            extract_transactions_to(block, settlement_contract.address(), &web3)
+                .await
+                .map(move |receipt| (time, receipt))
+        })
+        .flatten();
+    pin_mut!(txs);
 
     let mut latest_alert_time = Utc.timestamp(0, 0);
     while let Some((time, settlement)) = txs.next().await {
