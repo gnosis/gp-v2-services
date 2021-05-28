@@ -5,10 +5,10 @@ use crate::{
         token_path_to_pair_path,
     },
     conversions::U256Ext,
-    pool_fetching::{Pool, PoolFetching},
+    pool_fetching::{LatestPoolFetching, Pool},
 };
 use anyhow::{anyhow, Result};
-use ethcontract::{BlockNumber, H160, U256};
+use ethcontract::{H160, U256};
 use futures::future::join_all;
 use gas_estimation::GasPriceEstimating;
 use model::{order::OrderKind, TokenPair};
@@ -89,7 +89,7 @@ pub trait PriceEstimating: Send + Sync {
 }
 
 pub struct BaselinePriceEstimator {
-    pool_fetcher: Box<dyn PoolFetching>,
+    pool_fetcher: Box<dyn LatestPoolFetching>,
     gas_estimator: Arc<dyn GasPriceEstimating>,
     base_tokens: HashSet<H160>,
     bad_token_detector: Arc<dyn BadTokenDetecting>,
@@ -98,7 +98,7 @@ pub struct BaselinePriceEstimator {
 
 impl BaselinePriceEstimator {
     pub fn new(
-        pool_fetcher: Box<dyn PoolFetching>,
+        pool_fetcher: Box<dyn LatestPoolFetching>,
         gas_estimator: Arc<dyn GasPriceEstimating>,
         base_tokens: HashSet<H160>,
         bad_token_detector: Arc<dyn BadTokenDetecting>,
@@ -320,7 +320,7 @@ impl BaselinePriceEstimator {
             .collect();
         let pools = self
             .pool_fetcher
-            .fetch(all_pairs, BlockNumber::Latest)
+            .fetch_latest(all_pairs)
             .await?
             .into_iter()
             .fold(HashMap::<_, Vec<Pool>>::new(), |mut pools, pool| {
@@ -409,17 +409,13 @@ mod tests {
     use super::*;
     use crate::{
         gas_price_estimation::FakeGasPriceEstimator,
-        pool_fetching::{Pool, PoolFetching},
+        pool_fetching::{LatestPoolFetching, Pool},
     };
 
     struct FakePoolFetcher(Vec<Pool>);
     #[async_trait::async_trait]
-    impl PoolFetching for FakePoolFetcher {
-        async fn fetch(
-            &self,
-            token_pairs: HashSet<TokenPair>,
-            _: BlockNumber,
-        ) -> Result<Vec<Pool>> {
+    impl LatestPoolFetching for FakePoolFetcher {
+        async fn fetch_latest(&self, token_pairs: HashSet<TokenPair>) -> Result<Vec<Pool>> {
             Ok(self
                 .0
                 .clone()

@@ -33,6 +33,22 @@ pub trait PoolFetching: Send + Sync {
     ) -> Result<Vec<Pool>>;
 }
 
+#[async_trait::async_trait]
+pub trait LatestPoolFetching: Send + Sync {
+    /// Like PoolFetching::fetch but only for the current block.
+    async fn fetch_latest(&self, token_pairs: HashSet<TokenPair>) -> Result<Vec<Pool>>;
+}
+
+#[async_trait::async_trait]
+impl<T> LatestPoolFetching for T
+where
+    T: PoolFetching,
+{
+    async fn fetch_latest(&self, token_pairs: HashSet<TokenPair>) -> Result<Vec<Pool>> {
+        self.fetch(token_pairs, BlockNumber::Latest).await
+    }
+}
+
 #[derive(Clone, Hash, PartialEq, Debug)]
 pub struct Pool {
     pub tokens: TokenPair,
