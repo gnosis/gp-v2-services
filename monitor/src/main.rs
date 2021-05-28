@@ -176,10 +176,8 @@ impl SettlementFailureCounter {
 
     fn prune(&mut self) {
         let threshold = Utc::now() - self.time_window;
-        self.settlements = std::mem::take(&mut self.settlements)
-            .into_iter()
-            .filter(|Settlement { time, .. }| time >= &threshold)
-            .collect();
+        self.settlements
+            .retain(|Settlement { time, .. }| time >= &threshold);
     }
 
     fn push_settlement(&mut self, time: DateTime<Utc>, success: bool) {
