@@ -138,12 +138,13 @@ async fn get_blocks_from(
                 tracing::error!("block filter did not return a valid block: {}", e);
                 bail!("invalid block filter");
             }
-            let response = eth.block_with_txs(BlockId::Hash(block_hash?)).await?;
-            if response.is_none() {
-                tracing::warn!("failed to retrieve a block returned by the new block filter");
-                bail!("invalid block from block filter")
+            match eth.block_with_txs(BlockId::Hash(block_hash?)).await? {
+                Some(block) => Ok(block),
+                None => {
+                    tracing::warn!("failed to retrieve a block returned by the new block filter");
+                    bail!("invalid block from block filter")
+                }
             }
-            Ok(response.unwrap())
         }
     }))
 }
