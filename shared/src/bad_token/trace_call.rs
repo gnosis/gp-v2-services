@@ -2,7 +2,7 @@ use super::{BadTokenDetecting, TokenQuality};
 use crate::{
     amm_pair_provider::AmmPairProvider, ethcontract_error::EthcontractErrorType, trace_many, Web3,
 };
-use anyhow::{anyhow, bail, ensure, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use contracts::ERC20;
 use ethcontract::{
     batch::CallBatch, dyns::DynTransport, transaction::TransactionBuilder, PrivateKey,
@@ -74,7 +74,9 @@ impl TraceCallDetector {
         // sending to an address that does not have any balance yet (implicitly 0) causes an
         // allocation.
         let request = self.create_trace_request(token, amount, take_from);
-        let traces = trace_many::trace_many(request, &self.web3).await?;
+        let traces = trace_many::trace_many(request, &self.web3)
+            .await
+            .context("failed to trace for bad token detection")?;
         Self::handle_response(&traces, amount)
     }
 
@@ -268,12 +270,11 @@ mod tests {
     use super::*;
     use crate::{
         amm_pair_provider::{SushiswapPairProvider, UniswapPairProvider},
-        transport::LoggingTransport,
+        transport::create_test_transport,
     };
     use hex_literal::hex;
-    use web3::{
-        transports::Http,
-        types::{Action, ActionType, Bytes, Call, CallResult, CallType, Res, TransactionTrace},
+    use web3::types::{
+        Action, ActionType, Bytes, Call, CallResult, CallType, Res, TransactionTrace,
     };
 
     fn encode_u256(u256: U256) -> Bytes {
@@ -380,14 +381,12 @@ mod tests {
         println!("{:?}", TraceCallDetector::arbitrary_recipient());
     }
 
-    // cargo test -p orderbook mainnet_tokens -- --nocapture
+    // cargo test -p shared mainnet_tokens -- --nocapture --ignored
     #[tokio::test]
     #[ignore]
     async fn mainnet_tokens() {
         // shared::tracing::initialize("orderbook::bad_token=debug,shared::transport=debug");
-        let http = LoggingTransport::new(
-            Http::new("https://dev-openethereum.mainnet.gnosisdev.com/").unwrap(),
-        );
+        let http = create_test_transport("https://dev-openethereum.mainnet.gnosisdev.com/");
         let web3 = Web3::new(http);
 
         let base_tokens = &[
@@ -493,6 +492,7 @@ mod tests {
             H160(hex!("2b1fe2cea92436e8c34b7c215af66aaa2932a8b2")),
             H160(hex!("c7c24fe893c21e8a4ef46eaf31badcab9f362841")),
             H160(hex!("ef5b32486ed432b804a51d129f4d2fbdf18057ec")),
+            H160(hex!("2129ff6000b95a973236020bcd2b2006b0d8e019")),
         ];
 
         // Of the deny listed tokens the following are detected as good:
