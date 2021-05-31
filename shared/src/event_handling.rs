@@ -40,7 +40,7 @@ pub trait EventStoring<T> {
     /// * `events` the contract events to be replaced by the implementer
     /// * `range` indicates a particular range of blocks on which to operate.
     async fn replace_events(
-        &self,
+        &mut self,
         events: Vec<EthcontractEvent<T>>,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<()>;
@@ -49,7 +49,7 @@ pub trait EventStoring<T> {
     ///
     /// # Arguments
     /// * `events` the contract events to be appended by the implementer
-    async fn append_events(&self, events: Vec<EthcontractEvent<T>>) -> Result<()>;
+    async fn append_events(&mut self, events: Vec<EthcontractEvent<T>>) -> Result<()>;
 
     async fn last_event_block(&self) -> Result<u64>;
 }

@@ -224,7 +224,7 @@ impl BalancerEventUpdater {
 #[async_trait::async_trait]
 impl EventStoring<ContractEvent> for BalancerPools {
     async fn replace_events(
-        &self,
+        &mut self,
         events: Vec<EthContractEvent<ContractEvent>>,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<()> {
@@ -238,11 +238,11 @@ impl EventStoring<ContractEvent> for BalancerPools {
         );
         // Not sure if we even need this... since balancer team claims there will never be deregistered pools
         // However, it is still possible.
-        self.replace_events(0, balancer_events)?;
+        BalancerPools::replace_events(self, 0, balancer_events)?;
         Ok(())
     }
 
-    async fn append_events(&self, events: Vec<EthContractEvent<ContractEvent>>) -> Result<()> {
+    async fn append_events(&mut self, events: Vec<EthContractEvent<ContractEvent>>) -> Result<()> {
         let balancer_events = self
             .contract_to_balancer_events(events)
             .context("failed to convert events")?;
