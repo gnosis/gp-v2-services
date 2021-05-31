@@ -34,7 +34,7 @@ struct OrderSettlementHandler {
 }
 
 fn inflight_order_filter(order: Order, inflight_trades: &HashSet<OrderUid>) -> Option<Order> {
-    // TODO - could model inflight_trades as HashMap<OrderUid, Trade>
+    // TODO - could model inflight_trades as HashMap<OrderUid, Vec<Trade>>
     // https://github.com/gnosis/gp-v2-services/issues/673
     if inflight_trades.contains(&order.order_meta_data.uid) {
         return if order.order_creation.partially_fillable {
