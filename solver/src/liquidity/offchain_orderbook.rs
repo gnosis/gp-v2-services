@@ -1,44 +1,26 @@
 use crate::interactions::UnwrapWethInteraction;
 use crate::orderbook::OrderBookApi;
-use crate::settlement::SettlementEncoder;
+use crate::settlement::{SettlementEncoder, Trade};
 use anyhow::{anyhow, Context, Result};
 use contracts::WETH9;
 use ethcontract::H160;
-use model::order::{InflightOrders, Order, OrderKind, BUY_ETH_ADDRESS};
+use model::order::{Order, OrderKind, OrderUid, BUY_ETH_ADDRESS};
 use primitive_types::U256;
 use std::{collections::HashMap, sync::Arc};
 
 use super::{LimitOrder, SettlementHandling};
+use std::collections::HashSet;
 
 impl OrderBookApi {
     /// Returns a list of limit orders coming from the offchain orderbook API
-    pub async fn get_liquidity(&self, inflight_orders: &InflightOrders) -> Result<Vec<LimitOrder>> {
+    pub async fn get_liquidity(&self, inflight_trades: &HashSet<Trade>) -> Result<Vec<LimitOrder>> {
         Ok(self
             .get_orders()
             .await
             .context("failed to get orderbook")?
             .into_iter()
-            .filter_map(|order| {
-                if inflight_orders.contains_key(&order.order_meta_data.uid) {
-                    if order.order_creation.partially_fillable {
-                        // TODO - update order in a way that inflight executed amounts are deducted
-                        // and the output of this method (LimitOrder is aware of this).
-                        // let executed_sell_amount = inflight_orders
-                        //     .get(&order.order_meta_data.uid)
-                        //     .expect(&U256::zero());
-                        // // temp_update_inflight_status(order);
-                        // TODO - Not sure if LimitOrder is aware of the contents of OrderMetaData
-                        // order.order_meta_data.executed_sell_amount += executed_sell_amount;
-                        // order.order_meta_data.executed_buy_amount += executed_buy_amount;
-                    } else {
-                        // Fully filled, inflight orders are excluded from consideration
-                        return None;
-                    }
-                }
-                Some(normalize_limit_order(order, self.get_native_token()))
-            })
-            // .filter(|order| !excluded_orders.contains(&order.order_meta_data.uid))
-            // .map(|order| normalize_limit_order(order, self.get_native_token()))
+            .filter_map(|order| inflight_order_filter(order, inflight_trades))
+            .map(|altered_order| normalize_limit_order(altered_order, self.get_native_token()))
             .collect())
     }
 }
@@ -46,6 +28,28 @@ impl OrderBookApi {
 struct OrderSettlementHandler {
     native_token: WETH9,
     order: Order,
+}
+
+fn inflight_order_filter(order: Order, inflight_trades: &HashSet<Trade>) -> Option<Order> {
+    // TODO - could model inflight_trades as HashMap<OrderUid, Trade>
+    // https://github.com/gnosis/gp-v2-services/issues/673
+    // would avoid map-collect and make trade data accessible by id.
+    let inflight_trades_map = inflight_trades
+        .iter()
+        .map(|t| (t.order.order_meta_data.uid, t.clone()))
+        .collect::<HashMap<OrderUid, Trade>>();
+    if inflight_trades_map.contains_key(&order.order_meta_data.uid) {
+        return if order.order_creation.partially_fillable {
+            // TODO - driver logic for Partially Fillable Orders
+            // https://github.com/gnosis/gp-v2-services/issues/673
+            tracing::error!("filtering partially fillable inflight orders unimplemented.");
+            Some(order)
+        } else {
+            // Fully filled, inflight orders are excluded from consideration
+            None
+        };
+    }
+    Some(order)
 }
 
 pub fn normalize_limit_order(order: Order, native_token: WETH9) -> LimitOrder {
@@ -59,6 +63,7 @@ pub fn normalize_limit_order(order: Order, native_token: WETH9) -> LimitOrder {
         sell_token: order.order_creation.sell_token,
         buy_token,
         // TODO discount previously executed sell amount
+        // https://github.com/gnosis/gp-v2-services/issues/673
         sell_amount: order.order_creation.sell_amount,
         buy_amount: order.order_creation.buy_amount,
         kind: order.order_creation.kind,
@@ -130,8 +135,9 @@ fn executed_buy_amount(order: &Order, executed_amount: U256, price: Price) -> Op
 pub mod tests {
     use super::*;
     use crate::{settlement::tests::assert_settlement_encoded_with, testutil};
-    use maplit::hashmap;
+    use maplit::{hashmap, hashset};
     use model::order::OrderCreation;
+    use model::DomainSeparator;
 
     #[test]
     fn eth_buy_liquidity_is_assigned_to_weth() {
@@ -331,5 +337,45 @@ pub mod tests {
                 assert!(encoder.add_trade(order, executed_amount).is_ok());
             },
         );
+    }
+
+    #[test]
+    fn inflight_order_filter_() {
+        let fully_fillable_order = Order::from_order_creation(
+            OrderCreation {
+                partially_fillable: false,
+                ..Default::default()
+            },
+            &DomainSeparator::default(),
+        )
+        .unwrap();
+        let trade = Trade {
+            order: fully_fillable_order.clone(),
+            ..Default::default()
+        };
+        assert!(inflight_order_filter(fully_fillable_order.clone(), &hashset!(trade)).is_none());
+        let order = inflight_order_filter(fully_fillable_order.clone(), &hashset!());
+        assert!(order.is_some());
+        assert_eq!(order.unwrap(), fully_fillable_order);
+
+        let partially_fillable_order = Order::from_order_creation(
+            OrderCreation {
+                partially_fillable: true,
+                ..Default::default()
+            },
+            &DomainSeparator::default(),
+        )
+        .unwrap();
+        let trade = Trade {
+            order: partially_fillable_order.clone(),
+            ..Default::default()
+        };
+        let adjusted_order =
+            inflight_order_filter(partially_fillable_order.clone(), &hashset!(trade));
+        assert!(adjusted_order.is_some());
+
+        // TODO - The following assertion will fail and need to be adapted in
+        // https://github.com/gnosis/gp-v2-services/issues/673
+        assert_eq!(adjusted_order.unwrap(), partially_fillable_order);
     }
 }

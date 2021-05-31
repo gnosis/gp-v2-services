@@ -1,6 +1,7 @@
 pub mod solver_settlements;
 
 use self::solver_settlements::{RatedSettlement, SettlementWithSolver};
+use crate::settlement::Trade;
 use crate::{
     chain,
     liquidity::Liquidity,
@@ -14,11 +15,10 @@ use crate::{
 use anyhow::{anyhow, Context, Error, Result};
 use contracts::GPv2Settlement;
 use ethcontract::errors::MethodError;
-use ethcontract::U256;
 use futures::future::join_all;
 use gas_estimation::GasPriceEstimating;
 use itertools::{Either, Itertools};
-use model::order::{InflightOrders, OrderUid, BUY_ETH_ADDRESS};
+use model::order::BUY_ETH_ADDRESS;
 use num::BigRational;
 use primitive_types::H160;
 use shared::{price_estimate::PriceEstimating, token_list::TokenList, Web3};
@@ -45,7 +45,7 @@ pub struct Driver {
     solver_time_limit: Duration,
     gas_price_cap: f64,
     market_makable_token_list: Option<TokenList>,
-    inflight_orders: InflightOrders,
+    inflight_trades: HashSet<Trade>,
 }
 impl Driver {
     #[allow(clippy::too_many_arguments)]
@@ -84,7 +84,7 @@ impl Driver {
             solver_time_limit,
             gas_price_cap,
             market_makable_token_list,
-            inflight_orders: HashMap::new(),
+            inflight_trades: HashSet::new(),
         }
     }
 
@@ -335,15 +335,14 @@ impl Driver {
             .await
             .context("failed to get current block")?
             .as_u64();
+
+        let inflight_trades = &self.inflight_trades.clone();
+        // Reset the inflight orders - event if get_liquidity fails.
+        self.inflight_trades = HashSet::new();
         let liquidity = self
             .liquidity_collector
-            .get_liquidity(
-                current_block_during_liquidity_fetch.into(),
-                &self.inflight_orders,
-            )
+            .get_liquidity(current_block_during_liquidity_fetch.into(), inflight_trades)
             .await?;
-        // Reset the inflight orders after use.
-        self.inflight_orders = HashMap::new();
 
         let estimated_prices =
             collect_estimated_prices(self.price_estimator.as_ref(), self.native_token, &liquidity)
@@ -421,13 +420,13 @@ impl Driver {
 
             tracing::debug!("winning settlement: {:?}", settlement);
             self.submit_settlement(settlement.clone()).await;
-            self.inflight_orders = settlement
+            self.inflight_trades = settlement
                 .settlement
                 .settlement
                 .trades()
                 .iter()
-                .map(|t| (t.order.order_meta_data.uid, t.executed_amount))
-                .collect::<HashMap<OrderUid, U256>>();
+                .cloned()
+                .collect::<HashSet<Trade>>();
 
             self.report_matched_but_unsettled_orders(
                 &Settlement::from(settlement),

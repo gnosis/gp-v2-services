@@ -14,7 +14,7 @@ use secp256k1::key::ONE_KEY;
 use serde::{de, Deserialize, Serialize};
 use serde::{Deserializer, Serializer};
 use serde_with::serde_as;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt::{self, Display};
 use std::str::FromStr;
 use web3::signing::{self, Key, SecretKeyRef};
@@ -34,8 +34,6 @@ pub struct Order {
     #[serde(flatten)]
     pub order_creation: OrderCreation,
 }
-
-pub type InflightOrders = HashMap<OrderUid, U256>;
 
 impl Default for Order {
     fn default() -> Self {
