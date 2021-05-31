@@ -248,7 +248,7 @@ impl Driver {
                 Err(err) => err,
             };
             tracing::error!(
-                "settlement simulation for {} solver failed right before submission AND for block {} which was current when liquidity was fetched:\n{:?}",
+                "{} settlement simulation failed at submission and block {}:\n{:?}",
                 settlement.name, current_block_during_liquidity_fetch, error_at_earlier_block
             );
             // This is an additional debug log so that the log message doesn't get too long as
