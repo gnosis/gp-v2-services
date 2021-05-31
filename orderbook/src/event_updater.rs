@@ -30,7 +30,7 @@ impl EventStoring<ContractEvent> for Database {
             db_events.len(),
             range.start().to_u64()
         );
-        Database::replace_events(self,range.start().to_u64(), db_events)
+        Database::replace_events(self, range.start().to_u64(), db_events)
             .await
             .context("failed to replace trades")?;
         Ok(())

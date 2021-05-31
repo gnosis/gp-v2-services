@@ -3,12 +3,15 @@ use crate::{
     event_handling::{BlockNumber, EventHandler, EventIndex, EventStoring},
     impl_event_retrieving,
     maintenance::Maintaining,
-    Web3,
 };
 use anyhow::{anyhow, Context, Result};
 use contracts::{
     balancer_v2_vault::{
-        self, event_data::PoolRegistered as ContractPoolRegistered, Event as ContractEvent,
+        self,
+        event_data::{
+            PoolRegistered as ContractPoolRegistered, TokensRegistered as ContractTokensRegistered,
+        },
+        Event as ContractEvent,
     },
     BalancerV2Vault,
 };
@@ -24,6 +27,7 @@ use tokio::sync::Mutex;
 #[derive(Debug)]
 pub enum BalancerEvent {
     PoolRegistered(PoolRegistered),
+    TokensRegistered(TokensRegistered),
 }
 
 #[derive(Debug)]
@@ -33,16 +37,22 @@ pub struct PoolRegistered {
     pub specialization: PoolSpecialization,
 }
 
+#[derive(Debug)]
+pub struct TokensRegistered {
+    pub pool_id: H256,
+    pub tokens: Vec<H160>,
+}
+
 #[derive(Clone, Default, Eq, PartialEq, Hash)]
 pub struct WeightedPool {
-    pool_address: H160,
-    tokens: Vec<H160>,
     pool_id: H256,
+    pool_address: Option<H160>,
+    tokens: Option<Vec<H160>>,
 }
 
 #[derive(Default)]
 pub struct BalancerPools {
-    _pools_by_token: HashMap<H160, HashSet<H256>>,
+    pools_by_token: HashMap<H160, HashSet<H256>>,
     pools: HashMap<H256, WeightedPool>,
     // Block number of last update
     last_updated: u64,
@@ -73,7 +83,7 @@ impl PoolSpecialization {
             0 => Ok(Self::General),
             1 => Ok(Self::MinimalSwapInfo),
             2 => Ok(Self::TwoToken),
-            t => Err(anyhow!("Invalid PoolSpecialization value {}", t)),
+            t => Err(anyhow!("Invalid PoolSpecialization value {} (> 2)", t)),
         }
     }
 }
@@ -84,10 +94,11 @@ impl BalancerPools {
     }
 
     // All insertions happen in one transaction.
-    fn insert_events(&self, events: Vec<(EventIndex, BalancerEvent)>) -> Result<()> {
-        for (index, event) in events {
+    fn insert_events(&mut self, events: Vec<(EventIndex, BalancerEvent)>) -> Result<()> {
+        for (_index, event) in events {
             match event {
-                BalancerEvent::PoolRegistered(event) => self.insert_pool(index, event),
+                BalancerEvent::PoolRegistered(event) => self.insert_pool(event),
+                BalancerEvent::TokensRegistered(event) => self.include_token_data(event),
             };
         }
         Ok(())
@@ -99,7 +110,7 @@ impl BalancerPools {
     }
 
     fn replace_events(
-        &self,
+        &mut self,
         _delete_from_block_number: u64,
         events: Vec<(EventIndex, BalancerEvent)>,
     ) -> Result<()> {
@@ -108,36 +119,72 @@ impl BalancerPools {
         Ok(())
     }
 
-    fn known_pool(&self, pool_id: H256) -> bool {
-        self.pools.contains_key(&pool_id)
+    fn insert_pool(&mut self, registration: PoolRegistered) {
+        match self.pools.get(&registration.pool_id) {
+            None => {
+                // PoolRegistered event is first to be processed, we leave tokens empty
+                // and update when TokenRegistration event is processed.
+                let weighted_pool = WeightedPool {
+                    pool_id: registration.pool_id,
+                    pool_address: Some(registration.pool_address),
+                    // Tokens not emitted with registration event.
+                    tokens: None,
+                };
+                self.pools.insert(registration.pool_id, weighted_pool);
+                tracing::debug!(
+                    "Balancer Pool created from PoolRegistration {:?} (tokens pending...)",
+                    registration
+                );
+            }
+            Some(existing_pool) => {
+                // If exists before PoolRegistration, then only pool_id and tokens known
+                let tokens = existing_pool.clone().tokens;
+                self.pools.insert(
+                    registration.pool_id,
+                    WeightedPool {
+                        pool_id: registration.pool_id,
+                        pool_address: Some(registration.pool_address),
+                        tokens,
+                    },
+                );
+            }
+        }
     }
 
-    fn insert_pool(&self, index: EventIndex, registration: PoolRegistered) {
-        if !self.known_pool(registration.pool_id) {
-            let pool_tokens = vec![];
-            let _weighted_pool = WeightedPool {
-                pool_address: registration.pool_address,
-                pool_id: registration.pool_id,
-                tokens: pool_tokens,
-            };
-            // Need to figure out a way to update this.
-            // self.pools
-            //     .entry(registration.pool_id)
-            //     .or_default()
-            //     .insert(weighted_pool.clone());
-            // for token in pool_tokens {
-            //     self.pools_by_token
-            //         .entry(token)
-            //         .or_default()
-            //         .insert(weighted_pool.pool_id);
-            // }
-            tracing::debug!(
-                "Updated Balancer Pools with {:?} - {:?}",
-                registration.pool_address,
-                index
-            );
-        } else {
-            tracing::debug!("Ignored known pool {:?}", registration.pool_address);
+    fn include_token_data(&mut self, registration: TokensRegistered) {
+        let pool_id = registration.pool_id;
+        let tokens = registration.tokens;
+        match self.pools.get(&pool_id) {
+            None => {
+                // TokensRegistered event received before PoolRegistered, leaving pool_address
+                // empty until PoolRegistration event is processed.
+                let weighted_pool = WeightedPool {
+                    pool_id,
+                    // Pool address not emitted with registration event.
+                    pool_address: None,
+                    tokens: Some(tokens.clone()),
+                };
+                self.pools.insert(pool_id, weighted_pool);
+            }
+            Some(existing_pool) => {
+                // If pool exists before token registration, then only pool_id and address known
+                let pool_address = existing_pool.clone().pool_address;
+                self.pools.insert(
+                    pool_id,
+                    WeightedPool {
+                        pool_id,
+                        pool_address,
+                        tokens: Some(tokens.clone()),
+                    },
+                );
+            }
+        }
+        // In either of the above cases we can now populate pools_by_token
+        for token in tokens {
+            self.pools_by_token
+                .entry(token)
+                .or_default()
+                .insert(pool_id);
         }
     }
 
@@ -154,14 +201,14 @@ impl BalancerPools {
                 };
                 match data {
                     ContractEvent::PoolRegistered(event) => {
+                        // Technically this is only needed for pool_address
                         Some(convert_pool_registered(&event, &meta))
+                    }
+                    ContractEvent::TokensRegistered(event) => {
+                        Some(convert_tokens_registered(&event, &meta))
                     }
                     // ContractEvent::TokensDeregistered(event) => {
                     //     tracing::debug!("Tokens Deregistered {:?}", event);
-                    //     None
-                    // }
-                    // ContractEvent::TokensRegistered(event) => {
-                    //     tracing::debug!("Tokens Registered {:?}", event);
                     //     None
                     // }
                     _ => {
@@ -174,19 +221,19 @@ impl BalancerPools {
     }
 }
 
-pub struct BalancerPoolFetcher {
-    pub web3: Web3,
-}
-
-impl BalancerPoolFetcher {
-    async fn _get_pool_tokens(&self, _pool_address: H160) -> Vec<H160> {
-        // let web3 = Web3::new(self.web3.transport().clone());
-        // let pool_contract = BalancerPool::at(&web3, pool_address).await;
-        // TODO - fetch tokens from pool
-        // There are two different types of pools, hopefully they share a common interface.
-        vec![]
-    }
-}
+// pub struct BalancerPoolFetcher {
+//     pub web3: Web3,
+// }
+//
+// impl BalancerPoolFetcher {
+//     async fn _get_pool_tokens(&self, _pool_address: H160) -> Vec<H160> {
+//         // let web3 = Web3::new(self.web3.transport().clone());
+//         // let pool_contract = BalancerPool::at(&web3, pool_address).await;
+//         // TODO - fetch tokens from pool
+//         // There are two different types of pools, hopefully they share a common interface.
+//         vec![]
+//     }
+// }
 
 pub struct BalancerEventUpdater(
     Mutex<EventHandler<DynWeb3, BalancerV2VaultContract, BalancerPools>>,
@@ -236,8 +283,7 @@ impl EventStoring<ContractEvent> for BalancerPools {
             balancer_events.len(),
             range.start().to_u64()
         );
-        // Not sure if we even need this... since balancer team claims there will never be deregistered pools
-        // However, it is still possible.
+        // Not sure we will event need to replace events as we don't store the events themselves.
         BalancerPools::replace_events(self, 0, balancer_events)?;
         Ok(())
     }
@@ -275,4 +321,18 @@ fn convert_pool_registered(
         specialization: PoolSpecialization::new(registration.specialization)?,
     };
     Ok((EventIndex::from(meta), BalancerEvent::PoolRegistered(event)))
+}
+
+fn convert_tokens_registered(
+    registration: &ContractTokensRegistered,
+    meta: &EventMetadata,
+) -> Result<(EventIndex, BalancerEvent)> {
+    let event = TokensRegistered {
+        pool_id: H256::from(registration.pool_id),
+        tokens: registration.tokens.clone(),
+    };
+    Ok((
+        EventIndex::from(meta),
+        BalancerEvent::TokensRegistered(event),
+    ))
 }
