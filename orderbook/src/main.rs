@@ -25,7 +25,7 @@ use shared::{
     pool_aggregating::{self, PoolAggregator},
     pool_fetching::CachedPoolFetcher,
     price_estimate::BaselinePriceEstimator,
-    transport::LoggingTransport,
+    transport::create_instrumented_transport,
 };
 use std::{
     collections::HashSet, iter::FromIterator as _, net::SocketAddr, sync::Arc, time::Duration,
@@ -87,6 +87,15 @@ struct Arguments {
     /// thinks they are bad. Base tokens are automatically allowed.
     #[structopt(long, env = "ALLOWED_TOKENS", use_delimiter = true)]
     pub allowed_tokens: Vec<H160>,
+
+    /// The amount of time a classification of a token into good or bad is valid for.
+    #[structopt(
+        long,
+        env,
+        default_value = "5",
+        parse(try_from_str = shared::arguments::duration_from_seconds),
+    )]
+    block_stream_poll_interval_seconds: Duration,
 }
 
 pub async fn database_metrics(metrics: Arc<Metrics>, database: Database) -> ! {
@@ -109,9 +118,13 @@ async fn main() {
     shared::tracing::initialize(args.shared.log_filter.as_str());
     tracing::info!("running order book with {:#?}", args);
 
-    let transport = LoggingTransport::new(
+    let registry = Registry::default();
+    let metrics = Arc::new(Metrics::new(&registry).unwrap());
+
+    let transport = create_instrumented_transport(
         web3::transports::Http::new(args.shared.node_url.as_str())
             .expect("transport creation failed"),
+        metrics.clone(),
     );
     let web3 = web3::Web3::new(transport);
     let settlement_contract = GPv2Settlement::deployed(&web3)
@@ -195,7 +208,10 @@ async fn main() {
         },
     ));
 
-    let current_block_stream = current_block_stream(web3.clone()).await.unwrap();
+    let current_block_stream =
+        current_block_stream(web3.clone(), args.block_stream_poll_interval_seconds)
+            .await
+            .unwrap();
 
     let pool_aggregator = PoolAggregator::from_providers(&pair_providers, &web3).await;
     let pool_fetcher =
@@ -233,9 +249,6 @@ async fn main() {
         ],
     };
     check_database_connection(orderbook.as_ref()).await;
-
-    let registry = Registry::default();
-    let metrics = Arc::new(Metrics::new(&registry).unwrap());
 
     let serve_task = serve_task(
         database.clone(),
