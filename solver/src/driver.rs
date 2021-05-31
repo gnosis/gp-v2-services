@@ -1,7 +1,6 @@
 pub mod solver_settlements;
 
 use self::solver_settlements::{RatedSettlement, SettlementWithSolver};
-use crate::settlement::Trade;
 use crate::{
     chain,
     liquidity::Liquidity,
@@ -18,7 +17,7 @@ use ethcontract::errors::MethodError;
 use futures::future::join_all;
 use gas_estimation::GasPriceEstimating;
 use itertools::{Either, Itertools};
-use model::order::BUY_ETH_ADDRESS;
+use model::order::{OrderUid, BUY_ETH_ADDRESS};
 use num::BigRational;
 use primitive_types::H160;
 use shared::{price_estimate::PriceEstimating, token_list::TokenList, Web3};
@@ -45,7 +44,7 @@ pub struct Driver {
     solver_time_limit: Duration,
     gas_price_cap: f64,
     market_makable_token_list: Option<TokenList>,
-    inflight_trades: HashSet<Trade>,
+    inflight_trades: HashSet<OrderUid>,
 }
 impl Driver {
     #[allow(clippy::too_many_arguments)]
@@ -425,8 +424,8 @@ impl Driver {
                 .settlement
                 .trades()
                 .iter()
-                .cloned()
-                .collect::<HashSet<Trade>>();
+                .map(|t| t.order.order_meta_data.uid)
+                .collect::<HashSet<OrderUid>>();
 
             self.report_matched_but_unsettled_orders(
                 &Settlement::from(settlement),

@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use ethcontract::BlockNumber;
 
-use crate::settlement::Trade;
 use crate::{
     liquidity::uniswap::UniswapLikeLiquidity, liquidity::Liquidity, orderbook::OrderBookApi,
 };
+use model::order::OrderUid;
 use std::collections::HashSet;
 
 pub struct LiquidityCollector {
@@ -16,7 +16,7 @@ impl LiquidityCollector {
     pub async fn get_liquidity(
         &self,
         at_block: BlockNumber,
-        inflight_trades: &HashSet<Trade>,
+        inflight_trades: &HashSet<OrderUid>,
     ) -> Result<Vec<Liquidity>> {
         let limit_orders = self
             .orderbook_api

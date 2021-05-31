@@ -1,6 +1,6 @@
 use crate::interactions::UnwrapWethInteraction;
 use crate::orderbook::OrderBookApi;
-use crate::settlement::{SettlementEncoder, Trade};
+use crate::settlement::SettlementEncoder;
 use anyhow::{anyhow, Context, Result};
 use contracts::WETH9;
 use ethcontract::H160;
@@ -13,7 +13,10 @@ use std::collections::HashSet;
 
 impl OrderBookApi {
     /// Returns a list of limit orders coming from the offchain orderbook API
-    pub async fn get_liquidity(&self, inflight_trades: &HashSet<Trade>) -> Result<Vec<LimitOrder>> {
+    pub async fn get_liquidity(
+        &self,
+        inflight_trades: &HashSet<OrderUid>,
+    ) -> Result<Vec<LimitOrder>> {
         Ok(self
             .get_orders()
             .await
@@ -30,15 +33,10 @@ struct OrderSettlementHandler {
     order: Order,
 }
 
-fn inflight_order_filter(order: Order, inflight_trades: &HashSet<Trade>) -> Option<Order> {
+fn inflight_order_filter(order: Order, inflight_trades: &HashSet<OrderUid>) -> Option<Order> {
     // TODO - could model inflight_trades as HashMap<OrderUid, Trade>
     // https://github.com/gnosis/gp-v2-services/issues/673
-    // would avoid map-collect and make trade data accessible by id.
-    let inflight_trades_map = inflight_trades
-        .iter()
-        .map(|t| (t.order.order_meta_data.uid, t.clone()))
-        .collect::<HashMap<OrderUid, Trade>>();
-    if inflight_trades_map.contains_key(&order.order_meta_data.uid) {
+    if inflight_trades.contains(&order.order_meta_data.uid) {
         return if order.order_creation.partially_fillable {
             // TODO - driver logic for Partially Fillable Orders
             // https://github.com/gnosis/gp-v2-services/issues/673
@@ -349,11 +347,11 @@ pub mod tests {
             &DomainSeparator::default(),
         )
         .unwrap();
-        let trade = Trade {
-            order: fully_fillable_order.clone(),
-            ..Default::default()
-        };
-        assert!(inflight_order_filter(fully_fillable_order.clone(), &hashset!(trade)).is_none());
+        assert!(inflight_order_filter(
+            fully_fillable_order.clone(),
+            &hashset!(fully_fillable_order.order_meta_data.uid)
+        )
+        .is_none());
         let order = inflight_order_filter(fully_fillable_order.clone(), &hashset!());
         assert!(order.is_some());
         assert_eq!(order.unwrap(), fully_fillable_order);
@@ -366,12 +364,10 @@ pub mod tests {
             &DomainSeparator::default(),
         )
         .unwrap();
-        let trade = Trade {
-            order: partially_fillable_order.clone(),
-            ..Default::default()
-        };
-        let adjusted_order =
-            inflight_order_filter(partially_fillable_order.clone(), &hashset!(trade));
+        let adjusted_order = inflight_order_filter(
+            partially_fillable_order.clone(),
+            &hashset!(partially_fillable_order.order_meta_data.uid),
+        );
         assert!(adjusted_order.is_some());
 
         // TODO - The following assertion will fail and need to be adapted in
