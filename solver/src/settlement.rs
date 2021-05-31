@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 pub use settlement_encoder::SettlementEncoder;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Trade {
     pub order: Order,
     pub sell_token_index: usize,
