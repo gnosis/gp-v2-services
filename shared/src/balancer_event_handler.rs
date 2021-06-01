@@ -30,14 +30,14 @@ pub enum BalancerEvent {
     TokensRegistered(TokensRegistered),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PoolRegistered {
     pub pool_id: H256,
     pub pool_address: H160,
     pub specialization: PoolSpecialization,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TokensRegistered {
     pub pool_id: H256,
     pub tokens: Vec<H160>,
@@ -48,7 +48,50 @@ pub struct WeightedPool {
     pool_id: H256,
     pool_address: Option<H160>,
     tokens: Option<Vec<H160>>,
+    specialization: Option<PoolSpecialization>,
     block_created: u64,
+}
+
+impl WeightedPool {
+    fn update_from_event(&mut self, event: BalancerEvent) {
+        // Pool and Token Registration always occur in the same tx! So block_created doesn't need update.
+        // https://github.com/balancer-labs/balancer-v2-monorepo/blob/70843e6a61ad11208c1cfabf5cfe15be216ca8d3/pkg/pool-utils/contracts/BasePool.sol#L128-L130
+        match event {
+            BalancerEvent::PoolRegistered(pool_registration) => {
+                self.pool_address = Some(pool_registration.pool_address);
+                self.specialization = Some(pool_registration.specialization);
+            }
+            BalancerEvent::TokensRegistered(token_registration) => {
+                self.tokens = Some(token_registration.tokens)
+            }
+        }
+    }
+}
+
+impl From<(EventIndex, &PoolRegistered)> for WeightedPool {
+    fn from(event_data: (EventIndex, &PoolRegistered)) -> Self {
+        Self {
+            pool_id: event_data.1.pool_id,
+            pool_address: Some(event_data.1.pool_address),
+            specialization: Some(event_data.1.specialization),
+            // Tokens not emitted with pool registration event.
+            tokens: None,
+            block_created: event_data.0.block_number,
+        }
+    }
+}
+
+impl From<(EventIndex, TokensRegistered)> for WeightedPool {
+    fn from(event_data: (EventIndex, TokensRegistered)) -> Self {
+        Self {
+            pool_id: event_data.1.pool_id,
+            // pool_address and specialization not emitted with token registration event.
+            pool_address: None,
+            specialization: None,
+            tokens: Some(event_data.1.tokens),
+            block_created: event_data.0.block_number,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -60,7 +103,7 @@ pub struct BalancerPools {
 
 /// There are three specialization settings for Pools,
 /// which allow for cheaper swaps at the cost of reduced functionality:
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
 #[repr(u8)]
 pub enum PoolSpecialization {
     /// no specialization, suited for all Pools. IGeneralPool is used for swap request callbacks,
@@ -94,7 +137,7 @@ impl BalancerPools {
         for (index, event) in events {
             match event {
                 BalancerEvent::PoolRegistered(event) => self.insert_pool(index, event),
-                BalancerEvent::TokensRegistered(event) => self.include_token_data(index, event),
+                BalancerEvent::TokensRegistered(event) => self.insert_token_data(index, event),
             };
         }
         Ok(())
@@ -136,84 +179,58 @@ impl BalancerPools {
     }
 
     fn insert_pool(&mut self, index: EventIndex, registration: PoolRegistered) {
-        match self.pools.get(&registration.pool_id) {
+        match self.pools.get_mut(&registration.pool_id) {
             None => {
                 // PoolRegistered event is first to be processed, we leave tokens empty
                 // and update when TokenRegistration event is processed.
-                let weighted_pool = WeightedPool {
-                    pool_id: registration.pool_id,
-                    pool_address: Some(registration.pool_address),
-                    // Tokens not emitted with registration event.
-                    tokens: None,
-                    block_created: index.block_number,
-                };
-                self.pools.insert(registration.pool_id, weighted_pool);
+                self.pools.insert(
+                    registration.pool_id,
+                    WeightedPool::from((index, &registration)),
+                );
                 tracing::debug!(
-                    "Balancer Pool created from PoolRegistration {:?} (tokens pending...)",
-                    registration
+                    "Balancer Pool with id {:?} created from PoolRegistration event (tokens pending...)",
+                    registration.pool_id
                 );
             }
             Some(existing_pool) => {
-                // If exists before PoolRegistration, then only pool_id and tokens known
-                let tokens = existing_pool.clone().tokens;
-                self.pools.insert(
-                    registration.pool_id,
-                    WeightedPool {
-                        pool_id: registration.pool_id,
-                        pool_address: Some(registration.pool_address),
-                        tokens,
-                        // Pool and Token Registration always occur in the same tx!
-                        // https://github.com/balancer-labs/balancer-v2-monorepo/blob/70843e6a61ad11208c1cfabf5cfe15be216ca8d3/pkg/pool-utils/contracts/BasePool.sol#L128-L130
-                        block_created: index.block_number,
-                    },
+                // If exists before PoolRegistration, then only pool_id and tokens are known
+                existing_pool.update_from_event(BalancerEvent::PoolRegistered(registration));
+                tracing::debug!(
+                    "Pool Address and specialization recovered for existing Balancer pool with id {:}", existing_pool.pool_id
                 );
-                tracing::debug!("Pool Address recovered for existing Balancer pool")
             }
         }
     }
 
-    fn include_token_data(&mut self, index: EventIndex, registration: TokensRegistered) {
-        let pool_id = registration.pool_id;
-        let tokens = registration.tokens;
-        match self.pools.get(&pool_id) {
+    fn insert_token_data(&mut self, index: EventIndex, registration: TokensRegistered) {
+        match self.pools.get_mut(&registration.pool_id) {
             None => {
                 // TokensRegistered event received before PoolRegistered, leaving pool_address
                 // empty until PoolRegistration event is processed.
-                let weighted_pool = WeightedPool {
-                    pool_id,
-                    // Pool address not emitted with registration event.
-                    pool_address: None,
-                    tokens: Some(tokens.clone()),
-                    block_created: index.block_number,
-                };
-                self.pools.insert(pool_id, weighted_pool);
+                self.pools.insert(
+                    registration.pool_id,
+                    WeightedPool::from((index, registration.clone())),
+                );
                 tracing::debug!(
-                    "Balancer Pool created from TokensRegistration (pool address pending...)",
+                    "BalancerPool with id {:?} created from TokensRegistration event (pool address pending...)", registration.pool_id
                 );
             }
             Some(existing_pool) => {
                 // If pool exists before token registration, then only pool_id and address known
-                let pool_address = existing_pool.clone().pool_address;
-                self.pools.insert(
-                    pool_id,
-                    WeightedPool {
-                        pool_id,
-                        pool_address,
-                        tokens: Some(tokens.clone()),
-                        // Pool and Token Registration always occur in the same tx!
-                        // https://github.com/balancer-labs/balancer-v2-monorepo/blob/70843e6a61ad11208c1cfabf5cfe15be216ca8d3/pkg/pool-utils/contracts/BasePool.sol#L128-L130
-                        block_created: index.block_number,
-                    },
-                );
-                tracing::debug!("Pool Tokens received for existing Balancer pool")
+                existing_pool
+                    .update_from_event(BalancerEvent::TokensRegistered(registration.clone()));
+                tracing::debug!(
+                    "Pool Tokens recovered for existing Balancer pool with id {:?}",
+                    existing_pool.pool_id
+                )
             }
         }
         // In either of the above cases we can now populate pools_by_token
-        for token in tokens {
+        for token in registration.clone().tokens {
             self.pools_by_token
                 .entry(token)
                 .or_default()
-                .insert(pool_id);
+                .insert(registration.pool_id);
         }
     }
 
@@ -385,7 +402,7 @@ mod tests {
         let mut pool_store = BalancerPools::default();
         let index = EventIndex {
             block_number: 1,
-            log_index: 0
+            log_index: 0,
         };
         let pool_id = H256::from_low_u64_be(1);
         let pool_address = H160::from_low_u64_be(1);
@@ -401,17 +418,19 @@ mod tests {
         let expected = hashmap! {H256::from_low_u64_be(1) => WeightedPool {
             pool_id,
             pool_address: Some(pool_address),
+            specialization: Some(specialization),
             tokens: None,
             block_created: 1,
         }};
         assert_eq!(pool_store.pools, expected);
         assert_eq!(pool_store.pools_by_token, HashMap::new());
-        
-        // Branch when token event already stored
+
+        // Branch where token registration event already stored
         let tokens = vec![H160::from_low_u64_be(2), H160::from_low_u64_be(3)];
         let mut weighted_pool = WeightedPool {
             pool_id,
             pool_address: None,
+            specialization: None,
             tokens: Some(tokens.clone()),
             block_created: 1,
         };
@@ -434,17 +453,18 @@ mod tests {
 
         pool_store.insert_pool(index, registration);
         weighted_pool.pool_address = Some(pool_address);
+        weighted_pool.specialization = Some(specialization);
         *pools.get_mut(&pool_id).unwrap() = weighted_pool;
         assert_eq!(pool_store.pools, pools);
         assert_eq!(pool_store.pools_by_token, pools_by_token);
     }
 
     #[test]
-    fn balancer_include_token_data() {
+    fn balancer_insert_token_data() {
         let mut pool_store = BalancerPools::default();
         let index = EventIndex {
             block_number: 1,
-            log_index: 0
+            log_index: 0,
         };
         let pool_id = H256::from_low_u64_be(1);
         let tokens = vec![H160::from_low_u64_be(2), H160::from_low_u64_be(3)];
@@ -454,10 +474,11 @@ mod tests {
             tokens: tokens.clone(),
         };
 
-        pool_store.include_token_data(index, registration);
+        pool_store.insert_token_data(index, registration);
         let expected_pool_map = hashmap! {H256::from_low_u64_be(1) => WeightedPool {
             pool_id,
             pool_address: None,
+            specialization: None,
             tokens: Some(tokens.clone()),
             block_created: 1,
         }};
@@ -468,20 +489,49 @@ mod tests {
         assert_eq!(pool_store.pools, expected_pool_map);
         assert_eq!(pool_store.pools_by_token, expected_token_map);
 
+        // Branch where pool registered already stored
+        let pool_address = H160::from_low_u64_be(1);
+        let specialization = PoolSpecialization::General;
+        let mut weighted_pool = WeightedPool {
+            pool_id,
+            pool_address: Some(pool_address),
+            specialization: Some(specialization),
+            tokens: None,
+            block_created: 1,
+        };
+        let mut pools = hashmap! {H256::from_low_u64_be(1) => weighted_pool.clone() };
+        let mut pools_by_token = HashMap::new();
+        let mut pool_store = BalancerPools {
+            pools_by_token: pools_by_token.clone(),
+            pools: pools.clone(),
+            contract_deployment_block: 0,
+        };
 
+        let registration = TokensRegistered {
+            pool_id,
+            tokens: tokens.clone(),
+        };
+
+        pool_store.insert_token_data(index, registration);
+
+        // update expected state
+        weighted_pool.tokens = Some(tokens.clone());
+        *pools.get_mut(&pool_id).unwrap() = weighted_pool;
+        pools_by_token.insert(tokens[0], hashset! { pool_id });
+        pools_by_token.insert(tokens[1], hashset! { pool_id });
+
+        assert_eq!(pool_store.pools, pools);
+        assert_eq!(pool_store.pools_by_token, pools_by_token);
     }
 
     #[test]
-    fn balancer_delete_pools() {
-    }
+    fn balancer_delete_pools() {}
 
     #[test]
-    fn balancer_insert_events() {
-    }
+    fn balancer_insert_events() {}
 
     #[test]
-    fn balancer_replace_events() {
-    }
+    fn balancer_replace_events() {}
 
     #[test]
     fn event_conversion() {
@@ -489,9 +539,7 @@ mod tests {
         // pools registered
     }
 
-    #[tokio::test]
-    #[ignore]
-    async fn event_storing_trait() {}
-
-
+    // #[tokio::test]
+    // #[ignore]
+    // async fn event_storing_trait() {}
 }

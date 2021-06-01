@@ -285,8 +285,8 @@ mod tests {
             },
             Event::Invalidation(Invalidation::default()),
         )])
-            .await
-            .unwrap();
+        .await
+        .unwrap();
         assert_eq!(db.block_number_of_most_recent_event().await.unwrap(), 1);
 
         db.insert_events(vec![(
@@ -296,8 +296,8 @@ mod tests {
             },
             Event::Trade(Trade::default()),
         )])
-            .await
-            .unwrap();
+        .await
+        .unwrap();
         assert_eq!(db.block_number_of_most_recent_event().await.unwrap(), 2);
 
         db.replace_events(
@@ -310,8 +310,8 @@ mod tests {
                 Event::Invalidation(Invalidation::default()),
             )],
         )
-            .await
-            .unwrap();
+        .await
+        .unwrap();
         assert_eq!(db.block_number_of_most_recent_event().await.unwrap(), 3);
 
         db.replace_events(2, vec![]).await.unwrap();
@@ -327,8 +327,8 @@ mod tests {
                 transaction_hash: H256::from_low_u64_be(4),
             }),
         )])
-            .await
-            .unwrap();
+        .await
+        .unwrap();
 
         assert_eq!(db.block_number_of_most_recent_event().await.unwrap(), 1);
 
@@ -349,8 +349,8 @@ mod tests {
                 },
                 Event::Trade(Default::default()),
             )])
-                .await
-                .unwrap();
+            .await
+            .unwrap();
             db.insert_events(vec![(
                 EventIndex {
                     block_number: 2,
@@ -358,8 +358,8 @@ mod tests {
                 },
                 Event::Invalidation(Default::default()),
             )])
-                .await
-                .unwrap();
+            .await
+            .unwrap();
             db.insert_events(vec![(
                 EventIndex {
                     block_number: 2,
@@ -367,8 +367,8 @@ mod tests {
                 },
                 Event::Settlement(Default::default()),
             )])
-                .await
-                .unwrap();
+            .await
+            .unwrap();
         }
         assert_eq!(db.block_number_of_most_recent_event().await.unwrap(), 2);
     }
