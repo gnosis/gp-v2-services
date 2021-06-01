@@ -339,7 +339,10 @@ impl Driver {
 
         let liquidity = self
             .liquidity_collector
-            .get_liquidity(current_block_during_liquidity_fetch.into(), &self.inflight_trades)
+            .get_liquidity(
+                current_block_during_liquidity_fetch.into(),
+                &self.inflight_trades,
+            )
             .await?;
 
         let estimated_prices =
