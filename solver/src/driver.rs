@@ -337,12 +337,9 @@ impl Driver {
             .context("failed to get current block")?
             .as_u64();
 
-        let inflight_trades = &self.inflight_trades.clone();
-        // Reset the inflight orders - event if get_liquidity fails.
-        self.inflight_trades = HashSet::new();
         let liquidity = self
             .liquidity_collector
-            .get_liquidity(current_block_during_liquidity_fetch.into(), inflight_trades)
+            .get_liquidity(current_block_during_liquidity_fetch.into(), &self.inflight_trades)
             .await?;
 
         let estimated_prices =

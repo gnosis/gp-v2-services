@@ -40,7 +40,8 @@ fn inflight_order_filter(order: Order, inflight_trades: &HashSet<OrderUid>) -> O
         return if order.order_creation.partially_fillable {
             // TODO - driver logic for Partially Fillable Orders
             // https://github.com/gnosis/gp-v2-services/issues/673
-            tracing::error!("filtering partially fillable inflight orders unimplemented.");
+            // Note that this will result in simulation error "GPv2: order filled" if the
+            // next solver run loop tries to match the order again beyond its remaining amount.
             Some(order)
         } else {
             // Fully filled, inflight orders are excluded from consideration
