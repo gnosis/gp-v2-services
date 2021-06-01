@@ -383,7 +383,7 @@ fn convert_tokens_registered(
     meta: &EventMetadata,
 ) -> Result<(EventIndex, BalancerEvent)> {
     let event = TokensRegistered {
-        pool_id: H256::from(registration.pool_id),
+        pool_id: H256::from(registration.pool_id.0),
         tokens: registration.tokens.clone(),
     };
     Ok((
