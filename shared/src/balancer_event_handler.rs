@@ -89,7 +89,6 @@ impl PoolSpecialization {
 }
 
 impl BalancerPools {
-
     // All insertions happen in one transaction.
     fn insert_events(&mut self, events: Vec<(EventIndex, BalancerEvent)>) -> Result<()> {
         for (index, event) in events {
@@ -131,7 +130,7 @@ impl BalancerPools {
         delete_from_block_number: u64,
         events: Vec<(EventIndex, BalancerEvent)>,
     ) -> Result<()> {
-        self.delete_events(delete_from_block_number)?;
+        self.delete_pools(delete_from_block_number)?;
         self.insert_events(events)?;
         Ok(())
     }
@@ -290,7 +289,7 @@ impl BalancerEventUpdater {
             None => None,
         };
         // This minor update keeps deployment block fetching self contained to here.
-        pools.deployment_block = deployment_block.unwrap_or(0);
+        pools.contract_deployment_block = deployment_block.unwrap_or(0);
         Self(Mutex::new(EventHandler::new(
             contract.raw_instance().web3(),
             BalancerV2VaultContract(contract),
