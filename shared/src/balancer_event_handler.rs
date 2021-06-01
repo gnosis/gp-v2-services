@@ -371,7 +371,7 @@ fn convert_pool_registered(
     meta: &EventMetadata,
 ) -> Result<(EventIndex, BalancerEvent)> {
     let event = PoolRegistered {
-        pool_id: H256::from(registration.pool_id),
+        pool_id: H256::from(registration.pool_id.0),
         pool_address: registration.pool_address,
         specialization: PoolSpecialization::new(registration.specialization)?,
     };
