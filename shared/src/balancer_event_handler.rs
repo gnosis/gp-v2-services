@@ -60,7 +60,7 @@ pub struct BalancerPools {
 
 /// There are three specialization settings for Pools,
 /// which allow for cheaper swaps at the cost of reduced functionality:
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum PoolSpecialization {
     /// no specialization, suited for all Pools. IGeneralPool is used for swap request callbacks,
@@ -373,4 +373,125 @@ fn convert_tokens_registered(
         EventIndex::from(meta),
         BalancerEvent::TokensRegistered(event),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use maplit::{hashmap, hashset};
+
+    #[test]
+    fn balancer_insert_pool() {
+        let mut pool_store = BalancerPools::default();
+        let index = EventIndex {
+            block_number: 1,
+            log_index: 0
+        };
+        let pool_id = H256::from_low_u64_be(1);
+        let pool_address = H160::from_low_u64_be(1);
+        let specialization = PoolSpecialization::General;
+
+        let registration = PoolRegistered {
+            pool_id,
+            pool_address,
+            specialization,
+        };
+
+        pool_store.insert_pool(index, registration);
+        let expected = hashmap! {H256::from_low_u64_be(1) => WeightedPool {
+            pool_id,
+            pool_address: Some(pool_address),
+            tokens: None,
+            block_created: 1,
+        }};
+        assert_eq!(pool_store.pools, expected);
+        assert_eq!(pool_store.pools_by_token, HashMap::new());
+        
+        // Branch when token event already stored
+        let tokens = vec![H160::from_low_u64_be(2), H160::from_low_u64_be(3)];
+        let mut weighted_pool = WeightedPool {
+            pool_id,
+            pool_address: None,
+            tokens: Some(tokens.clone()),
+            block_created: 1,
+        };
+        let mut pools = hashmap! {H256::from_low_u64_be(1) => weighted_pool.clone() };
+        let pools_by_token = hashmap! {
+            tokens[0] => hashset! { pool_id },
+            tokens[1] => hashset! { pool_id },
+        };
+        let mut pool_store = BalancerPools {
+            pools_by_token: pools_by_token.clone(),
+            pools: pools.clone(),
+            contract_deployment_block: 0,
+        };
+
+        let registration = PoolRegistered {
+            pool_id,
+            pool_address,
+            specialization,
+        };
+
+        pool_store.insert_pool(index, registration);
+        weighted_pool.pool_address = Some(pool_address);
+        *pools.get_mut(&pool_id).unwrap() = weighted_pool;
+        assert_eq!(pool_store.pools, pools);
+        assert_eq!(pool_store.pools_by_token, pools_by_token);
+    }
+
+    #[test]
+    fn balancer_include_token_data() {
+        let mut pool_store = BalancerPools::default();
+        let index = EventIndex {
+            block_number: 1,
+            log_index: 0
+        };
+        let pool_id = H256::from_low_u64_be(1);
+        let tokens = vec![H160::from_low_u64_be(2), H160::from_low_u64_be(3)];
+
+        let registration = TokensRegistered {
+            pool_id,
+            tokens: tokens.clone(),
+        };
+
+        pool_store.include_token_data(index, registration);
+        let expected_pool_map = hashmap! {H256::from_low_u64_be(1) => WeightedPool {
+            pool_id,
+            pool_address: None,
+            tokens: Some(tokens.clone()),
+            block_created: 1,
+        }};
+        let expected_token_map = hashmap! {
+            tokens[0] => hashset! { pool_id },
+            tokens[1] => hashset! { pool_id },
+        };
+        assert_eq!(pool_store.pools, expected_pool_map);
+        assert_eq!(pool_store.pools_by_token, expected_token_map);
+
+
+    }
+
+    #[test]
+    fn balancer_delete_pools() {
+    }
+
+    #[test]
+    fn balancer_insert_events() {
+    }
+
+    #[test]
+    fn balancer_replace_events() {
+    }
+
+    #[test]
+    fn event_conversion() {
+        // tokens registered
+        // pools registered
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn event_storing_trait() {}
+
+
 }

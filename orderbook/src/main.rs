@@ -14,6 +14,7 @@ use orderbook::{
 };
 use primitive_types::H160;
 use prometheus::Registry;
+use shared::balancer_event_handler::{BalancerEventUpdater, BalancerPools};
 use shared::{
     bad_token::{
         cache::CachingDetector,
@@ -130,7 +131,7 @@ async fn main() {
     let settlement_contract = GPv2Settlement::deployed(&web3)
         .await
         .expect("Couldn't load deployed settlement");
-    let _vault_contract = BalancerV2Vault::deployed(&web3)
+    let vault_contract = BalancerV2Vault::deployed(&web3)
         .await
         .expect("Couldn't load deployed balancer vault");
     let gp_allowance = settlement_contract
@@ -167,6 +168,8 @@ async fn main() {
 
     let event_updater =
         EventUpdater::new(settlement_contract.clone(), database.clone(), sync_start);
+    let balancer_event_updater =
+        BalancerEventUpdater::new(vault_contract, BalancerPools::default()).await;
     let balance_fetcher =
         Web3BalanceFetcher::new(web3.clone(), gp_allowance, settlement_contract.address());
 
@@ -249,6 +252,7 @@ async fn main() {
             orderbook.clone(),
             Arc::new(database.clone()),
             Arc::new(event_updater),
+            Arc::new(balancer_event_updater),
         ],
     };
     check_database_connection(orderbook.as_ref()).await;
