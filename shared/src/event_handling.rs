@@ -182,6 +182,15 @@ pub struct EventIndex {
     pub log_index: u64,
 }
 
+impl EventIndex {
+    pub fn new(block_number: u64, log_index: u64) -> Self {
+        Self {
+            block_number,
+            log_index,
+        }
+    }
+}
+
 impl From<&EventMetadata> for EventIndex {
     fn from(meta: &EventMetadata) -> Self {
         EventIndex {
