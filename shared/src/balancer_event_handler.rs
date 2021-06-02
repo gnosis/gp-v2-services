@@ -281,20 +281,6 @@ impl BalancerPools {
     }
 }
 
-// pub struct BalancerPoolFetcher {
-//     pub web3: Web3,
-// }
-//
-// impl BalancerPoolFetcher {
-//     async fn _get_pool_tokens(&self, _pool_address: H160) -> Vec<H160> {
-//         // let web3 = Web3::new(self.web3.transport().clone());
-//         // let pool_contract = BalancerPool::at(&web3, pool_address).await;
-//         // TODO - fetch details from pool
-//         // There are two different types of pools, hopefully they share a common interface.
-//         vec![]
-//     }
-// }
-
 pub struct BalancerEventUpdater(
     Mutex<EventHandler<DynWeb3, BalancerV2VaultContract, BalancerPools>>,
 );
