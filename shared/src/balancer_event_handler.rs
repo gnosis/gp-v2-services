@@ -94,10 +94,14 @@ impl From<(EventIndex, TokensRegistered)> for WeightedPool {
     }
 }
 
+/// The BalancerPool struct represents in-memory storage of all deployed Balancer Pools
 #[derive(Debug, Default)]
 pub struct BalancerPools {
+    /// Used for O(1) access to all pool_ids for a given token
     pools_by_token: HashMap<H160, HashSet<H256>>,
+    /// WeightedPool data for a given PoolId
     pools: HashMap<H256, WeightedPool>,
+    /// Used mainly as a fallback for `last_event_block` when there are no events.
     contract_deployment_block: u64,
 }
 
