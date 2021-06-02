@@ -559,23 +559,31 @@ mod tests {
     #[test]
     fn balancer_insert_events() {
         let n = 3usize;
-        let pool_ids: Vec<H256> = (0..n).map(|i|H256::from_low_u64_be(i as u64)).collect();
+        let pool_ids: Vec<H256> = (0..n).map(|i| H256::from_low_u64_be(i as u64)).collect();
         let pool_addresses: Vec<H160> = (0..n).map(|i| H160::from_low_u64_be(i as u64)).collect();
-        let tokens: Vec<H160> = (0..n + 1).map(|i | H160::from_low_u64_be(i as u64)).collect();
-        let specializations: Vec<PoolSpecialization> = (0..n).map(|i| PoolSpecialization::new(i as u8 % 3).unwrap()).collect();
-        let pool_registration_events: Vec<BalancerEvent> = (0..n).map(|i| {
-            BalancerEvent::PoolRegistered(PoolRegistered {
-                pool_id: pool_ids[i],
-                pool_address: pool_addresses[i],
-                specialization: specializations[i],
+        let tokens: Vec<H160> = (0..n + 1)
+            .map(|i| H160::from_low_u64_be(i as u64))
+            .collect();
+        let specializations: Vec<PoolSpecialization> = (0..n)
+            .map(|i| PoolSpecialization::new(i as u8 % 3).unwrap())
+            .collect();
+        let pool_registration_events: Vec<BalancerEvent> = (0..n)
+            .map(|i| {
+                BalancerEvent::PoolRegistered(PoolRegistered {
+                    pool_id: pool_ids[i],
+                    pool_address: pool_addresses[i],
+                    specialization: specializations[i],
+                })
             })
-        }).collect();
-        let token_registration_events: Vec<BalancerEvent> = (0..n).map(|i| {
-            BalancerEvent::TokensRegistered(TokensRegistered {
-                pool_id: pool_ids[i],
-                tokens: vec![tokens[i], tokens[i + 1]],
+            .collect();
+        let token_registration_events: Vec<BalancerEvent> = (0..n)
+            .map(|i| {
+                BalancerEvent::TokensRegistered(TokensRegistered {
+                    pool_id: pool_ids[i],
+                    tokens: vec![tokens[i], tokens[i + 1]],
+                })
             })
-        }).collect();
+            .collect();
 
         let events: Vec<(EventIndex, BalancerEvent)> = vec![
             // Block 1 has both Pool and Tokens registered
@@ -595,31 +603,52 @@ mod tests {
         // Note that it is never expected that blocks for events will differ,
         // but in this test block_created for the pool is the first block it receives.
         assert_eq!(pool_store.last_event_block(), 3);
-        assert_eq!(pool_store.pools_by_token.get(&tokens[0]).unwrap(), &hashset! { pool_ids[0] });
-        assert_eq!(pool_store.pools_by_token.get(&tokens[1]).unwrap(), &hashset! { pool_ids[0], pool_ids[1] });
-        assert_eq!(pool_store.pools_by_token.get(&tokens[2]).unwrap(), &hashset! { pool_ids[1], pool_ids[2] });
-        assert_eq!(pool_store.pools_by_token.get(&tokens[3]).unwrap(), &hashset! { pool_ids[2] });
+        assert_eq!(
+            pool_store.pools_by_token.get(&tokens[0]).unwrap(),
+            &hashset! { pool_ids[0] }
+        );
+        assert_eq!(
+            pool_store.pools_by_token.get(&tokens[1]).unwrap(),
+            &hashset! { pool_ids[0], pool_ids[1] }
+        );
+        assert_eq!(
+            pool_store.pools_by_token.get(&tokens[2]).unwrap(),
+            &hashset! { pool_ids[1], pool_ids[2] }
+        );
+        assert_eq!(
+            pool_store.pools_by_token.get(&tokens[3]).unwrap(),
+            &hashset! { pool_ids[2] }
+        );
 
-        assert_eq!(pool_store.pools.get(&pool_ids[0]).unwrap(), &WeightedPool {
-            pool_id: pool_ids[0],
-            pool_address: Some(pool_addresses[0]),
-            tokens: Some(vec![tokens[0], tokens[1]]),
-            specialization: Some(PoolSpecialization::new(0).unwrap()),
-            block_created: 1
-        });
-        assert_eq!(pool_store.pools.get(&pool_ids[1]).unwrap(), &WeightedPool {
-            pool_id: pool_ids[1],
-            pool_address: Some(pool_addresses[1]),
-            tokens: Some(vec![tokens[1], tokens[2]]),
-            specialization: Some(PoolSpecialization::new(1).unwrap()),
-            block_created: 1
-        });
-        assert_eq!(pool_store.pools.get(&pool_ids[2]).unwrap(), &WeightedPool {
-            pool_id: pool_ids[2],
-            pool_address: Some(pool_addresses[2]),
-            tokens: Some(vec![tokens[2], tokens[3]]),
-            specialization: Some(PoolSpecialization::new(2).unwrap()),
-            block_created: 3
-        });
+        assert_eq!(
+            pool_store.pools.get(&pool_ids[0]).unwrap(),
+            &WeightedPool {
+                pool_id: pool_ids[0],
+                pool_address: Some(pool_addresses[0]),
+                tokens: Some(vec![tokens[0], tokens[1]]),
+                specialization: Some(PoolSpecialization::new(0).unwrap()),
+                block_created: 1
+            }
+        );
+        assert_eq!(
+            pool_store.pools.get(&pool_ids[1]).unwrap(),
+            &WeightedPool {
+                pool_id: pool_ids[1],
+                pool_address: Some(pool_addresses[1]),
+                tokens: Some(vec![tokens[1], tokens[2]]),
+                specialization: Some(PoolSpecialization::new(1).unwrap()),
+                block_created: 1
+            }
+        );
+        assert_eq!(
+            pool_store.pools.get(&pool_ids[2]).unwrap(),
+            &WeightedPool {
+                pool_id: pool_ids[2],
+                pool_address: Some(pool_addresses[2]),
+                tokens: Some(vec![tokens[2], tokens[3]]),
+                specialization: Some(PoolSpecialization::new(2).unwrap()),
+                block_created: 3
+            }
+        );
     }
 }
