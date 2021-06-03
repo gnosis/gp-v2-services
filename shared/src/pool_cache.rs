@@ -120,12 +120,6 @@ impl PoolFetching for PoolCache {
             last_update_block = mutexed.last_update_block;
         }
 
-        tracing::debug!(
-            "{} cache misses out of {} total",
-            cache_misses.len(),
-            pairs.len()
-        );
-
         if cache_misses.is_empty() {
             return Ok(cache_hits);
         }
