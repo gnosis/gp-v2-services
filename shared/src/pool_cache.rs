@@ -137,7 +137,7 @@ impl PoolFetching for PoolCache {
             .await?;
         {
             let mut mutexed = self.mutexed.lock().unwrap();
-            mutexed.insert(cache_miss_block, pairs.iter().copied(), &uncached_pools);
+            mutexed.insert(cache_miss_block, cache_misses.into_iter(), &uncached_pools);
         }
 
         cache_hits.extend_from_slice(&uncached_pools);
@@ -372,21 +372,40 @@ mod tests {
         )
         .unwrap();
 
+        let pool0 = Pool::uniswap(test_pairs()[0], (0, 0));
+        let pool1 = Pool::uniswap(test_pairs()[1], (1, 1));
+        let pool2 = Pool::uniswap(test_pairs()[2], (2, 2));
+
+        *pools.lock().unwrap() = vec![pool0, pool1];
         // cache miss gets cached
         cache
-            .fetch(test_pairs()[0..1].iter().copied().collect(), Block::Recent)
+            .fetch(test_pairs()[0..2].iter().copied().collect(), Block::Recent)
             .now_or_never()
             .unwrap()
             .unwrap();
 
-        *pools.lock().unwrap() = vec![Pool::uniswap(test_pairs()[0], (1, 1))];
-        // cache hit does not use inner pool fetcher so result is still empty
+        *pools.lock().unwrap() = vec![pool2];
+        // pair 1 is cache hit, pair 2 is miss
         let result = cache
-            .fetch(test_pairs()[0..1].iter().copied().collect(), Block::Recent)
+            .fetch(test_pairs()[1..3].iter().copied().collect(), Block::Recent)
             .now_or_never()
             .unwrap()
             .unwrap();
-        assert_eq!(result, vec![]);
+        assert_eq!(result.len(), 2);
+        assert!(result.contains(&pool1));
+        assert!(result.contains(&pool2));
+
+        // Make sure everything is still properly cached.
+        pools.lock().unwrap().clear();
+        let result = cache
+            .fetch(test_pairs()[0..3].iter().copied().collect(), Block::Recent)
+            .now_or_never()
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.len(), 3);
+        assert!(result.contains(&pool0));
+        assert!(result.contains(&pool1));
+        assert!(result.contains(&pool2));
     }
 
     #[test]

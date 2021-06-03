@@ -138,6 +138,7 @@ impl OrderbookServices {
         let pool_fetcher = PoolCache::new(
             NonZeroU64::new(10).unwrap(),
             20,
+            4,
             Box::new(PoolFetcher {
                 pair_provider,
                 web3: web3.clone(),
