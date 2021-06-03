@@ -17,6 +17,7 @@ use contracts::{
 };
 use ethcontract::common::DeploymentInformation;
 use ethcontract::{dyns::DynWeb3, Event as EthContractEvent, EventMetadata, H160, H256};
+use std::convert::TryInto;
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
@@ -44,7 +45,7 @@ pub struct TokensRegistered {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct WeightedPool {
+pub struct WeightedPoolBuilder {
     pool_id: H256,
     pool_address: Option<H160>,
     tokens: Option<Vec<H160>>,
@@ -52,7 +53,33 @@ pub struct WeightedPool {
     block_created: u64,
 }
 
-impl WeightedPool {
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct WeightedPool {
+    pool_id: H256,
+    pool_address: H160,
+    tokens: Vec<H160>,
+    specialization: PoolSpecialization,
+    block_created: u64,
+}
+
+impl TryInto<WeightedPool> for WeightedPoolBuilder {
+    type Error = ();
+
+    fn try_into(self) -> Result<WeightedPool, Self::Error> {
+        if self.pool_address.is_some() && self.tokens.is_some() {
+            return Ok(WeightedPool {
+                pool_id: self.pool_id,
+                pool_address: self.pool_address.unwrap(),
+                tokens: self.tokens.unwrap(),
+                specialization: self.specialization.unwrap(),
+                block_created: self.block_created,
+            });
+        }
+        Err(())
+    }
+}
+
+impl WeightedPoolBuilder {
     fn update_from_event(&mut self, event: BalancerEvent) {
         // Pool and Token Registration always occur in the same tx! So block_created doesn't need update.
         // https://github.com/balancer-labs/balancer-v2-monorepo/blob/70843e6a61ad11208c1cfabf5cfe15be216ca8d3/pkg/pool-utils/contracts/BasePool.sol#L128-L130
@@ -68,7 +95,7 @@ impl WeightedPool {
     }
 }
 
-impl From<(EventIndex, PoolRegistered)> for WeightedPool {
+impl From<(EventIndex, PoolRegistered)> for WeightedPoolBuilder {
     fn from(event_data: (EventIndex, PoolRegistered)) -> Self {
         Self {
             pool_id: event_data.1.pool_id,
@@ -81,7 +108,7 @@ impl From<(EventIndex, PoolRegistered)> for WeightedPool {
     }
 }
 
-impl From<(EventIndex, TokensRegistered)> for WeightedPool {
+impl From<(EventIndex, TokensRegistered)> for WeightedPoolBuilder {
     fn from(event_data: (EventIndex, TokensRegistered)) -> Self {
         Self {
             pool_id: event_data.1.pool_id,
@@ -100,7 +127,7 @@ pub struct BalancerPools {
     /// Used for O(1) access to all pool_ids for a given token
     pools_by_token: HashMap<H160, HashSet<H256>>,
     /// WeightedPool data for a given PoolId
-    pools: HashMap<H256, WeightedPool>,
+    pools: HashMap<H256, WeightedPoolBuilder>,
 }
 
 /// There are three specialization settings for Pools,
@@ -156,7 +183,7 @@ impl BalancerPools {
                 );
                 self.pools.insert(
                     registration.pool_id,
-                    WeightedPool::from((index, registration)),
+                    WeightedPoolBuilder::from((index, registration)),
                 );
             }
             Some(existing_pool) => {
@@ -178,8 +205,10 @@ impl BalancerPools {
                 tracing::debug!(
                     "Creating Balancer Pool with id {:?} from TokensRegistration event (pool address pending...)", pool_id
                 );
-                self.pools
-                    .insert(*pool_id, WeightedPool::from((index, registration.clone())));
+                self.pools.insert(
+                    *pool_id,
+                    WeightedPoolBuilder::from((index, registration.clone())),
+                );
             }
             Some(existing_pool) => {
                 // If pool exists before token registration, then only pool_id and address known
@@ -392,7 +421,7 @@ mod tests {
         };
 
         pool_store.insert_pool(index, registration);
-        let expected = hashmap! {H256::from_low_u64_be(1) => WeightedPool {
+        let expected = hashmap! {H256::from_low_u64_be(1) => WeightedPoolBuilder {
             pool_id,
             pool_address: Some(pool_address),
             specialization: Some(specialization),
@@ -404,7 +433,7 @@ mod tests {
 
         // Branch where token registration event already stored
         let tokens = vec![H160::from_low_u64_be(2), H160::from_low_u64_be(3)];
-        let mut weighted_pool = WeightedPool {
+        let mut weighted_pool = WeightedPoolBuilder {
             pool_id,
             pool_address: None,
             specialization: None,
@@ -451,7 +480,7 @@ mod tests {
         };
 
         pool_store.insert_token_data(index, registration);
-        let expected_pool_map = hashmap! {H256::from_low_u64_be(1) => WeightedPool {
+        let expected_pool_map = hashmap! {H256::from_low_u64_be(1) => WeightedPoolBuilder {
             pool_id,
             pool_address: None,
             specialization: None,
@@ -468,7 +497,7 @@ mod tests {
         // Branch where pool registered already stored
         let pool_address = H160::from_low_u64_be(1);
         let specialization = PoolSpecialization::General;
-        let mut weighted_pool = WeightedPool {
+        let mut weighted_pool = WeightedPoolBuilder {
             pool_id,
             pool_address: Some(pool_address),
             specialization: Some(specialization),
@@ -598,7 +627,7 @@ mod tests {
 
         assert_eq!(
             pool_store.pools.get(&pool_ids[0]).unwrap(),
-            &WeightedPool {
+            &WeightedPoolBuilder {
                 pool_id: pool_ids[0],
                 pool_address: Some(pool_addresses[0]),
                 tokens: Some(vec![tokens[0], tokens[1]]),
@@ -608,7 +637,7 @@ mod tests {
         );
         assert_eq!(
             pool_store.pools.get(&pool_ids[1]).unwrap(),
-            &WeightedPool {
+            &WeightedPoolBuilder {
                 pool_id: pool_ids[1],
                 pool_address: Some(pool_addresses[1]),
                 tokens: Some(vec![tokens[1], tokens[2]]),
@@ -618,7 +647,7 @@ mod tests {
         );
         assert_eq!(
             pool_store.pools.get(&pool_ids[2]).unwrap(),
-            &WeightedPool {
+            &WeightedPoolBuilder {
                 pool_id: pool_ids[2],
                 pool_address: Some(pool_addresses[2]),
                 tokens: Some(vec![tokens[2], tokens[3]]),
@@ -730,7 +759,7 @@ mod tests {
         for i in 0..3 {
             assert_eq!(
                 setup.pool_store.pools.get(&setup.pool_ids[i]).unwrap(),
-                &WeightedPool {
+                &WeightedPoolBuilder {
                     pool_id: setup.pool_ids[i],
                     pool_address: Some(setup.pool_addresses[i]),
                     tokens: Some(vec![setup.tokens[i], setup.tokens[i + 1]]),
@@ -788,11 +817,11 @@ mod tests {
         // All new data is included.
         assert_eq!(
             setup.pool_store.pools.get(&new_pool_id_a).unwrap(),
-            &WeightedPool::from((new_events[0].0, new_pool_registration))
+            &WeightedPoolBuilder::from((new_events[0].0, new_pool_registration))
         );
         assert_eq!(
             setup.pool_store.pools.get(&new_pool_id_b).unwrap(),
-            &WeightedPool::from((new_events[1].0, new_token_registration))
+            &WeightedPoolBuilder::from((new_events[1].0, new_token_registration))
         );
 
         assert_eq!(
