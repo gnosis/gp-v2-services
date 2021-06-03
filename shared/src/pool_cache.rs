@@ -34,26 +34,36 @@ pub struct PoolCache {
 // When pools are requested we mark all those pools as recently used which potentially evicts other
 // pairs from the pair lru cache. Cache misses are fetched and inserted into the cache.
 // Then when the automatic update runs the next time, we request and cache all recently used pairs.
-// For the order book we only care about the "recent" state of the pools. So we can return any
+// For some consumers we only care about the "recent" state of the pools. So we can return any
 // result from the cache even if it comes from previous blocks.
-// On the other hand for the driver we need to get the pool at exact blocks which is why we keep a
-// cache of previous blocks in the first place as we could simplify this module if it was only used
-// by the order book.
+// On the other hand for others we need to get the pool at exact blocks which is why we keep a cache
+// of previous blocks in the first place as we could simplify this module if it was only used by
+// by the former.
 
 impl PoolCache {
     /// number_of_blocks_to_cache: Previous blocks stay cached until the block is this much older
-    /// than the current block.
+    /// than the current block. If there is a request for a block that is already too old then the
+    /// result stays cached until the automatic updating runs the next time.
+    ///
     /// number_of_pairs_to_auto_update: The number of most recently used pools to keep track of and
     /// auto update when the current block changes.
+    ///
+    /// maximum_recent_block_age: When a recent block is requested, this is the maximum a cached
+    /// block can have to be considered.
     pub fn new(
         number_of_blocks_to_cache: NonZeroU64,
         number_of_pairs_to_auto_update: usize,
+        maximum_recent_block_age: u64,
         inner: Box<dyn PoolFetching>,
         block_stream: CurrentBlockStream,
     ) -> Result<Self> {
         let block = current_block::block_number(&block_stream.borrow())?;
         Ok(Self {
-            mutexed: Mutex::new(Mutexed::new(number_of_pairs_to_auto_update, block)),
+            mutexed: Mutex::new(Mutexed::new(
+                number_of_pairs_to_auto_update,
+                block,
+                maximum_recent_block_age,
+            )),
             number_of_blocks_to_cache,
             inner,
             block_stream,
@@ -154,15 +164,18 @@ struct Mutexed {
     pools: BTreeMap<(u64, TokenPair), Vec<Pool>>,
     // The last block at which the automatic cache updating happened.
     last_update_block: u64,
+    // Maximum age a cached block can have to count as recent.
+    maximum_recent_block_age: u64,
 }
 
 impl Mutexed {
-    fn new(pairs_lru_size: usize, current_block: u64) -> Mutexed {
+    fn new(pairs_lru_size: usize, current_block: u64, maximum_recent_block_age: u64) -> Mutexed {
         Self {
             recently_used: LruCache::new(pairs_lru_size),
             cached_most_recently_at_block: HashMap::new(),
             pools: BTreeMap::new(),
             last_update_block: current_block,
+            maximum_recent_block_age,
         }
     }
 }
@@ -170,7 +183,14 @@ impl Mutexed {
 impl Mutexed {
     fn get(&mut self, pair: TokenPair, block: Option<u64>) -> Option<&[Pool]> {
         self.recently_used.put(pair, ());
-        let block = block.or_else(|| self.cached_most_recently_at_block.get(&pair).copied())?;
+        let block = block.or_else(|| {
+            self.cached_most_recently_at_block
+                .get(&pair)
+                .copied()
+                .filter(|&block| {
+                    self.last_update_block.saturating_sub(block) <= self.maximum_recent_block_age
+                })
+        })?;
         self.pools.get(&(block, pair)).map(Vec::as_slice)
     }
 
@@ -242,8 +262,14 @@ mod tests {
             ..Default::default()
         };
         let (_sender, receiver) = watch::channel(block);
-        let cache =
-            PoolCache::new(NonZeroU64::new(1).unwrap(), 2, Box::new(inner), receiver).unwrap();
+        let cache = PoolCache::new(
+            NonZeroU64::new(1).unwrap(),
+            2,
+            10,
+            Box::new(inner),
+            receiver,
+        )
+        .unwrap();
 
         cache
             .fetch(test_pairs()[0..1].iter().copied().collect(), Block::Recent)
@@ -288,8 +314,14 @@ mod tests {
             ..Default::default()
         };
         let (_sender, receiver) = watch::channel(block);
-        let cache =
-            PoolCache::new(NonZeroU64::new(1).unwrap(), 2, Box::new(inner), receiver).unwrap();
+        let cache = PoolCache::new(
+            NonZeroU64::new(1).unwrap(),
+            2,
+            10,
+            Box::new(inner),
+            receiver,
+        )
+        .unwrap();
 
         let result = cache
             .fetch(test_pairs()[0..2].iter().copied().collect(), Block::Recent)
@@ -331,8 +363,14 @@ mod tests {
             ..Default::default()
         };
         let (_sender, receiver) = watch::channel(block);
-        let cache =
-            PoolCache::new(NonZeroU64::new(1).unwrap(), 2, Box::new(inner), receiver).unwrap();
+        let cache = PoolCache::new(
+            NonZeroU64::new(1).unwrap(),
+            2,
+            10,
+            Box::new(inner),
+            receiver,
+        )
+        .unwrap();
 
         // cache miss gets cached
         cache
@@ -361,8 +399,14 @@ mod tests {
             ..Default::default()
         };
         let (_sender, receiver) = watch::channel(block);
-        let cache =
-            PoolCache::new(NonZeroU64::new(1).unwrap(), 2, Box::new(inner), receiver).unwrap();
+        let cache = PoolCache::new(
+            NonZeroU64::new(1).unwrap(),
+            2,
+            10,
+            Box::new(inner),
+            receiver,
+        )
+        .unwrap();
 
         // cache at block 5
         *pools.lock().unwrap() = vec![Pool::uniswap(test_pairs()[0], (1, 1))];
@@ -407,8 +451,14 @@ mod tests {
             ..Default::default()
         };
         let (_sender, receiver) = watch::channel(block);
-        let cache =
-            PoolCache::new(NonZeroU64::new(5).unwrap(), 0, Box::new(inner), receiver).unwrap();
+        let cache = PoolCache::new(
+            NonZeroU64::new(5).unwrap(),
+            0,
+            10,
+            Box::new(inner),
+            receiver,
+        )
+        .unwrap();
 
         cache
             .fetch(
@@ -424,5 +474,38 @@ mod tests {
         assert_eq!(cache.mutexed.lock().unwrap().pools.len(), 1);
         cache.update_cache(15).now_or_never().unwrap().unwrap();
         assert!(cache.mutexed.lock().unwrap().pools.is_empty());
+    }
+
+    #[test]
+    fn respects_max_age_limit_for_recent() {
+        let inner = FakePoolFetcher::default();
+        let block_number = 10u64;
+        let block = Web3Block {
+            number: Some(block_number.into()),
+            ..Default::default()
+        };
+        let (_sender, receiver) = watch::channel(block);
+        let cache =
+            PoolCache::new(NonZeroU64::new(5).unwrap(), 0, 2, Box::new(inner), receiver).unwrap();
+        let pair = test_pairs()[0];
+
+        // cache at block 7, most recent block is 10.
+        cache
+            .fetch(std::iter::once(pair).collect(), Block::Number(7))
+            .now_or_never()
+            .unwrap()
+            .unwrap();
+        assert!(cache.mutexed.lock().unwrap().get(pair, Some(7)).is_some());
+        assert!(cache.mutexed.lock().unwrap().get(pair, None).is_none());
+
+        // cache at block 8
+        cache
+            .fetch(std::iter::once(pair).collect(), Block::Number(8))
+            .now_or_never()
+            .unwrap()
+            .unwrap();
+        assert!(cache.mutexed.lock().unwrap().get(pair, Some(7)).is_some());
+        assert!(cache.mutexed.lock().unwrap().get(pair, Some(8)).is_some());
+        assert!(cache.mutexed.lock().unwrap().get(pair, None).is_some());
     }
 }

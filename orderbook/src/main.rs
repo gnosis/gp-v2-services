@@ -218,6 +218,7 @@ async fn main() {
         PoolCache::new(
             args.shared.pool_cache_blocks,
             args.shared.pool_cache_lru_size,
+            args.shared.pool_cache_maximum_recent_block_age,
             Box::new(pool_aggregator),
             current_block_stream.clone(),
         )
