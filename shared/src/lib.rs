@@ -1,6 +1,7 @@
 pub mod amm_pair_provider;
 pub mod arguments;
 pub mod baseline_solver;
+pub mod code;
 pub mod conversions;
 pub mod current_block;
 pub mod gas_price_estimation;
