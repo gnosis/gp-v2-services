@@ -320,7 +320,7 @@ impl BaselinePriceEstimator {
             .collect();
         let pools = self
             .pool_fetcher
-            .fetch(all_pairs, Block::Latest)
+            .fetch(all_pairs, Block::Recent)
             .await?
             .into_iter()
             .fold(HashMap::<_, Vec<Pool>>::new(), |mut pools, pool| {

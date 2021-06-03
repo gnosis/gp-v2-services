@@ -29,14 +29,14 @@ type RelativeReserves = (U256, U256, H160);
 pub enum Block {
     /// The most recent state. This is on a best effort basis so that for example a cache can still
     /// return results that are slightly out of date.
-    Latest,
+    Recent,
     Number(u64),
 }
 
 impl From<Block> for BlockNumber {
     fn from(val: Block) -> Self {
         match val {
-            Block::Latest => BlockNumber::Latest,
+            Block::Recent => BlockNumber::Latest,
             Block::Number(number) => BlockNumber::Number(number.into()),
         }
     }
@@ -232,7 +232,7 @@ impl CachedPoolFetcher {
     ) -> Result<Vec<Pool>> {
         let mut cache = self.cache.lock().await;
         let block = match at_block {
-            Block::Latest => cache.latest_block_number(),
+            Block::Recent => cache.latest_block_number(),
             Block::Number(number) => number,
         };
 
@@ -555,7 +555,7 @@ mod tests {
 
         // Read Through
         assert_eq!(
-            instance.fetch(hashset!(pair), Block::Latest).await.unwrap(),
+            instance.fetch(hashset!(pair), Block::Recent).await.unwrap(),
             vec![Pool::uniswap(pair, (1, 1)), Pool::uniswap(pair, (2, 2))]
         );
         assert_eq!(
@@ -569,7 +569,7 @@ mod tests {
         // clear inner to test caching
         pools.lock().await.clear();
         assert_eq!(
-            instance.fetch(hashset!(pair), Block::Latest).await.unwrap(),
+            instance.fetch(hashset!(pair), Block::Recent).await.unwrap(),
             vec![Pool::uniswap(pair, (1, 1)), Pool::uniswap(pair, (2, 2))]
         );
         assert_eq!(
@@ -589,7 +589,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(
-            instance.fetch(hashset!(pair), Block::Latest).await.unwrap(),
+            instance.fetch(hashset!(pair), Block::Recent).await.unwrap(),
             vec![]
         );
 
@@ -623,7 +623,7 @@ mod tests {
 
         // Read Through
         assert_eq!(
-            instance.fetch(hashset!(pair), Block::Latest).await.unwrap(),
+            instance.fetch(hashset!(pair), Block::Recent).await.unwrap(),
             vec![Pool::uniswap(pair, (1, 1))]
         );
 
@@ -646,7 +646,7 @@ mod tests {
             vec![]
         );
         assert_eq!(
-            instance.fetch(hashset!(pair), Block::Latest).await.unwrap(),
+            instance.fetch(hashset!(pair), Block::Recent).await.unwrap(),
             vec![]
         );
     }
@@ -669,7 +669,7 @@ mod tests {
         let instance = CachedPoolFetcher::new(inner, receiver);
 
         assert!(instance
-            .fetch(hashset!(pair), Block::Latest)
+            .fetch(hashset!(pair), Block::Recent)
             .await
             .unwrap()
             .is_empty());
@@ -677,7 +677,7 @@ mod tests {
         pools.lock().await.push(Pool::uniswap(pair, (1, 1)));
         // Inner shouldn't get called because the previous empty result is still cached.
         assert!(instance
-            .fetch(hashset!(pair), Block::Latest)
+            .fetch(hashset!(pair), Block::Recent)
             .await
             .unwrap()
             .is_empty());
