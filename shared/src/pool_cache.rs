@@ -26,7 +26,7 @@ pub struct PoolCache {
 // Design:
 // The design of this module is driven by the need to always return pools quickly so that end users
 // going through the api do not have to wait longer than necessary:
-// - The mutex is never held while waiting on an async operation (getting pools from the node).
+// - The mutex is never locked while waiting on an async operation (getting pools from the node).
 // - Automatically updating the cache is decoupled from normal pool fetches.
 // A result of this is that it is possible that the same uncached pair is requested multiple times
 // simultaneously and some work is wasted. This is unlikely to happen in practice and the pool is
@@ -96,9 +96,6 @@ impl PoolCache {
 #[async_trait::async_trait]
 impl PoolFetching for PoolCache {
     async fn fetch(&self, pairs: HashSet<TokenPair>, block: Block) -> Result<Vec<Pool>> {
-        // We assume that if "Latest" is used it is okay to return an earlier cached version even if
-        // it is not exactly latest. This should be reflected in the block enum parameter in the
-        // future.
         let block = match block {
             Block::Recent => None,
             Block::Number(number) => Some(number),
