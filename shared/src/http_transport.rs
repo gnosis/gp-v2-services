@@ -127,6 +127,11 @@ fn handle_batch_response(
     ids: &[RequestId],
     outputs: Vec<Output>,
 ) -> Result<Vec<RpcResult>, Web3Error> {
+    if ids.len() != outputs.len() {
+        return Err(Web3Error::InvalidResponse(
+            "unexpected number of responses".to_string(),
+        ));
+    }
     let mut outputs = outputs
         .into_iter()
         .map(|output| {
