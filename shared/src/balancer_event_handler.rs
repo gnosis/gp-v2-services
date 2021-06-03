@@ -101,8 +101,6 @@ pub struct BalancerPools {
     pools_by_token: HashMap<H160, HashSet<H256>>,
     /// WeightedPool data for a given PoolId
     pools: HashMap<H256, WeightedPool>,
-    /// Used mainly as a fallback for `last_event_block` when there are no events.
-    contract_deployment_block: u64,
 }
 
 /// There are three specialization settings for Pools,
@@ -214,24 +212,13 @@ impl BalancerPools {
     }
 
     fn delete_pools(&mut self, delete_from_block_number: u64) -> Result<()> {
-        let pool_ids_to_delete = self
-            .pools
-            .iter()
-            .filter_map(|(pool_id, pool)| {
-                if pool.block_created >= delete_from_block_number {
-                    return Some(*pool_id);
-                }
-                None
-            })
-            .collect::<HashSet<H256>>();
-
         self.pools
-            .retain(|pool_id, _| !pool_ids_to_delete.contains(pool_id));
-        // Remove all deleted pool_ids from token listing.
+            .retain(|_, pool| pool.block_created < delete_from_block_number);
         // Note that this could result in an empty set for some tokens.
+        let retained_pool_ids: HashSet<H256> = self.pools.keys().copied().collect();
         for (_, pool_set) in self.pools_by_token.iter_mut() {
             *pool_set = pool_set
-                .difference(&pool_ids_to_delete)
+                .intersection(&retained_pool_ids)
                 .cloned()
                 .collect::<HashSet<H256>>();
         }
@@ -245,7 +232,7 @@ impl BalancerPools {
             .iter()
             .map(|(_, pool)| pool.block_created)
             .max()
-            .unwrap_or(self.contract_deployment_block)
+            .unwrap_or(0)
     }
 
     fn contract_to_balancer_events(
@@ -286,7 +273,7 @@ pub struct BalancerEventUpdater(
 );
 
 impl BalancerEventUpdater {
-    pub async fn new(contract: BalancerV2Vault, mut pools: BalancerPools) -> Self {
+    pub async fn new(contract: BalancerV2Vault, pools: BalancerPools) -> Self {
         let deployment_block = match contract.deployment_information() {
             Some(DeploymentInformation::BlockNumber(block_number)) => Some(block_number),
             Some(DeploymentInformation::TransactionHash(hash)) => {
@@ -305,8 +292,6 @@ impl BalancerEventUpdater {
             }
             None => None,
         };
-        // This minor update keeps deployment block fetching self contained to here.
-        pools.contract_deployment_block = deployment_block.unwrap_or(0);
         Self(Mutex::new(EventHandler::new(
             contract.raw_instance().web3(),
             BalancerV2VaultContract(contract),
@@ -331,7 +316,6 @@ impl EventStoring<ContractEvent> for BalancerPools {
             balancer_events.len(),
             range.start().to_u64()
         );
-        // Not sure we will event need to replace events as we don't store the events themselves.
         BalancerPools::replace_events(self, 0, balancer_events)?;
         Ok(())
     }
@@ -435,7 +419,6 @@ mod tests {
         let mut pool_store = BalancerPools {
             pools_by_token: pools_by_token.clone(),
             pools: pools.clone(),
-            contract_deployment_block: 0,
         };
 
         let registration = PoolRegistered {
@@ -497,7 +480,6 @@ mod tests {
         let mut pool_store = BalancerPools {
             pools_by_token: pools_by_token.clone(),
             pools: pools.clone(),
-            contract_deployment_block: 0,
         };
 
         let registration = TokensRegistered {
@@ -520,40 +502,34 @@ mod tests {
     #[test]
     fn balancer_delete_pools() {
         // Construct a bunch of pools
-        let n = 3;
-        let tokens: Vec<H160> = (0..n + 1).map(H160::from_low_u64_be).collect();
-        let mut pools = HashMap::new();
-        let mut pools_by_token: HashMap<H160, HashSet<H256>> = HashMap::new();
-        for i in 0..n {
-            let pool_id = H256::from_low_u64_be(i + 1);
-            let token_a = tokens[i as usize];
-            let token_b = tokens[i as usize + 1];
-            pools.insert(
-                pool_id,
-                WeightedPool {
-                    pool_id,
-                    tokens: Some(vec![token_a, token_b]),
-                    block_created: i + 1,
-                    // Pool Specialization isn't relevant here.
-                    ..Default::default()
-                },
-            );
-            pools_by_token.entry(token_a).or_default().insert(pool_id);
-            pools_by_token.entry(token_b).or_default().insert(pool_id);
-        }
+        let mut setup = dummy_balancer_setup(0, 2);
 
-        let mut pool_store = BalancerPools {
-            pools_by_token,
-            pools,
-            contract_deployment_block: 0,
-        };
-        assert_eq!(pool_store.last_event_block(), 3);
-        pool_store.delete_pools(3).unwrap();
-        assert_eq!(pool_store.last_event_block(), 2);
-        pool_store.delete_pools(2).unwrap();
-        assert_eq!(pool_store.last_event_block(), 1);
-        pool_store.delete_pools(1).unwrap();
-        assert_eq!(pool_store.last_event_block(), 0);
+        setup.pool_store.delete_pools(1).unwrap();
+
+        assert_eq!(setup.pool_store.last_event_block(), 0);
+        assert!(setup.pool_store.pools.get(&setup.pool_ids[0]).is_some());
+        assert!(!setup
+            .pool_store
+            .pools_by_token
+            .get(&setup.tokens[0])
+            .unwrap()
+            .is_empty());
+        assert!(!setup
+            .pool_store
+            .pools_by_token
+            .get(&setup.tokens[1])
+            .unwrap()
+            .is_empty());
+
+        for i in 1..3 {
+            assert!(!setup.pool_store.pools.contains_key(&setup.pool_ids[i]));
+            assert!(setup
+                .pool_store
+                .pools_by_token
+                .get(&setup.tokens[i + 1])
+                .unwrap()
+                .is_empty());
+        }
     }
 
     #[test]
@@ -650,5 +626,179 @@ mod tests {
                 block_created: 3
             }
         );
+    }
+
+    struct BalancerPoolSetup {
+        pool_ids: Vec<H256>,
+        pool_addresses: Vec<H160>,
+        tokens: Vec<H160>,
+        specializations: Vec<PoolSpecialization>,
+        pool_store: BalancerPools,
+    }
+
+    fn dummy_balancer_setup(start_block: usize, end_block: usize) -> BalancerPoolSetup {
+        let pool_ids: Vec<H256> = (start_block..end_block + 1)
+            .map(|i| H256::from_low_u64_be(i as u64))
+            .collect();
+        let pool_addresses: Vec<H160> = (start_block..end_block + 1)
+            .map(|i| H160::from_low_u64_be(i as u64))
+            .collect();
+        let tokens: Vec<H160> = (start_block..end_block + 2)
+            .map(|i| H160::from_low_u64_be(i as u64))
+            .collect();
+        let specializations: Vec<PoolSpecialization> = (start_block..end_block + 1)
+            .map(|i| PoolSpecialization::new(i as u8 % 3).unwrap())
+            .collect();
+        let pool_registration_events: Vec<BalancerEvent> = (start_block..end_block + 1)
+            .map(|i| {
+                BalancerEvent::PoolRegistered(PoolRegistered {
+                    pool_id: pool_ids[i],
+                    pool_address: pool_addresses[i],
+                    specialization: specializations[i],
+                })
+            })
+            .collect();
+        let token_registration_events: Vec<BalancerEvent> = (start_block..end_block + 1)
+            .map(|i| {
+                BalancerEvent::TokensRegistered(TokensRegistered {
+                    pool_id: pool_ids[i],
+                    tokens: vec![tokens[i], tokens[i + 1]],
+                })
+            })
+            .collect();
+
+        let balancer_events: Vec<(EventIndex, BalancerEvent)> = (start_block..end_block + 1)
+            .map(|i| {
+                vec![
+                    (
+                        EventIndex::new(i as u64, 0),
+                        pool_registration_events[i].clone(),
+                    ),
+                    (
+                        EventIndex::new(i as u64, 1),
+                        token_registration_events[i].clone(),
+                    ),
+                ]
+            })
+            .flatten()
+            .collect();
+
+        let mut pool_store = BalancerPools::default();
+        pool_store.insert_events(balancer_events).unwrap();
+        BalancerPoolSetup {
+            pool_ids,
+            pool_addresses,
+            tokens,
+            specializations,
+            pool_store,
+        }
+    }
+
+    #[test]
+    fn balancer_replace_events() {
+        let mut setup = dummy_balancer_setup(0, 5);
+        assert_eq!(setup.pool_store.last_event_block(), 5);
+        let new_pool_id_a = H256::from_low_u64_be(43110);
+        let new_pool_id_b = H256::from_low_u64_be(1337);
+        let new_pool_address = H160::zero();
+        let new_token = H160::from_low_u64_be(808);
+        let new_pool_registration = PoolRegistered {
+            pool_id: new_pool_id_a,
+            pool_address: new_pool_address,
+            specialization: PoolSpecialization::General,
+        };
+        let new_token_registration = TokensRegistered {
+            pool_id: new_pool_id_b,
+            tokens: vec![new_token],
+        };
+
+        let new_events = vec![
+            (
+                EventIndex::new(3, 0),
+                BalancerEvent::PoolRegistered(new_pool_registration.clone()),
+            ),
+            (
+                EventIndex::new(4, 0),
+                BalancerEvent::TokensRegistered(new_token_registration.clone()),
+            ),
+        ];
+        setup
+            .pool_store
+            .replace_events(3, new_events.clone())
+            .unwrap();
+        // Everything until block 3 is unchanged.
+        for i in 0..3 {
+            assert_eq!(
+                setup.pool_store.pools.get(&setup.pool_ids[i]).unwrap(),
+                &WeightedPool {
+                    pool_id: setup.pool_ids[i],
+                    pool_address: Some(setup.pool_addresses[i]),
+                    tokens: Some(vec![setup.tokens[i], setup.tokens[i + 1]]),
+                    specialization: Some(setup.specializations[i]),
+                    block_created: i as u64
+                }
+            );
+        }
+        assert_eq!(
+            setup
+                .pool_store
+                .pools_by_token
+                .get(&setup.tokens[0])
+                .unwrap(),
+            &hashset! { setup.pool_ids[0] }
+        );
+        assert_eq!(
+            setup
+                .pool_store
+                .pools_by_token
+                .get(&setup.tokens[1])
+                .unwrap(),
+            &hashset! { setup.pool_ids[0], setup.pool_ids[1] }
+        );
+        assert_eq!(
+            setup
+                .pool_store
+                .pools_by_token
+                .get(&setup.tokens[2])
+                .unwrap(),
+            &hashset! { setup.pool_ids[1], setup.pool_ids[2] }
+        );
+        assert_eq!(
+            setup
+                .pool_store
+                .pools_by_token
+                .get(&setup.tokens[3])
+                .unwrap(),
+            &hashset! { setup.pool_ids[2] }
+        );
+
+        // Everything old from block 3 on is gone.
+        for i in 3..6 {
+            assert!(setup.pool_store.pools.get(&setup.pool_ids[i]).is_none());
+        }
+        for i in 4..7 {
+            assert!(setup
+                .pool_store
+                .pools_by_token
+                .get(&setup.tokens[i])
+                .unwrap()
+                .is_empty());
+        }
+
+        // All new data is included.
+        assert_eq!(
+            setup.pool_store.pools.get(&new_pool_id_a).unwrap(),
+            &WeightedPool::from((new_events[0].0, new_pool_registration))
+        );
+        assert_eq!(
+            setup.pool_store.pools.get(&new_pool_id_b).unwrap(),
+            &WeightedPool::from((new_events[1].0, new_token_registration))
+        );
+
+        assert_eq!(
+            setup.pool_store.pools_by_token.get(&new_token).unwrap(),
+            &hashset! { new_pool_id_b }
+        );
+        assert_eq!(setup.pool_store.last_event_block(), 4);
     }
 }
