@@ -129,8 +129,7 @@ impl Orderbook {
             let code_size = self
                 .code_fetcher
                 .code_size(order.actual_receiver())
-                .await
-                .unwrap_or(1);
+                .await?;
             if code_size != 0 {
                 return Ok(AddOrderResult::TransferEthToContract);
             }
