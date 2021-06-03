@@ -126,10 +126,7 @@ impl Orderbook {
         }
 
         if order.order_creation.buy_token == BUY_ETH_ADDRESS {
-            let code_size = self
-                .code_fetcher
-                .code_size(order.actual_receiver())
-                .await?;
+            let code_size = self.code_fetcher.code_size(order.actual_receiver()).await?;
             if code_size != 0 {
                 return Ok(AddOrderResult::TransferEthToContract);
             }
