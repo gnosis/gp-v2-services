@@ -5,8 +5,8 @@ use reqwest::Url;
 use shared::{
     amm_pair_provider::{SushiswapPairProvider, UniswapPairProvider},
     bad_token::list_based::ListBasedDetector,
-    http_transport::HttpTransport,
     current_block::current_block_stream,
+    http_transport::HttpTransport,
     maintenance::ServiceMaintenance,
     metrics::serve_metrics,
     network::network_name,
@@ -217,6 +217,7 @@ async fn main() {
             args.shared.pool_cache_maximum_recent_block_age,
             Box::new(pool_aggregator),
             current_block_stream.clone(),
+            metrics.clone(),
         )
         .expect("failed to create pool cache"),
     );
