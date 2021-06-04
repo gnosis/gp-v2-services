@@ -58,6 +58,7 @@ pub struct WeightedPoolBuilder {
     pool_registration: Option<PoolRegistered>,
     tokens_registration: Option<TokensRegistered>,
     /// Both Pool and Tokens Registered events are emitted in the same transaction
+    /// https://github.com/balancer-labs/balancer-v2-monorepo/blob/70843e6a61ad11208c1cfabf5cfe15be216ca8d3/pkg/pool-utils/contracts/BasePool.sol#L128-L130
     /// block_number is only contained in the EventIndex
     block_created: u64,
 }
