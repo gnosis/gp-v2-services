@@ -24,7 +24,7 @@ use shared::{
     http_transport::HttpTransport,
     maintenance::ServiceMaintenance,
     pool_aggregating::{self, PoolAggregator},
-    pool_fetching::CachedPoolFetcher,
+    pool_cache::PoolCache,
     price_estimate::BaselinePriceEstimator,
     transport::create_instrumented_transport,
 };
@@ -212,11 +212,20 @@ async fn main() {
             .unwrap();
 
     let pool_aggregator = PoolAggregator::from_providers(&pair_providers, &web3).await;
-    let pool_fetcher =
-        CachedPoolFetcher::new(Box::new(pool_aggregator), current_block_stream.clone());
+    let pool_fetcher = Arc::new(
+        PoolCache::new(
+            args.shared.pool_cache_blocks,
+            args.shared.pool_cache_lru_size,
+            args.shared.pool_cache_maximum_recent_block_age,
+            Box::new(pool_aggregator),
+            current_block_stream.clone(),
+            metrics.clone(),
+        )
+        .expect("failed to create pool cache"),
+    );
 
     let price_estimator = Arc::new(BaselinePriceEstimator::new(
-        Box::new(pool_fetcher),
+        pool_fetcher.clone(),
         gas_price_estimator.clone(),
         base_tokens,
         bad_token_detector.clone(),
@@ -244,6 +253,7 @@ async fn main() {
             orderbook.clone(),
             Arc::new(database.clone()),
             Arc::new(event_updater),
+            pool_fetcher,
         ],
     };
     check_database_connection(orderbook.as_ref()).await;
