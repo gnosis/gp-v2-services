@@ -387,7 +387,10 @@ mod tests {
         let lonely_token_registration_index = 2 * n as u64 + 1;
         let stand_alone_token_registration = TokensRegistered {
             pool_id: H256::from_low_u64_be(lonely_token_registration_index),
-            tokens: vec![H160::from_low_u64_be(lonely_token_registration_index), H160::from_low_u64_be(lonely_token_registration_index + 1)],
+            tokens: vec![
+                H160::from_low_u64_be(lonely_token_registration_index),
+                H160::from_low_u64_be(lonely_token_registration_index + 1),
+            ],
         };
 
         let events: Vec<(EventIndex, BalancerEvent)> = vec![
@@ -402,9 +405,15 @@ mod tests {
             (EventIndex::new(3, 0), token_registration_events[2].clone()),
             (EventIndex::new(4, 0), pool_registration_events[2].clone()),
             // Stand alone Token registration
-            (EventIndex::new(5, 0), BalancerEvent::TokensRegistered(stand_alone_token_registration.clone())),
+            (
+                EventIndex::new(5, 0),
+                BalancerEvent::TokensRegistered(stand_alone_token_registration.clone()),
+            ),
             // Stand along Pool Registration
-            (EventIndex::new(6, 0), BalancerEvent::PoolRegistered(stand_alone_pool_registration.clone())),
+            (
+                EventIndex::new(6, 0),
+                BalancerEvent::PoolRegistered(stand_alone_pool_registration.clone()),
+            ),
         ];
 
         let mut pool_store = BalancerPools::default();
@@ -434,18 +443,25 @@ mod tests {
                 &WeightedPool {
                     pool_id: pool_ids[i],
                     pool_address: pool_addresses[i],
-                    tokens: vec![tokens[i], tokens[i+1]],
+                    tokens: vec![tokens[i], tokens[i + 1]],
                     specialization: PoolSpecialization::new(i as u8).unwrap(),
                     block_created: i as u64 + 1
                 },
-                "failed assertion at index {}", i
+                "failed assertion at index {}",
+                i
             );
             assert!(pool_store.pending_pools.get(&pool_ids[i]).is_none());
         }
 
-        assert!(pool_store.pools.get(&stand_alone_token_registration.pool_id).is_none());
+        assert!(pool_store
+            .pools
+            .get(&stand_alone_token_registration.pool_id)
+            .is_none());
         assert_eq!(
-            pool_store.pending_pools.get(&stand_alone_token_registration.pool_id).unwrap(),
+            pool_store
+                .pending_pools
+                .get(&stand_alone_token_registration.pool_id)
+                .unwrap(),
             &WeightedPoolBuilder {
                 pool_registration: None,
                 tokens_registration: Some(stand_alone_token_registration),
@@ -453,9 +469,15 @@ mod tests {
             },
         );
 
-        assert!(pool_store.pools.get(&stand_alone_pool_registration.pool_id).is_none());
+        assert!(pool_store
+            .pools
+            .get(&stand_alone_pool_registration.pool_id)
+            .is_none());
         assert_eq!(
-            pool_store.pending_pools.get(&stand_alone_pool_registration.pool_id).unwrap(),
+            pool_store
+                .pending_pools
+                .get(&stand_alone_pool_registration.pool_id)
+                .unwrap(),
             &WeightedPoolBuilder {
                 pool_registration: Some(stand_alone_pool_registration),
                 tokens_registration: None,
@@ -581,12 +603,7 @@ mod tests {
             assert!(pool_store.pools.get(pool_id).is_none());
         }
         for token in tokens.iter().take(7).skip(4) {
-            assert!(
-                pool_store
-                .pools_by_token
-                .get(token)
-                .unwrap()
-                .is_empty());
+            assert!(pool_store.pools_by_token.get(token).unwrap().is_empty());
         }
 
         // All new data is included.
