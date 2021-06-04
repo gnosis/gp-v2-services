@@ -57,6 +57,8 @@ pub struct WeightedPool {
 pub struct WeightedPoolBuilder {
     pool_registration: Option<PoolRegistered>,
     tokens_registration: Option<TokensRegistered>,
+    /// Both Pool and Tokens Registered events are emitted in the same transaction
+    /// block_number is only contained in the EventIndex
     block_created: u64,
 }
 
@@ -249,7 +251,6 @@ impl BalancerPools {
                 };
                 match data {
                     ContractEvent::PoolRegistered(event) => {
-                        // Technically this is only needed for pool_address
                         Some(convert_pool_registered(&event, &meta))
                     }
                     ContractEvent::TokensRegistered(event) => {
