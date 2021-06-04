@@ -279,18 +279,11 @@ impl BalancerEventUpdater {
         let deployment_block = match contract.deployment_information() {
             Some(DeploymentInformation::BlockNumber(block_number)) => Some(block_number),
             Some(DeploymentInformation::TransactionHash(hash)) => {
-                match contract
+                contract
                     .raw_instance()
                     .web3()
                     .block_number_from_tx_hash(hash)
-                    .await
-                {
-                    Ok(block_number) => Some(block_number),
-                    Err(err) => {
-                        tracing::warn!("no deployment block for hash {}: {}", hash, err);
-                        None
-                    }
-                }
+                    .await?
             }
             None => None,
         };
