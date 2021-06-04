@@ -561,6 +561,7 @@ components:
           type: string
           enum:
             [
+              WrongOwner,
               DuplicateOrder,
               InvalidSignature,
               MissingOrderData,
@@ -568,7 +569,7 @@ components:
               InsufficientFunds,
               InsufficientFee,
               UnsupportedToken,
-              WrongOwner,
+              TransferEthToContract,
             ]
         description:
           type: string
