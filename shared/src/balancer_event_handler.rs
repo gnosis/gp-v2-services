@@ -17,7 +17,6 @@ use contracts::{
 };
 use ethcontract::common::DeploymentInformation;
 use ethcontract::{dyns::DynWeb3, Event as EthContractEvent, EventMetadata, H160, H256};
-use std::convert::TryInto;
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
@@ -63,21 +62,20 @@ pub struct WeightedPoolBuilder {
     block_created: u64,
 }
 
-impl TryInto<WeightedPool> for WeightedPoolBuilder {
-    type Error = ();
-
-    fn try_into(self) -> Result<WeightedPool, Self::Error> {
-        if self.pool_registration.is_some() && self.tokens_registration.is_some() {
-            let pool_data = self.pool_registration.as_ref().unwrap();
-            return Ok(WeightedPool {
-                pool_id: pool_data.pool_id,
-                pool_address: pool_data.pool_address,
-                tokens: self.tokens_registration.clone().unwrap().tokens,
-                specialization: pool_data.specialization,
+impl WeightedPoolBuilder {
+    fn into_pool(self) -> Option<WeightedPool> {
+        if let (Some(pool_registration), Some(tokens_registration)) =
+            (self.pool_registration, self.tokens_registration)
+        {
+            return Some(WeightedPool {
+                pool_id: pool_registration.pool_id,
+                pool_address: pool_registration.pool_address,
+                tokens: tokens_registration.tokens,
+                specialization: pool_registration.specialization,
                 block_created: self.block_created,
             });
         }
-        Err(())
+        None
     }
 }
 
@@ -123,24 +121,19 @@ impl PoolSpecialization {
 }
 
 impl BalancerPools {
-    fn try_upgrade(&mut self, pool_builder: WeightedPoolBuilder) {
-        match pool_builder.clone().try_into() {
-            Ok(weighted_pool) => {
-                let token_registration = pool_builder.tokens_registration.expect("known to exist");
+    fn try_upgrade(&mut self) {
+        for (pool_id, pool_builder) in self.pending_pools.clone() {
+            if let Some(weighted_pool) = pool_builder.into_pool() {
                 // When upgradable, delete pending pool and add to valid pools
-                let pool_id = token_registration.pool_id;
                 tracing::info!("Upgrading Pool Builder with id {:?}", pool_id);
+                self.pools.insert(pool_id, weighted_pool.clone());
                 self.pending_pools.remove(&pool_id);
-                self.pools.insert(pool_id, weighted_pool);
-                for token in token_registration.tokens {
+                for token in weighted_pool.tokens {
                     self.pools_by_token
                         .entry(token)
                         .or_default()
                         .insert(pool_id);
                 }
-            }
-            Err(_) => {
-                tracing::info!("Pool Builder not yet upgradable");
             }
         }
     }
@@ -148,21 +141,17 @@ impl BalancerPools {
     // All insertions happen in one transaction.
     fn insert_events(&mut self, events: Vec<(EventIndex, BalancerEvent)>) -> Result<()> {
         for (index, event) in events {
-            let pool_builder = match event {
+            match event {
                 BalancerEvent::PoolRegistered(event) => self.insert_pool(index, event),
                 BalancerEvent::TokensRegistered(event) => self.insert_token_data(index, event),
             };
             // In the future, when processing TokensDeregistered we may have to downgrade the result.
-            self.try_upgrade(pool_builder)
+            self.try_upgrade();
         }
         Ok(())
     }
 
-    fn insert_pool(
-        &mut self,
-        index: EventIndex,
-        registration: PoolRegistered,
-    ) -> WeightedPoolBuilder {
+    fn insert_pool(&mut self, index: EventIndex, registration: PoolRegistered) {
         let pool_builder =
             self.pending_pools
                 .entry(registration.pool_id)
@@ -173,14 +162,9 @@ impl BalancerPools {
                 });
         // Whether the entry was there already or not, we set PoolRegistered
         pool_builder.pool_registration = Some(registration);
-        pool_builder.to_owned()
     }
 
-    fn insert_token_data(
-        &mut self,
-        index: EventIndex,
-        registration: TokensRegistered,
-    ) -> WeightedPoolBuilder {
+    fn insert_token_data(&mut self, index: EventIndex, registration: TokensRegistered) {
         let pool_builder =
             self.pending_pools
                 .entry(registration.pool_id)
@@ -191,7 +175,6 @@ impl BalancerPools {
                 });
         // Whether the entry was there already or not, we set TokensRegistered
         pool_builder.tokens_registration = Some(registration);
-        pool_builder.to_owned()
     }
 
     fn replace_events(
@@ -256,10 +239,6 @@ impl BalancerPools {
                     ContractEvent::TokensRegistered(event) => {
                         Some(convert_tokens_registered(&event, &meta))
                     }
-                    // ContractEvent::TokensDeregistered(event) => {
-                    //     tracing::debug!("Tokens Deregistered {:?}", event);
-                    //     None
-                    // }
                     _ => {
                         // TODO - Not processing other events at the moment.
                         // https://github.com/gnosis/gp-v2-services/issues/681
@@ -481,13 +460,13 @@ mod tests {
         assert_eq!(pool_store.pools, HashMap::new());
         assert_eq!(
             pool_store.pending_pools,
-            hashmap! { pool_id => pool_builder.clone() }
+            hashmap! { pool_id => pool_builder }
         );
         assert_eq!(pool_store.pools_by_token, HashMap::new());
 
         // The remaining assertions go a bit beyond scope of this test.
         // namely testing try_upgrade on success.
-        pool_store.try_upgrade(pool_builder);
+        pool_store.try_upgrade();
 
         // update expected state
         let weighted_pool = WeightedPool {
@@ -536,6 +515,72 @@ mod tests {
                 .get(&setup.tokens[i + 1])
                 .unwrap()
                 .is_empty());
+        }
+    }
+
+    struct BalancerPoolSetup {
+        pool_ids: Vec<H256>,
+        pool_addresses: Vec<H160>,
+        tokens: Vec<H160>,
+        specializations: Vec<PoolSpecialization>,
+        pool_store: BalancerPools,
+    }
+
+    fn dummy_balancer_setup(start_block: usize, end_block: usize) -> BalancerPoolSetup {
+        let pool_ids: Vec<H256> = (start_block..end_block + 1)
+            .map(|i| H256::from_low_u64_be(i as u64))
+            .collect();
+        let pool_addresses: Vec<H160> = (start_block..end_block + 1)
+            .map(|i| H160::from_low_u64_be(i as u64))
+            .collect();
+        let tokens: Vec<H160> = (start_block..end_block + 2)
+            .map(|i| H160::from_low_u64_be(i as u64))
+            .collect();
+        let specializations: Vec<PoolSpecialization> = (start_block..end_block + 1)
+            .map(|i| PoolSpecialization::new(i as u8 % 3).unwrap())
+            .collect();
+        let pool_registration_events: Vec<BalancerEvent> = (start_block..end_block + 1)
+            .map(|i| {
+                BalancerEvent::PoolRegistered(PoolRegistered {
+                    pool_id: pool_ids[i],
+                    pool_address: pool_addresses[i],
+                    specialization: specializations[i],
+                })
+            })
+            .collect();
+        let token_registration_events: Vec<BalancerEvent> = (start_block..end_block + 1)
+            .map(|i| {
+                BalancerEvent::TokensRegistered(TokensRegistered {
+                    pool_id: pool_ids[i],
+                    tokens: vec![tokens[i], tokens[i + 1]],
+                })
+            })
+            .collect();
+
+        let balancer_events: Vec<(EventIndex, BalancerEvent)> = (start_block..end_block + 1)
+            .map(|i| {
+                vec![
+                    (
+                        EventIndex::new(i as u64, 0),
+                        pool_registration_events[i].clone(),
+                    ),
+                    (
+                        EventIndex::new(i as u64, 1),
+                        token_registration_events[i].clone(),
+                    ),
+                ]
+            })
+            .flatten()
+            .collect();
+
+        let mut pool_store = BalancerPools::default();
+        pool_store.insert_events(balancer_events).unwrap();
+        BalancerPoolSetup {
+            pool_ids,
+            pool_addresses,
+            tokens,
+            specializations,
+            pool_store,
         }
     }
 
@@ -633,72 +678,6 @@ mod tests {
                 block_created: 3
             }
         );
-    }
-
-    struct BalancerPoolSetup {
-        pool_ids: Vec<H256>,
-        pool_addresses: Vec<H160>,
-        tokens: Vec<H160>,
-        specializations: Vec<PoolSpecialization>,
-        pool_store: BalancerPools,
-    }
-
-    fn dummy_balancer_setup(start_block: usize, end_block: usize) -> BalancerPoolSetup {
-        let pool_ids: Vec<H256> = (start_block..end_block + 1)
-            .map(|i| H256::from_low_u64_be(i as u64))
-            .collect();
-        let pool_addresses: Vec<H160> = (start_block..end_block + 1)
-            .map(|i| H160::from_low_u64_be(i as u64))
-            .collect();
-        let tokens: Vec<H160> = (start_block..end_block + 2)
-            .map(|i| H160::from_low_u64_be(i as u64))
-            .collect();
-        let specializations: Vec<PoolSpecialization> = (start_block..end_block + 1)
-            .map(|i| PoolSpecialization::new(i as u8 % 3).unwrap())
-            .collect();
-        let pool_registration_events: Vec<BalancerEvent> = (start_block..end_block + 1)
-            .map(|i| {
-                BalancerEvent::PoolRegistered(PoolRegistered {
-                    pool_id: pool_ids[i],
-                    pool_address: pool_addresses[i],
-                    specialization: specializations[i],
-                })
-            })
-            .collect();
-        let token_registration_events: Vec<BalancerEvent> = (start_block..end_block + 1)
-            .map(|i| {
-                BalancerEvent::TokensRegistered(TokensRegistered {
-                    pool_id: pool_ids[i],
-                    tokens: vec![tokens[i], tokens[i + 1]],
-                })
-            })
-            .collect();
-
-        let balancer_events: Vec<(EventIndex, BalancerEvent)> = (start_block..end_block + 1)
-            .map(|i| {
-                vec![
-                    (
-                        EventIndex::new(i as u64, 0),
-                        pool_registration_events[i].clone(),
-                    ),
-                    (
-                        EventIndex::new(i as u64, 1),
-                        token_registration_events[i].clone(),
-                    ),
-                ]
-            })
-            .flatten()
-            .collect();
-
-        let mut pool_store = BalancerPools::default();
-        pool_store.insert_events(balancer_events).unwrap();
-        BalancerPoolSetup {
-            pool_ids,
-            pool_addresses,
-            tokens,
-            specializations,
-            pool_store,
-        }
     }
 
     #[test]
