@@ -275,24 +275,24 @@ pub struct BalancerEventUpdater(
 );
 
 impl BalancerEventUpdater {
-    pub async fn new(contract: BalancerV2Vault, pools: BalancerPools) -> Self {
+    pub async fn new(contract: BalancerV2Vault, pools: BalancerPools) -> Result<Self> {
         let deployment_block = match contract.deployment_information() {
             Some(DeploymentInformation::BlockNumber(block_number)) => Some(block_number),
-            Some(DeploymentInformation::TransactionHash(hash)) => {
+            Some(DeploymentInformation::TransactionHash(hash)) => Some(
                 contract
                     .raw_instance()
                     .web3()
                     .block_number_from_tx_hash(hash)
-                    .await?
-            }
+                    .await?,
+            ),
             None => None,
         };
-        Self(Mutex::new(EventHandler::new(
+        Ok(Self(Mutex::new(EventHandler::new(
             contract.raw_instance().web3(),
             BalancerV2VaultContract(contract),
             pools,
             deployment_block,
-        )))
+        ))))
     }
 }
 
