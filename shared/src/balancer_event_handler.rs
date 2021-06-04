@@ -77,7 +77,6 @@ impl TryInto<WeightedPool> for WeightedPoolBuilder {
                 block_created: self.block_created,
             });
         }
-        // TODO - make an error enum for this.
         Err(())
     }
 }
