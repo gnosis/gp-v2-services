@@ -1,3 +1,6 @@
+//! Module containting traits for abstracting Web3 operations so components can
+//! more easily be tested with mocked versions of these behaviours.
+
 use crate::Web3;
 use anyhow::Result;
 use ethcontract::H160;

@@ -14,8 +14,8 @@ use model::{
 };
 use primitive_types::{H160, U256};
 use shared::{
-    bad_token::BadTokenDetecting, code::CodeFetching, maintenance::Maintaining,
-    time::now_in_epoch_seconds,
+    bad_token::BadTokenDetecting, maintenance::Maintaining, time::now_in_epoch_seconds,
+    web3_traits::CodeFetching,
 };
 use std::{
     collections::{HashMap, HashSet},
