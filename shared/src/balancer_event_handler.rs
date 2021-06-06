@@ -145,9 +145,9 @@ impl BalancerPools {
                 BalancerEvent::PoolRegistered(event) => self.insert_pool(index, event),
                 BalancerEvent::TokensRegistered(event) => self.insert_token_data(index, event),
             };
-            // In the future, when processing TokensDeregistered we may have to downgrade the result.
-            self.try_upgrade();
         }
+        // In the future, when processing TokensDeregistered we may have to downgrade the result.
+        self.try_upgrade();
         Ok(())
     }
 
