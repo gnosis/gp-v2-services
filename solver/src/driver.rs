@@ -312,9 +312,9 @@ impl Driver {
         futures::stream::iter(settlements)
             .filter_map(|settlement| async {
                 let surplus = settlement.settlement.total_surplus(prices);
-                // Given the fee discount the solver fees by themselves may not be sufficient to make a solution economically viable (leading to a negative objective value)
+                // Because of a potential fee discount, the solver fees may by themselves not be sufficient to make a solution economically viable (leading to a negative objective value)
                 // We therefore reverse apply the fee discount to simulate unsubsidized fees for ranking.
-                let solver_fees = settlement.settlement.total_fees(prices) / BigRational::from_float(self.fee_discount_factor).expect("Discount factor is not a rational");
+                let unsubsidized_solver_fees = settlement.settlement.total_fees(prices) / BigRational::from_float(self.fee_discount_factor).expect("Discount factor is not a rational");
                 let gas_estimate = settlement_submission::estimate_gas(
                     &self.settlement_contract,
                     &settlement.settlement.clone().into(),
@@ -325,7 +325,7 @@ impl Driver {
                 let rated_settlement = RatedSettlement {
                     settlement,
                     surplus,
-                    solver_fees,
+                    solver_fees: unsubsidized_solver_fees,
                     gas_estimate,
                     gas_price: gas_price_wei.clone(),
                 };
