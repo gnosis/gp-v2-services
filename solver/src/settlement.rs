@@ -46,17 +46,19 @@ impl Trade {
         }
     }
 
-    // Returns the relative fee amount given the executed amount
+    // Returns the executed fee amount (prorated of executed amount)
     // cf. https://github.com/gnosis/gp-v2-contracts/blob/964f1eb76f366f652db7f4c2cb5ff9bfa26eb2cd/src/contracts/GPv2Settlement.sol#L370-L371
-    pub fn fee(&self) -> U256 {
+    pub fn executed_fee(&self) -> Option<U256> {
         let order = self.order.order_creation;
         match order.kind {
-            model::order::OrderKind::Buy => {
-                order.fee_amount * self.executed_amount / order.buy_amount
-            }
-            model::order::OrderKind::Sell => {
-                order.fee_amount * self.executed_amount / order.sell_amount
-            }
+            model::order::OrderKind::Buy => order
+                .fee_amount
+                .checked_mul(self.executed_amount)?
+                .checked_div(order.buy_amount),
+            model::order::OrderKind::Sell => order
+                .fee_amount
+                .checked_mul(self.executed_amount)?
+                .checked_div(order.sell_amount),
         }
     }
 
@@ -168,7 +170,7 @@ impl Settlement {
             .filter_map(|trade| {
                 let fee_token_price =
                     external_prices.get(&trade.order.order_creation.sell_token)?;
-                Some(trade.fee().to_big_rational() * fee_token_price)
+                Some(trade.executed_fee()?.to_big_rational() * fee_token_price)
             })
             .sum()
     }
@@ -552,7 +554,7 @@ pub mod tests {
             executed_amount: 100.into(),
             ..Default::default()
         };
-        assert_eq!(fully_filled_sell.fee(), 5.into());
+        assert_eq!(fully_filled_sell.executed_fee().unwrap(), 5.into());
 
         let partially_filled_sell = Trade {
             order: Order {
@@ -567,7 +569,7 @@ pub mod tests {
             executed_amount: 50.into(),
             ..Default::default()
         };
-        assert_eq!(partially_filled_sell.fee(), 2.into());
+        assert_eq!(partially_filled_sell.executed_fee().unwrap(), 2.into());
 
         let fully_filled_buy = Trade {
             order: Order {
@@ -582,7 +584,7 @@ pub mod tests {
             executed_amount: 100.into(),
             ..Default::default()
         };
-        assert_eq!(fully_filled_buy.fee(), 5.into());
+        assert_eq!(fully_filled_buy.executed_fee().unwrap(), 5.into());
 
         let partially_filled_buy = Trade {
             order: Order {
@@ -597,7 +599,40 @@ pub mod tests {
             executed_amount: 50.into(),
             ..Default::default()
         };
-        assert_eq!(partially_filled_buy.fee(), 2.into());
+        assert_eq!(partially_filled_buy.executed_fee().unwrap(), 2.into());
+    }
+
+    #[test]
+    fn test_trade_fee_overflow() {
+        let large_amounts = Trade {
+            order: Order {
+                order_creation: OrderCreation {
+                    sell_amount: U256::max_value(),
+                    fee_amount: U256::max_value(),
+                    kind: OrderKind::Sell,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            executed_amount: U256::max_value(),
+            ..Default::default()
+        };
+        assert_eq!(large_amounts.executed_fee(), None);
+
+        let zero_amounts = Trade {
+            order: Order {
+                order_creation: OrderCreation {
+                    sell_amount: U256::zero(),
+                    fee_amount: U256::zero(),
+                    kind: OrderKind::Sell,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            executed_amount: U256::zero(),
+            ..Default::default()
+        };
+        assert_eq!(zero_amounts.executed_fee(), None);
     }
 
     #[test]
@@ -638,8 +673,8 @@ pub mod tests {
         let external_prices = maplit::hashmap! {token0 => BigRational::from_integer(5.into()), token1 => BigRational::from_integer(10.into())};
 
         // Fee in sell tokens
-        assert_eq!(trade0.fee(), 5.into());
-        assert_eq!(trade1.fee(), 2.into());
+        assert_eq!(trade0.executed_fee().unwrap(), 5.into());
+        assert_eq!(trade1.executed_fee().unwrap(), 2.into());
 
         // Fee in wei of ETH
         let settlement = test_settlement(clearing_prices, vec![trade0, trade1]);
