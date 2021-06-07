@@ -5,10 +5,10 @@ use crate::{
         token_path_to_pair_path,
     },
     conversions::U256Ext,
-    pool_fetching::{Pool, PoolFetching},
+    pool_fetching::{Block, Pool, PoolFetching},
 };
 use anyhow::{anyhow, Result};
-use ethcontract::{BlockNumber, H160, U256};
+use ethcontract::{H160, U256};
 use futures::future::join_all;
 use gas_estimation::GasPriceEstimating;
 use model::{order::OrderKind, TokenPair};
@@ -89,7 +89,7 @@ pub trait PriceEstimating: Send + Sync {
 }
 
 pub struct BaselinePriceEstimator {
-    pool_fetcher: Box<dyn PoolFetching>,
+    pool_fetcher: Arc<dyn PoolFetching>,
     gas_estimator: Arc<dyn GasPriceEstimating>,
     base_tokens: HashSet<H160>,
     bad_token_detector: Arc<dyn BadTokenDetecting>,
@@ -98,7 +98,7 @@ pub struct BaselinePriceEstimator {
 
 impl BaselinePriceEstimator {
     pub fn new(
-        pool_fetcher: Box<dyn PoolFetching>,
+        pool_fetcher: Arc<dyn PoolFetching>,
         gas_estimator: Arc<dyn GasPriceEstimating>,
         base_tokens: HashSet<H160>,
         bad_token_detector: Arc<dyn BadTokenDetecting>,
@@ -320,7 +320,7 @@ impl BaselinePriceEstimator {
             .collect();
         let pools = self
             .pool_fetcher
-            .fetch(all_pairs, BlockNumber::Latest)
+            .fetch(all_pairs, Block::Recent)
             .await?
             .into_iter()
             .fold(HashMap::<_, Vec<Pool>>::new(), |mut pools, pool| {
@@ -415,11 +415,7 @@ mod tests {
     struct FakePoolFetcher(Vec<Pool>);
     #[async_trait::async_trait]
     impl PoolFetching for FakePoolFetcher {
-        async fn fetch(
-            &self,
-            token_pairs: HashSet<TokenPair>,
-            _: BlockNumber,
-        ) -> Result<Vec<Pool>> {
+        async fn fetch(&self, token_pairs: HashSet<TokenPair>, _: Block) -> Result<Vec<Pool>> {
             Ok(self
                 .0
                 .clone()
@@ -438,7 +434,7 @@ mod tests {
             (10u128.pow(30), 10u128.pow(29)),
         );
 
-        let pool_fetcher = Box::new(FakePoolFetcher(vec![pool]));
+        let pool_fetcher = Arc::new(FakePoolFetcher(vec![pool]));
         let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
         let estimator = BaselinePriceEstimator::new(
             pool_fetcher,
@@ -505,7 +501,7 @@ mod tests {
             (10u128.pow(30), 10u128.pow(29)),
         );
 
-        let pool_fetcher = Box::new(FakePoolFetcher(vec![pool]));
+        let pool_fetcher = Arc::new(FakePoolFetcher(vec![pool]));
         let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
         let estimator = BaselinePriceEstimator::new(
             pool_fetcher,
@@ -539,7 +535,7 @@ mod tests {
             (10u128.pow(30), 10u128.pow(29)),
         );
 
-        let pool_fetcher = Box::new(FakePoolFetcher(vec![pool_ab, pool_bc]));
+        let pool_fetcher = Arc::new(FakePoolFetcher(vec![pool_ab, pool_bc]));
         let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
         let estimator = BaselinePriceEstimator::new(
             pool_fetcher,
@@ -564,7 +560,7 @@ mod tests {
     async fn return_error_if_no_token_found() {
         let token_a = H160::from_low_u64_be(1);
         let token_b = H160::from_low_u64_be(2);
-        let pool_fetcher = Box::new(FakePoolFetcher(vec![]));
+        let pool_fetcher = Arc::new(FakePoolFetcher(vec![]));
         let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
         let estimator = BaselinePriceEstimator::new(
             pool_fetcher,
@@ -588,11 +584,11 @@ mod tests {
             TokenPair::new(token_a, token_b).unwrap(),
             (10u128.pow(30), 10u128.pow(29)),
         );
-        let pool_fetcher = FakePoolFetcher(vec![pool_ab]);
+        let pool_fetcher = Arc::new(FakePoolFetcher(vec![pool_ab]));
         let bad_token = Arc::new(ListBasedDetector::deny_list(vec![token_a]));
         let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
         let estimator = BaselinePriceEstimator::new(
-            Box::new(pool_fetcher),
+            pool_fetcher,
             gas_estimator,
             hashset!(),
             bad_token,
@@ -623,7 +619,7 @@ mod tests {
         let token_b = H160::from_low_u64_be(2);
         let pool = Pool::uniswap(TokenPair::new(token_a, token_b).unwrap(), (0, 10));
 
-        let pool_fetcher = Box::new(FakePoolFetcher(vec![pool]));
+        let pool_fetcher = Arc::new(FakePoolFetcher(vec![pool]));
         let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
         let estimator = BaselinePriceEstimator::new(
             pool_fetcher,
@@ -652,7 +648,7 @@ mod tests {
             (10u128.pow(30), 10u128.pow(29)),
         );
 
-        let pool_fetcher = Box::new(FakePoolFetcher(vec![pool]));
+        let pool_fetcher = Arc::new(FakePoolFetcher(vec![pool]));
         let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
         let estimator = BaselinePriceEstimator::new(
             pool_fetcher,
@@ -701,7 +697,7 @@ mod tests {
             Pool::uniswap(TokenPair::new(token_a, token_b).unwrap(), (100_000, 90_000)),
         ];
 
-        let pool_fetcher = Box::new(FakePoolFetcher(pools.clone()));
+        let pool_fetcher = Arc::new(FakePoolFetcher(pools.clone()));
         let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
         let estimator = BaselinePriceEstimator::new(
             pool_fetcher,
@@ -739,7 +735,7 @@ mod tests {
             Pool::uniswap(TokenPair::new(intermediate, token_b).unwrap(), (900, 1000)),
         ];
 
-        let pool_fetcher = Box::new(FakePoolFetcher(pools));
+        let pool_fetcher = Arc::new(FakePoolFetcher(pools));
         let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
         let estimator = BaselinePriceEstimator::new(
             pool_fetcher,
@@ -777,7 +773,7 @@ mod tests {
         let supported_token = H160::from_low_u64_be(1);
         let unsupported_token = H160::from_low_u64_be(2);
 
-        let pool_fetcher = Box::new(FakePoolFetcher(Vec::new()));
+        let pool_fetcher = Arc::new(FakePoolFetcher(Vec::new()));
         let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
         let estimator = BaselinePriceEstimator::new(
             pool_fetcher,
@@ -839,7 +835,7 @@ mod tests {
             ),
         ];
 
-        let pool_fetcher = Box::new(FakePoolFetcher(pools.clone()));
+        let pool_fetcher = Arc::new(FakePoolFetcher(pools.clone()));
         let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(100.0))));
         let estimator = BaselinePriceEstimator::new(
             pool_fetcher,
@@ -868,7 +864,7 @@ mod tests {
         );
 
         // Now with a cheap gas price
-        let pool_fetcher = Box::new(FakePoolFetcher(pools));
+        let pool_fetcher = Arc::new(FakePoolFetcher(pools));
         let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0))));
         let estimator = BaselinePriceEstimator::new(
             pool_fetcher,

@@ -5,9 +5,13 @@ use reqwest::Url;
 use shared::{
     amm_pair_provider::{SushiswapPairProvider, UniswapPairProvider},
     bad_token::list_based::ListBasedDetector,
+    current_block::current_block_stream,
+    http_transport::HttpTransport,
+    maintenance::ServiceMaintenance,
     metrics::serve_metrics,
     network::network_name,
     pool_aggregating::{self, BaselineSources, PoolAggregator},
+    pool_cache::{PoolCache, PoolCacheConfig},
     price_estimate::BaselinePriceEstimator,
     token_info::{CachedTokenInfoFetcher, TokenInfoFetcher},
     token_list::TokenList,
@@ -154,11 +158,8 @@ async fn main() {
     let metrics = Arc::new(Metrics::new(&registry).expect("Couldn't register metrics"));
 
     // TODO: custom transport that allows setting timeout
-    let transport = create_instrumented_transport(
-        web3::transports::Http::new(args.shared.node_url.as_str())
-            .expect("transport creation failed"),
-        metrics.clone(),
-    );
+    let transport =
+        create_instrumented_transport(HttpTransport::new(args.shared.node_url), metrics.clone());
     let web3 = web3::Web3::new(transport);
     let chain_id = web3
         .eth()
@@ -201,14 +202,34 @@ async fn main() {
         .expect("failed to create gas price estimator"),
     );
 
+    let current_block_stream =
+        current_block_stream(web3.clone(), args.shared.block_stream_poll_interval_seconds)
+            .await
+            .unwrap();
+
     let pair_providers =
         pool_aggregating::pair_providers(&args.shared.baseline_sources, chain_id, &web3).await;
-
     let pool_aggregator = PoolAggregator::from_providers(&pair_providers, &web3).await;
+    let pool_fetcher = Arc::new(
+        PoolCache::new(
+            PoolCacheConfig {
+                number_of_blocks_to_cache: args.shared.pool_cache_blocks,
+                // 0 because we don't make use of the auto update functionality as we always fetch
+                // for specific blocks
+                number_of_pairs_to_auto_update: 0,
+                maximum_recent_block_age: args.shared.pool_cache_maximum_recent_block_age,
+                max_retries: args.shared.pool_cache_maximum_retries,
+                delay_between_retries: args.shared.pool_cache_delay_between_retries_seconds,
+            },
+            Box::new(pool_aggregator),
+            current_block_stream.clone(),
+            metrics.clone(),
+        )
+        .expect("failed to create pool cache"),
+    );
 
-    // TODO: use caching pool fetcher
     let price_estimator = Arc::new(BaselinePriceEstimator::new(
-        Box::new(pool_aggregator),
+        pool_fetcher.clone(),
         gas_price_estimator.clone(),
         base_tokens.clone(),
         // Order book already filters bad tokens
@@ -264,7 +285,13 @@ async fn main() {
         args.solver_time_limit,
         args.gas_price_cap,
         market_makable_token_list,
+        current_block_stream.clone(),
     );
+
+    let maintainer = ServiceMaintenance {
+        maintainers: vec![pool_fetcher],
+    };
+    tokio::task::spawn(maintainer.run_maintenance_on_new_block(current_block_stream));
 
     serve_metrics(registry, ([0, 0, 0, 0], args.metrics_port).into());
     driver.run_forever().await;

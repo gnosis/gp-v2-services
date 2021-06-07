@@ -21,9 +21,10 @@ use shared::{
         trace_call::TraceCallDetector,
     },
     current_block::current_block_stream,
+    http_transport::HttpTransport,
     maintenance::ServiceMaintenance,
     pool_aggregating::{self, PoolAggregator},
-    pool_fetching::CachedPoolFetcher,
+    pool_cache::{PoolCache, PoolCacheConfig},
     price_estimate::BaselinePriceEstimator,
     transport::create_instrumented_transport,
 };
@@ -88,14 +89,9 @@ struct Arguments {
     #[structopt(long, env = "ALLOWED_TOKENS", use_delimiter = true)]
     pub allowed_tokens: Vec<H160>,
 
-    /// The amount of time a classification of a token into good or bad is valid for.
-    #[structopt(
-        long,
-        env,
-        default_value = "5",
-        parse(try_from_str = shared::arguments::duration_from_seconds),
-    )]
-    block_stream_poll_interval_seconds: Duration,
+    /// The number of pairs that are automatically updated in the pool cache.
+    #[structopt(long, env, default_value = "200")]
+    pub pool_cache_lru_size: usize,
 }
 
 pub async fn database_metrics(metrics: Arc<Metrics>, database: Database) -> ! {
@@ -121,11 +117,8 @@ async fn main() {
     let registry = Registry::default();
     let metrics = Arc::new(Metrics::new(&registry).unwrap());
 
-    let transport = create_instrumented_transport(
-        web3::transports::Http::new(args.shared.node_url.as_str())
-            .expect("transport creation failed"),
-        metrics.clone(),
-    );
+    let transport =
+        create_instrumented_transport(HttpTransport::new(args.shared.node_url), metrics.clone());
     let web3 = web3::Web3::new(transport);
     let settlement_contract = GPv2Settlement::deployed(&web3)
         .await
@@ -209,16 +202,29 @@ async fn main() {
     ));
 
     let current_block_stream =
-        current_block_stream(web3.clone(), args.block_stream_poll_interval_seconds)
+        current_block_stream(web3.clone(), args.shared.block_stream_poll_interval_seconds)
             .await
             .unwrap();
 
     let pool_aggregator = PoolAggregator::from_providers(&pair_providers, &web3).await;
-    let pool_fetcher =
-        CachedPoolFetcher::new(Box::new(pool_aggregator), current_block_stream.clone());
+    let pool_fetcher = Arc::new(
+        PoolCache::new(
+            PoolCacheConfig {
+                number_of_blocks_to_cache: args.shared.pool_cache_blocks,
+                number_of_pairs_to_auto_update: args.pool_cache_lru_size,
+                maximum_recent_block_age: args.shared.pool_cache_maximum_recent_block_age,
+                max_retries: args.shared.pool_cache_maximum_retries,
+                delay_between_retries: args.shared.pool_cache_delay_between_retries_seconds,
+            },
+            Box::new(pool_aggregator),
+            current_block_stream.clone(),
+            metrics.clone(),
+        )
+        .expect("failed to create pool cache"),
+    );
 
     let price_estimator = Arc::new(BaselinePriceEstimator::new(
-        Box::new(pool_fetcher),
+        pool_fetcher.clone(),
         gas_price_estimator.clone(),
         base_tokens,
         bad_token_detector.clone(),
@@ -240,12 +246,14 @@ async fn main() {
         fee_calculator.clone(),
         args.min_order_validity_period,
         bad_token_detector,
+        Box::new(web3.clone()),
     ));
     let service_maintainer = ServiceMaintenance {
         maintainers: vec![
             orderbook.clone(),
             Arc::new(database.clone()),
             Arc::new(event_updater),
+            pool_fetcher,
         ],
     };
     check_database_connection(orderbook.as_ref()).await;

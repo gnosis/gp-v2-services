@@ -12,14 +12,15 @@ use prometheus::Registry;
 use shared::{
     amm_pair_provider::UniswapPairProvider,
     bad_token::list_based::ListBasedDetector,
-    current_block::current_block_stream,
+    current_block::{current_block_stream, CurrentBlockStream},
     maintenance::ServiceMaintenance,
-    pool_fetching::{CachedPoolFetcher, PoolFetcher},
+    pool_cache::{PoolCache, PoolCacheConfig},
+    pool_fetching::PoolFetcher,
     price_estimate::BaselinePriceEstimator,
     Web3,
 };
 use solver::orderbook::OrderBookApi;
-use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::HashSet, num::NonZeroU64, str::FromStr, sync::Arc, time::Duration};
 
 pub const API_HOST: &str = "http://127.0.0.1:8080";
 
@@ -115,6 +116,7 @@ pub async fn deploy_mintable_token(web3: &Web3) -> ERC20Mintable {
 pub struct OrderbookServices {
     pub price_estimator: Arc<BaselinePriceEstimator>,
     pub maintenance: ServiceMaintenance,
+    pub block_stream: CurrentBlockStream,
 }
 impl OrderbookServices {
     pub async fn new(
@@ -123,6 +125,8 @@ impl OrderbookServices {
         uniswap_factory: &UniswapV2Factory,
         native_token: H160,
     ) -> Self {
+        let registry = Registry::default();
+        let metrics = Arc::new(Metrics::new(&registry).unwrap());
         let chain_id = web3
             .eth()
             .chain_id()
@@ -132,24 +136,32 @@ impl OrderbookServices {
         let db = Database::new("postgresql://").unwrap();
         db.clear().await.unwrap();
         let event_updater = Arc::new(EventUpdater::new(gpv2.settlement.clone(), db.clone(), None));
-        let current_block_stream = current_block_stream(web3.clone(), Duration::from_secs(1))
-            .await
-            .unwrap();
         let pair_provider = Arc::new(UniswapPairProvider {
             factory: uniswap_factory.clone(),
             chain_id,
         });
-        let pool_fetcher = CachedPoolFetcher::new(
+        let current_block_stream = current_block_stream(web3.clone(), Duration::from_secs(5))
+            .await
+            .unwrap();
+        let pool_fetcher = PoolCache::new(
+            PoolCacheConfig {
+                number_of_blocks_to_cache: NonZeroU64::new(10).unwrap(),
+                number_of_pairs_to_auto_update: 20,
+                maximum_recent_block_age: 4,
+                ..Default::default()
+            },
             Box::new(PoolFetcher {
                 pair_provider,
                 web3: web3.clone(),
             }),
-            current_block_stream,
-        );
+            current_block_stream.clone(),
+            metrics.clone(),
+        )
+        .unwrap();
         let gas_estimator = Arc::new(web3.clone());
         let bad_token_detector = Arc::new(ListBasedDetector::deny_list(Vec::new()));
         let price_estimator = Arc::new(BaselinePriceEstimator::new(
-            Box::new(pool_fetcher),
+            Arc::new(pool_fetcher),
             gas_estimator.clone(),
             HashSet::new(),
             bad_token_detector.clone(),
@@ -174,12 +186,11 @@ impl OrderbookServices {
             fee_calculator.clone(),
             Duration::from_secs(120),
             bad_token_detector,
+            Box::new(web3.clone()),
         ));
         let maintenance = ServiceMaintenance {
             maintainers: vec![orderbook.clone(), Arc::new(db.clone()), event_updater],
         };
-        let registry = Registry::default();
-        let metrics = Arc::new(Metrics::new(&registry).unwrap());
         orderbook::serve_task(
             db.clone(),
             orderbook,
@@ -193,6 +204,7 @@ impl OrderbookServices {
         Self {
             price_estimator,
             maintenance,
+            block_stream: current_block_stream,
         }
     }
 }
