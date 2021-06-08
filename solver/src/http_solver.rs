@@ -321,7 +321,12 @@ impl HttpSolver {
 
     pub fn generate_instance_name(network_id: &str, chain_id: u64) -> String {
         let now = chrono::offset::Utc::now();
-        format!("{}_{}_{}", now.to_string().replace(" ", "_"), network_id, chain_id)
+        format!(
+            "{}_{}_{}",
+            now.to_string().replace(" ", "_"),
+            network_id,
+            chain_id
+        )
     }
 }
 
