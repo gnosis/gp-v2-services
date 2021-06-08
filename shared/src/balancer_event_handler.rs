@@ -3,6 +3,7 @@ use crate::{
     event_handling::{BlockNumber, EventHandler, EventIndex, EventStoring},
     impl_event_retrieving,
     maintenance::Maintaining,
+    Web3,
 };
 use anyhow::{anyhow, Context, Result};
 use contracts::{
@@ -13,10 +14,12 @@ use contracts::{
         },
         Event as ContractEvent,
     },
-    BalancerV2Vault,
+    BalancerV2Vault, BalancerV2WeightedPool,
 };
+use derivative::Derivative;
 use ethcontract::common::DeploymentInformation;
-use ethcontract::{dyns::DynWeb3, Event as EthContractEvent, EventMetadata, H160, H256};
+use ethcontract::{dyns::DynWeb3, Event as EthContractEvent, EventMetadata, H160, H256, U256};
+use mockall::*;
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
@@ -48,6 +51,7 @@ pub struct WeightedPool {
     pool_id: H256,
     pool_address: H160,
     tokens: Vec<H160>,
+    normalized_weights: Vec<U256>,
     specialization: PoolSpecialization,
     block_created: u64,
 }
@@ -63,24 +67,53 @@ pub struct WeightedPoolBuilder {
 }
 
 impl WeightedPoolBuilder {
-    fn into_pool(self) -> Option<WeightedPool> {
-        if let (Some(pool_registration), Some(tokens_registration)) =
-            (self.pool_registration, self.tokens_registration)
-        {
-            return Some(WeightedPool {
+    async fn into_pool(
+        self,
+        weight_fetcher: &dyn NormalizedWeightFetching,
+    ) -> Result<WeightedPool> {
+        if let (Some(pool_registration), Some(tokens_registration)) = (
+            self.pool_registration.clone(),
+            self.tokens_registration.clone(),
+        ) {
+            return Ok(WeightedPool {
                 pool_id: pool_registration.pool_id,
                 pool_address: pool_registration.pool_address,
                 tokens: tokens_registration.tokens,
+                normalized_weights: weight_fetcher
+                    .get_normalized_weights(pool_registration.pool_address)
+                    .await?,
                 specialization: pool_registration.specialization,
                 block_created: self.block_created,
             });
         }
-        None
+        Err(anyhow!(
+            "Expected pool and token registration events to be emitted together {:?}",
+            self
+        ))
+    }
+}
+
+#[automock]
+#[async_trait::async_trait]
+trait NormalizedWeightFetching: Send + Sync {
+    async fn get_normalized_weights(&self, pool_address: H160) -> Result<Vec<U256>>;
+}
+
+#[async_trait::async_trait]
+impl NormalizedWeightFetching for Web3 {
+    async fn get_normalized_weights(&self, pool_address: H160) -> Result<Vec<U256>> {
+        let pool_contract = BalancerV2WeightedPool::at(self, pool_address);
+        Ok(pool_contract
+            .methods()
+            .get_normalized_weights()
+            .call()
+            .await?)
     }
 }
 
 /// The BalancerPool struct represents in-memory storage of all deployed Balancer Pools
-#[derive(Debug, Default)]
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct BalancerPools {
     /// Used for O(1) access to all pool_ids for a given token
     pools_by_token: HashMap<H160, HashSet<H256>>,
@@ -88,6 +121,8 @@ pub struct BalancerPools {
     pools: HashMap<H256, WeightedPool>,
     /// Temporary storage for WeightedPools containing insufficient constructor data
     pending_pools: HashMap<H256, WeightedPoolBuilder>,
+    #[derivative(Debug = "ignore")]
+    weight_fetcher: Box<dyn NormalizedWeightFetching>,
 }
 
 /// There are three specialization settings for Pools,
@@ -121,25 +156,24 @@ impl PoolSpecialization {
 }
 
 impl BalancerPools {
-    fn try_upgrade(&mut self) {
+    async fn try_upgrade(&mut self) -> Result<()> {
         for (pool_id, pool_builder) in self.pending_pools.clone() {
-            if let Some(weighted_pool) = pool_builder.into_pool() {
-                // When upgradable, delete pending pool and add to valid pools
-                tracing::info!("Upgrading Pool Builder with id {:?}", pool_id);
-                self.pools.insert(pool_id, weighted_pool.clone());
-                self.pending_pools.remove(&pool_id);
-                for token in weighted_pool.tokens {
-                    self.pools_by_token
-                        .entry(token)
-                        .or_default()
-                        .insert(pool_id);
-                }
+            let weighted_pool = pool_builder.into_pool(&*self.weight_fetcher).await?;
+            // delete pending pool and add to valid pools
+            tracing::info!("Upgrading Pool Builder with id {:?}", pool_id);
+            self.pools.insert(pool_id, weighted_pool.clone());
+            self.pending_pools.remove(&pool_id);
+            for token in weighted_pool.tokens {
+                self.pools_by_token
+                    .entry(token)
+                    .or_default()
+                    .insert(pool_id);
             }
         }
+        Ok(())
     }
 
-    // All insertions happen in one transaction.
-    fn insert_events(&mut self, events: Vec<(EventIndex, BalancerEvent)>) -> Result<()> {
+    async fn insert_events(&mut self, events: Vec<(EventIndex, BalancerEvent)>) -> Result<()> {
         for (index, event) in events {
             match event {
                 BalancerEvent::PoolRegistered(event) => self.insert_pool(index, event),
@@ -147,7 +181,7 @@ impl BalancerPools {
             };
         }
         // In the future, when processing TokensDeregistered we may have to downgrade the result.
-        self.try_upgrade();
+        self.try_upgrade().await?;
         Ok(())
     }
 
@@ -177,13 +211,13 @@ impl BalancerPools {
         pool_builder.tokens_registration = Some(registration);
     }
 
-    fn replace_events(
+    async fn replace_events(
         &mut self,
         delete_from_block_number: u64,
         events: Vec<(EventIndex, BalancerEvent)>,
     ) -> Result<()> {
         self.delete_pools(delete_from_block_number)?;
-        self.insert_events(events)?;
+        self.insert_events(events).await?;
         Ok(())
     }
 
@@ -291,7 +325,7 @@ impl EventStoring<ContractEvent> for BalancerPools {
             balancer_events.len(),
             range.start().to_u64()
         );
-        BalancerPools::replace_events(self, 0, balancer_events)?;
+        BalancerPools::replace_events(self, 0, balancer_events).await?;
         Ok(())
     }
 
@@ -299,7 +333,7 @@ impl EventStoring<ContractEvent> for BalancerPools {
         let balancer_events = self
             .contract_to_balancer_events(events)
             .context("failed to convert events")?;
-        self.insert_events(balancer_events)
+        self.insert_events(balancer_events).await
     }
 
     async fn last_event_block(&self) -> Result<u64> {
@@ -349,8 +383,8 @@ mod tests {
     use super::*;
     use maplit::hashset;
 
-    #[test]
-    fn balancer_insert_events() {
+    #[tokio::test]
+    async fn balancer_insert_events() {
         let n = 3usize;
         let pool_ids: Vec<H256> = (0..n).map(|i| H256::from_low_u64_be(i as u64)).collect();
         let pool_addresses: Vec<H160> = (0..n).map(|i| H160::from_low_u64_be(i as u64)).collect();
@@ -378,21 +412,6 @@ mod tests {
             })
             .collect();
 
-        let lonely_pool_registration_index = 2 * n as u64;
-        let stand_alone_pool_registration = PoolRegistered {
-            pool_id: H256::from_low_u64_be(lonely_pool_registration_index),
-            pool_address: H160::from_low_u64_be(lonely_pool_registration_index),
-            specialization: PoolSpecialization::MinimalSwapInfo,
-        };
-        let lonely_token_registration_index = 2 * n as u64 + 1;
-        let stand_alone_token_registration = TokensRegistered {
-            pool_id: H256::from_low_u64_be(lonely_token_registration_index),
-            tokens: vec![
-                H160::from_low_u64_be(lonely_token_registration_index),
-                H160::from_low_u64_be(lonely_token_registration_index + 1),
-            ],
-        };
-
         let events: Vec<(EventIndex, BalancerEvent)> = vec![
             // Block 1 has both Pool and Tokens registered
             (EventIndex::new(1, 0), pool_registration_events[0].clone()),
@@ -404,23 +423,22 @@ mod tests {
             // Next tokens registered in block 3, but corresponding pool not received till block 4
             (EventIndex::new(3, 0), token_registration_events[2].clone()),
             (EventIndex::new(4, 0), pool_registration_events[2].clone()),
-            // Stand alone Token registration
-            (
-                EventIndex::new(5, 0),
-                BalancerEvent::TokensRegistered(stand_alone_token_registration.clone()),
-            ),
-            // Stand along Pool Registration
-            (
-                EventIndex::new(6, 0),
-                BalancerEvent::PoolRegistered(stand_alone_pool_registration.clone()),
-            ),
         ];
 
-        let mut pool_store = BalancerPools::default();
-        pool_store.insert_events(events).unwrap();
+        let mut dummy_weight_fetcher = MockNormalizedWeightFetching::new();
+        dummy_weight_fetcher
+            .expect_get_normalized_weights()
+            .returning(|_| Ok(vec![]));
+        let mut pool_store = BalancerPools {
+            pools_by_token: Default::default(),
+            pools: Default::default(),
+            pending_pools: Default::default(),
+            weight_fetcher: Box::new(dummy_weight_fetcher),
+        };
+        pool_store.insert_events(events).await.unwrap();
         // Note that it is never expected that blocks for events will differ,
         // but in this test block_created for the pool is the first block it receives.
-        assert_eq!(pool_store.last_event_block(), 6);
+        assert_eq!(pool_store.last_event_block(), 3);
         assert_eq!(
             pool_store.pools_by_token.get(&tokens[0]).unwrap(),
             &hashset! { pool_ids[0] }
@@ -444,6 +462,7 @@ mod tests {
                     pool_id: pool_ids[i],
                     pool_address: pool_addresses[i],
                     tokens: vec![tokens[i], tokens[i + 1]],
+                    normalized_weights: vec![],
                     specialization: PoolSpecialization::new(i as u8).unwrap(),
                     block_created: i as u64 + 1
                 },
@@ -452,42 +471,10 @@ mod tests {
             );
             assert!(pool_store.pending_pools.get(&pool_ids[i]).is_none());
         }
-
-        assert!(pool_store
-            .pools
-            .get(&stand_alone_token_registration.pool_id)
-            .is_none());
-        assert_eq!(
-            pool_store
-                .pending_pools
-                .get(&stand_alone_token_registration.pool_id)
-                .unwrap(),
-            &WeightedPoolBuilder {
-                pool_registration: None,
-                tokens_registration: Some(stand_alone_token_registration),
-                block_created: 5
-            },
-        );
-
-        assert!(pool_store
-            .pools
-            .get(&stand_alone_pool_registration.pool_id)
-            .is_none());
-        assert_eq!(
-            pool_store
-                .pending_pools
-                .get(&stand_alone_pool_registration.pool_id)
-                .unwrap(),
-            &WeightedPoolBuilder {
-                pool_registration: Some(stand_alone_pool_registration),
-                tokens_registration: None,
-                block_created: 6
-            },
-        );
     }
 
-    #[test]
-    fn balancer_replace_events() {
+    #[tokio::test]
+    async fn balancer_replace_events() {
         let start_block = 0;
         let end_block = 5;
         // Setup all the variables to initialize Balancer Pool State
@@ -536,23 +523,31 @@ mod tests {
             })
             .flatten()
             .collect();
+        let mut dummy_weight_fetcher = MockNormalizedWeightFetching::new();
 
-        let mut pool_store = BalancerPools::default();
-        pool_store.insert_events(balancer_events).unwrap();
+        dummy_weight_fetcher
+            .expect_get_normalized_weights()
+            .returning(|_| Ok(vec![]));
+        let mut pool_store = BalancerPools {
+            pools_by_token: Default::default(),
+            pools: Default::default(),
+            pending_pools: Default::default(),
+            weight_fetcher: Box::new(dummy_weight_fetcher),
+        };
+        pool_store.insert_events(balancer_events).await.unwrap();
 
         // Let the tests begin!
         assert_eq!(pool_store.last_event_block(), 5);
-        let new_pool_id_a = H256::from_low_u64_be(43110);
-        let new_pool_id_b = H256::from_low_u64_be(1337);
+        let new_pool_id = H256::from_low_u64_be(43110);
         let new_pool_address = H160::zero();
         let new_token = H160::from_low_u64_be(808);
         let new_pool_registration = PoolRegistered {
-            pool_id: new_pool_id_a,
+            pool_id: new_pool_id,
             pool_address: new_pool_address,
             specialization: PoolSpecialization::General,
         };
         let new_token_registration = TokensRegistered {
-            pool_id: new_pool_id_b,
+            pool_id: new_pool_id,
             tokens: vec![new_token],
         };
 
@@ -567,7 +562,10 @@ mod tests {
             ),
         ];
 
-        pool_store.replace_events(3, new_events.clone()).unwrap();
+        pool_store
+            .replace_events(3, new_events.clone())
+            .await
+            .unwrap();
         // Everything until block 3 is unchanged.
         for i in 0..3 {
             assert_eq!(
@@ -576,6 +574,7 @@ mod tests {
                     pool_id: pool_ids[i],
                     pool_address: pool_addresses[i],
                     tokens: vec![tokens[i], tokens[i + 1]],
+                    normalized_weights: vec![],
                     specialization: specializations[i],
                     block_created: i as u64
                 }
@@ -605,26 +604,25 @@ mod tests {
         for token in tokens.iter().take(7).skip(4) {
             assert!(pool_store.pools_by_token.get(token).unwrap().is_empty());
         }
-
+        let new_event_block = new_events[0]
+            .0
+            .block_number
+            .min(new_events[1].0.block_number);
         // All new data is included.
+        assert!(pool_store.pending_pools.get(&new_pool_id).is_none());
         assert_eq!(
-            pool_store.pending_pools.get(&new_pool_id_a).unwrap(),
-            &WeightedPoolBuilder {
-                pool_registration: Some(new_pool_registration),
-                tokens_registration: None,
-                block_created: new_events[0].0.block_number
-            }
-        );
-        assert_eq!(
-            pool_store.pending_pools.get(&new_pool_id_b).unwrap(),
-            &WeightedPoolBuilder {
-                pool_registration: None,
-                tokens_registration: Some(new_token_registration),
-                block_created: new_events[1].0.block_number
+            pool_store.pools.get(&new_pool_id).unwrap(),
+            &WeightedPool {
+                pool_id: new_pool_id,
+                pool_address: new_pool_address,
+                tokens: new_token_registration.tokens,
+                normalized_weights: vec![],
+                specialization: new_pool_registration.specialization,
+                block_created: new_event_block
             }
         );
 
-        assert!(pool_store.pools_by_token.get(&new_token).is_none());
-        assert_eq!(pool_store.last_event_block(), 4);
+        assert!(pool_store.pools_by_token.get(&new_token).is_some());
+        assert_eq!(pool_store.last_event_block(), new_event_block);
     }
 }
