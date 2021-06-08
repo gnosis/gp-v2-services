@@ -20,6 +20,7 @@ use derivative::Derivative;
 use ethcontract::common::DeploymentInformation;
 use ethcontract::{dyns::DynWeb3, Event as EthContractEvent, EventMetadata, H160, H256, U256};
 use mockall::*;
+use model::TokenPair;
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
@@ -48,11 +49,11 @@ pub struct TokensRegistered {
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct WeightedPool {
-    pool_id: H256,
-    pool_address: H160,
+    pub pool_id: H256,
+    pub pool_address: H160,
+    pub normalized_weights: Vec<U256>,
+    pub specialization: PoolSpecialization,
     tokens: Vec<H160>,
-    normalized_weights: Vec<U256>,
-    specialization: PoolSpecialization,
     block_created: u64,
 }
 
@@ -114,7 +115,7 @@ impl NormalizedWeightFetching for Web3 {
 /// The BalancerPool struct represents in-memory storage of all deployed Balancer Pools
 #[derive(Derivative)]
 #[derivative(Debug)]
-pub struct BalancerPools {
+pub struct BalancerPoolStore {
     /// Used for O(1) access to all pool_ids for a given token
     pools_by_token: HashMap<H160, HashSet<H256>>,
     /// WeightedPool data for a given PoolId
@@ -155,7 +156,30 @@ impl PoolSpecialization {
     }
 }
 
-impl BalancerPools {
+impl BalancerPoolStore {
+    // Since all the fields are private, we expose helper methods to fetch relevant information
+    pub fn pools_containing_pair(&self, token_pair: TokenPair) -> Vec<WeightedPool> {
+        let empty_set = HashSet::new();
+        let pools_0 = self
+            .pools_by_token
+            .get(&token_pair.get().0)
+            .unwrap_or(&empty_set);
+        let pools_1 = self
+            .pools_by_token
+            .get(&token_pair.get().1)
+            .unwrap_or(&empty_set);
+        pools_0
+            .intersection(pools_1)
+            .into_iter()
+            .map(|pool_id| {
+                self.pools
+                    .get(pool_id)
+                    .expect("failed iterating over known pools")
+                    .clone()
+            })
+            .collect()
+    }
+
     async fn try_upgrade(&mut self) -> Result<()> {
         for (pool_id, pool_builder) in self.pending_pools.clone() {
             let weighted_pool = pool_builder.into_pool(&*self.weight_fetcher).await?;
@@ -289,11 +313,11 @@ impl BalancerPools {
 }
 
 pub struct BalancerEventUpdater(
-    Mutex<EventHandler<DynWeb3, BalancerV2VaultContract, BalancerPools>>,
+    Mutex<EventHandler<DynWeb3, BalancerV2VaultContract, BalancerPoolStore>>,
 );
 
 impl BalancerEventUpdater {
-    pub async fn new(contract: BalancerV2Vault, pools: BalancerPools) -> Result<Self> {
+    pub async fn new(contract: BalancerV2Vault, pools: BalancerPoolStore) -> Result<Self> {
         let deployment_block = match contract.deployment_information() {
             Some(DeploymentInformation::BlockNumber(block_number)) => Some(block_number),
             Some(DeploymentInformation::TransactionHash(hash)) => Some(
@@ -315,7 +339,7 @@ impl BalancerEventUpdater {
 }
 
 #[async_trait::async_trait]
-impl EventStoring<ContractEvent> for BalancerPools {
+impl EventStoring<ContractEvent> for BalancerPoolStore {
     async fn replace_events(
         &mut self,
         events: Vec<EthContractEvent<ContractEvent>>,
@@ -329,7 +353,7 @@ impl EventStoring<ContractEvent> for BalancerPools {
             balancer_events.len(),
             range.start().to_u64()
         );
-        BalancerPools::replace_events(self, 0, balancer_events).await?;
+        BalancerPoolStore::replace_events(self, 0, balancer_events).await?;
         Ok(())
     }
 
@@ -433,7 +457,7 @@ mod tests {
         dummy_weight_fetcher
             .expect_get_normalized_weights()
             .returning(|_| Ok(vec![]));
-        let mut pool_store = BalancerPools {
+        let mut pool_store = BalancerPoolStore {
             pools_by_token: Default::default(),
             pools: Default::default(),
             pending_pools: Default::default(),
@@ -532,7 +556,7 @@ mod tests {
         dummy_weight_fetcher
             .expect_get_normalized_weights()
             .returning(|_| Ok(vec![]));
-        let mut pool_store = BalancerPools {
+        let mut pool_store = BalancerPoolStore {
             pools_by_token: Default::default(),
             pools: Default::default(),
             pending_pools: Default::default(),

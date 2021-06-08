@@ -9,7 +9,7 @@ use model::TokenPair;
 use num::{rational::Ratio, BigInt, BigRational, Zero};
 use std::{collections::HashSet, sync::Arc};
 
-const MAX_BATCH_SIZE: usize = 100;
+pub const MAX_BATCH_SIZE: usize = 100;
 const POOL_SWAP_GAS_COST: usize = 60_000;
 
 /// This type denotes `(reserve_a, reserve_b, token_b)` where
@@ -215,7 +215,7 @@ impl PoolFetching for PoolFetcher {
                     .batch_call(&mut batch);
 
                 async move {
-                    // Clippy is wrong about this being eval order depndendent.
+                    // Clippy is wrong about this being eval order dependent.
                     #[allow(clippy::eval_order_dependence)]
                     FetchedPool {
                         pair,
@@ -243,18 +243,18 @@ struct FetchedPool {
     token1_balance: Result<U256, MethodError>,
 }
 
-fn handle_results(results: Vec<FetchedPool>) -> Result<Vec<Pool>> {
-    // Node errors should be bubbled up but contract errors should lead to the pool being skipped.
-    fn handle_contract_error<T>(result: Result<T, MethodError>) -> Result<Option<T>> {
-        match result {
-            Ok(t) => Ok(Some(t)),
-            Err(err) => match EthcontractErrorType::classify(&err) {
-                EthcontractErrorType::Node => Err(err.into()),
-                EthcontractErrorType::Contract => Ok(None),
-            },
-        }
+// Node errors should be bubbled up but contract errors should lead to the pool being skipped.
+pub fn handle_contract_error<T>(result: Result<T, MethodError>) -> Result<Option<T>> {
+    match result {
+        Ok(t) => Ok(Some(t)),
+        Err(err) => match EthcontractErrorType::classify(&err) {
+            EthcontractErrorType::Node => Err(err.into()),
+            EthcontractErrorType::Contract => Ok(None),
+        },
     }
+}
 
+fn handle_results(results: Vec<FetchedPool>) -> Result<Vec<Pool>> {
     results.into_iter().try_fold(Vec::new(), |mut acc, pool| {
         let reserves = match handle_contract_error(pool.reserves)? {
             Some(reserves) => reserves,
