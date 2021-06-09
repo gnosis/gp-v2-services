@@ -694,10 +694,10 @@ mod tests {
         // Now test non-empty pool with standard form.
         let mut weighted_pools = vec![];
         for i in 0..n {
-            for j in 0..i + 1 {
+            for pool_id in pool_ids.iter().take(i + 1) {
                 // This is tokens[i] => { pool_id[0], pool_id[1], ..., pool_id[i] }
                 let entry = pool_store.pools_by_token.entry(tokens[i]).or_default();
-                entry.insert(pool_ids[j]);
+                entry.insert(*pool_id);
             }
             // This is weighted_pools[i] has tokens [tokens[i], tokens[i+1], ... , tokens[n]]
             weighted_pools.push(WeightedPool {
