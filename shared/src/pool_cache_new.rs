@@ -30,7 +30,7 @@ impl CacheKey<Pool> for TokenPair {
 
 #[async_trait::async_trait]
 impl CacheFetching<TokenPair, Pool> for Box<dyn PoolFetching> {
-    async fn fetch(&self, keys: HashSet<TokenPair>, block: Block) -> Result<Vec<Pool>> {
+    async fn fetch_values(&self, keys: HashSet<TokenPair>, block: Block) -> Result<Vec<Pool>> {
         self.fetch(keys, block).await
     }
 }

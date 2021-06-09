@@ -35,7 +35,7 @@ use std::{
 #[async_trait::async_trait]
 #[mockall::automock]
 pub trait CacheFetching<K, V> {
-    async fn fetch(&self, keys: HashSet<K>, block: Block) -> Result<Vec<V>>;
+    async fn fetch_values(&self, keys: HashSet<K>, block: Block) -> Result<Vec<V>>;
 }
 
 /// A trait used for `RecentBlockCache` keys.
@@ -182,7 +182,7 @@ where
     // block when the node has been load balanced out to one that hasn't seen the block yet. As a
     // workaround we repeat the request up to N times while sleeping in between.
     async fn fetch_inner(&self, keys: HashSet<K>, block: Block) -> Result<Vec<V>> {
-        let fetch = || self.fetcher.fetch(keys.clone(), block);
+        let fetch = || self.fetcher.fetch_values(keys.clone(), block);
         for _ in 0..self.maximum_retries {
             match fetch().await {
                 Ok(values) => return Ok(values),
@@ -369,7 +369,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl CacheFetching<TestKey, TestValue> for FakeCacheFetcher {
-        async fn fetch(&self, _: HashSet<TestKey>, _: Block) -> Result<Vec<TestValue>> {
+        async fn fetch_values(&self, _: HashSet<TestKey>, _: Block) -> Result<Vec<TestValue>> {
             Ok(self.0.lock().unwrap().clone())
         }
     }
