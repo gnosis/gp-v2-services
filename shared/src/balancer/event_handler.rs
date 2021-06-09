@@ -97,7 +97,7 @@ impl WeightedPoolBuilder {
 }
 
 /// The BalancerPool struct represents in-memory storage of all deployed Balancer Pools
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct PoolRegistry {
     /// Used for O(1) access to all pool_ids for a given token
     pools_by_token: HashMap<H160, HashSet<H256>>,
@@ -164,7 +164,7 @@ impl PoolRegistry {
     fn try_upgrade(&mut self) -> Result<()> {
         for (pool_id, pool_builder) in self.pending_pools.clone() {
             let weighted_pool = pool_builder.into_pool()?;
-            // delete pending pool and add to valid pools
+            // When upgradable, delete pending pool and add to valid pools
             tracing::info!("Upgrading Pool Builder with id {:?}", pool_id);
             self.pools.insert(pool_id, weighted_pool.clone());
             self.pending_pools.remove(&pool_id);
@@ -392,8 +392,8 @@ mod tests {
     use super::*;
     use maplit::hashset;
 
-    #[tokio::test]
-    async fn balancer_insert_events() {
+    #[test]
+    fn balancer_insert_events() {
         let n = 3usize;
         let pool_ids: Vec<H256> = (0..n).map(|i| H256::from_low_u64_be(i as u64)).collect();
         let pool_addresses: Vec<H160> = (0..n).map(|i| H160::from_low_u64_be(i as u64)).collect();
@@ -434,11 +434,7 @@ mod tests {
             (EventIndex::new(4, 0), pool_registration_events[2].clone()),
         ];
 
-        let mut pool_store = PoolRegistry {
-            pools_by_token: Default::default(),
-            pools: Default::default(),
-            pending_pools: Default::default(),
-        };
+        let mut pool_store = PoolRegistry::default();
         pool_store.insert_events(events).unwrap();
         // Note that it is never expected that blocks for events will differ,
         // but in this test block_created for the pool is the first block it receives.
@@ -476,8 +472,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn balancer_replace_events() {
+    #[test]
+    fn balancer_replace_events() {
         let start_block = 0;
         let end_block = 5;
         // Setup all the variables to initialize Balancer Pool State
@@ -527,11 +523,7 @@ mod tests {
             .flatten()
             .collect();
 
-        let mut pool_store = PoolRegistry {
-            pools_by_token: Default::default(),
-            pools: Default::default(),
-            pending_pools: Default::default(),
-        };
+        let mut pool_store = PoolRegistry::default();
         pool_store.insert_events(balancer_events).unwrap();
 
         // Let the tests begin!
@@ -559,8 +551,12 @@ mod tests {
                 BalancerEvent::TokensRegistered(new_token_registration.clone()),
             ),
         ];
+        let new_event_block = new_events[0]
+            .0
+            .block_number
+            .min(new_events[1].0.block_number);
 
-        pool_store.replace_events(3, new_events.clone()).unwrap();
+        pool_store.replace_events(3, new_events).unwrap();
         // Everything until block 3 is unchanged.
         for i in 0..3 {
             assert_eq!(
@@ -598,10 +594,7 @@ mod tests {
         for token in tokens.iter().take(7).skip(4) {
             assert!(pool_store.pools_by_token.get(token).unwrap().is_empty());
         }
-        let new_event_block = new_events[0]
-            .0
-            .block_number
-            .min(new_events[1].0.block_number);
+
         // All new data is included.
         assert!(pool_store.pending_pools.get(&new_pool_id).is_none());
         assert_eq!(
