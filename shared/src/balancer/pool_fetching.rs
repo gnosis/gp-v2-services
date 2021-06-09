@@ -2,23 +2,21 @@ use anyhow::Result;
 use model::TokenPair;
 use std::collections::HashSet;
 
-use crate::balancer::event_handler::{BalancerPoolStore, WeightedPool};
+use crate::balancer::event_handler::{PoolRegistry, PoolSpecialization, RegisteredPool};
 use crate::pool_fetching::{handle_contract_error, Block, MAX_BATCH_SIZE};
 use crate::Web3;
 use contracts::BalancerV2Vault;
 use ethcontract::batch::CallBatch;
 use ethcontract::errors::MethodError;
-use ethcontract::{BlockId, Bytes, H160, U256};
+use ethcontract::{BlockId, Bytes, H160, H256, U256};
 use itertools::Itertools;
 
-pub struct PreFetchedWeightedPool {
-    pool_data: WeightedPool,
-    /// getPoolTokens returns (Tokens, Balances, LastBlockUpdated)
-    reserves: Result<(Vec<H160>, Vec<U256>, U256), MethodError>,
-}
-
-pub struct FetchedWeightedPool {
-    pub pool_data: WeightedPool,
+pub struct WeightedPool {
+    pub pool_id: H256,
+    pub pool_address: H160,
+    pub normalized_weights: Vec<U256>,
+    pub specialization: PoolSpecialization,
+    pub tokens: Vec<H160>,
     pub reserves: Vec<U256>,
 }
 
@@ -28,28 +26,11 @@ pub trait WeightedPoolFetching: Send + Sync {
         &self,
         token_pairs: HashSet<TokenPair>,
         at_block: Block,
-    ) -> Result<Vec<FetchedWeightedPool>>;
-}
-
-fn handle_results(results: Vec<PreFetchedWeightedPool>) -> Result<Vec<FetchedWeightedPool>> {
-    results
-        .into_iter()
-        .try_fold(Vec::new(), |mut acc, pre_fetched_pool| {
-            let reserves = match handle_contract_error(pre_fetched_pool.reserves)? {
-                // We only keep the balances entry of reserves query.
-                Some(reserves) => reserves.1,
-                None => return Ok(acc),
-            };
-            acc.push(FetchedWeightedPool {
-                pool_data: pre_fetched_pool.pool_data,
-                reserves,
-            });
-            Ok(acc)
-        })
+    ) -> Result<Vec<WeightedPool>>;
 }
 
 pub struct BalancerPoolFetcher {
-    pool_data: BalancerPoolStore,
+    pool_data: PoolRegistry,
     vault: BalancerV2Vault,
     web3: Web3,
 }
@@ -60,7 +41,7 @@ impl WeightedPoolFetching for BalancerPoolFetcher {
         &self,
         token_pairs: HashSet<TokenPair>,
         at_block: Block,
-    ) -> Result<Vec<FetchedWeightedPool>> {
+    ) -> Result<Vec<WeightedPool>> {
         let mut batch = CallBatch::new(self.web3.transport());
         let block = BlockId::Number(at_block.into());
         let futures = token_pairs
@@ -74,7 +55,7 @@ impl WeightedPoolFetching for BalancerPoolFetcher {
                     .block(block)
                     .batch_call(&mut batch);
                 async move {
-                    PreFetchedWeightedPool {
+                    FetchedWeightedPool {
                         pool_data: weighted_pool,
                         reserves: reserves.await,
                     }
@@ -91,6 +72,34 @@ impl WeightedPoolFetching for BalancerPoolFetcher {
     }
 }
 
+/// An internal temporary struct used during pool fetching to handle errors.
+struct FetchedWeightedPool {
+    pool_data: RegisteredPool,
+    /// getPoolTokens returns (Tokens, Balances, LastBlockUpdated)
+    reserves: Result<(Vec<H160>, Vec<U256>, U256), MethodError>,
+}
+
+fn handle_results(results: Vec<FetchedWeightedPool>) -> Result<Vec<WeightedPool>> {
+    results
+        .into_iter()
+        .try_fold(Vec::new(), |mut acc, fetched_pool| {
+            let reserves = match handle_contract_error(fetched_pool.reserves)? {
+                // We only keep the balances entry of reserves query.
+                Some(reserves) => reserves.1,
+                None => return Ok(acc),
+            };
+            acc.push(WeightedPool {
+                pool_id: fetched_pool.pool_data.pool_id,
+                pool_address: fetched_pool.pool_data.pool_address,
+                normalized_weights: fetched_pool.pool_data.normalized_weights,
+                specialization: fetched_pool.pool_data.specialization,
+                tokens: fetched_pool.pool_data.tokens,
+                reserves,
+            });
+            Ok(acc)
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,8 +107,8 @@ mod tests {
 
     #[test]
     fn pool_fetcher_forwards_node_error() {
-        let results = vec![PreFetchedWeightedPool {
-            pool_data: WeightedPool::test_instance(),
+        let results = vec![FetchedWeightedPool {
+            pool_data: RegisteredPool::test_instance(),
             reserves: Err(ethcontract_error::testing_node_error()),
         }];
         assert!(handle_results(results).is_err());
@@ -108,12 +117,12 @@ mod tests {
     #[test]
     fn pool_fetcher_skips_contract_error() {
         let results = vec![
-            PreFetchedWeightedPool {
-                pool_data: WeightedPool::test_instance(),
+            FetchedWeightedPool {
+                pool_data: RegisteredPool::test_instance(),
                 reserves: Err(ethcontract_error::testing_contract_error()),
             },
-            PreFetchedWeightedPool {
-                pool_data: WeightedPool::test_instance(),
+            FetchedWeightedPool {
+                pool_data: RegisteredPool::test_instance(),
                 reserves: Ok((vec![], vec![], U256::zero())),
             },
         ];

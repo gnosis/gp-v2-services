@@ -48,16 +48,16 @@ pub struct TokensRegistered {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct WeightedPool {
+pub struct RegisteredPool {
     pub pool_id: H256,
     pub pool_address: H160,
     pub normalized_weights: Vec<U256>,
     pub specialization: PoolSpecialization,
-    tokens: Vec<H160>,
-    block_created: u64,
+    pub tokens: Vec<H160>,
+    pub block_created: u64,
 }
 
-impl WeightedPool {
+impl RegisteredPool {
     pub fn test_instance() -> Self {
         Self {
             pool_id: Default::default(),
@@ -84,12 +84,12 @@ impl WeightedPoolBuilder {
     async fn into_pool(
         self,
         weight_fetcher: &dyn NormalizedWeightFetching,
-    ) -> Result<WeightedPool> {
+    ) -> Result<RegisteredPool> {
         if let (Some(pool_registration), Some(tokens_registration)) = (
             self.pool_registration.clone(),
             self.tokens_registration.clone(),
         ) {
-            return Ok(WeightedPool {
+            return Ok(RegisteredPool {
                 pool_id: pool_registration.pool_id,
                 pool_address: pool_registration.pool_address,
                 tokens: tokens_registration.tokens,
@@ -128,11 +128,11 @@ impl NormalizedWeightFetching for Web3 {
 /// The BalancerPool struct represents in-memory storage of all deployed Balancer Pools
 #[derive(Derivative)]
 #[derivative(Debug)]
-pub struct BalancerPoolStore {
+pub struct PoolRegistry {
     /// Used for O(1) access to all pool_ids for a given token
     pools_by_token: HashMap<H160, HashSet<H256>>,
     /// WeightedPool data for a given PoolId
-    pools: HashMap<H256, WeightedPool>,
+    pools: HashMap<H256, RegisteredPool>,
     /// Temporary storage for WeightedPools containing insufficient constructor data
     pending_pools: HashMap<H256, WeightedPoolBuilder>,
     #[derivative(Debug = "ignore")]
@@ -169,9 +169,9 @@ impl PoolSpecialization {
     }
 }
 
-impl BalancerPoolStore {
+impl PoolRegistry {
     // Since all the fields are private, we expose helper methods to fetch relevant information
-    pub fn pools_containing_pair(&self, token_pair: TokenPair) -> Vec<WeightedPool> {
+    pub fn pools_containing_pair(&self, token_pair: TokenPair) -> Vec<RegisteredPool> {
         let empty_set = HashSet::new();
         let pools_0 = self
             .pools_by_token
@@ -326,11 +326,11 @@ impl BalancerPoolStore {
 }
 
 pub struct BalancerEventUpdater(
-    Mutex<EventHandler<DynWeb3, BalancerV2VaultContract, BalancerPoolStore>>,
+    Mutex<EventHandler<DynWeb3, BalancerV2VaultContract, PoolRegistry>>,
 );
 
 impl BalancerEventUpdater {
-    pub async fn new(contract: BalancerV2Vault, pools: BalancerPoolStore) -> Result<Self> {
+    pub async fn new(contract: BalancerV2Vault, pools: PoolRegistry) -> Result<Self> {
         let deployment_block = match contract.deployment_information() {
             Some(DeploymentInformation::BlockNumber(block_number)) => Some(block_number),
             Some(DeploymentInformation::TransactionHash(hash)) => Some(
@@ -352,7 +352,7 @@ impl BalancerEventUpdater {
 }
 
 #[async_trait::async_trait]
-impl EventStoring<ContractEvent> for BalancerPoolStore {
+impl EventStoring<ContractEvent> for PoolRegistry {
     async fn replace_events(
         &mut self,
         events: Vec<EthContractEvent<ContractEvent>>,
@@ -366,7 +366,7 @@ impl EventStoring<ContractEvent> for BalancerPoolStore {
             balancer_events.len(),
             range.start().to_u64()
         );
-        BalancerPoolStore::replace_events(self, 0, balancer_events).await?;
+        PoolRegistry::replace_events(self, 0, balancer_events).await?;
         Ok(())
     }
 
@@ -470,7 +470,7 @@ mod tests {
         dummy_weight_fetcher
             .expect_get_normalized_weights()
             .returning(|_| Ok(vec![]));
-        let mut pool_store = BalancerPoolStore {
+        let mut pool_store = PoolRegistry {
             pools_by_token: Default::default(),
             pools: Default::default(),
             pending_pools: Default::default(),
@@ -499,7 +499,7 @@ mod tests {
         for i in 0..n {
             assert_eq!(
                 pool_store.pools.get(&pool_ids[i]).unwrap(),
-                &WeightedPool {
+                &RegisteredPool {
                     pool_id: pool_ids[i],
                     pool_address: pool_addresses[i],
                     tokens: vec![tokens[i], tokens[i + 1]],
@@ -568,7 +568,7 @@ mod tests {
         dummy_weight_fetcher
             .expect_get_normalized_weights()
             .returning(|_| Ok(vec![]));
-        let mut pool_store = BalancerPoolStore {
+        let mut pool_store = PoolRegistry {
             pools_by_token: Default::default(),
             pools: Default::default(),
             pending_pools: Default::default(),
@@ -610,7 +610,7 @@ mod tests {
         for i in 0..3 {
             assert_eq!(
                 pool_store.pools.get(&pool_ids[i]).unwrap(),
-                &WeightedPool {
+                &RegisteredPool {
                     pool_id: pool_ids[i],
                     pool_address: pool_addresses[i],
                     tokens: vec![tokens[i], tokens[i + 1]],
@@ -652,7 +652,7 @@ mod tests {
         assert!(pool_store.pending_pools.get(&new_pool_id).is_none());
         assert_eq!(
             pool_store.pools.get(&new_pool_id).unwrap(),
-            &WeightedPool {
+            &RegisteredPool {
                 pool_id: new_pool_id,
                 pool_address: new_pool_address,
                 tokens: new_token_registration.tokens,
@@ -681,7 +681,7 @@ mod tests {
             .returning(|_| Ok(vec![]));
 
         // Test the empty pool.
-        let mut pool_store = BalancerPoolStore {
+        let mut pool_store = PoolRegistry {
             pools_by_token: Default::default(),
             pools: Default::default(),
             pending_pools: Default::default(),
@@ -700,7 +700,7 @@ mod tests {
                 entry.insert(*pool_id);
             }
             // This is weighted_pools[i] has tokens [tokens[i], tokens[i+1], ... , tokens[n]]
-            weighted_pools.push(WeightedPool {
+            weighted_pools.push(RegisteredPool {
                 pool_id: pool_ids[i],
                 tokens: tokens[i..n].to_owned(),
                 // None of below fields are relevant here
