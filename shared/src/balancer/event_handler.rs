@@ -3,7 +3,6 @@ use crate::{
     event_handling::{BlockNumber, EventHandler, EventIndex, EventStoring},
     impl_event_retrieving,
     maintenance::Maintaining,
-    Web3,
 };
 use anyhow::{anyhow, Context, Result};
 use contracts::{
@@ -14,12 +13,10 @@ use contracts::{
         },
         Event as ContractEvent,
     },
-    BalancerV2Vault, BalancerV2WeightedPool,
+    BalancerV2Vault,
 };
-use derivative::Derivative;
 use ethcontract::common::DeploymentInformation;
-use ethcontract::{dyns::DynWeb3, Event as EthContractEvent, EventMetadata, H160, H256, U256};
-use mockall::*;
+use ethcontract::{dyns::DynWeb3, Event as EthContractEvent, EventMetadata, H160, H256};
 use model::TokenPair;
 use std::{
     collections::{HashMap, HashSet},
@@ -51,7 +48,6 @@ pub struct TokensRegistered {
 pub struct RegisteredPool {
     pub pool_id: H256,
     pub pool_address: H160,
-    pub normalized_weights: Vec<U256>,
     pub specialization: PoolSpecialization,
     pub tokens: Vec<H160>,
     pub block_created: u64,
@@ -62,7 +58,6 @@ impl RegisteredPool {
         Self {
             pool_id: Default::default(),
             pool_address: Default::default(),
-            normalized_weights: vec![],
             specialization: PoolSpecialization::General,
             tokens: vec![],
             block_created: 0,
@@ -81,10 +76,7 @@ pub struct WeightedPoolBuilder {
 }
 
 impl WeightedPoolBuilder {
-    async fn into_pool(
-        self,
-        weight_fetcher: &dyn NormalizedWeightFetching,
-    ) -> Result<RegisteredPool> {
+    fn into_pool(self) -> Result<RegisteredPool> {
         if let (Some(pool_registration), Some(tokens_registration)) = (
             self.pool_registration.clone(),
             self.tokens_registration.clone(),
@@ -93,9 +85,6 @@ impl WeightedPoolBuilder {
                 pool_id: pool_registration.pool_id,
                 pool_address: pool_registration.pool_address,
                 tokens: tokens_registration.tokens,
-                normalized_weights: weight_fetcher
-                    .get_normalized_weights(pool_registration.pool_address)
-                    .await?,
                 specialization: pool_registration.specialization,
                 block_created: self.block_created,
             });
@@ -107,27 +96,8 @@ impl WeightedPoolBuilder {
     }
 }
 
-#[automock]
-#[async_trait::async_trait]
-trait NormalizedWeightFetching: Send + Sync {
-    async fn get_normalized_weights(&self, pool_address: H160) -> Result<Vec<U256>>;
-}
-
-#[async_trait::async_trait]
-impl NormalizedWeightFetching for Web3 {
-    async fn get_normalized_weights(&self, pool_address: H160) -> Result<Vec<U256>> {
-        let pool_contract = BalancerV2WeightedPool::at(self, pool_address);
-        Ok(pool_contract
-            .methods()
-            .get_normalized_weights()
-            .call()
-            .await?)
-    }
-}
-
 /// The BalancerPool struct represents in-memory storage of all deployed Balancer Pools
-#[derive(Derivative)]
-#[derivative(Debug)]
+#[derive(Debug)]
 pub struct PoolRegistry {
     /// Used for O(1) access to all pool_ids for a given token
     pools_by_token: HashMap<H160, HashSet<H256>>,
@@ -135,8 +105,6 @@ pub struct PoolRegistry {
     pools: HashMap<H256, RegisteredPool>,
     /// Temporary storage for WeightedPools containing insufficient constructor data
     pending_pools: HashMap<H256, WeightedPoolBuilder>,
-    #[derivative(Debug = "ignore")]
-    weight_fetcher: Box<dyn NormalizedWeightFetching>,
 }
 
 /// There are three specialization settings for Pools,
@@ -193,9 +161,9 @@ impl PoolRegistry {
             .collect()
     }
 
-    async fn try_upgrade(&mut self) -> Result<()> {
+    fn try_upgrade(&mut self) -> Result<()> {
         for (pool_id, pool_builder) in self.pending_pools.clone() {
-            let weighted_pool = pool_builder.into_pool(&*self.weight_fetcher).await?;
+            let weighted_pool = pool_builder.into_pool()?;
             // delete pending pool and add to valid pools
             tracing::info!("Upgrading Pool Builder with id {:?}", pool_id);
             self.pools.insert(pool_id, weighted_pool.clone());
@@ -210,7 +178,7 @@ impl PoolRegistry {
         Ok(())
     }
 
-    async fn insert_events(&mut self, events: Vec<(EventIndex, BalancerEvent)>) -> Result<()> {
+    fn insert_events(&mut self, events: Vec<(EventIndex, BalancerEvent)>) -> Result<()> {
         for (index, event) in events {
             match event {
                 BalancerEvent::PoolRegistered(event) => self.insert_pool(index, event),
@@ -218,7 +186,7 @@ impl PoolRegistry {
             };
         }
         // In the future, when processing TokensDeregistered we may have to downgrade the result.
-        self.try_upgrade().await?;
+        self.try_upgrade()?;
         Ok(())
     }
 
@@ -248,13 +216,13 @@ impl PoolRegistry {
         pool_builder.tokens_registration = Some(registration);
     }
 
-    async fn replace_events(
+    fn replace_events(
         &mut self,
         delete_from_block_number: u64,
         events: Vec<(EventIndex, BalancerEvent)>,
     ) -> Result<()> {
         self.delete_pools(delete_from_block_number)?;
-        self.insert_events(events).await?;
+        self.insert_events(events)?;
         Ok(())
     }
 
@@ -366,7 +334,7 @@ impl EventStoring<ContractEvent> for PoolRegistry {
             balancer_events.len(),
             range.start().to_u64()
         );
-        PoolRegistry::replace_events(self, 0, balancer_events).await?;
+        PoolRegistry::replace_events(self, 0, balancer_events)?;
         Ok(())
     }
 
@@ -374,7 +342,7 @@ impl EventStoring<ContractEvent> for PoolRegistry {
         let balancer_events = self
             .contract_to_balancer_events(events)
             .context("failed to convert events")?;
-        self.insert_events(balancer_events).await
+        self.insert_events(balancer_events)
     }
 
     async fn last_event_block(&self) -> Result<u64> {
@@ -466,17 +434,12 @@ mod tests {
             (EventIndex::new(4, 0), pool_registration_events[2].clone()),
         ];
 
-        let mut dummy_weight_fetcher = MockNormalizedWeightFetching::new();
-        dummy_weight_fetcher
-            .expect_get_normalized_weights()
-            .returning(|_| Ok(vec![]));
         let mut pool_store = PoolRegistry {
             pools_by_token: Default::default(),
             pools: Default::default(),
             pending_pools: Default::default(),
-            weight_fetcher: Box::new(dummy_weight_fetcher),
         };
-        pool_store.insert_events(events).await.unwrap();
+        pool_store.insert_events(events).unwrap();
         // Note that it is never expected that blocks for events will differ,
         // but in this test block_created for the pool is the first block it receives.
         assert_eq!(pool_store.last_event_block(), 3);
@@ -503,7 +466,6 @@ mod tests {
                     pool_id: pool_ids[i],
                     pool_address: pool_addresses[i],
                     tokens: vec![tokens[i], tokens[i + 1]],
-                    normalized_weights: vec![],
                     specialization: PoolSpecialization::new(i as u8).unwrap(),
                     block_created: i as u64 + 1
                 },
@@ -564,17 +526,13 @@ mod tests {
             })
             .flatten()
             .collect();
-        let mut dummy_weight_fetcher = MockNormalizedWeightFetching::new();
-        dummy_weight_fetcher
-            .expect_get_normalized_weights()
-            .returning(|_| Ok(vec![]));
+
         let mut pool_store = PoolRegistry {
             pools_by_token: Default::default(),
             pools: Default::default(),
             pending_pools: Default::default(),
-            weight_fetcher: Box::new(dummy_weight_fetcher),
         };
-        pool_store.insert_events(balancer_events).await.unwrap();
+        pool_store.insert_events(balancer_events).unwrap();
 
         // Let the tests begin!
         assert_eq!(pool_store.last_event_block(), 5);
@@ -602,10 +560,7 @@ mod tests {
             ),
         ];
 
-        pool_store
-            .replace_events(3, new_events.clone())
-            .await
-            .unwrap();
+        pool_store.replace_events(3, new_events.clone()).unwrap();
         // Everything until block 3 is unchanged.
         for i in 0..3 {
             assert_eq!(
@@ -614,7 +569,6 @@ mod tests {
                     pool_id: pool_ids[i],
                     pool_address: pool_addresses[i],
                     tokens: vec![tokens[i], tokens[i + 1]],
-                    normalized_weights: vec![],
                     specialization: specializations[i],
                     block_created: i as u64
                 }
@@ -656,7 +610,6 @@ mod tests {
                 pool_id: new_pool_id,
                 pool_address: new_pool_address,
                 tokens: new_token_registration.tokens,
-                normalized_weights: vec![],
                 specialization: new_pool_registration.specialization,
                 block_created: new_event_block
             }
@@ -675,17 +628,11 @@ mod tests {
             .map(|i| TokenPair::new(tokens[i], tokens[(i + 1) % n]).unwrap())
             .collect();
 
-        let mut dummy_weight_fetcher = MockNormalizedWeightFetching::new();
-        dummy_weight_fetcher
-            .expect_get_normalized_weights()
-            .returning(|_| Ok(vec![]));
-
         // Test the empty pool.
         let mut pool_store = PoolRegistry {
             pools_by_token: Default::default(),
             pools: Default::default(),
             pending_pools: Default::default(),
-            weight_fetcher: Box::new(dummy_weight_fetcher),
         };
         for token_pair in token_pairs.iter().take(n) {
             assert!(pool_store.pools_containing_pair(*token_pair).is_empty());
@@ -705,7 +652,6 @@ mod tests {
                 tokens: tokens[i..n].to_owned(),
                 // None of below fields are relevant here
                 specialization: PoolSpecialization::General,
-                normalized_weights: vec![],
                 block_created: 0,
                 pool_address: Default::default(),
             });

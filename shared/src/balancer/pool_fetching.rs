@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use crate::balancer::event_handler::{PoolRegistry, PoolSpecialization, RegisteredPool};
 use crate::pool_fetching::{handle_contract_error, Block, MAX_BATCH_SIZE};
 use crate::Web3;
-use contracts::BalancerV2Vault;
+use contracts::{BalancerV2Vault, BalancerV2WeightedPool};
 use ethcontract::batch::CallBatch;
 use ethcontract::errors::MethodError;
 use ethcontract::{BlockId, Bytes, H160, H256, U256};
@@ -24,7 +24,7 @@ pub struct WeightedPool {
 }
 
 impl WeightedPool {
-    fn new(pool_data: RegisteredPool, balances: Vec<U256>) -> Self {
+    fn new(pool_data: RegisteredPool, balances: Vec<U256>, weights: Vec<U256>) -> Self {
         let mut reserves = HashMap::new();
         // We expect the weight and token indices are aligned with balances returned from EVM query.
         // If necessary we would also pass the tokens along with the query result,
@@ -34,7 +34,7 @@ impl WeightedPool {
                 pool_data.tokens[i],
                 PoolTokenState {
                     balance,
-                    weight: pool_data.normalized_weights[i],
+                    weight: weights[i],
                 },
             );
         }
@@ -76,15 +76,24 @@ impl WeightedPoolFetching for BalancerPoolFetcher {
             .flat_map(|pair| self.pool_data.pools_containing_pair(pair))
             .unique_by(|pool| pool.pool_id)
             .map(|weighted_pool| {
+                let pool_contract =
+                    BalancerV2WeightedPool::at(&self.web3, weighted_pool.pool_address);
+                let weights = pool_contract
+                    .methods()
+                    .get_normalized_weights()
+                    .batch_call(&mut batch);
                 let reserves = self
                     .vault
                     .get_pool_tokens(Bytes(weighted_pool.pool_id.0))
                     .block(block)
                     .batch_call(&mut batch);
                 async move {
+                    // Clippy is wrong about this being eval order dependent.
+                    #[allow(clippy::eval_order_dependence)]
                     FetchedWeightedPool {
                         pool_data: weighted_pool,
                         reserves: reserves.await,
+                        weights: weights.await,
                     }
                 }
             })
@@ -104,6 +113,7 @@ struct FetchedWeightedPool {
     pool_data: RegisteredPool,
     /// getPoolTokens returns (Tokens, Balances, LastBlockUpdated)
     reserves: Result<(Vec<H160>, Vec<U256>, U256), MethodError>,
+    weights: Result<Vec<U256>, MethodError>,
 }
 
 fn handle_results(results: Vec<FetchedWeightedPool>) -> Result<Vec<WeightedPool>> {
@@ -115,7 +125,12 @@ fn handle_results(results: Vec<FetchedWeightedPool>) -> Result<Vec<WeightedPool>
                 Some(reserves) => reserves.1,
                 None => return Ok(acc),
             };
-            acc.push(WeightedPool::new(fetched_pool.pool_data, balances));
+            let weights = match handle_contract_error(fetched_pool.weights)? {
+                // We only keep the balances entry of reserves query.
+                Some(weights) => weights,
+                None => return Ok(acc),
+            };
+            acc.push(WeightedPool::new(fetched_pool.pool_data, balances, weights));
             Ok(acc)
         })
 }
@@ -130,6 +145,7 @@ mod tests {
         let results = vec![FetchedWeightedPool {
             pool_data: RegisteredPool::test_instance(),
             reserves: Err(ethcontract_error::testing_node_error()),
+            weights: Err(ethcontract_error::testing_node_error()),
         }];
         assert!(handle_results(results).is_err());
     }
@@ -140,10 +156,12 @@ mod tests {
             FetchedWeightedPool {
                 pool_data: RegisteredPool::test_instance(),
                 reserves: Err(ethcontract_error::testing_contract_error()),
+                weights: Err(ethcontract_error::testing_contract_error()),
             },
             FetchedWeightedPool {
                 pool_data: RegisteredPool::test_instance(),
                 reserves: Ok((vec![], vec![], U256::zero())),
+                weights: Ok(vec![]),
             },
         ];
         assert_eq!(handle_results(results).unwrap().len(), 1);
