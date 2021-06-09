@@ -171,7 +171,7 @@ impl PoolSpecialization {
 
 impl PoolRegistry {
     // Since all the fields are private, we expose helper methods to fetch relevant information
-    pub fn pools_containing_pair(&self, token_pair: TokenPair) -> Vec<RegisteredPool> {
+    pub fn pools_containing_pair(&self, token_pair: TokenPair) -> HashSet<RegisteredPool> {
         let empty_set = HashSet::new();
         let pools_0 = self
             .pools_by_token
@@ -736,16 +736,15 @@ mod tests {
 
         assert_eq!(
             pool_store.pools_containing_pair(token_pairs[0]),
-            vec![weighted_pools[0].clone()]
+            hashset!{ weighted_pools[0].clone() }
         );
         assert_eq!(
             pool_store.pools_containing_pair(token_pairs[1]),
-            // If this were returned as a set we could be sure about the order and comparison.
-            vec![weighted_pools[1].clone(), weighted_pools[0].clone()]
+            hashset!{ weighted_pools[1].clone(), weighted_pools[0].clone() }
         );
         assert_eq!(
             pool_store.pools_containing_pair(token_pairs[2]),
-            vec![weighted_pools[0].clone()]
+            hashset!{ weighted_pools[0].clone() }
         );
     }
 }
