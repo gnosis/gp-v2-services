@@ -607,7 +607,6 @@ mod tests {
                 block_created: new_event_block
             }
         );
-
         assert!(pool_store.pools_by_token.get(&new_token).is_some());
         assert_eq!(pool_store.last_event_block(), new_event_block);
     }
