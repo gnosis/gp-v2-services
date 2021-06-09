@@ -17,11 +17,9 @@ pub mod maintenance;
 pub mod metrics;
 pub mod network;
 pub mod pool_aggregating;
-#[path = "pool_cache_new.rs"]
 pub mod pool_cache;
 pub mod pool_fetching;
 pub mod price_estimate;
-#[path = "pool_cache.rs"]
 pub mod recent_block_cache;
 pub mod time;
 pub mod token_info;
