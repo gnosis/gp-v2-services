@@ -1,6 +1,6 @@
 use anyhow::Result;
 use model::TokenPair;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::balancer::event_handler::{PoolRegistry, PoolSpecialization, RegisteredPool};
 use crate::pool_fetching::{handle_contract_error, Block, MAX_BATCH_SIZE};
@@ -11,13 +11,40 @@ use ethcontract::errors::MethodError;
 use ethcontract::{BlockId, Bytes, H160, H256, U256};
 use itertools::Itertools;
 
+pub struct PoolTokenState {
+    pub balance: U256,
+    pub weight: U256,
+}
+
 pub struct WeightedPool {
     pub pool_id: H256,
     pub pool_address: H160,
-    pub normalized_weights: Vec<U256>,
     pub specialization: PoolSpecialization,
-    pub tokens: Vec<H160>,
-    pub reserves: Vec<U256>,
+    pub reserves: HashMap<H160, PoolTokenState>,
+}
+
+impl WeightedPool {
+    fn new(pool_data: RegisteredPool, balances: Vec<U256>) -> Self {
+        let mut reserves = HashMap::new();
+        // We expect the weight and token indices are aligned with balances returned from EVM query.
+        // If necessary we would also pass the tokens along with the query result,
+        // use them and fetch the weights from the registry by token address.
+        for (i, balance) in balances.into_iter().enumerate() {
+            reserves.insert(
+                pool_data.tokens[i],
+                PoolTokenState {
+                    balance,
+                    weight: pool_data.normalized_weights[i],
+                },
+            );
+        }
+        WeightedPool {
+            pool_id: pool_data.pool_id,
+            pool_address: pool_data.pool_address,
+            specialization: pool_data.specialization,
+            reserves,
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -83,19 +110,12 @@ fn handle_results(results: Vec<FetchedWeightedPool>) -> Result<Vec<WeightedPool>
     results
         .into_iter()
         .try_fold(Vec::new(), |mut acc, fetched_pool| {
-            let reserves = match handle_contract_error(fetched_pool.reserves)? {
+            let balances = match handle_contract_error(fetched_pool.reserves)? {
                 // We only keep the balances entry of reserves query.
                 Some(reserves) => reserves.1,
                 None => return Ok(acc),
             };
-            acc.push(WeightedPool {
-                pool_id: fetched_pool.pool_data.pool_id,
-                pool_address: fetched_pool.pool_data.pool_address,
-                normalized_weights: fetched_pool.pool_data.normalized_weights,
-                specialization: fetched_pool.pool_data.specialization,
-                tokens: fetched_pool.pool_data.tokens,
-                reserves,
-            });
+            acc.push(WeightedPool::new(fetched_pool.pool_data, balances));
             Ok(acc)
         })
 }

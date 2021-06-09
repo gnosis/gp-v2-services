@@ -736,15 +736,15 @@ mod tests {
 
         assert_eq!(
             pool_store.pools_containing_pair(token_pairs[0]),
-            hashset!{ weighted_pools[0].clone() }
+            hashset! { weighted_pools[0].clone() }
         );
         assert_eq!(
             pool_store.pools_containing_pair(token_pairs[1]),
-            hashset!{ weighted_pools[1].clone(), weighted_pools[0].clone() }
+            hashset! { weighted_pools[1].clone(), weighted_pools[0].clone() }
         );
         assert_eq!(
             pool_store.pools_containing_pair(token_pairs[2]),
-            hashset!{ weighted_pools[0].clone() }
+            hashset! { weighted_pools[0].clone() }
         );
     }
 }
