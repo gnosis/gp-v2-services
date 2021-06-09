@@ -178,6 +178,21 @@ where
         Ok(())
     }
 
+    // Sometimes nodes requests error when we try to get state from what we think is the current
+    // block when the node has been load balanced out to one that hasn't seen the block yet. As a
+    // workaround we repeat the request up to N times while sleeping in between.
+    async fn fetch_inner(&self, keys: HashSet<K>, block: Block) -> Result<Vec<V>> {
+        let fetch = || self.fetcher.fetch(keys.clone(), block);
+        for _ in 0..self.maximum_retries {
+            match fetch().await {
+                Ok(values) => return Ok(values),
+                Err(err) => tracing::warn!("retrying fetch because error: {:?}", err),
+            }
+            tokio::time::sleep(self.delay_between_retries).await;
+        }
+        fetch().await
+    }
+
     pub async fn fetch(&self, keys: impl IntoIterator<Item = K>, block: Block) -> Result<Vec<V>> {
         let block = match block {
             Block::Recent => None,
@@ -224,21 +239,6 @@ where
         }
 
         Ok(cache_hits)
-    }
-
-    // Sometimes nodes requests error when we try to get state from what we think is the current
-    // block when the node has been load balanced out to one that hasn't seen the block yet. As a
-    // workaround we repeat the request up to N times while sleeping in between.
-    async fn fetch_inner(&self, keys: HashSet<K>, block: Block) -> Result<Vec<V>> {
-        let fetch = || self.fetcher.fetch(keys.clone(), block);
-        for _ in 0..self.maximum_retries {
-            match fetch().await {
-                Ok(values) => return Ok(values),
-                Err(err) => tracing::warn!("retrying fetch because error: {:?}", err),
-            }
-            tokio::time::sleep(self.delay_between_retries).await;
-        }
-        fetch().await
     }
 }
 
