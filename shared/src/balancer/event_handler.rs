@@ -57,6 +57,19 @@ pub struct WeightedPool {
     block_created: u64,
 }
 
+impl WeightedPool {
+    pub fn test_instance() -> Self {
+        Self {
+            pool_id: Default::default(),
+            pool_address: Default::default(),
+            normalized_weights: vec![],
+            specialization: PoolSpecialization::General,
+            tokens: vec![],
+            block_created: 0,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WeightedPoolBuilder {
     pool_registration: Option<PoolRegistered>,
@@ -552,7 +565,6 @@ mod tests {
             .flatten()
             .collect();
         let mut dummy_weight_fetcher = MockNormalizedWeightFetching::new();
-
         dummy_weight_fetcher
             .expect_get_normalized_weights()
             .returning(|_| Ok(vec![]));
@@ -652,5 +664,88 @@ mod tests {
 
         assert!(pool_store.pools_by_token.get(&new_token).is_some());
         assert_eq!(pool_store.last_event_block(), new_event_block);
+    }
+
+    #[test]
+    fn pools_containing_pair_test() {
+        let n = 3;
+        let pool_ids: Vec<H256> = (0..n).map(|i| H256::from_low_u64_be(i as u64)).collect();
+        let tokens: Vec<H160> = (0..n).map(|i| H160::from_low_u64_be(i as u64)).collect();
+        let token_pairs: Vec<TokenPair> = (0..n)
+            .map(|i| TokenPair::new(tokens[i], tokens[(i + 1) % n]).unwrap())
+            .collect();
+
+        let mut dummy_weight_fetcher = MockNormalizedWeightFetching::new();
+        dummy_weight_fetcher
+            .expect_get_normalized_weights()
+            .returning(|_| Ok(vec![]));
+
+        // Test the empty pool.
+        let mut pool_store = BalancerPoolStore {
+            pools_by_token: Default::default(),
+            pools: Default::default(),
+            pending_pools: Default::default(),
+            weight_fetcher: Box::new(dummy_weight_fetcher),
+        };
+        for token_pair in token_pairs.iter().take(n) {
+            assert!(pool_store.pools_containing_pair(*token_pair).is_empty());
+        }
+
+        // Now test non-empty pool with standard form.
+        let mut weighted_pools = vec![];
+        for i in 0..n {
+            for j in 0..i + 1 {
+                // This is tokens[i] => { pool_id[0], pool_id[1], ..., pool_id[i] }
+                let entry = pool_store.pools_by_token.entry(tokens[i]).or_default();
+                entry.insert(pool_ids[j]);
+            }
+            // This is weighted_pools[i] has tokens [tokens[i], tokens[i+1], ... , tokens[n]]
+            weighted_pools.push(WeightedPool {
+                pool_id: pool_ids[i],
+                tokens: tokens[i..n].to_owned(),
+                // None of below fields are relevant here
+                specialization: PoolSpecialization::General,
+                normalized_weights: vec![],
+                block_created: 0,
+                pool_address: Default::default(),
+            });
+            pool_store
+                .pools
+                .insert(pool_ids[i], weighted_pools[i].clone());
+        }
+        // When n = 3, this above generates
+        // pool_store.pools_by_token = hashmap! {
+        //     tokens[0] => hashset! { pool_ids[0] },
+        //     tokens[1] => hashset! { pool_ids[0], pool_ids[1]},
+        //     tokens[2] => hashset! { pool_ids[0], pool_ids[1], pool_ids[2] },
+        // };
+        // pool_store.pools = hashmap! {
+        //     pool_ids[0] => WeightedPool {
+        //         tokens: vec![tokens[0], tokens[1], tokens[2]],
+        //         ..other fields
+        //     },
+        //     pool_ids[1] => WeightedPool {
+        //         tokens: vec![tokens[1], tokens[2]],
+        //         ..other fields
+        //     }
+        //     pool_ids[2] => WeightedPool {
+        //         tokens: vec![tokens[2]],
+        //         ..other fields
+        //     }
+        // };
+
+        assert_eq!(
+            pool_store.pools_containing_pair(token_pairs[0]),
+            vec![weighted_pools[0].clone()]
+        );
+        assert_eq!(
+            pool_store.pools_containing_pair(token_pairs[1]),
+            // If this were returned as a set we could be sure about the order and comparison.
+            vec![weighted_pools[1].clone(), weighted_pools[0].clone()]
+        );
+        assert_eq!(
+            pool_store.pools_containing_pair(token_pairs[2]),
+            vec![weighted_pools[0].clone()]
+        );
     }
 }
