@@ -91,6 +91,7 @@ pub fn create(
                 token_info_fetcher.clone(),
                 price_estimator.clone(),
                 network_id.clone(),
+                chain_id,
                 fee_discount_factor,
             )),
             SolverType::OneInch => {
