@@ -23,19 +23,17 @@ pub trait SingleOrderSolving {
 /// requests may a non-trivial amount of time.
 const MAX_SETTLEMENTS: usize = 5;
 
-pub struct SingleOrderSolver {
-    inner: Box<dyn SingleOrderSolving + Sync + Send>,
+pub struct SingleOrderSolver<I> {
+    inner: I,
 }
-impl<T: SingleOrderSolving + Sync + Send + 'static> From<T> for SingleOrderSolver {
-    fn from(inner: T) -> Self {
-        Self {
-            inner: Box::new(inner),
-        }
+impl<I: SingleOrderSolving> From<I> for SingleOrderSolver<I> {
+    fn from(inner: I) -> Self {
+        Self { inner }
     }
 }
 
 #[async_trait::async_trait]
-impl Solver for SingleOrderSolver {
+impl<I: SingleOrderSolving + Send + Sync> Solver for SingleOrderSolver<I> {
     async fn solve(&self, liquidity: Vec<Liquidity>, _gas_price: f64) -> Result<Vec<Settlement>> {
         let mut orders = liquidity
             .into_iter()
