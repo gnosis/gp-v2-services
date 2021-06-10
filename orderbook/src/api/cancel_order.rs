@@ -36,6 +36,18 @@ pub fn cancel_order_response(result: Result<OrderCancellationResult>) -> impl Re
             super::error("InvalidSignature", "Likely malformed signature"),
             StatusCode::BAD_REQUEST,
         ),
+        Ok(OrderCancellationResult::OrderAlreadyCancelled) => (
+            super::error("OrderAlreadyCancelled", "Order is already cancelled"),
+            StatusCode::BAD_REQUEST,
+        ),
+        Ok(OrderCancellationResult::OrderFullyExecuted) => (
+            super::error("OrderFullyExecuted", "Order is fully executed"),
+            StatusCode::BAD_REQUEST,
+        ),
+        Ok(OrderCancellationResult::OrderExpired) => (
+            super::error("OrderExpired", "Order is expired"),
+            StatusCode::BAD_REQUEST,
+        ),
         Ok(OrderCancellationResult::OrderNotFound) => (
             super::error("OrderNotFound", "order not located in database"),
             StatusCode::NOT_FOUND,
