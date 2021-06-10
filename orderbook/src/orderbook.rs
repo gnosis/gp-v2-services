@@ -44,6 +44,9 @@ pub enum OrderCancellationResult {
     InvalidSignature,
     WrongOwner,
     OrderNotFound,
+    OrderAlreadyCancelled,
+    OrderFullyExecuted,
+    OrderExpired,
 }
 
 pub struct Orderbook {
