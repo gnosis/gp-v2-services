@@ -7,7 +7,7 @@ use crate::{
 };
 use anyhow::{anyhow, Context, Result};
 use contracts::{
-    balancer_v2_factory::{
+    balancer_v2_weighted_pool_factory::{
         self, event_data::PoolCreated as ContractPoolCreated, Event as ContractEvent,
     },
     BalancerV2Vault, BalancerV2WeightedPool, BalancerV2WeightedPoolFactory,
@@ -290,7 +290,7 @@ impl EventStoring<ContractEvent> for BalancerPools {
 }
 
 impl_event_retrieving! {
-    pub BalancerV2WeightedPoolFactoryContract for balancer_v2_factory
+    pub BalancerV2WeightedPoolFactoryContract for balancer_v2_weighted_pool_factory
 }
 
 #[async_trait::async_trait]

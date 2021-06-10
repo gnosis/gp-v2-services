@@ -75,6 +75,7 @@ mod tests {
         }
         for network in &[1, 4] {
             assert_has_deployment_address!(BalancerV2Vault for *network);
+            assert_has_deployment_address!(BalancerV2WeightedPoolFactory for *network);
         }
     }
 
@@ -93,6 +94,7 @@ mod tests {
         }
         for network in &[1, 4] {
             assert_has_deployment_information!(BalancerV2Vault for *network);
+            assert_has_deployment_information!(BalancerV2WeightedPoolFactory for *network);
         }
     }
 }

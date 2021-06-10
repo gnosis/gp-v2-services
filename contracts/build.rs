@@ -35,7 +35,7 @@ fn main() {
     });
     generate_contract_with_config("BalancerV2WeightedPoolFactory", |builder| {
         builder
-            .with_contract_mod_override(Some("balancer_v2_factory"))
+            .with_contract_mod_override(Some("balancer_v2_weighted_pool_factory"))
             .add_deployment(
                 1,
                 addr("0x8E9aa87E45e92bad84D5F8DD1bff34Fb92637dE9"),
