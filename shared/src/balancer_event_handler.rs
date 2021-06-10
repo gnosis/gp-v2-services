@@ -39,23 +39,20 @@ pub struct WeightedPool {
     block_created: u64,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
-pub struct WeightedPoolBuilder {
-    pool_creation: PoolCreated,
-    /// block_number is only contained in the EventIndex
-    block_created: u64,
-}
-
-impl WeightedPoolBuilder {
-    async fn into_pool(self, data_fetcher: &dyn PoolDataFetching) -> Result<WeightedPool> {
-        let pool_address = self.pool_creation.pool_address;
+impl WeightedPool {
+    async fn from_event(
+        block_created: u64,
+        creation: PoolCreated,
+        data_fetcher: &dyn PoolDataFetching,
+    ) -> Result<WeightedPool> {
+        let pool_address = creation.pool_address;
         let pool_data = data_fetcher.get_pool_data(pool_address).await?;
         return Ok(WeightedPool {
             pool_id: pool_data.pool_id,
             pool_address,
             tokens: pool_data.tokens,
             normalized_weights: pool_data.weights,
-            block_created: self.block_created,
+            block_created,
         });
     }
 }
@@ -70,49 +67,30 @@ pub struct WeightedPoolData {
 #[automock]
 #[async_trait::async_trait]
 trait PoolDataFetching: Send + Sync {
-    async fn get_normalized_weights(&self, pool_address: H160) -> Result<Vec<U256>>;
-    async fn get_pool_tokens(&self, pool_id: H256) -> Result<Vec<H160>>;
-    async fn get_pool_id(&self, pool_address: H160) -> Result<H256>;
     async fn get_pool_data(&self, pool_address: H160) -> Result<WeightedPoolData>;
 }
 
 #[async_trait::async_trait]
 impl PoolDataFetching for Web3 {
-    async fn get_normalized_weights(&self, pool_address: H160) -> Result<Vec<U256>> {
+    async fn get_pool_data(&self, pool_address: H160) -> Result<WeightedPoolData> {
         let pool_contract = BalancerV2WeightedPool::at(self, pool_address);
-        Ok(pool_contract
-            .methods()
-            .get_normalized_weights()
-            .call()
-            .await?)
-    }
-
-    async fn get_pool_tokens(&self, pool_id: H256) -> Result<Vec<H160>> {
+        // Need vault and pool_id before we can fetch tokens.
         let vault = BalancerV2Vault::deployed(&self).await?;
-        // Note, this is also recovering the balances.
-        Ok(vault
+        let pool_id = H256::from(pool_contract.methods().get_pool_id().call().await?.0);
+        let tokens = vault
             .methods()
             .get_pool_tokens(Bytes(pool_id.0))
             .call()
             .await?
-            .0)
-    }
-
-    async fn get_pool_id(&self, pool_address: H160) -> Result<H256> {
-        let pool_contract = BalancerV2WeightedPool::at(self, pool_address);
-        Ok(H256::from(
-            pool_contract.methods().get_pool_id().call().await?.0,
-        ))
-    }
-
-    async fn get_pool_data(&self, pool_address: H160) -> Result<WeightedPoolData> {
-        let pool_id = self.get_pool_id(pool_address).await?;
-        let tokens = self.get_pool_tokens(pool_id).await?;
-        let weights = self.get_normalized_weights(pool_address).await?;
+            .0;
         Ok(WeightedPoolData {
             pool_id,
             tokens,
-            weights,
+            weights: pool_contract
+                .methods()
+                .get_normalized_weights()
+                .call()
+                .await?,
         })
     }
 }
@@ -125,21 +103,17 @@ pub struct BalancerPools {
     pools_by_token: HashMap<H160, HashSet<H256>>,
     /// WeightedPool data for a given PoolId
     pools: HashMap<H256, WeightedPool>,
-    /// Temporary storage for WeightedPools having errored on data fetching
-    pending_pools: HashSet<WeightedPoolBuilder>,
     #[derivative(Debug = "ignore")]
     data_fetcher: Box<dyn PoolDataFetching>,
 }
 
 impl BalancerPools {
-    async fn try_upgrade(&mut self) -> Result<()> {
-        for pool_builder in self.pending_pools.clone() {
-            let weighted_pool = pool_builder.into_pool(&*self.data_fetcher).await?;
+    async fn insert_events(&mut self, events: Vec<(EventIndex, PoolCreated)>) -> Result<()> {
+        for (index, creation) in events {
+            let weighted_pool =
+                WeightedPool::from_event(index.block_number, creation, &*self.data_fetcher).await?;
             let pool_id = weighted_pool.pool_id;
-            // delete pending pool and add to valid pools
-            tracing::info!("Upgrading Pool Builder with id {:?}", pool_id);
             self.pools.insert(pool_id, weighted_pool.clone());
-            self.pending_pools.remove(&pool_builder);
             for token in weighted_pool.tokens {
                 self.pools_by_token
                     .entry(token)
@@ -148,21 +122,6 @@ impl BalancerPools {
             }
         }
         Ok(())
-    }
-
-    async fn insert_events(&mut self, events: Vec<(EventIndex, PoolCreated)>) -> Result<()> {
-        for (index, creation) in events {
-            self.insert_pool(index, creation)
-        }
-        self.try_upgrade().await?;
-        Ok(())
-    }
-
-    fn insert_pool(&mut self, index: EventIndex, creation: PoolCreated) {
-        self.pending_pools.insert(WeightedPoolBuilder {
-            pool_creation: creation,
-            block_created: index.block_number,
-        });
     }
 
     async fn replace_events(
@@ -178,8 +137,6 @@ impl BalancerPools {
     fn delete_pools(&mut self, delete_from_block_number: u64) -> Result<()> {
         self.pools
             .retain(|_, pool| pool.block_created < delete_from_block_number);
-        self.pending_pools
-            .retain(|pool| pool.block_created < delete_from_block_number);
         // Note that this could result in an empty set for some tokens.
         let retained_pool_ids: HashSet<H256> = self.pools.keys().copied().collect();
         for (_, pool_set) in self.pools_by_token.iter_mut() {
@@ -194,20 +151,11 @@ impl BalancerPools {
     fn last_event_block(&self) -> u64 {
         // Technically we could keep this updated more effectively in a field on balancer pools,
         // but the maintenance seems like more overhead that needs to be tested.
-        let pending_max = self
-            .pending_pools
-            .iter()
-            .map(|pool_builder| pool_builder.block_created)
-            .max()
-            .unwrap_or(0);
-        // note that pending pools is likely always empty.
-        let pool_max = self
-            .pools
+        self.pools
             .iter()
             .map(|(_, pool)| pool.block_created)
             .max()
-            .unwrap_or(0);
-        pending_max.max(pool_max)
+            .unwrap_or(0)
     }
 
     fn contract_to_balancer_events(
@@ -356,7 +304,6 @@ mod tests {
         let mut pool_store = BalancerPools {
             pools_by_token: Default::default(),
             pools: Default::default(),
-            pending_pools: Default::default(),
             data_fetcher: Box::new(dummy_data_fetcher),
         };
         pool_store.insert_events(events).await.unwrap();
@@ -392,7 +339,6 @@ mod tests {
                 "failed assertion at index {}",
                 i
             );
-            assert!(pool_store.pending_pools.is_empty());
         }
     }
 
@@ -458,7 +404,6 @@ mod tests {
         let mut pool_store = BalancerPools {
             pools_by_token: Default::default(),
             pools: Default::default(),
-            pending_pools: Default::default(),
             data_fetcher: Box::new(dummy_data_fetcher),
         };
         pool_store.insert_events(converted_events).await.unwrap();
@@ -509,7 +454,6 @@ mod tests {
         let new_event_block = new_event.0.block_number;
 
         // All new data is included.
-        assert!(pool_store.pending_pools.is_empty());
         assert_eq!(
             pool_store.pools.get(&new_pool_id).unwrap(),
             &WeightedPool {
