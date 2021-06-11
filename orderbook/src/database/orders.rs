@@ -286,13 +286,84 @@ impl OrdersQueryRow {
 mod tests {
 
     use super::*;
-    use chrono::NaiveDateTime;
+    use chrono::{Duration, NaiveDateTime};
     use futures::StreamExt;
     use num_bigint::BigUint;
     use primitive_types::U256;
     use shared::event_handling::EventIndex;
     use sqlx::Executor;
     use std::collections::HashSet;
+
+    #[test]
+    fn order_status() {
+        let valid_to_timestamp = Utc::now() + Duration::days(1);
+
+        // Open
+        let order_row = OrdersQueryRow {
+            uid: vec![0; 56],
+            owner: vec![0; 20],
+            creation_timestamp: Utc::now(),
+            sell_token: vec![1; 20],
+            buy_token: vec![2; 20],
+            sell_amount: BigDecimal::from(1),
+            buy_amount: BigDecimal::from(1),
+            valid_to: valid_to_timestamp.timestamp().into(),
+            app_data: vec![0; 32],
+            fee_amount: BigDecimal::default(),
+            kind: DbOrderKind::Sell,
+            partially_fillable: true,
+            signature: vec![0; 65],
+            receiver: None,
+            sum_sell: BigDecimal::default(),
+            sum_buy: BigDecimal::default(),
+            sum_fee: BigDecimal::default(),
+            invalidated: false,
+            signing_scheme: DbSigningScheme::Eip712,
+        };
+
+        assert_eq!(order_row.calculate_status(), OrderStatus::Open);
+
+        // Filled Sell
+        let order_row = OrdersQueryRow {
+            kind: DbOrderKind::Sell,
+            sum_sell: BigDecimal::from(1),
+            sum_buy: BigDecimal::default(),
+            ..order_row
+        };
+
+        assert_eq!(order_row.calculate_status(), OrderStatus::Fulfilled);
+
+        // Filled Buy
+        let order_row = OrdersQueryRow {
+            kind: DbOrderKind::Buy,
+            sum_buy: BigDecimal::from(1),
+            sum_sell: BigDecimal::default(),
+            ..order_row
+        };
+
+        assert_eq!(order_row.calculate_status(), OrderStatus::Fulfilled);
+
+        // Cancelled
+        let order_row = OrdersQueryRow {
+            sum_sell: BigDecimal::default(),
+            sum_buy: BigDecimal::default(),
+            invalidated: true,
+            ..order_row
+        };
+
+        assert_eq!(order_row.calculate_status(), OrderStatus::Cancelled);
+
+        // Expired
+        let valid_to_yesterday = Utc::now() - Duration::days(1);
+
+        let order_row = OrdersQueryRow {
+            invalidated: false,
+            valid_to: valid_to_yesterday.timestamp().into(),
+            ..order_row
+        };
+
+        assert_eq!(order_row.calculate_status(), OrderStatus::Expired);
+    }
 
     #[tokio::test]
     #[ignore]
@@ -413,6 +484,7 @@ mod tests {
     async fn postgres_filter_orders_by_address() {
         let db = Database::new("postgresql://").unwrap();
         db.clear().await.unwrap();
+
         let orders = vec![
             Order {
                 order_meta_data: OrderMetaData {
