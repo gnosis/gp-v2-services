@@ -544,7 +544,9 @@ mod tests {
             data_fetcher: Box::new(dummy_data_fetcher),
         };
         for token_pair in token_pairs.iter().take(n) {
-            assert!(pool_store.pools_containing_token_pair(*token_pair).is_empty());
+            assert!(pool_store
+                .pools_containing_token_pair(*token_pair)
+                .is_empty());
         }
 
         // Now test non-empty pool with standard form.
