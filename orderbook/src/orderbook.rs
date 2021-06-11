@@ -338,7 +338,7 @@ mod tests {
     use futures::FutureExt;
     use maplit::hashmap;
     use mockall::{predicate::eq, Sequence};
-    use model::order::{OrderBuilder, OrderCreation, OrderMetaData};
+    use model::order::{OrderBuilder, OrderCreation, OrderMetaData, OrderStatus};
     use shared::bad_token::list_based::ListBasedDetector;
 
     #[tokio::test]
@@ -426,6 +426,7 @@ mod tests {
                     creation_date: DateTime::from_utc(NaiveDateTime::from_timestamp(2, 0), Utc),
                     ..Default::default()
                 },
+                status: OrderStatus::Open,
             },
             Order {
                 order_creation: OrderCreation {
@@ -437,6 +438,7 @@ mod tests {
                     creation_date: DateTime::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc),
                     ..Default::default()
                 },
+                status: OrderStatus::Open,
             },
         ];
 
