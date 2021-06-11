@@ -9,7 +9,6 @@ use contracts::BalancerV2Vault;
 use ethcontract::batch::CallBatch;
 use ethcontract::errors::MethodError;
 use ethcontract::{BlockId, Bytes, H160, H256, U256};
-use itertools::Itertools;
 
 pub struct PoolTokenState {
     pub balance: U256,
@@ -69,10 +68,10 @@ impl WeightedPoolFetching for BalancerPoolFetcher {
     ) -> Result<Vec<WeightedPool>> {
         let mut batch = CallBatch::new(self.web3.transport());
         let block = BlockId::Number(at_block.into());
-        let futures = token_pairs
+        let futures = self
+            .pool_data
+            .pools_containing_token_pairs(token_pairs)
             .into_iter()
-            .flat_map(|pair| self.pool_data.pools_containing_pair(pair))
-            .unique_by(|pool| pool.pool_id)
             .map(|weighted_pool| {
                 let reserves = self
                     .vault
@@ -91,6 +90,7 @@ impl WeightedPoolFetching for BalancerPoolFetcher {
 
         let mut results = Vec::new();
         for future in futures {
+            // Batch has already been executed, so these awaits resolve immediately.
             results.push(future.await);
         }
         handle_results(results)
@@ -126,7 +126,7 @@ mod tests {
     #[test]
     fn pool_fetcher_forwards_node_error() {
         let results = vec![FetchedWeightedPool {
-            pool_data: RegisteredWeightedPool::test_instance(),
+            pool_data: RegisteredWeightedPool::default(),
             reserves: Err(ethcontract_error::testing_node_error()),
         }];
         assert!(handle_results(results).is_err());
@@ -136,11 +136,11 @@ mod tests {
     fn pool_fetcher_skips_contract_error() {
         let results = vec![
             FetchedWeightedPool {
-                pool_data: RegisteredWeightedPool::test_instance(),
+                pool_data: RegisteredWeightedPool::default(),
                 reserves: Err(ethcontract_error::testing_contract_error()),
             },
             FetchedWeightedPool {
-                pool_data: RegisteredWeightedPool::test_instance(),
+                pool_data: RegisteredWeightedPool::default(),
                 reserves: Ok((vec![], vec![], U256::zero())),
             },
         ];

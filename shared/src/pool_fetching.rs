@@ -230,6 +230,7 @@ impl PoolFetching for PoolFetcher {
 
         let mut results = Vec::new();
         for future in futures {
+            // Batch has already been executed, so these awaits resolve immediately.
             results.push(future.await);
         }
         handle_results(results)

@@ -17,6 +17,7 @@ use ethcontract::common::DeploymentInformation;
 use ethcontract::{
     dyns::DynWeb3, Bytes, Event as EthContractEvent, EventMetadata, H160, H256, U256,
 };
+use itertools::Itertools;
 use mockall::*;
 use model::TokenPair;
 use std::{
@@ -31,25 +32,13 @@ pub struct PoolCreated {
     pub pool_address: H160,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RegisteredWeightedPool {
     pub(crate) pool_id: H256,
     pub(crate) pool_address: H160,
     pub(crate) tokens: Vec<H160>,
     pub(crate) normalized_weights: Vec<U256>,
     block_created: u64,
-}
-
-impl RegisteredWeightedPool {
-    pub fn test_instance() -> Self {
-        Self {
-            pool_id: Default::default(),
-            pool_address: Default::default(),
-            normalized_weights: vec![],
-            tokens: vec![],
-            block_created: 0,
-        }
-    }
 }
 
 impl RegisteredWeightedPool {
@@ -122,7 +111,10 @@ pub struct PoolRegistry {
 
 impl PoolRegistry {
     // Since all the fields are private, we expose helper methods to fetch relevant information
-    pub fn pools_containing_pair(&self, token_pair: TokenPair) -> HashSet<RegisteredWeightedPool> {
+    pub fn pools_containing_token_pair(
+        &self,
+        token_pair: TokenPair,
+    ) -> HashSet<RegisteredWeightedPool> {
         let empty_set = HashSet::new();
         let pools_0 = self
             .pools_by_token
@@ -141,6 +133,17 @@ impl PoolRegistry {
                     .expect("failed iterating over known pools")
                     .clone()
             })
+            .collect::<HashSet<RegisteredWeightedPool>>()
+    }
+
+    pub fn pools_containing_token_pairs(
+        &self,
+        token_pairs: HashSet<TokenPair>,
+    ) -> HashSet<RegisteredWeightedPool> {
+        token_pairs
+            .into_iter()
+            .flat_map(|pair| self.pools_containing_token_pair(pair))
+            .unique_by(|pool| pool.pool_id)
             .collect()
     }
 
@@ -541,7 +544,7 @@ mod tests {
             data_fetcher: Box::new(dummy_data_fetcher),
         };
         for token_pair in token_pairs.iter().take(n) {
-            assert!(pool_store.pools_containing_pair(*token_pair).is_empty());
+            assert!(pool_store.pools_containing_token_pair(*token_pair).is_empty());
         }
 
         // Now test non-empty pool with standard form.
@@ -586,15 +589,15 @@ mod tests {
         // };
 
         assert_eq!(
-            pool_store.pools_containing_pair(token_pairs[0]),
+            pool_store.pools_containing_token_pair(token_pairs[0]),
             hashset! { weighted_pools[0].clone() }
         );
         assert_eq!(
-            pool_store.pools_containing_pair(token_pairs[1]),
+            pool_store.pools_containing_token_pair(token_pairs[1]),
             hashset! { weighted_pools[1].clone(), weighted_pools[0].clone() }
         );
         assert_eq!(
-            pool_store.pools_containing_pair(token_pairs[2]),
+            pool_store.pools_containing_token_pair(token_pairs[2]),
             hashset! { weighted_pools[0].clone() }
         );
     }
