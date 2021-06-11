@@ -111,6 +111,7 @@ pub struct PoolRegistry {
 
 impl PoolRegistry {
     // Since all the fields are private, we expose helper methods to fetch relevant information
+    /// Returns all pools containing both tokens from TokenPair
     pub fn pools_containing_token_pair(
         &self,
         token_pair: TokenPair,
@@ -136,6 +137,7 @@ impl PoolRegistry {
             .collect::<HashSet<RegisteredWeightedPool>>()
     }
 
+    /// Given a collection of TokenPair, returns all pools containing at least one of the pairs.
     pub fn pools_containing_token_pairs(
         &self,
         token_pairs: HashSet<TokenPair>,
