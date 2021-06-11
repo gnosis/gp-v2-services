@@ -11,6 +11,7 @@ use crate::{
     naive_solver::NaiveSolver,
     oneinch_solver::OneInchSolver,
     settlement::Settlement,
+    single_order_solver::SingleOrderSolver,
 };
 use anyhow::Result;
 use contracts::GPv2Settlement;
@@ -25,6 +26,11 @@ use structopt::clap::arg_enum;
 // minus this duration to account for additional delay for example from the network.
 const TIMEOUT_SAFETY_BUFFER: Duration = Duration::from_secs(5);
 
+/// Interface that all solvers must implement
+/// A `solve` method transforming a collection of `Liquidity` (sources) into a list of
+/// independent `Settlements`. Solvers are free to choose which types `Liquidity` they
+/// would like to include/process (i.e. those already supported here or their own private sources)
+/// The `name` method is included for logging purposes.
 #[async_trait::async_trait]
 pub trait Solver {
     // The returned settlements should be independent (for example not reusing the same user
@@ -94,17 +100,20 @@ pub fn create(
                 fee_discount_factor,
             )),
             SolverType::OneInch => {
-                // We only want to use 1Inch for high value orders
-                boxed(SellVolumeFilteringSolver {
-                    inner: OneInchSolver::with_disabled_protocols(
+                let one_inch_solver: SingleOrderSolver<OneInchSolver> =
+                    OneInchSolver::with_disabled_protocols(
                         settlement_contract.clone(),
                         chain_id,
                         disabled_one_inch_protocols.clone(),
-                    )?,
-                    price_estimator: price_estimator.clone(),
-                    denominator_token: native_token,
-                    min_value: min_order_size_one_inch,
-                })
+                    )?
+                    .into();
+                // We only want to use 1Inch for high value orders
+                boxed(SellVolumeFilteringSolver::new(
+                    Box::new(one_inch_solver),
+                    price_estimator.clone(),
+                    native_token,
+                    min_order_size_one_inch,
+                ))
             }
         })
         .collect()
@@ -121,14 +130,28 @@ impl Solver for NoopSolver {
 
 /// A solver that remove limit order below a certain threshold and
 /// passes the remaining liquidity onto an inner solver implementation.
-pub struct SellVolumeFilteringSolver<S> {
-    inner: S,
+pub struct SellVolumeFilteringSolver {
+    inner: Box<dyn Solver + Send + Sync>,
     price_estimator: Arc<dyn PriceEstimating>,
     denominator_token: H160,
     min_value: U256,
 }
 
-impl<S> SellVolumeFilteringSolver<S> {
+impl SellVolumeFilteringSolver {
+    pub fn new(
+        inner: Box<dyn Solver + Send + Sync>,
+        price_estimator: Arc<dyn PriceEstimating>,
+        denominator_token: H160,
+        min_value: U256,
+    ) -> Self {
+        Self {
+            inner,
+            price_estimator,
+            denominator_token,
+            min_value,
+        }
+    }
+
     async fn filter_liquidity(&self, orders: Vec<Liquidity>) -> Vec<Liquidity> {
         let sell_tokens: Vec<_> = orders
             .iter()
@@ -175,7 +198,7 @@ impl<S> SellVolumeFilteringSolver<S> {
 }
 
 #[async_trait::async_trait]
-impl<S: Solver + Send + Sync> Solver for SellVolumeFilteringSolver<S> {
+impl Solver for SellVolumeFilteringSolver {
     async fn solve(&self, orders: Vec<Liquidity>, gas_price: f64) -> Result<Vec<Settlement>> {
         let original_length = orders.len();
         let filtered_liquidity = self.filter_liquidity(orders).await;
@@ -227,7 +250,7 @@ mod tests {
 
         let price_estimator = Arc::new(FakePriceEstimator(BigRational::from_integer(42.into())));
         let solver = SellVolumeFilteringSolver {
-            inner: NoopSolver(),
+            inner: Box::new(NoopSolver()),
             price_estimator,
             denominator_token: H160::zero(),
             min_value: 400_000.into(),
@@ -246,7 +269,7 @@ mod tests {
 
         let price_estimator = Arc::new(FailingPriceEstimator());
         let solver = SellVolumeFilteringSolver {
-            inner: NoopSolver(),
+            inner: Box::new(NoopSolver()),
             price_estimator,
             denominator_token: H160::zero(),
             min_value: 0.into(),

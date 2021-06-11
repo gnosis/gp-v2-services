@@ -135,19 +135,19 @@ impl Pool {
 }
 
 impl BaselineSolvable for Pool {
-    fn get_amount_in(&self, in_token: H160, out_amount: U256, out_token: H160) -> Option<U256> {
-        self.get_amount_in(out_token, out_amount)
-            .map(|(in_amount, token)| {
-                assert_eq!(token, in_token);
-                in_amount
-            })
-    }
-
     fn get_amount_out(&self, out_token: H160, in_amount: U256, in_token: H160) -> Option<U256> {
         self.get_amount_out(in_token, in_amount)
             .map(|(out_amount, token)| {
                 assert_eq!(token, out_token);
                 out_amount
+            })
+    }
+
+    fn get_amount_in(&self, in_token: H160, out_amount: U256, out_token: H160) -> Option<U256> {
+        self.get_amount_in(out_token, out_amount)
+            .map(|(in_amount, token)| {
+                assert_eq!(token, in_token);
+                in_amount
             })
     }
 
@@ -197,7 +197,7 @@ impl PoolFetching for PoolFetcher {
                     .batch_call(&mut batch);
 
                 async move {
-                    // Clippy is wrong about this being eval order depndendent.
+                    // Clippy is wrong about this being eval order dependent.
                     #[allow(clippy::eval_order_dependence)]
                     FetchedPool {
                         pair,
