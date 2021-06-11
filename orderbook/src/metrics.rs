@@ -1,11 +1,21 @@
 use anyhow::Result;
-use prometheus::{HistogramOpts, HistogramVec, IntGaugeVec, Opts, Registry};
-use std::{convert::Infallible, sync::Arc, time::Instant};
+use prometheus::{HistogramOpts, HistogramVec, IntCounter, IntGaugeVec, Opts, Registry};
+use shared::{pool_cache::PoolCacheMetrics, transport::TransportMetrics};
+use std::{
+    convert::Infallible,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use warp::{reply::Response, Filter, Reply};
 
 pub struct Metrics {
-    requests: HistogramVec,
+    /// Incoming API request metrics
+    api_requests: HistogramVec,
     db_table_row_count: IntGaugeVec,
+    /// Outgoing RPC request metrics
+    rpc_requests: HistogramVec,
+    pool_cache_hits: IntCounter,
+    pool_cache_misses: IntCounter,
 }
 
 impl Metrics {
@@ -14,8 +24,8 @@ impl Metrics {
             "gp_v2_api_requests",
             "API Request durations labelled by route and response status code",
         );
-        let requests = HistogramVec::new(opts, &["response", "request_type"]).unwrap();
-        registry.register(Box::new(requests.clone()))?;
+        let api_requests = HistogramVec::new(opts, &["response", "request_type"]).unwrap();
+        registry.register(Box::new(api_requests.clone()))?;
 
         let db_table_row_count = IntGaugeVec::new(
             Opts::new("gp_v2_api_table_rows", "Number of rows in db tables."),
@@ -23,9 +33,31 @@ impl Metrics {
         )?;
         registry.register(Box::new(db_table_row_count.clone()))?;
 
+        let opts = HistogramOpts::new(
+            "gp_v2_api_transport_requests",
+            "RPC Request durations labelled by method",
+        );
+        let rpc_requests = HistogramVec::new(opts, &["method"]).unwrap();
+        registry.register(Box::new(rpc_requests.clone()))?;
+
+        let pool_cache_hits = IntCounter::new(
+            "gp_v2_api_pool_cache_hits",
+            "Number of cache hits in the pool fetcher cache.",
+        )?;
+        registry.register(Box::new(pool_cache_hits.clone()))?;
+
+        let pool_cache_misses = IntCounter::new(
+            "gp_v2_api_pool_cache_misses",
+            "Number of cache misses in the pool fetcher cache.",
+        )?;
+        registry.register(Box::new(pool_cache_misses.clone()))?;
+
         Ok(Self {
-            requests,
+            api_requests,
             db_table_row_count,
+            rpc_requests,
+            pool_cache_hits,
+            pool_cache_misses,
         })
     }
 
@@ -33,6 +65,21 @@ impl Metrics {
         self.db_table_row_count
             .with_label_values(&[table])
             .set(count);
+    }
+}
+
+impl TransportMetrics for Metrics {
+    fn report_query(&self, label: &str, elapsed: Duration) {
+        self.rpc_requests
+            .with_label_values(&[label])
+            .observe(elapsed.as_secs_f64())
+    }
+}
+
+impl PoolCacheMetrics for Metrics {
+    fn pools_fetched(&self, cache_hits: usize, cache_misses: usize) {
+        self.pool_cache_hits.inc_by(cache_hits as u64);
+        self.pool_cache_misses.inc_by(cache_misses as u64);
     }
 }
 
@@ -77,7 +124,7 @@ pub fn end_request(metrics: Arc<Metrics>, timer: Instant, reply: LabelledReply) 
     let response = inner.into_response();
     let elapsed = timer.elapsed().as_secs_f64();
     metrics
-        .requests
+        .api_requests
         .with_label_values(&[response.status().as_str(), label])
         .observe(elapsed);
     MetricsReply { response }

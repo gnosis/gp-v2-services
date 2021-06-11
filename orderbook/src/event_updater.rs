@@ -1,57 +1,45 @@
 use crate::database::Database;
 use anyhow::{Context, Result};
 use contracts::{
-    g_pv_2_settlement::{self, Event as ContractEvent},
+    gpv2_settlement::{self, Event as ContractEvent},
     GPv2Settlement,
 };
 use ethcontract::{dyns::DynWeb3, Event};
 use shared::{
     event_handling::{BlockNumber, EventHandler, EventStoring},
     impl_event_retrieving,
+    maintenance::Maintaining,
 };
-use std::ops::{Deref, DerefMut, RangeInclusive};
+use std::ops::RangeInclusive;
+use tokio::sync::Mutex;
 
-pub struct EventUpdater(EventHandler<DynWeb3, GPv2SettlementContract, Database>);
-
-impl Deref for EventUpdater {
-    type Target = EventHandler<DynWeb3, GPv2SettlementContract, Database>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for EventUpdater {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
+pub struct EventUpdater(Mutex<EventHandler<DynWeb3, GPv2SettlementContract, Database>>);
 
 #[async_trait::async_trait]
 impl EventStoring<ContractEvent> for Database {
     async fn replace_events(
-        &self,
+        &mut self,
         events: Vec<Event<ContractEvent>>,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<()> {
         let db_events = self
             .contract_to_db_events(events)
-            .context("failed to get event")?;
+            .context("replace - failed to convert events")?;
         tracing::debug!(
             "replacing {} events from block number {}",
             db_events.len(),
             range.start().to_u64()
         );
-        self.replace_events(range.start().to_u64(), db_events)
+        Database::replace_events(self, range.start().to_u64(), db_events)
             .await
             .context("failed to replace trades")?;
         Ok(())
     }
 
-    async fn append_events(&self, events: Vec<Event<ContractEvent>>) -> Result<()> {
+    async fn append_events(&mut self, events: Vec<Event<ContractEvent>>) -> Result<()> {
         let db_events = self
             .contract_to_db_events(events)
-            .context("failed to get event")?;
+            .context("append - failed to convert events")?;
         tracing::debug!("inserting {} new events", db_events.len());
         self.insert_events(db_events)
             .await
@@ -65,16 +53,23 @@ impl EventStoring<ContractEvent> for Database {
 }
 
 impl_event_retrieving! {
-    pub GPv2SettlementContract for g_pv_2_settlement
+    pub GPv2SettlementContract for gpv2_settlement
 }
 
 impl EventUpdater {
     pub fn new(contract: GPv2Settlement, db: Database, start_sync_at_block: Option<u64>) -> Self {
-        Self(EventHandler::new(
+        Self(Mutex::new(EventHandler::new(
             contract.raw_instance().web3(),
             GPv2SettlementContract(contract),
             db,
             start_sync_at_block,
-        ))
+        )))
+    }
+}
+
+#[async_trait::async_trait]
+impl Maintaining for EventUpdater {
+    async fn run_maintenance(&self) -> Result<()> {
+        self.0.run_maintenance().await
     }
 }

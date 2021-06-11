@@ -1,7 +1,7 @@
 use super::Database;
 use crate::conversions::*;
 use anyhow::{anyhow, Context, Result};
-use contracts::g_pv_2_settlement::{
+use contracts::gpv2_settlement::{
     event_data::{
         OrderInvalidated as ContractInvalidation, Settlement as ContractSettlement,
         Trade as ContractTrade,
@@ -11,14 +11,9 @@ use contracts::g_pv_2_settlement::{
 use ethcontract::{Event as EthContractEvent, EventMetadata, H160, H256, U256};
 use futures::FutureExt;
 use model::order::OrderUid;
+use shared::event_handling::EventIndex;
 use sqlx::{Connection, Executor, Postgres, Transaction};
 use std::convert::TryInto;
-
-#[derive(Debug, Clone, Copy)]
-pub struct EventIndex {
-    pub block_number: u64,
-    pub log_index: u64,
-}
 
 #[derive(Debug)]
 pub enum Event {
@@ -232,6 +227,7 @@ fn convert_trade(trade: &ContractTrade, meta: &EventMetadata) -> Result<(EventIn
     let order_uid = OrderUid(
         trade
             .order_uid
+            .0
             .as_slice()
             .try_into()
             .context("trade event order_uid has wrong number of bytes")?,
@@ -242,7 +238,7 @@ fn convert_trade(trade: &ContractTrade, meta: &EventMetadata) -> Result<(EventIn
         buy_amount: trade.buy_amount,
         fee_amount: trade.fee_amount,
     };
-    Ok((event_meta_to_index(meta), Event::Trade(event)))
+    Ok((EventIndex::from(meta), Event::Trade(event)))
 }
 
 fn convert_settlement(
@@ -253,7 +249,7 @@ fn convert_settlement(
         solver: settlement.solver,
         transaction_hash: meta.transaction_hash,
     };
-    (event_meta_to_index(meta), Event::Settlement(event))
+    (EventIndex::from(meta), Event::Settlement(event))
 }
 
 fn convert_invalidation(
@@ -263,20 +259,13 @@ fn convert_invalidation(
     let order_uid = OrderUid(
         invalidation
             .order_uid
+            .0
             .as_slice()
             .try_into()
             .context("invalidation event order_uid has wrong number of bytes")?,
     );
     let event = Invalidation { order_uid };
-    Ok((event_meta_to_index(meta), Event::Invalidation(event)))
-}
-
-// Converts EventMetaData to DbEventIndex struct
-fn event_meta_to_index(meta: &EventMetadata) -> EventIndex {
-    EventIndex {
-        block_number: meta.block_number,
-        log_index: meta.log_index as u64,
-    }
+    Ok((EventIndex::from(meta), Event::Invalidation(event)))
 }
 
 #[cfg(test)]

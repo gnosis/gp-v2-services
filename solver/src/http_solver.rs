@@ -59,6 +59,7 @@ pub struct HttpSolver {
     token_info_fetcher: Arc<dyn TokenInfoFetching>,
     price_estimator: Arc<dyn PriceEstimating>,
     network_id: String,
+    chain_id: u64,
     fee_discount_factor: f64,
 }
 
@@ -72,6 +73,7 @@ impl HttpSolver {
         token_info_fetcher: Arc<dyn TokenInfoFetching>,
         price_estimator: Arc<dyn PriceEstimating>,
         network_id: String,
+        chain_id: u64,
         fee_discount_factor: f64,
     ) -> Self {
         // Unwrap because we cannot handle client creation failing.
@@ -85,6 +87,7 @@ impl HttpSolver {
             token_info_fetcher,
             price_estimator,
             network_id,
+            chain_id,
             fee_discount_factor,
         }
     }
@@ -268,6 +271,12 @@ impl HttpSolver {
     async fn send(&self, model: &BatchAuctionModel) -> Result<SettledBatchAuctionModel> {
         let mut url = self.base.clone();
         url.set_path("/solve");
+
+        let instance_name = self.generate_instance_name();
+        tracing::info!("http solver instance name is {}", instance_name);
+        url.query_pairs_mut()
+            .append_pair("instance_name", &instance_name);
+
         self.config.add_to_query(&mut url);
         let query = url.query().map(ToString::to_string).unwrap_or_default();
         let mut request = self.client.post(url);
@@ -315,6 +324,16 @@ impl HttpSolver {
             .ceil()
             .to_u128()
             .context("failed to compute order fee")
+    }
+
+    pub fn generate_instance_name(&self) -> String {
+        let now = chrono::Utc::now();
+        format!(
+            "{}_{}_{}",
+            now.to_string().replace(" ", "_"),
+            self.network_id,
+            self.chain_id
+        )
     }
 }
 
@@ -438,6 +457,7 @@ mod tests {
             mock_token_info_fetcher,
             mock_price_estimation,
             "mock_network_id".to_string(),
+            0,
             1.,
         );
         let base = |x: u128| x * 10u128.pow(18);

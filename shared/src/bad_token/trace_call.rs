@@ -1,17 +1,14 @@
 use super::{BadTokenDetecting, TokenQuality};
-use crate::trace_many;
-use anyhow::{anyhow, bail, ensure, Result};
+use crate::{
+    amm_pair_provider::AmmPairProvider, ethcontract_error::EthcontractErrorType, trace_many, Web3,
+};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use contracts::ERC20;
 use ethcontract::{
-    batch::CallBatch,
-    dyns::DynTransport,
-    errors::{ExecutionError, MethodError},
-    transaction::TransactionBuilder,
-    PrivateKey,
+    batch::CallBatch, dyns::DynTransport, transaction::TransactionBuilder, PrivateKey,
 };
 use model::TokenPair;
 use primitive_types::{H160, U256};
-use shared::{amm_pair_provider::AmmPairProvider, Web3};
 use std::{collections::HashSet, sync::Arc};
 use web3::{
     signing::keccak256,
@@ -35,7 +32,9 @@ pub struct TraceCallDetector {
 #[async_trait::async_trait]
 impl BadTokenDetecting for TraceCallDetector {
     async fn detect(&self, token: H160) -> Result<TokenQuality> {
-        self.detect_impl(token).await
+        let quality = self.detect_impl(token).await?;
+        tracing::info!("token {:?} quality {:?}", token, quality);
+        Ok(quality)
     }
 }
 
@@ -45,9 +44,11 @@ impl TraceCallDetector {
         let decimals = match instance.decimals().call().await {
             Ok(decimals) => decimals,
             Err(err) => {
-                return match EthcontractError::classify(&err) {
-                    EthcontractError::Node => Err(err.into()),
-                    EthcontractError::Contract => Ok(TokenQuality::bad("failed to get decimals")),
+                return match EthcontractErrorType::classify(&err) {
+                    EthcontractErrorType::Node => Err(err.into()),
+                    EthcontractErrorType::Contract => {
+                        Ok(TokenQuality::bad("failed to get decimals"))
+                    }
                 }
             }
         };
@@ -73,7 +74,9 @@ impl TraceCallDetector {
         // sending to an address that does not have any balance yet (implicitly 0) causes an
         // allocation.
         let request = self.create_trace_request(token, amount, take_from);
-        let traces = trace_many::trace_many(request, &self.web3).await?;
+        let traces = trace_many::trace_many(request, &self.web3)
+            .await
+            .context("failed to trace for bad token detection")?;
         Self::handle_response(&traces, amount)
     }
 
@@ -109,9 +112,9 @@ impl TraceCallDetector {
             let balance = match result {
                 Ok(balance) => balance,
                 Err(err) => {
-                    return match EthcontractError::classify(&err) {
-                        EthcontractError::Node => Err(err.into()),
-                        EthcontractError::Contract => Ok(None),
+                    return match EthcontractErrorType::classify(&err) {
+                        EthcontractErrorType::Node => Err(err.into()),
+                        EthcontractErrorType::Contract => Ok(None),
                     }
                 }
             };
@@ -262,34 +265,16 @@ fn ensure_transaction_ok_and_get_gas(trace: &BlockTrace) -> Result<Result<U256, 
     Ok(Ok(call_result.gas_used))
 }
 
-#[derive(Copy, Clone, Debug)]
-enum EthcontractError {
-    // The error stems from communicating with the node.
-    Node,
-    // Communication was successful but the contract on chain errored.
-    Contract,
-}
-
-impl EthcontractError {
-    fn classify(err: &MethodError) -> Self {
-        match &err.inner {
-            ExecutionError::Web3(_) => Self::Node,
-            _ => Self::Contract,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hex_literal::hex;
-    use shared::{
+    use crate::{
         amm_pair_provider::{SushiswapPairProvider, UniswapPairProvider},
-        transport::LoggingTransport,
+        transport::create_test_transport,
     };
-    use web3::{
-        transports::Http,
-        types::{Action, ActionType, Bytes, Call, CallResult, CallType, Res, TransactionTrace},
+    use hex_literal::hex;
+    use web3::types::{
+        Action, ActionType, Bytes, Call, CallResult, CallType, Res, TransactionTrace,
     };
 
     fn encode_u256(u256: U256) -> Bytes {
@@ -396,14 +381,12 @@ mod tests {
         println!("{:?}", TraceCallDetector::arbitrary_recipient());
     }
 
-    // cargo test -p orderbook mainnet_tokens -- --nocapture
+    // cargo test -p shared mainnet_tokens -- --nocapture --ignored
     #[tokio::test]
     #[ignore]
     async fn mainnet_tokens() {
         // shared::tracing::initialize("orderbook::bad_token=debug,shared::transport=debug");
-        let http = LoggingTransport::new(
-            Http::new("https://dev-openethereum.mainnet.gnosisdev.com/").unwrap(),
-        );
+        let http = create_test_transport("https://dev-openethereum.mainnet.gnosisdev.com/");
         let web3 = Web3::new(http);
 
         let base_tokens = &[
@@ -509,6 +492,7 @@ mod tests {
             H160(hex!("2b1fe2cea92436e8c34b7c215af66aaa2932a8b2")),
             H160(hex!("c7c24fe893c21e8a4ef46eaf31badcab9f362841")),
             H160(hex!("ef5b32486ed432b804a51d129f4d2fbdf18057ec")),
+            H160(hex!("2129ff6000b95a973236020bcd2b2006b0d8e019")),
         ];
 
         // Of the deny listed tokens the following are detected as good:

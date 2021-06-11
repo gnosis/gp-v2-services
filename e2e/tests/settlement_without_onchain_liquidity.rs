@@ -26,6 +26,7 @@ use crate::services::{
     create_orderbook_api, deploy_mintable_token, to_wei, GPv2, OrderbookServices, UniswapContracts,
     API_HOST,
 };
+use shared::maintenance::Maintaining;
 
 const TRADER_A_PK: [u8; 32] =
     hex!("0000000000000000000000000000000000000000000000000000000000000001");
@@ -111,8 +112,9 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
     // Place Orders
     let native_token = token_a.address();
     let OrderbookServices {
-        orderbook,
         price_estimator,
+        maintenance,
+        block_stream,
     } = OrderbookServices::new(&web3, &gpv2, &uniswap_factory, native_token).await;
 
     let client = reqwest::Client::new();
@@ -154,7 +156,7 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
     let solver = solver::naive_solver::NaiveSolver {};
     let liquidity_collector = LiquidityCollector {
         uniswap_like_liquidity: vec![uniswap_liquidity],
-        orderbook_api: create_orderbook_api(&web3),
+        orderbook_api: create_orderbook_api(&web3, native_token),
     };
     let network_id = web3.net().version().await.unwrap();
     let market_makable_token_list = TokenList::new(maplit::hashmap! {
@@ -180,7 +182,10 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
         network_id,
         1,
         Duration::from_secs(10),
+        f64::MAX,
         Some(market_makable_token_list),
+        block_stream,
+        1.0,
     );
     driver.single_run().await.unwrap();
 
@@ -208,9 +213,12 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
     assert_eq!(balance, to_wei(100));
 
     // Drive orderbook in order to check the removal of settled order_b
-    orderbook.run_maintenance(&gpv2.settlement).await.unwrap();
+    maintenance.run_maintenance().await.unwrap();
 
-    let orders = create_orderbook_api(&web3).get_orders().await.unwrap();
+    let orders = create_orderbook_api(&web3, native_token)
+        .get_orders()
+        .await
+        .unwrap();
     assert!(orders.is_empty());
 
     // Drive again to ensure we can continue solution finding

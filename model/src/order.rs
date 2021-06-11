@@ -65,6 +65,15 @@ impl Order {
         token_list.contains(&self.order_creation.buy_token)
             || token_list.contains(&self.order_creation.sell_token)
     }
+
+    pub fn actual_receiver(&self) -> H160 {
+        let receiver = self.order_creation.receiver.unwrap_or_default();
+        if receiver == H160::zero() {
+            self.order_meta_data.owner
+        } else {
+            receiver
+        }
+    }
 }
 
 #[derive(Default)]
@@ -255,7 +264,7 @@ impl OrderCreation {
 
 /// An order cancellation as provided to the orderbook by the frontend.
 #[serde_as]
-#[derive(Eq, PartialEq, Clone, Copy, Debug, Deserialize, Serialize, Hash)]
+#[derive(Eq, PartialEq, Clone, Copy, Debug, Hash)]
 pub struct OrderCancellation {
     pub order_uid: OrderUid,
     pub signature: Signature,

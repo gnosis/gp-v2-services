@@ -4,13 +4,18 @@ use prometheus::Registry;
 use reqwest::Url;
 use shared::{
     amm_pair_provider::{SushiswapPairProvider, UniswapPairProvider},
+    bad_token::list_based::ListBasedDetector,
+    current_block::current_block_stream,
+    http_transport::HttpTransport,
+    maintenance::ServiceMaintenance,
     metrics::serve_metrics,
     network::network_name,
     pool_aggregating::{self, BaselineSources, PoolAggregator},
+    pool_cache::{PoolCache, PoolCacheConfig},
     price_estimate::BaselinePriceEstimator,
     token_info::{CachedTokenInfoFetcher, TokenInfoFetcher},
     token_list::TokenList,
-    transport::LoggingTransport,
+    transport::create_instrumented_transport,
 };
 use solver::{
     driver::Driver, liquidity::uniswap::UniswapLikeLiquidity,
@@ -19,7 +24,6 @@ use solver::{
 use std::iter::FromIterator as _;
 use std::{collections::HashSet, sync::Arc, time::Duration};
 use structopt::StructOpt;
-use web3::transports::Http;
 
 #[derive(Debug, StructOpt)]
 struct Arguments {
@@ -119,14 +123,29 @@ struct Arguments {
     )]
     min_order_size_one_inch: U256,
 
+    /// The list of disabled 1Inch protocols. By default, the `PMM1` protocol
+    /// (representing a private market maker) is disabled as it seems to
+    /// produce invalid swaps.
+    #[structopt(long, env, default_value = "PMM1", use_delimiter = true)]
+    disabled_one_inch_protocols: Vec<String>,
+
     /// The list of tokens our settlement contract is willing to buy when settling trades
     /// without external liquidity
     #[structopt(
         long,
-        env = "MARKET_MAKEABLE_TOKEN_LIST",
+        env = "MARKET_MAKABLE_TOKEN_LIST",
         default_value = "https://tokens.coingecko.com/uniswap/all.json"
     )]
     market_makable_token_list: String,
+
+    /// The maximum gas price the solver is willing to pay in a settlement
+    #[structopt(
+        long,
+        env = "GAS_PRICE_CAP_GWEI",
+        default_value = "1500",
+        parse(try_from_str = shared::arguments::wei_from_gwei)
+    )]
+    gas_price_cap: f64,
 }
 
 #[tokio::main]
@@ -139,10 +158,8 @@ async fn main() {
     let metrics = Arc::new(Metrics::new(&registry).expect("Couldn't register metrics"));
 
     // TODO: custom transport that allows setting timeout
-    let transport = LoggingTransport::new(
-        web3::transports::Http::new(args.shared.node_url.as_str())
-            .expect("transport creation failed"),
-    );
+    let transport =
+        create_instrumented_transport(HttpTransport::new(args.shared.node_url), metrics.clone());
     let web3 = web3::Web3::new(transport);
     let chain_id = web3
         .eth()
@@ -185,17 +202,38 @@ async fn main() {
         .expect("failed to create gas price estimator"),
     );
 
+    let current_block_stream =
+        current_block_stream(web3.clone(), args.shared.block_stream_poll_interval_seconds)
+            .await
+            .unwrap();
+
     let pair_providers =
         pool_aggregating::pair_providers(&args.shared.baseline_sources, chain_id, &web3).await;
-
     let pool_aggregator = PoolAggregator::from_providers(&pair_providers, &web3).await;
+    let pool_fetcher = Arc::new(
+        PoolCache::new(
+            PoolCacheConfig {
+                number_of_blocks_to_cache: args.shared.pool_cache_blocks,
+                // 0 because we don't make use of the auto update functionality as we always fetch
+                // for specific blocks
+                number_of_pairs_to_auto_update: 0,
+                maximum_recent_block_age: args.shared.pool_cache_maximum_recent_block_age,
+                max_retries: args.shared.pool_cache_maximum_retries,
+                delay_between_retries: args.shared.pool_cache_delay_between_retries_seconds,
+            },
+            Box::new(pool_aggregator),
+            current_block_stream.clone(),
+            metrics.clone(),
+        )
+        .expect("failed to create pool cache"),
+    );
 
-    // TODO - use Filtered-Cached PoolFetchers here too.
     let price_estimator = Arc::new(BaselinePriceEstimator::new(
-        Box::new(pool_aggregator),
+        pool_fetcher.clone(),
         gas_price_estimator.clone(),
         base_tokens.clone(),
-        args.shared.unsupported_tokens.into_iter().collect(),
+        // Order book already filters bad tokens
+        Arc::new(ListBasedDetector::deny_list(Vec::new())),
         native_token_contract.address(),
     ));
     let uniswap_like_liquidity = build_amm_artifacts(
@@ -219,6 +257,7 @@ async fn main() {
         args.shared.fee_discount_factor,
         args.solver_time_limit,
         args.min_order_size_one_inch,
+        args.disabled_one_inch_protocols,
     )
     .expect("failure creating solvers");
     let liquidity_collector = LiquidityCollector {
@@ -244,8 +283,16 @@ async fn main() {
         network_id,
         args.max_merged_settlements,
         args.solver_time_limit,
+        args.gas_price_cap,
         market_makable_token_list,
+        current_block_stream.clone(),
+        args.shared.fee_discount_factor,
     );
+
+    let maintainer = ServiceMaintenance {
+        maintainers: vec![pool_fetcher],
+    };
+    tokio::task::spawn(maintainer.run_maintenance_on_new_block(current_block_stream));
 
     serve_metrics(registry, ([0, 0, 0, 0], args.metrics_port).into());
     driver.run_forever().await;
@@ -256,7 +303,7 @@ async fn build_amm_artifacts(
     chain_id: u64,
     settlement_contract: contracts::GPv2Settlement,
     base_tokens: HashSet<H160>,
-    web3: web3::Web3<LoggingTransport<Http>>,
+    web3: shared::Web3,
 ) -> Vec<UniswapLikeLiquidity> {
     let mut res = vec![];
     for source in sources {

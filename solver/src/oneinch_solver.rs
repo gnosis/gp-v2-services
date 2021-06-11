@@ -9,24 +9,27 @@ use self::api::{Amount, OneInchClient, Slippage, Swap, SwapQuery};
 use crate::{
     encoding::EncodedInteraction,
     interactions::Erc20ApproveInteraction,
-    liquidity::{slippage::MAX_SLIPPAGE_BPS, LimitOrder, Liquidity},
+    liquidity::{slippage::MAX_SLIPPAGE_BPS, LimitOrder},
     settlement::{Interaction, Settlement},
-    solver::Solver,
+    single_order_solver::SingleOrderSolving,
 };
 use anyhow::{ensure, Result};
 use contracts::{GPv2Settlement, ERC20};
-use ethcontract::{dyns::DynWeb3, U256};
-use futures::future;
+use ethcontract::{dyns::DynWeb3, Bytes, U256};
 use maplit::hashmap;
 use model::order::OrderKind;
-use rand::seq::SliceRandom as _;
-use std::fmt::{self, Display, Formatter};
+use std::{
+    collections::HashSet,
+    fmt::{self, Display, Formatter},
+    iter,
+};
 
 /// A GPv2 solver that matches GP **sell** orders to direct 1Inch swaps.
 #[derive(Debug)]
 pub struct OneInchSolver {
     settlement_contract: GPv2Settlement,
     client: OneInchClient,
+    disabled_protocols: HashSet<String>,
 }
 
 /// Chain ID for Mainnet.
@@ -36,6 +39,15 @@ impl OneInchSolver {
     /// Creates a new 1Inch solver instance for specified settlement contract
     /// instance.
     pub fn new(settlement_contract: GPv2Settlement, chain_id: u64) -> Result<Self> {
+        Self::with_disabled_protocols(settlement_contract, chain_id, iter::empty())
+    }
+
+    /// Creates a new 1Inch solver with a list of disabled protocols.
+    pub fn with_disabled_protocols(
+        settlement_contract: GPv2Settlement,
+        chain_id: u64,
+        disabled_protocols: impl IntoIterator<Item = String>,
+    ) -> Result<Self> {
         ensure!(
             chain_id == MAINNET_CHAIN_ID,
             "1Inch solver only supported on Mainnet",
@@ -44,11 +56,35 @@ impl OneInchSolver {
         Ok(Self {
             settlement_contract,
             client: Default::default(),
+            disabled_protocols: disabled_protocols.into_iter().collect(),
         })
     }
 
-    /// Settles a single sell order against a 1Inch swap.
-    async fn settle_order(&self, order: LimitOrder) -> Result<Settlement> {
+    /// Gets the list of supported protocols for the 1Inch solver.
+    async fn supported_protocols(&self) -> Result<Option<Vec<String>>> {
+        let protocols = if self.disabled_protocols.is_empty() {
+            None
+        } else {
+            Some(
+                self.client
+                    .get_protocols()
+                    .await?
+                    .protocols
+                    .into_iter()
+                    .filter(|protocol| !self.disabled_protocols.contains(protocol))
+                    .collect(),
+            )
+        };
+        Ok(protocols)
+    }
+
+    /// Settles a single sell order against a 1Inch swap using the spcified
+    /// protocols.
+    async fn settle_order(
+        &self,
+        order: LimitOrder,
+        protocols: Option<Vec<String>>,
+    ) -> Result<Settlement> {
         debug_assert_eq!(
             order.kind,
             OrderKind::Sell,
@@ -62,26 +98,27 @@ impl OneInchSolver {
             .call()
             .await?;
 
-        let swap = self
-            .client
-            .get_swap(SwapQuery {
-                from_token_address: order.sell_token,
-                to_token_address: order.buy_token,
-                amount: order.sell_amount,
-                from_address: self.settlement_contract.address(),
-                slippage: Slippage::basis_points(MAX_SLIPPAGE_BPS).unwrap(),
-                // Disable balance/allowance checks, as the settlement contract
-                // does not hold balances to traded tokens.
-                disable_estimate: Some(true),
-                // Use at most 2 connector tokens
-                complexity_level: Some(Amount::new(2).unwrap()),
-                // Cap swap gas to 750K.
-                gas_limit: Some(750_000),
-                // Use only 3 main route for cheaper trades.
-                main_route_parts: Some(Amount::new(3).unwrap()),
-                parts: Some(Amount::new(3).unwrap()),
-            })
-            .await?;
+        let query = SwapQuery {
+            from_token_address: order.sell_token,
+            to_token_address: order.buy_token,
+            amount: order.sell_amount,
+            from_address: self.settlement_contract.address(),
+            slippage: Slippage::basis_points(MAX_SLIPPAGE_BPS).unwrap(),
+            protocols,
+            // Disable balance/allowance checks, as the settlement contract
+            // does not hold balances to traded tokens.
+            disable_estimate: Some(true),
+            // Use at most 2 connector tokens
+            complexity_level: Some(Amount::new(2).unwrap()),
+            // Cap swap gas to 750K.
+            gas_limit: Some(750_000),
+            // Use only 3 main route for cheaper trades.
+            main_route_parts: Some(Amount::new(3).unwrap()),
+            parts: Some(Amount::new(3).unwrap()),
+        };
+
+        tracing::debug!("querying 1Inch swap api with {:?}", query);
+        let swap = self.client.get_swap(query).await?;
 
         ensure!(
             swap.to_token_amount >= order.buy_amount,
@@ -115,54 +152,19 @@ impl OneInchSolver {
 
 impl Interaction for Swap {
     fn encode(&self) -> Vec<EncodedInteraction> {
-        vec![(self.tx.to, self.tx.value, self.tx.data.clone())]
+        vec![(self.tx.to, self.tx.value, Bytes(self.tx.data.clone()))]
     }
 }
 
-/// Maximum number of sell orders to consider for settlements.
-///
-/// This is mostly out of concern to avoid rate limiting and because 1Inch
-/// requests take a non-trivial amount of time.
-const MAX_SETTLEMENTS: usize = 5;
-
 #[async_trait::async_trait]
-impl Solver for OneInchSolver {
-    async fn solve(&self, liquidity: Vec<Liquidity>, _gas_price: f64) -> Result<Vec<Settlement>> {
-        let mut sell_orders = liquidity
-            .into_iter()
-            .filter_map(|liquidity| match liquidity {
-                Liquidity::Limit(order) if order.kind == OrderKind::Sell => Some(order),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-
-        // Randomize which orders we take, this prevents this solver "getting
-        // stuck" on bad orders.
-        if sell_orders.len() > MAX_SETTLEMENTS {
-            sell_orders.shuffle(&mut rand::thread_rng());
-        }
-
-        let settlements = future::join_all(
-            sell_orders
-                .into_iter()
-                .take(MAX_SETTLEMENTS)
-                .map(|sell_order| self.settle_order(sell_order)),
-        )
-        .await;
-
-        Ok(settlements
-            .into_iter()
-            .filter_map(|settlement| match settlement {
-                Ok(settlement) => Some(settlement),
-                Err(err) => {
-                    // It could be that 1Inch can't match an order and would
-                    // return an error for whatever reason. In that case, we want
-                    // to continue trying to solve for other orders.
-                    tracing::warn!("1Inch API error quoting swap: {}", err);
-                    None
-                }
-            })
-            .collect())
+impl SingleOrderSolving for OneInchSolver {
+    async fn settle_order(&self, order: LimitOrder) -> Result<Settlement> {
+        ensure!(
+            order.kind == OrderKind::Sell,
+            "1Inch only supports sell orders"
+        );
+        let protocols = self.supported_protocols().await?;
+        self.settle_order(order, protocols).await
     }
 
     fn name(&self) -> &'static str {
@@ -179,10 +181,7 @@ impl Display for OneInchSolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        liquidity::{AmmOrder, LimitOrder},
-        testutil,
-    };
+    use crate::{liquidity::LimitOrder, testutil};
     use contracts::{GPv2Settlement, WETH9};
     use ethcontract::H160;
     use model::order::{Order, OrderCreation, OrderKind};
@@ -198,30 +197,33 @@ mod tests {
     #[should_panic]
     async fn panics_when_settling_buy_orders() {
         let _ = dummy_solver()
-            .settle_order(LimitOrder {
-                kind: OrderKind::Buy,
-                ..Default::default()
-            })
+            .settle_order(
+                LimitOrder {
+                    kind: OrderKind::Buy,
+                    ..Default::default()
+                },
+                None,
+            )
             .await;
     }
 
     #[tokio::test]
-    async fn ignores_all_liquidity_other_than_sell_orders() {
-        let settlements = dummy_solver()
-            .solve(
-                vec![
-                    Liquidity::Limit(LimitOrder {
-                        kind: OrderKind::Buy,
-                        ..Default::default()
-                    }),
-                    Liquidity::Amm(AmmOrder::default()),
-                ],
-                0.0,
-            )
-            .await
-            .unwrap();
+    async fn returns_none_when_no_protocols_are_disabled() {
+        let protocols = dummy_solver().supported_protocols().await.unwrap();
+        assert!(protocols.is_none());
+    }
 
-        assert_eq!(settlements.len(), 0);
+    #[tokio::test]
+    #[ignore]
+    async fn filters_disabled_protocols() {
+        let mut solver = dummy_solver();
+
+        let all_protocols = solver.client.get_protocols().await.unwrap().protocols;
+
+        solver.disabled_protocols.insert(all_protocols[0].clone());
+        let filtered_protocols = solver.supported_protocols().await.unwrap().unwrap();
+
+        assert_eq!(all_protocols[1..], filtered_protocols[..]);
     }
 
     #[tokio::test]
@@ -234,7 +236,9 @@ mod tests {
         let weth = WETH9::deployed(&web3).await.unwrap();
         let gno = shared::addr!("6810e776880c02933d47db1b9fc05908e5386b96");
 
-        let solver = OneInchSolver::new(settlement, chain_id).unwrap();
+        let solver =
+            OneInchSolver::with_disabled_protocols(settlement, chain_id, vec!["PMM1".to_string()])
+                .unwrap();
         let settlement = solver
             .settle_order(
                 Order {
@@ -249,6 +253,7 @@ mod tests {
                     ..Default::default()
                 }
                 .into(),
+                None,
             )
             .await
             .unwrap();

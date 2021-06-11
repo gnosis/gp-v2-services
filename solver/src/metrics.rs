@@ -1,8 +1,14 @@
-use std::{convert::TryInto, time::Instant};
+use std::{
+    convert::TryInto,
+    time::{Duration, Instant},
+};
 
 use anyhow::Result;
 use model::order::Order;
-use prometheus::{IntCounter, IntCounterVec, IntGaugeVec, Opts, Registry};
+use prometheus::{
+    HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGaugeVec, Opts, Registry,
+};
+use shared::{pool_cache::PoolCacheMetrics, transport::TransportMetrics};
 use strum::{AsStaticRef, VariantNames};
 
 use crate::liquidity::Liquidity;
@@ -26,6 +32,9 @@ pub struct Metrics {
     settlement_simulations: IntCounterVec,
     settlement_submissions: IntCounterVec,
     matched_but_unsettled_orders: IntCounter,
+    transport_requests: HistogramVec,
+    pool_cache_hits: IntCounter,
+    pool_cache_misses: IntCounter,
 }
 
 impl Metrics {
@@ -84,6 +93,25 @@ impl Metrics {
         )?;
         registry.register(Box::new(matched_but_unsettled_orders.clone()))?;
 
+        let opts = HistogramOpts::new(
+            "gp_v2_solver_transport_requests",
+            "RPC Request durations labelled by method",
+        );
+        let transport_requests = HistogramVec::new(opts, &["method"]).unwrap();
+        registry.register(Box::new(transport_requests.clone()))?;
+
+        let pool_cache_hits = IntCounter::new(
+            "gp_v2_solver_pool_cache_hits",
+            "Number of cache hits in the pool fetcher cache.",
+        )?;
+        registry.register(Box::new(pool_cache_hits.clone()))?;
+
+        let pool_cache_misses = IntCounter::new(
+            "gp_v2_solver_pool_cache_misses",
+            "Number of cache misses in the pool fetcher cache.",
+        )?;
+        registry.register(Box::new(pool_cache_misses.clone()))?;
+
         Ok(Self {
             trade_counter,
             order_settlement_time,
@@ -92,6 +120,9 @@ impl Metrics {
             settlement_simulations,
             settlement_submissions,
             matched_but_unsettled_orders,
+            transport_requests,
+            pool_cache_hits,
+            pool_cache_misses,
         })
     }
 }
@@ -153,6 +184,21 @@ impl SolverMetrics for Metrics {
 
     fn orders_matched_but_not_settled(&self, count: usize) {
         self.matched_but_unsettled_orders.inc_by(count as u64);
+    }
+}
+
+impl TransportMetrics for Metrics {
+    fn report_query(&self, label: &str, elapsed: Duration) {
+        self.transport_requests
+            .with_label_values(&[label])
+            .observe(elapsed.as_secs_f64())
+    }
+}
+
+impl PoolCacheMetrics for Metrics {
+    fn pools_fetched(&self, cache_hits: usize, cache_misses: usize) {
+        self.pool_cache_hits.inc_by(cache_hits as u64);
+        self.pool_cache_misses.inc_by(cache_misses as u64);
     }
 }
 

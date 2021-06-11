@@ -11,38 +11,48 @@ use orderbook::{
 use prometheus::Registry;
 use shared::{
     amm_pair_provider::UniswapPairProvider,
-    current_block::current_block_stream,
-    pool_fetching::{CachedPoolFetcher, PoolFetcher},
+    bad_token::list_based::ListBasedDetector,
+    current_block::{current_block_stream, CurrentBlockStream},
+    maintenance::ServiceMaintenance,
+    pool_cache::{PoolCache, PoolCacheConfig},
+    pool_fetching::PoolFetcher,
     price_estimate::BaselinePriceEstimator,
     Web3,
 };
 use solver::orderbook::OrderBookApi;
-use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::HashSet, num::NonZeroU64, str::FromStr, sync::Arc, time::Duration};
 
 pub const API_HOST: &str = "http://127.0.0.1:8080";
 
 #[macro_export]
-macro_rules! tx {
-    ($acc:ident, $call:expr) => {{
+macro_rules! tx_value {
+    ($acc:ident, $value:expr, $call:expr) => {{
         const NAME: &str = stringify!($call);
         $call
             .from($acc.clone())
+            .value($value)
             .send()
             .await
             .expect(&format!("{} failed", NAME))
     }};
+}
+#[macro_export]
+macro_rules! tx {
+    ($acc:ident, $call:expr) => {
+        tx_value!($acc, U256::zero(), $call)
+    };
 }
 
 pub fn to_wei(base: u32) -> U256 {
     U256::from(base) * U256::from(10).pow(18.into())
 }
 
-pub fn create_orderbook_api(web3: &Web3) -> OrderBookApi {
-    let native_token = WETH9::at(web3, H160([0x42; 20]));
+pub fn create_orderbook_api(web3: &Web3, weth_address: H160) -> OrderBookApi {
+    let weth = WETH9::at(&web3, weth_address);
     solver::orderbook::OrderBookApi::new(
         reqwest::Url::from_str(API_HOST).unwrap(),
         std::time::Duration::from_secs(10),
-        native_token,
+        weth,
     )
 }
 
@@ -66,7 +76,8 @@ impl GPv2 {
                 .domain_separator()
                 .call()
                 .await
-                .expect("Couldn't query domain separator"),
+                .expect("Couldn't query domain separator")
+                .0,
         );
         Self {
             settlement,
@@ -103,8 +114,9 @@ pub async fn deploy_mintable_token(web3: &Web3) -> ERC20Mintable {
 }
 
 pub struct OrderbookServices {
-    pub orderbook: Arc<Orderbook>,
     pub price_estimator: Arc<BaselinePriceEstimator>,
+    pub maintenance: ServiceMaintenance,
+    pub block_stream: CurrentBlockStream,
 }
 impl OrderbookServices {
     pub async fn new(
@@ -113,6 +125,8 @@ impl OrderbookServices {
         uniswap_factory: &UniswapV2Factory,
         native_token: H160,
     ) -> Self {
+        let registry = Registry::default();
+        let metrics = Arc::new(Metrics::new(&registry).unwrap());
         let chain_id = web3
             .eth()
             .chain_id()
@@ -121,26 +135,36 @@ impl OrderbookServices {
             .as_u64();
         let db = Database::new("postgresql://").unwrap();
         db.clear().await.unwrap();
-        let event_updater = EventUpdater::new(gpv2.settlement.clone(), db.clone(), None);
-
-        let current_block_stream = current_block_stream(web3.clone()).await.unwrap();
+        let event_updater = Arc::new(EventUpdater::new(gpv2.settlement.clone(), db.clone(), None));
         let pair_provider = Arc::new(UniswapPairProvider {
             factory: uniswap_factory.clone(),
             chain_id,
         });
-        let pool_fetcher = CachedPoolFetcher::new(
+        let current_block_stream = current_block_stream(web3.clone(), Duration::from_secs(5))
+            .await
+            .unwrap();
+        let pool_fetcher = PoolCache::new(
+            PoolCacheConfig {
+                number_of_blocks_to_cache: NonZeroU64::new(10).unwrap(),
+                number_of_pairs_to_auto_update: 20,
+                maximum_recent_block_age: 4,
+                ..Default::default()
+            },
             Box::new(PoolFetcher {
                 pair_provider,
                 web3: web3.clone(),
             }),
-            current_block_stream,
-        );
+            current_block_stream.clone(),
+            metrics.clone(),
+        )
+        .unwrap();
         let gas_estimator = Arc::new(web3.clone());
+        let bad_token_detector = Arc::new(ListBasedDetector::deny_list(Vec::new()));
         let price_estimator = Arc::new(BaselinePriceEstimator::new(
-            Box::new(pool_fetcher),
+            Arc::new(pool_fetcher),
             gas_estimator.clone(),
             HashSet::new(),
-            HashSet::new(),
+            bad_token_detector.clone(),
             native_token,
         ));
         let fee_calculator = Arc::new(EthAwareMinFeeCalculator::new(
@@ -149,28 +173,27 @@ impl OrderbookServices {
             native_token,
             db.clone(),
             1.0,
-            HashSet::new(),
+            bad_token_detector.clone(),
         ));
         let orderbook = Arc::new(Orderbook::new(
             gpv2.domain_separator,
             db.clone(),
-            event_updater,
             Box::new(Web3BalanceFetcher::new(
                 web3.clone(),
                 gpv2.allowance,
                 gpv2.settlement.address(),
-                true,
             )),
             fee_calculator.clone(),
-            HashSet::new(),
             Duration::from_secs(120),
+            bad_token_detector,
+            Box::new(web3.clone()),
         ));
-
-        let registry = Registry::default();
-        let metrics = Arc::new(Metrics::new(&registry).unwrap());
+        let maintenance = ServiceMaintenance {
+            maintainers: vec![orderbook.clone(), Arc::new(db.clone()), event_updater],
+        };
         orderbook::serve_task(
             db.clone(),
-            orderbook.clone(),
+            orderbook,
             fee_calculator,
             price_estimator.clone(),
             API_HOST[7..].parse().expect("Couldn't parse API address"),
@@ -179,8 +202,9 @@ impl OrderbookServices {
         );
 
         Self {
-            orderbook,
             price_estimator,
+            maintenance,
+            block_stream: current_block_stream,
         }
     }
 }

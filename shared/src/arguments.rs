@@ -1,7 +1,10 @@
 //! Contains command line arguments and related helpers that are shared between the binaries.
 use crate::{gas_price_estimation::GasEstimatorType, pool_aggregating::BaselineSources};
 use ethcontract::{H160, U256};
-use std::{num::ParseFloatError, time::Duration};
+use std::{
+    num::{NonZeroU64, ParseFloatError},
+    time::Duration,
+};
 use url::Url;
 
 #[derive(Debug, structopt::StructOpt)]
@@ -47,10 +50,6 @@ pub struct Arguments {
     #[structopt(long, env = "BASE_TOKENS", use_delimiter = true)]
     pub base_tokens: Vec<H160>,
 
-    /// List of token addresses to be ignored throughout service
-    #[structopt(long, env = "UNSUPPORTED_TOKENS", use_delimiter = true)]
-    pub unsupported_tokens: Vec<H160>,
-
     /// Fee discount factor: 1 means no discount, 0.9 means 10% discount.
     #[structopt(long, env = "FEE_DISCOUNT_FACTOR", default_value = "1")]
     pub fee_discount_factor: f64,
@@ -65,6 +64,31 @@ pub struct Arguments {
         use_delimiter = true
     )]
     pub baseline_sources: Vec<BaselineSources>,
+
+    /// The number of blocks kept in the pool cache.
+    #[structopt(long, env, default_value = "10")]
+    pub pool_cache_blocks: NonZeroU64,
+
+    /// The number of pairs that are automatically updated in the pool cache.
+    #[structopt(long, env, default_value = "4")]
+    pub pool_cache_maximum_recent_block_age: u64,
+
+    /// How often to retry requests in the pool cache.
+    #[structopt(long, env, default_value = "5")]
+    pub pool_cache_maximum_retries: u32,
+
+    /// How long to sleep between retries in the pool cache.
+    #[structopt(long, env, default_value = "1", parse(try_from_str = duration_from_seconds))]
+    pub pool_cache_delay_between_retries_seconds: Duration,
+
+    /// How often we poll the node to check if the current block has changed.
+    #[structopt(
+        long,
+        env,
+        default_value = "5",
+        parse(try_from_str = duration_from_seconds),
+    )]
+    pub block_stream_poll_interval_seconds: Duration,
 }
 
 pub fn duration_from_seconds(s: &str) -> Result<Duration, ParseFloatError> {
@@ -73,4 +97,9 @@ pub fn duration_from_seconds(s: &str) -> Result<Duration, ParseFloatError> {
 
 pub fn wei_from_base_unit(s: &str) -> anyhow::Result<U256> {
     Ok(U256::from_dec_str(s)? * U256::exp10(18))
+}
+
+pub fn wei_from_gwei(s: &str) -> anyhow::Result<f64> {
+    let in_gwei: f64 = s.parse()?;
+    Ok(in_gwei * 10e9)
 }
