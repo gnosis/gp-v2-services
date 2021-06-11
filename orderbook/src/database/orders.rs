@@ -1,11 +1,11 @@
 use super::*;
 use crate::conversions::*;
 use anyhow::{anyhow, Context, Result};
-use bigdecimal::BigDecimal;
+use bigdecimal::{BigDecimal, Zero};
 use chrono::{DateTime, Utc};
 use futures::{stream::TryStreamExt, Stream};
 use model::{
-    order::{Order, OrderCreation, OrderKind, OrderMetaData, OrderUid},
+    order::{Order, OrderCreation, OrderKind, OrderMetaData, OrderStatus, OrderUid},
     Signature, SigningScheme,
 };
 use primitive_types::H160;
@@ -202,7 +202,31 @@ struct OrdersQueryRow {
 }
 
 impl OrdersQueryRow {
+    fn calculate_status(&self) -> OrderStatus {
+        match self.kind {
+            DbOrderKind::Buy => {
+                if !self.sum_buy.is_zero() && self.sum_buy == self.buy_amount {
+                    return OrderStatus::Fulfilled;
+                }
+            }
+            DbOrderKind::Sell => {
+                if !self.sum_sell.is_zero() && self.sum_sell == self.sell_amount {
+                    return OrderStatus::Fulfilled;
+                }
+            }
+        }
+        if self.invalidated {
+            return OrderStatus::Cancelled;
+        }
+        if self.valid_to < Utc::now().timestamp() {
+            return OrderStatus::Expired;
+        }
+        OrderStatus::Open
+    }
+
     fn into_order(self) -> Result<Order> {
+        let status = self.calculate_status();
+
         let executed_sell_amount = big_decimal_to_big_uint(&self.sum_sell)
             .ok_or_else(|| anyhow!("sum_sell is not an unsigned integer"))?;
         let executed_fee_amount = big_decimal_to_big_uint(&self.sum_fee)
@@ -253,6 +277,7 @@ impl OrdersQueryRow {
         Ok(Order {
             order_meta_data,
             order_creation,
+            status,
         })
     }
 }
@@ -312,6 +337,7 @@ mod tests {
                     signature: Default::default(),
                     signing_scheme: *signing_scheme,
                 },
+                status: OrderStatus::Open,
             };
             db.insert_order(&order).await.unwrap();
             assert_eq!(
@@ -400,6 +426,7 @@ mod tests {
                     valid_to: 10,
                     ..Default::default()
                 },
+                status: OrderStatus::Expired,
             },
             Order {
                 order_meta_data: OrderMetaData {
@@ -413,6 +440,7 @@ mod tests {
                     valid_to: 11,
                     ..Default::default()
                 },
+                status: OrderStatus::Expired,
             },
             Order {
                 order_meta_data: OrderMetaData {
@@ -426,6 +454,7 @@ mod tests {
                     valid_to: 12,
                     ..Default::default()
                 },
+                status: OrderStatus::Expired,
             },
         ];
         for order in orders.iter() {
@@ -520,6 +549,7 @@ mod tests {
                 buy_amount: 100.into(),
                 ..Default::default()
             },
+            status: OrderStatus::Open,
         };
         db.insert_order(&order).await.unwrap();
 
@@ -626,6 +656,7 @@ mod tests {
                 kind: OrderKind::Sell,
                 ..Default::default()
             },
+            status: OrderStatus::Open,
         };
         db.insert_order(&order).await.unwrap();
 

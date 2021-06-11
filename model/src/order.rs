@@ -33,12 +33,22 @@ pub struct Order {
     pub order_meta_data: OrderMetaData,
     #[serde(flatten)]
     pub order_creation: OrderCreation,
+    pub status: OrderStatus,
 }
 
 impl Default for Order {
     fn default() -> Self {
         Self::from_order_creation(OrderCreation::default(), &DomainSeparator::default()).unwrap()
     }
+}
+
+#[derive(Eq, PartialEq, Clone, Debug, Deserialize, Serialize, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum OrderStatus {
+    Open,
+    Fulfilled,
+    Cancelled,
+    Expired,
 }
 
 impl Order {
@@ -59,6 +69,7 @@ impl Order {
                 ..Default::default()
             },
             order_creation,
+            status: OrderStatus::Open,
         })
     }
     pub fn contains_token_from(&self, token_list: &HashSet<H160>) -> bool {
@@ -477,6 +488,7 @@ mod tests {
             "partiallyFillable": false,
             "signature": "0x0200000000000000000000000000000000000000000000000000000000000003040000000000000000000000000000000000000000000000000000000000000501",
             "signingScheme": "eip712",
+            "status": "open",
         });
         let expected = Order {
             order_meta_data: OrderMetaData {
@@ -514,6 +526,7 @@ mod tests {
                 },
                 signing_scheme: SigningScheme::Eip712,
             },
+            status: OrderStatus::Open,
         };
         let deserialized: Order = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(deserialized, expected);

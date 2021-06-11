@@ -112,7 +112,7 @@ mod tests {
     use super::*;
     use crate::database::{Event, Settlement as DbSettlement, Trade as DbTrade};
     use ethcontract::H256;
-    use model::order::{Order, OrderCreation, OrderMetaData};
+    use model::order::{Order, OrderCreation, OrderMetaData, OrderStatus};
     use model::trade::Trade;
     use shared::event_handling::EventIndex;
     use std::collections::HashSet;
@@ -171,6 +171,7 @@ mod tests {
             order_creation: OrderCreation {
                 ..Default::default()
             },
+            status: OrderStatus::Open,
         };
         db.insert_order(&order).await.unwrap();
         add_trade(db, owner, order_uid, event_index, tx_hash).await
