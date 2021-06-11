@@ -34,10 +34,10 @@ pub struct PoolCreated {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RegisteredWeightedPool {
-    pub(crate) pool_id: H256,
-    pub(crate) pool_address: H160,
-    pub(crate) tokens: Vec<H160>,
-    pub(crate) normalized_weights: Vec<U256>,
+    pub pool_id: H256,
+    pub pool_address: H160,
+    pub tokens: Vec<H160>,
+    pub normalized_weights: Vec<U256>,
     block_created: u64,
 }
 
