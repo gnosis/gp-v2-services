@@ -42,6 +42,7 @@ pub struct RegisteredWeightedPool {
 }
 
 impl RegisteredWeightedPool {
+    /// Errors expected here are propagated from `get_pool_data`.
     async fn from_event(
         block_created: u64,
         creation: PoolCreated,
@@ -74,6 +75,7 @@ trait PoolDataFetching: Send + Sync {
 
 #[async_trait::async_trait]
 impl PoolDataFetching for Web3 {
+    /// Could result in ethcontract::{NodeError, MethodError or ContractError}
     async fn get_pool_data(&self, pool_address: H160) -> Result<WeightedPoolData> {
         let pool_contract = BalancerV2WeightedPool::at(self, pool_address);
         // Need vault and pool_id before we can fetch tokens.
