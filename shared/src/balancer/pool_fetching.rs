@@ -3,7 +3,8 @@ use model::TokenPair;
 use std::collections::{HashMap, HashSet};
 
 use crate::balancer::event_handler::{PoolRegistry, RegisteredWeightedPool};
-use crate::pool_fetching::{handle_contract_error, Block, MAX_BATCH_SIZE};
+use crate::pool_fetching::{handle_contract_error, MAX_BATCH_SIZE};
+use crate::recent_block_cache::Block;
 use crate::Web3;
 use contracts::BalancerV2Vault;
 use ethcontract::batch::CallBatch;
