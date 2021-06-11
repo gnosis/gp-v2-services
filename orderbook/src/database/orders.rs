@@ -307,7 +307,7 @@ mod tests {
             buy_token: vec![2; 20],
             sell_amount: BigDecimal::from(1),
             buy_amount: BigDecimal::from(1),
-            valid_to: valid_to_timestamp.timestamp().into(),
+            valid_to: valid_to_timestamp.timestamp(),
             app_data: vec![0; 32],
             fee_amount: BigDecimal::default(),
             kind: DbOrderKind::Sell,
@@ -358,7 +358,7 @@ mod tests {
 
         let order_row = OrdersQueryRow {
             invalidated: false,
-            valid_to: valid_to_yesterday.timestamp().into(),
+            valid_to: valid_to_yesterday.timestamp(),
             ..order_row
         };
 
