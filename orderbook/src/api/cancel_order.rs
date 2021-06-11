@@ -144,6 +144,18 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
         let response =
+            cancel_order_response(Ok(OrderCancellationResult::OrderFullyExecuted)).into_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let response = cancel_order_response(Ok(OrderCancellationResult::OrderAlreadyCancelled))
+            .into_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let response =
+            cancel_order_response(Ok(OrderCancellationResult::OrderExpired)).into_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let response =
             cancel_order_response(Ok(OrderCancellationResult::WrongOwner)).into_response();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
