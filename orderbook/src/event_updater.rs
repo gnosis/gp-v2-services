@@ -16,18 +16,20 @@ use tokio::sync::Mutex;
 pub struct EventUpdater(Mutex<EventHandler<DynWeb3, GPv2SettlementContract, Database>>);
 
 #[async_trait::async_trait]
-impl EventStoring<ContractEvent> for Database {
+impl EventStoring<ContractEvent, String> for Database {
     async fn replace_events(
         &mut self,
         events: Vec<Event<ContractEvent>>,
         range: RangeInclusive<BlockNumber>,
+        contract_name: Option<String>,
     ) -> Result<()> {
         let db_events = self
             .contract_to_db_events(events)
             .context("replace - failed to convert events")?;
         tracing::debug!(
-            "replacing {} events from block number {}",
+            "replacing {} events for contract {:?} from block number {}",
             db_events.len(),
+            contract_name.as_ref(),
             range.start().to_u64()
         );
         Database::replace_events(self, range.start().to_u64(), db_events)
@@ -36,11 +38,19 @@ impl EventStoring<ContractEvent> for Database {
         Ok(())
     }
 
-    async fn append_events(&mut self, events: Vec<Event<ContractEvent>>) -> Result<()> {
+    async fn append_events(
+        &mut self,
+        events: Vec<Event<ContractEvent>>,
+        contract_name: Option<String>,
+    ) -> Result<()> {
         let db_events = self
             .contract_to_db_events(events)
             .context("append - failed to convert events")?;
-        tracing::debug!("inserting {} new events", db_events.len());
+        tracing::debug!(
+            "inserting {} new events from contract {:?}",
+            db_events.len(),
+            contract_name.as_ref()
+        );
         self.insert_events(db_events)
             .await
             .context("failed to insert trades")?;
@@ -60,7 +70,10 @@ impl EventUpdater {
     pub fn new(contract: GPv2Settlement, db: Database, start_sync_at_block: Option<u64>) -> Self {
         Self(Mutex::new(EventHandler::new(
             contract.raw_instance().web3(),
-            GPv2SettlementContract(contract),
+            vec![(
+                GPv2SettlementContract(contract),
+                String::from("GPv2Settlement"),
+            )],
             db,
             start_sync_at_block,
         )))

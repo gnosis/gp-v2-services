@@ -243,7 +243,10 @@ impl BalancerEventUpdater {
         };
         Ok(Self(Mutex::new(EventHandler::new(
             contract.raw_instance().web3(),
-            BalancerV2WeightedPoolFactoryContract(contract),
+            vec![(
+                BalancerV2WeightedPoolFactoryContract(contract),
+                String::from("WeightedPoolFactory"),
+            )],
             pools,
             deployment_block,
         ))))
@@ -251,28 +254,39 @@ impl BalancerEventUpdater {
 }
 
 #[async_trait::async_trait]
-impl EventStoring<ContractEvent> for PoolRegistry {
+impl EventStoring<ContractEvent, String> for PoolRegistry {
     async fn replace_events(
         &mut self,
         events: Vec<EthContractEvent<ContractEvent>>,
         range: RangeInclusive<BlockNumber>,
+        contract_name: Option<String>,
     ) -> Result<()> {
         let balancer_events = self
             .contract_to_balancer_events(events)
             .context("failed to convert events")?;
         tracing::debug!(
-            "replacing {} events from block number {}",
+            "replacing {} events for contract {:?} from block number {}",
             balancer_events.len(),
-            range.start().to_u64()
+            contract_name.as_ref(),
+            range.start().to_u64(),
         );
         PoolRegistry::replace_events(self, 0, balancer_events).await?;
         Ok(())
     }
 
-    async fn append_events(&mut self, events: Vec<EthContractEvent<ContractEvent>>) -> Result<()> {
+    async fn append_events(
+        &mut self,
+        events: Vec<EthContractEvent<ContractEvent>>,
+        contract_name: Option<String>,
+    ) -> Result<()> {
         let balancer_events = self
             .contract_to_balancer_events(events)
             .context("failed to convert events")?;
+        tracing::debug!(
+            "inserting {} new events from contract {:?}",
+            balancer_events.len(),
+            contract_name.as_ref()
+        );
         self.insert_events(balancer_events).await
     }
 
