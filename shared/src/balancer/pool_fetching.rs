@@ -2,7 +2,7 @@ use anyhow::Result;
 use model::TokenPair;
 use std::collections::{HashMap, HashSet};
 
-use crate::balancer::event_handler::{PoolRegistry, PoolSpecialization, RegisteredPool};
+use crate::balancer::event_handler::{PoolRegistry, RegisteredWeightedPool};
 use crate::pool_fetching::{handle_contract_error, Block, MAX_BATCH_SIZE};
 use crate::Web3;
 use contracts::BalancerV2Vault;
@@ -19,12 +19,11 @@ pub struct PoolTokenState {
 pub struct WeightedPool {
     pub pool_id: H256,
     pub pool_address: H160,
-    pub specialization: PoolSpecialization,
     pub reserves: HashMap<H160, PoolTokenState>,
 }
 
 impl WeightedPool {
-    fn new(pool_data: RegisteredPool, balances: Vec<U256>) -> Self {
+    fn new(pool_data: RegisteredWeightedPool, balances: Vec<U256>) -> Self {
         let mut reserves = HashMap::new();
         // We expect the weight and token indices are aligned with balances returned from EVM query.
         // If necessary we would also pass the tokens along with the query result,
@@ -41,7 +40,6 @@ impl WeightedPool {
         WeightedPool {
             pool_id: pool_data.pool_id,
             pool_address: pool_data.pool_address,
-            specialization: pool_data.specialization,
             reserves,
         }
     }
@@ -101,7 +99,7 @@ impl WeightedPoolFetching for BalancerPoolFetcher {
 
 /// An internal temporary struct used during pool fetching to handle errors.
 struct FetchedWeightedPool {
-    pool_data: RegisteredPool,
+    pool_data: RegisteredWeightedPool,
     /// getPoolTokens returns (Tokens, Balances, LastBlockUpdated)
     reserves: Result<(Vec<H160>, Vec<U256>, U256), MethodError>,
 }
@@ -128,7 +126,7 @@ mod tests {
     #[test]
     fn pool_fetcher_forwards_node_error() {
         let results = vec![FetchedWeightedPool {
-            pool_data: RegisteredPool::test_instance(),
+            pool_data: RegisteredWeightedPool::test_instance(),
             reserves: Err(ethcontract_error::testing_node_error()),
         }];
         assert!(handle_results(results).is_err());
@@ -138,11 +136,11 @@ mod tests {
     fn pool_fetcher_skips_contract_error() {
         let results = vec![
             FetchedWeightedPool {
-                pool_data: RegisteredPool::test_instance(),
+                pool_data: RegisteredWeightedPool::test_instance(),
                 reserves: Err(ethcontract_error::testing_contract_error()),
             },
             FetchedWeightedPool {
-                pool_data: RegisteredPool::test_instance(),
+                pool_data: RegisteredWeightedPool::test_instance(),
                 reserves: Ok((vec![], vec![], U256::zero())),
             },
         ];
