@@ -271,41 +271,24 @@ impl BalancerEventUpdater {
         two_token_pool_factory: BalancerV2WeightedPool2TokensFactory,
         pools: PoolRegistry,
     ) -> Result<Self> {
-        let deployment_block_pool_factory = match weighted_pool_factory.deployment_information() {
-            Some(DeploymentInformation::BlockNumber(block_number)) => Some(block_number),
-            Some(DeploymentInformation::TransactionHash(hash)) => Some(
-                weighted_pool_factory
-                    .raw_instance()
-                    .web3()
-                    .block_number_from_tx_hash(hash)
-                    .await?,
-            ),
-            None => None,
-        };
-        let deployment_block_two_token_factory =
-            match two_token_pool_factory.deployment_information() {
-                Some(DeploymentInformation::BlockNumber(block_number)) => Some(block_number),
-                Some(DeploymentInformation::TransactionHash(hash)) => Some(
-                    two_token_pool_factory
-                        .raw_instance()
-                        .web3()
-                        .block_number_from_tx_hash(hash)
-                        .await?,
-                ),
-                None => None,
-            };
+        // Choosing any one of the
+        let web3 = weighted_pool_factory.raw_instance().web3();
         let store = Arc::new(Mutex::new(pools));
+        let deployment_block_weighted_pool =
+            get_deployment_block(weighted_pool_factory.deployment_information(), &web3).await;
+        let deployment_block_two_token_pool =
+            get_deployment_block(two_token_pool_factory.deployment_information(), &web3).await;
         let weighted_pool_updater = Mutex::new(EventHandler::new(
-            weighted_pool_factory.raw_instance().web3(),
+            web3.clone(),
             BalancerV2WeightedPoolFactoryContract(weighted_pool_factory),
             store.clone(),
-            deployment_block_pool_factory,
+            deployment_block_weighted_pool,
         ));
         let two_token_pool_updater = Mutex::new(EventHandler::new(
-            two_token_pool_factory.raw_instance().web3(),
+            web3,
             BalancerV2WeightedPool2TokensFactoryContract(two_token_pool_factory),
             store,
-            deployment_block_two_token_factory,
+            deployment_block_two_token_pool,
         ));
         Ok(Self {
             weighted_pool_updater,
@@ -314,19 +297,18 @@ impl BalancerEventUpdater {
     }
 }
 
-// async fn get_deployment_block<C: ethcontract::contract::Instance>(contract: &C) -> Option<u64> {
-//     match contract.deployment_information() {
-//         Some(DeploymentInformation::BlockNumber(block_number)) => Some(block_number),
-//         Some(DeploymentInformation::TransactionHash(hash)) => Some(
-//             contract
-//                 .raw_instance()
-//                 .web3()
-//                 .block_number_from_tx_hash(hash)
-//                 .await?,
-//         ),
-//         None => None,
-//     }
-// }
+async fn get_deployment_block(
+    deployment_info: Option<DeploymentInformation>,
+    web3: &DynWeb3,
+) -> Option<u64> {
+    match deployment_info {
+        Some(DeploymentInformation::BlockNumber(block_number)) => Some(block_number),
+        Some(DeploymentInformation::TransactionHash(hash)) => {
+            Some(web3.block_number_from_tx_hash(hash).await.ok()?)
+        }
+        None => None,
+    }
+}
 
 #[async_trait::async_trait]
 impl EventStoring<WeightedPoolFactoryEvent> for Arc<Mutex<PoolRegistry>> {
@@ -630,7 +612,10 @@ mod tests {
         pool_store.insert_events(converted_events).await.unwrap();
         // Let the tests begin!
         assert_eq!(pool_store.last_event_block(), end_block as u64);
-        pool_store.replace_events_inner(3, vec![new_event]).await.unwrap();
+        pool_store
+            .replace_events_inner(3, vec![new_event])
+            .await
+            .unwrap();
 
         // Everything until block 3 is unchanged.
         for i in 0..3 {
