@@ -2,7 +2,7 @@ use anyhow::Result;
 use model::TokenPair;
 use std::collections::{HashMap, HashSet};
 
-use crate::balancer::event_handler::{PoolRegistry, RegisteredWeightedPool};
+use crate::balancer::event_handler::{PoolRegistry, RegisteredWeightedPool, PoolType};
 use crate::pool_fetching::{handle_contract_error, MAX_BATCH_SIZE};
 use crate::recent_block_cache::Block;
 use crate::Web3;
@@ -19,6 +19,7 @@ pub struct PoolTokenState {
 pub struct WeightedPool {
     pub pool_id: H256,
     pub pool_address: H160,
+    pub pool_type: PoolType,
     pub reserves: HashMap<H160, PoolTokenState>,
 }
 
@@ -40,6 +41,7 @@ impl WeightedPool {
         WeightedPool {
             pool_id: pool_data.pool_id,
             pool_address: pool_data.pool_address,
+            pool_type: pool_data.pool_type,
             reserves,
         }
     }
