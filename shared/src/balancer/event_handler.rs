@@ -271,7 +271,7 @@ impl BalancerEventUpdater {
         two_token_pool_factory: BalancerV2WeightedPool2TokensFactory,
         pools: PoolRegistry,
     ) -> Result<Self> {
-        // Choosing any one of the
+        // Choosing any one of the web3s to be used all over.
         let web3 = weighted_pool_factory.raw_instance().web3();
         let store = Arc::new(Mutex::new(pools));
         let deployment_block_weighted_pool =
