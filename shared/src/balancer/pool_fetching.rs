@@ -122,12 +122,26 @@ fn handle_results(results: Vec<FetchedWeightedPool>) -> Result<Vec<WeightedPool>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::balancer::event_handler::PoolType;
     use crate::ethcontract_error;
+
+    impl RegisteredWeightedPool {
+        fn test_instance() -> Self {
+            Self {
+                pool_id: Default::default(),
+                pool_address: Default::default(),
+                tokens: vec![],
+                pool_type: PoolType::WeightedGeneral,
+                normalized_weights: vec![],
+                block_created: 0,
+            }
+        }
+    }
 
     #[test]
     fn pool_fetcher_forwards_node_error() {
         let results = vec![FetchedWeightedPool {
-            pool_data: RegisteredWeightedPool::default(),
+            pool_data: RegisteredWeightedPool::test_instance(),
             reserves: Err(ethcontract_error::testing_node_error()),
         }];
         assert!(handle_results(results).is_err());
@@ -137,11 +151,11 @@ mod tests {
     fn pool_fetcher_skips_contract_error() {
         let results = vec![
             FetchedWeightedPool {
-                pool_data: RegisteredWeightedPool::default(),
+                pool_data: RegisteredWeightedPool::test_instance(),
                 reserves: Err(ethcontract_error::testing_contract_error()),
             },
             FetchedWeightedPool {
-                pool_data: RegisteredWeightedPool::default(),
+                pool_data: RegisteredWeightedPool::test_instance(),
                 reserves: Ok((vec![], vec![], U256::zero())),
             },
         ];
