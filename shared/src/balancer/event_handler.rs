@@ -7,10 +7,15 @@ use crate::{
 };
 use anyhow::{anyhow, Context, Result};
 use contracts::{
-    balancer_v2_weighted_pool_factory::{
-        self, event_data::PoolCreated as ContractPoolCreated, Event as ContractEvent,
+    balancer_v2_weighted_pool_2_tokens_factory::{
+        self, event_data::PoolCreated as TwoTokenPoolCreated,
+        Event as WeightedPool2TokensFactoryEvent,
     },
-    BalancerV2Vault, BalancerV2WeightedPool, BalancerV2WeightedPoolFactory,
+    balancer_v2_weighted_pool_factory::{
+        self, event_data::PoolCreated as WeightedPoolCreated, Event as WeightedPoolFactoryEvent,
+    },
+    BalancerV2Vault, BalancerV2WeightedPool, BalancerV2WeightedPool2TokensFactory,
+    BalancerV2WeightedPoolFactory,
 };
 use derivative::Derivative;
 use ethcontract::common::DeploymentInformation;
@@ -20,6 +25,7 @@ use ethcontract::{
 use itertools::Itertools;
 use mockall::*;
 use model::TokenPair;
+use std::sync::Arc;
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
@@ -171,7 +177,7 @@ impl PoolRegistry {
         Ok(())
     }
 
-    async fn replace_events(
+    async fn replace_events_inner(
         &mut self,
         delete_from_block_number: u64,
         events: Vec<(EventIndex, PoolCreated)>,
@@ -205,9 +211,9 @@ impl PoolRegistry {
             .unwrap_or(0)
     }
 
-    fn contract_to_balancer_events(
+    fn contract_to_balancer_events_weighted_pool(
         &self,
-        contract_events: Vec<EthContractEvent<ContractEvent>>,
+        contract_events: Vec<EthContractEvent<WeightedPoolFactoryEvent>>,
     ) -> Result<Vec<(EventIndex, PoolCreated)>> {
         contract_events
             .into_iter()
@@ -217,23 +223,58 @@ impl PoolRegistry {
                     None => return Err(anyhow!("event without metadata")),
                 };
                 match data {
-                    ContractEvent::PoolCreated(event) => convert_pool_created(&event, &meta),
+                    WeightedPoolFactoryEvent::PoolCreated(event) => {
+                        convert_weighted_pool_created(&event, &meta)
+                    }
+                }
+            })
+            .collect::<Result<Vec<_>>>()
+    }
+
+    fn contract_to_balancer_events_two_token(
+        &self,
+        contract_events: Vec<EthContractEvent<WeightedPool2TokensFactoryEvent>>,
+    ) -> Result<Vec<(EventIndex, PoolCreated)>> {
+        contract_events
+            .into_iter()
+            .map(|EthContractEvent { data, meta }| {
+                let meta = match meta {
+                    Some(meta) => meta,
+                    None => return Err(anyhow!("event without metadata")),
+                };
+                match data {
+                    WeightedPool2TokensFactoryEvent::PoolCreated(event) => {
+                        convert_two_token_pool_created(&event, &meta)
+                    }
                 }
             })
             .collect::<Result<Vec<_>>>()
     }
 }
 
-pub struct BalancerEventUpdater(
-    Mutex<EventHandler<DynWeb3, BalancerV2WeightedPoolFactoryContract, PoolRegistry>>,
-);
+pub struct BalancerEventUpdater {
+    weighted_pool_updater: Mutex<
+        EventHandler<DynWeb3, BalancerV2WeightedPoolFactoryContract, Arc<Mutex<PoolRegistry>>>,
+    >,
+    two_token_pool_updater: Mutex<
+        EventHandler<
+            DynWeb3,
+            BalancerV2WeightedPool2TokensFactoryContract,
+            Arc<Mutex<PoolRegistry>>,
+        >,
+    >,
+}
 
 impl BalancerEventUpdater {
-    pub async fn new(contract: BalancerV2WeightedPoolFactory, pools: PoolRegistry) -> Result<Self> {
-        let deployment_block = match contract.deployment_information() {
+    pub async fn new(
+        weighted_pool_factory: BalancerV2WeightedPoolFactory,
+        two_token_pool_factory: BalancerV2WeightedPool2TokensFactory,
+        pools: PoolRegistry,
+    ) -> Result<Self> {
+        let deployment_block_pool_factory = match weighted_pool_factory.deployment_information() {
             Some(DeploymentInformation::BlockNumber(block_number)) => Some(block_number),
             Some(DeploymentInformation::TransactionHash(hash)) => Some(
-                contract
+                weighted_pool_factory
                     .raw_instance()
                     .web3()
                     .block_number_from_tx_hash(hash)
@@ -241,37 +282,155 @@ impl BalancerEventUpdater {
             ),
             None => None,
         };
-        Ok(Self(Mutex::new(EventHandler::new(
-            contract.raw_instance().web3(),
-            BalancerV2WeightedPoolFactoryContract(contract),
-            pools,
-            deployment_block,
-        ))))
+        let deployment_block_two_token_factory =
+            match two_token_pool_factory.deployment_information() {
+                Some(DeploymentInformation::BlockNumber(block_number)) => Some(block_number),
+                Some(DeploymentInformation::TransactionHash(hash)) => Some(
+                    two_token_pool_factory
+                        .raw_instance()
+                        .web3()
+                        .block_number_from_tx_hash(hash)
+                        .await?,
+                ),
+                None => None,
+            };
+        let store = Arc::new(Mutex::new(pools));
+        let weighted_pool_updater = Mutex::new(EventHandler::new(
+            weighted_pool_factory.raw_instance().web3(),
+            BalancerV2WeightedPoolFactoryContract(weighted_pool_factory),
+            store.clone(),
+            deployment_block_pool_factory,
+        ));
+        let two_token_pool_updater = Mutex::new(EventHandler::new(
+            two_token_pool_factory.raw_instance().web3(),
+            BalancerV2WeightedPool2TokensFactoryContract(two_token_pool_factory),
+            store,
+            deployment_block_two_token_factory,
+        ));
+        Ok(Self {
+            weighted_pool_updater,
+            two_token_pool_updater,
+        })
+    }
+}
+
+// async fn get_deployment_block<C: ethcontract::contract::Instance>(contract: &C) -> Option<u64> {
+//     match contract.deployment_information() {
+//         Some(DeploymentInformation::BlockNumber(block_number)) => Some(block_number),
+//         Some(DeploymentInformation::TransactionHash(hash)) => Some(
+//             contract
+//                 .raw_instance()
+//                 .web3()
+//                 .block_number_from_tx_hash(hash)
+//                 .await?,
+//         ),
+//         None => None,
+//     }
+// }
+
+#[async_trait::async_trait]
+impl EventStoring<WeightedPoolFactoryEvent> for Arc<Mutex<PoolRegistry>> {
+    async fn replace_events(
+        &mut self,
+        events: Vec<EthContractEvent<WeightedPoolFactoryEvent>>,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<()> {
+        self.lock().await.replace_events(events, range).await
+    }
+
+    async fn append_events(
+        &mut self,
+        events: Vec<EthContractEvent<WeightedPoolFactoryEvent>>,
+    ) -> Result<()> {
+        self.lock().await.append_events(events).await
+    }
+
+    async fn last_event_block(&self) -> Result<u64> {
+        Ok(self.lock().await.last_event_block())
     }
 }
 
 #[async_trait::async_trait]
-impl EventStoring<ContractEvent> for PoolRegistry {
+impl EventStoring<WeightedPool2TokensFactoryEvent> for Arc<Mutex<PoolRegistry>> {
     async fn replace_events(
         &mut self,
-        events: Vec<EthContractEvent<ContractEvent>>,
+        events: Vec<EthContractEvent<WeightedPool2TokensFactoryEvent>>,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<()> {
+        self.lock().await.replace_events(events, range).await
+    }
+
+    async fn append_events(
+        &mut self,
+        events: Vec<EthContractEvent<WeightedPool2TokensFactoryEvent>>,
+    ) -> Result<()> {
+        self.lock().await.append_events(events).await
+    }
+
+    async fn last_event_block(&self) -> Result<u64> {
+        Ok(self.lock().await.last_event_block())
+    }
+}
+
+#[async_trait::async_trait]
+impl EventStoring<WeightedPoolFactoryEvent> for PoolRegistry {
+    async fn replace_events(
+        &mut self,
+        events: Vec<EthContractEvent<WeightedPoolFactoryEvent>>,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<()> {
         let balancer_events = self
-            .contract_to_balancer_events(events)
+            .contract_to_balancer_events_weighted_pool(events)
             .context("failed to convert events")?;
         tracing::debug!(
             "replacing {} events from block number {}",
             balancer_events.len(),
             range.start().to_u64()
         );
-        PoolRegistry::replace_events(self, 0, balancer_events).await?;
+        PoolRegistry::replace_events_inner(self, 0, balancer_events).await?;
         Ok(())
     }
 
-    async fn append_events(&mut self, events: Vec<EthContractEvent<ContractEvent>>) -> Result<()> {
+    async fn append_events(
+        &mut self,
+        events: Vec<EthContractEvent<WeightedPoolFactoryEvent>>,
+    ) -> Result<()> {
         let balancer_events = self
-            .contract_to_balancer_events(events)
+            .contract_to_balancer_events_weighted_pool(events)
+            .context("failed to convert events")?;
+        self.insert_events(balancer_events).await
+    }
+
+    async fn last_event_block(&self) -> Result<u64> {
+        Ok(self.last_event_block())
+    }
+}
+
+#[async_trait::async_trait]
+impl EventStoring<WeightedPool2TokensFactoryEvent> for PoolRegistry {
+    async fn replace_events(
+        &mut self,
+        events: Vec<EthContractEvent<WeightedPool2TokensFactoryEvent>>,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<()> {
+        let balancer_events = self
+            .contract_to_balancer_events_two_token(events)
+            .context("failed to convert events")?;
+        tracing::debug!(
+            "replacing {} events from block number {}",
+            balancer_events.len(),
+            range.start().to_u64()
+        );
+        PoolRegistry::replace_events_inner(self, 0, balancer_events).await?;
+        Ok(())
+    }
+
+    async fn append_events(
+        &mut self,
+        events: Vec<EthContractEvent<WeightedPool2TokensFactoryEvent>>,
+    ) -> Result<()> {
+        let balancer_events = self
+            .contract_to_balancer_events_two_token(events)
             .context("failed to convert events")?;
         self.insert_events(balancer_events).await
     }
@@ -285,15 +444,32 @@ impl_event_retrieving! {
     pub BalancerV2WeightedPoolFactoryContract for balancer_v2_weighted_pool_factory
 }
 
+impl_event_retrieving! {
+    pub BalancerV2WeightedPool2TokensFactoryContract for balancer_v2_weighted_pool_2_tokens_factory
+}
+
 #[async_trait::async_trait]
 impl Maintaining for BalancerEventUpdater {
     async fn run_maintenance(&self) -> Result<()> {
-        self.0.run_maintenance().await
+        self.two_token_pool_updater.run_maintenance().await?;
+        self.weighted_pool_updater.run_maintenance().await
     }
 }
 
-fn convert_pool_created(
-    creation: &ContractPoolCreated,
+fn convert_weighted_pool_created(
+    creation: &WeightedPoolCreated,
+    meta: &EventMetadata,
+) -> Result<(EventIndex, PoolCreated)> {
+    Ok((
+        EventIndex::from(meta),
+        PoolCreated {
+            pool_address: creation.pool,
+        },
+    ))
+}
+
+fn convert_two_token_pool_created(
+    creation: &TwoTokenPoolCreated,
     meta: &EventMetadata,
 ) -> Result<(EventIndex, PoolCreated)> {
     Ok((
@@ -454,7 +630,7 @@ mod tests {
         pool_store.insert_events(converted_events).await.unwrap();
         // Let the tests begin!
         assert_eq!(pool_store.last_event_block(), end_block as u64);
-        pool_store.replace_events(3, vec![new_event]).await.unwrap();
+        pool_store.replace_events_inner(3, vec![new_event]).await.unwrap();
 
         // Everything until block 3 is unchanged.
         for i in 0..3 {
