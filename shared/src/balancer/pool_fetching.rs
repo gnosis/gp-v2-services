@@ -2,7 +2,7 @@ use anyhow::Result;
 use model::TokenPair;
 use std::collections::{HashMap, HashSet};
 
-use crate::balancer::event_handler::{PoolRegistry, RegisteredWeightedPool, PoolType};
+use crate::balancer::event_handler::{PoolRegistry, PoolType, RegisteredWeightedPool};
 use crate::pool_fetching::{handle_contract_error, MAX_BATCH_SIZE};
 use crate::recent_block_cache::Block;
 use crate::Web3;
