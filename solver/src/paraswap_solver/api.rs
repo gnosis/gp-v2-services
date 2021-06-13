@@ -3,6 +3,7 @@
 use std::convert::TryFrom;
 
 use anyhow::{Context, Result};
+use derivative::Derivative;
 use ethcontract::{H160, U256};
 use reqwest::{Client, RequestBuilder, Url};
 use serde::{Deserialize, Serialize};
@@ -43,14 +44,17 @@ impl ParaswapApi for DefaultParaswapApi {
         &self,
         query: TransactionBuilderQuery,
     ) -> Result<TransactionBuilderResponse> {
-        query
+        let text = query
             .into_request(&self.client)
             .send()
             .await
             .context("TransactionBuilderQuery failed")?
-            .json()
-            .await
-            .context("TransactionBuilderQuery result parsing failed")
+            .text()
+            .await?;
+        serde_json::from_str::<TransactionBuilderResponse>(&text).context(format!(
+            "TransactionBuilderQuery result parsing failed: {}",
+            text
+        ))
     }
 }
 
@@ -187,7 +191,8 @@ impl TransactionBuilderQuery {
 }
 
 /// Paraswap transaction builder response.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Derivative, Deserialize, Default)]
+#[derivative(Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionBuilderResponse {
     /// the sender of the built transaction
@@ -200,10 +205,15 @@ pub struct TransactionBuilderResponse {
     #[serde(with = "u256_decimal")]
     pub value: U256,
     /// the calldata for the transaction
+    #[derivative(Debug(format_with = "debug_bytes"))]
     pub data: Bytes,
     /// the suggested gas price
     #[serde(with = "u256_decimal")]
     pub gas_price: U256,
+}
+
+fn debug_bytes(bytes: &Bytes, formatter: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+    formatter.write_fmt(format_args!("0x{}", hex::encode(&bytes.0)))
 }
 
 #[cfg(test)]
