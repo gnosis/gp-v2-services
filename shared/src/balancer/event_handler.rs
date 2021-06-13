@@ -1,3 +1,4 @@
+use crate::balancer::data_loader::StoredRegistry;
 use crate::{
     current_block::BlockRetrieving,
     event_handling::{BlockNumber, EventHandler, EventIndex, EventStoring},
@@ -20,6 +21,9 @@ use ethcontract::{
 use itertools::Itertools;
 use mockall::*;
 use model::TokenPair;
+use serde::{Deserialize, Serialize};
+use std::convert::TryFrom;
+use std::path::{Path, PathBuf};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
@@ -32,7 +36,7 @@ pub struct PoolCreated {
     pub pool_address: H160,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default, Eq, PartialEq, Hash)]
 pub struct RegisteredWeightedPool {
     pub pool_id: H256,
     pub pool_address: H160,
@@ -112,6 +116,23 @@ pub struct PoolRegistry {
 }
 
 impl PoolRegistry {
+    pub fn from_path(path: &Path, web3: Web3) -> Result<Self> {
+        let loaded_registry = StoredRegistry::try_from(path)?;
+        Ok(Self {
+            pools_by_token: loaded_registry.pools_by_token,
+            pools: loaded_registry.pools,
+            data_fetcher: Box::new(web3),
+        })
+    }
+
+    pub fn write_to_file(&self, path: &Path) -> Result<()> {
+        let fixed_registry = StoredRegistry {
+            pools_by_token: self.pools_by_token.clone(),
+            pools: self.pools.clone(),
+        };
+        fixed_registry.write_to_file(path)
+    }
+
     // Since all the fields are private, we expose helper methods to fetch relevant information
     /// Returns all pools containing both tokens from TokenPair
     pub fn pools_containing_token_pair(
@@ -224,12 +245,29 @@ impl PoolRegistry {
     }
 }
 
-pub struct BalancerEventUpdater(
-    Mutex<EventHandler<DynWeb3, BalancerV2WeightedPoolFactoryContract, PoolRegistry>>,
-);
+pub struct BalancerEventUpdater {
+    filestore: Option<PathBuf>,
+    handler: Mutex<EventHandler<DynWeb3, BalancerV2WeightedPoolFactoryContract, PoolRegistry>>,
+}
 
 impl BalancerEventUpdater {
-    pub async fn new(contract: BalancerV2WeightedPoolFactory, pools: PoolRegistry) -> Result<Self> {
+    /// Uses pools when provided or loads from filepath otherwise.
+    /// filepath is kept and Pools registry is written there on every update.
+    pub async fn new(
+        contract: BalancerV2WeightedPoolFactory,
+        pools: Option<PoolRegistry>,
+        filepath: Option<PathBuf>,
+        web3: Web3,
+    ) -> Result<Self> {
+        let store = match pools {
+            None => match filepath.clone() {
+                None => return Err(anyhow!(
+                    "Must specify an existing PoolRegistry or filepath where it can be loaded from"
+                )),
+                Some(path) => PoolRegistry::from_path(&path, web3)?,
+            },
+            Some(store) => store,
+        };
         let deployment_block = match contract.deployment_information() {
             Some(DeploymentInformation::BlockNumber(block_number)) => Some(block_number),
             Some(DeploymentInformation::TransactionHash(hash)) => Some(
@@ -241,12 +279,16 @@ impl BalancerEventUpdater {
             ),
             None => None,
         };
-        Ok(Self(Mutex::new(EventHandler::new(
-            contract.raw_instance().web3(),
-            BalancerV2WeightedPoolFactoryContract(contract),
-            pools,
-            deployment_block,
-        ))))
+        let start_sync_at_block = deployment_block.max(Some(store.last_event_block()));
+        Ok(Self {
+            filestore: filepath,
+            handler: Mutex::new(EventHandler::new(
+                contract.raw_instance().web3(),
+                BalancerV2WeightedPoolFactoryContract(contract),
+                store,
+                start_sync_at_block,
+            )),
+        })
     }
 }
 
@@ -288,7 +330,14 @@ impl_event_retrieving! {
 #[async_trait::async_trait]
 impl Maintaining for BalancerEventUpdater {
     async fn run_maintenance(&self) -> Result<()> {
-        self.0.run_maintenance().await
+        self.handler.run_maintenance().await?;
+        // get_store involves a clone, so this might be too expensive to write on every run.
+        // Might want to know if a new pool has actually been retrieved.
+        // Could adjust return value of run_maintenance to a boolean representing if new info was added.
+        if let Some(path) = self.filestore.clone() {
+            self.handler.lock().await.store.write_to_file(&path)?
+        }
+        Ok(())
     }
 }
 
