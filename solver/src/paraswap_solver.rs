@@ -55,13 +55,17 @@ impl<F> std::fmt::Debug for ParaswapSolver<F> {
 #[cfg_attr(test, mockall::automock)]
 #[async_trait::async_trait]
 trait AllowanceFetching: Send + Sync {
-    async fn existing_allowance(&self, token: &ERC20, spender: &H160) -> Result<U256>;
+    async fn existing_allowance(&self, token: H160, spender: H160) -> Result<U256>;
 }
 
 #[async_trait::async_trait]
-impl AllowanceFetching for H160 {
-    async fn existing_allowance(&self, token: &ERC20, spender: &H160) -> Result<U256> {
-        Ok(token.allowance(*self, *spender).call().await?)
+impl AllowanceFetching for GPv2Settlement {
+    async fn existing_allowance(&self, token: H160, spender: H160) -> Result<U256> {
+        let token_contract = ERC20::at(&self.raw_instance().web3(), token);
+        Ok(token_contract
+            .allowance(self.address(), spender)
+            .call()
+            .await?)
     }
 }
 
@@ -125,16 +129,16 @@ where
         });
         settlement.with_liquidity(&order, amount)?;
 
-        let sell_token_contract = ERC20::at(
-            &self.settlement_contract.raw_instance().web3(),
-            order.sell_token,
-        );
         if self
             .allowance_fetcher
-            .existing_allowance(&sell_token_contract, &transaction.to)
+            .existing_allowance(order.sell_token, transaction.to)
             .await?
             < src_amount_with_slippage
         {
+            let sell_token_contract = ERC20::at(
+                &self.settlement_contract.raw_instance().web3(),
+                order.sell_token,
+            );
             settlement
                 .encoder
                 .append_to_execution_plan(Erc20ApproveInteraction {
