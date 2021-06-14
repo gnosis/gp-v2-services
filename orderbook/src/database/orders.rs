@@ -317,7 +317,7 @@ mod tests {
     fn order_status() {
         let valid_to_timestamp = Utc::now() + Duration::days(1);
 
-        // Open
+        // Open - sell (filled - 0%)
         let order_row = OrdersQueryRow {
             uid: vec![0; 56],
             owner: vec![0; 20],
@@ -342,27 +342,77 @@ mod tests {
 
         assert_eq!(order_row.calculate_status(), OrderStatus::Open);
 
-        // Filled Sell
+        // Open - sell (almost filled - 99.99%)
         let order_row = OrdersQueryRow {
             kind: DbOrderKind::Sell,
-            sum_sell: BigDecimal::from(1),
-            sum_buy: BigDecimal::default(),
+            sell_amount: BigDecimal::from(10_000),
+            sum_sell: BigDecimal::from(9_999),
+            ..order_row
+        };
+
+        assert_eq!(order_row.calculate_status(), OrderStatus::Open);
+
+        // Filled - sell (filled - 99.991%)
+        let order_row = OrdersQueryRow {
+            kind: DbOrderKind::Sell,
+            sell_amount: BigDecimal::from(100_000),
+            sum_sell: BigDecimal::from(99_991),
             ..order_row
         };
 
         assert_eq!(order_row.calculate_status(), OrderStatus::Fulfilled);
 
-        // Filled Buy
+        // Filled - sell (filled - 100%)
+        let order_row = OrdersQueryRow {
+            kind: DbOrderKind::Sell,
+            sell_amount: BigDecimal::from(1),
+            sum_sell: BigDecimal::from(1),
+            ..order_row
+        };
+
+        assert_eq!(order_row.calculate_status(), OrderStatus::Fulfilled);
+
+        // Open - buy (filled - 0%)
         let order_row = OrdersQueryRow {
             kind: DbOrderKind::Buy,
-            sum_buy: BigDecimal::from(1),
-            sum_sell: BigDecimal::default(),
+            buy_amount: BigDecimal::from(1),
+            sum_buy: BigDecimal::from(0),
+            ..order_row
+        };
+
+        assert_eq!(order_row.calculate_status(), OrderStatus::Open);
+
+        // Open - buy (almost filled - 99.99%)
+        let order_row = OrdersQueryRow {
+            kind: DbOrderKind::Buy,
+            buy_amount: BigDecimal::from(10_000),
+            sum_buy: BigDecimal::from(9_999),
+            ..order_row
+        };
+
+        assert_eq!(order_row.calculate_status(), OrderStatus::Open);
+
+        // Filled - buy (filled - 99.991%)
+        let order_row = OrdersQueryRow {
+            kind: DbOrderKind::Buy,
+            buy_amount: BigDecimal::from(100_000),
+            sum_buy: BigDecimal::from(99_991),
             ..order_row
         };
 
         assert_eq!(order_row.calculate_status(), OrderStatus::Fulfilled);
 
-        // Cancelled
+        // Filled - buy (filled - 100%)
+        let order_row = OrdersQueryRow {
+            kind: DbOrderKind::Buy,
+            buy_amount: BigDecimal::from(1),
+            sum_buy: BigDecimal::from(1),
+            ..order_row
+        };
+
+        assert_eq!(order_row.calculate_status(), OrderStatus::Fulfilled);
+
+        // Cancelled - no fills - sell
         let order_row = OrdersQueryRow {
             sum_sell: BigDecimal::default(),
             sum_buy: BigDecimal::default(),
@@ -372,10 +422,58 @@ mod tests {
 
         assert_eq!(order_row.calculate_status(), OrderStatus::Cancelled);
 
-        // Expired
+        // Cancelled - partial fill - sell
+        let order_row = OrdersQueryRow {
+            kind: DbOrderKind::Sell,
+            sell_amount: BigDecimal::from(2),
+            sum_sell: BigDecimal::from(1),
+            invalidated: true,
+            ..order_row
+        };
+
+        assert_eq!(order_row.calculate_status(), OrderStatus::Cancelled);
+
+        // Cancelled - partial fill - buy
+        let order_row = OrdersQueryRow {
+            kind: DbOrderKind::Buy,
+            buy_amount: BigDecimal::from(2),
+            sum_buy: BigDecimal::from(1),
+            invalidated: true,
+            ..order_row
+        };
+
+        assert_eq!(order_row.calculate_status(), OrderStatus::Cancelled);
+
+        // Expired - no fills
         let valid_to_yesterday = Utc::now() - Duration::days(1);
 
         let order_row = OrdersQueryRow {
+            sum_sell: BigDecimal::default(),
+            sum_buy: BigDecimal::default(),
+            invalidated: false,
+            valid_to: valid_to_yesterday.timestamp(),
+            ..order_row
+        };
+
+        assert_eq!(order_row.calculate_status(), OrderStatus::Expired);
+
+        // Expired - partial fill - sell
+        let order_row = OrdersQueryRow {
+            kind: DbOrderKind::Sell,
+            sell_amount: BigDecimal::from(2),
+            sum_sell: BigDecimal::from(1),
+            invalidated: false,
+            valid_to: valid_to_yesterday.timestamp(),
+            ..order_row
+        };
+
+        assert_eq!(order_row.calculate_status(), OrderStatus::Expired);
+
+        // Expired - partial fill - buy
+        let order_row = OrdersQueryRow {
+            kind: DbOrderKind::Buy,
+            buy_amount: BigDecimal::from(2),
+            sum_buy: BigDecimal::from(1),
             invalidated: false,
             valid_to: valid_to_yesterday.timestamp(),
             ..order_row
