@@ -111,6 +111,10 @@ pub struct PriceResponse {
     pub dest_amount: U256,
 }
 
+/// The reason we do not `#[derive(Deserialize)]` is that the structure of `price_route` is opaque and may change over time.
+/// In order to get the transaction data from the API, it expects `price_route` to be echoed back in the exact form as it was sent in the price estimation response.
+/// We therefore leave it as an opaque mapping and only extract the effective in and out amounts from the struct (which we hope will remain in the same place).
+/// We don't implement `Deserialize` manually as writing a custom MapVisitor leads to convoluted code.
 impl TryFrom<Value> for PriceResponse {
     type Error = anyhow::Error;
 
