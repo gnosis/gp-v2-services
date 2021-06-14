@@ -14,7 +14,7 @@ use ethcontract::{BlockId, Bytes, H160, H256, U256};
 pub struct PoolTokenState {
     pub balance: U256,
     pub weight: U256,
-    pub scaling_factor: u8,
+    pub scaling_exponent: u8,
 }
 
 pub struct WeightedPool {
@@ -35,7 +35,7 @@ impl WeightedPool {
                 PoolTokenState {
                     balance,
                     weight: pool_data.normalized_weights[i],
-                    scaling_factor: pool_data.scaling_factors[i],
+                    scaling_exponent: pool_data.scaling_exponents[i],
                 },
             );
         }

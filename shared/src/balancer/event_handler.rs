@@ -1,5 +1,4 @@
 use crate::pool_fetching::MAX_BATCH_SIZE;
-use crate::token_info::{TokenInfoFetcher, TokenInfoFetching};
 use crate::{
     current_block::BlockRetrieving,
     event_handling::{BlockNumber, EventHandler, EventIndex, EventStoring},
@@ -12,7 +11,7 @@ use contracts::{
     balancer_v2_weighted_pool_factory::{
         self, event_data::PoolCreated as ContractPoolCreated, Event as ContractEvent,
     },
-    BalancerV2Vault, BalancerV2WeightedPool, BalancerV2WeightedPoolFactory,
+    BalancerV2Vault, BalancerV2WeightedPool, BalancerV2WeightedPoolFactory, ERC20,
 };
 use derivative::Derivative;
 use ethcontract::batch::CallBatch;
@@ -20,6 +19,7 @@ use ethcontract::common::DeploymentInformation;
 use ethcontract::{
     dyns::DynWeb3, Bytes, Event as EthContractEvent, EventMetadata, H160, H256, U256,
 };
+use futures::future::join_all;
 use itertools::Itertools;
 use mockall::*;
 use model::TokenPair;
@@ -41,7 +41,7 @@ pub struct RegisteredWeightedPool {
     pub pool_address: H160,
     pub tokens: Vec<H160>,
     pub normalized_weights: Vec<U256>,
-    pub scaling_factors: Vec<u8>,
+    pub scaling_exponents: Vec<u8>,
     block_created: u64,
 }
 
@@ -59,7 +59,7 @@ impl RegisteredWeightedPool {
             pool_address,
             tokens: pool_data.tokens,
             normalized_weights: pool_data.weights,
-            scaling_factors: pool_data.scaling_factors,
+            scaling_exponents: pool_data.scaling_exponents,
             block_created,
         });
     }
@@ -70,7 +70,7 @@ pub struct WeightedPoolData {
     pool_id: H256,
     tokens: Vec<H160>,
     weights: Vec<U256>,
-    scaling_factors: Vec<u8>,
+    scaling_exponents: Vec<u8>,
 }
 
 #[automock]
@@ -102,24 +102,32 @@ impl PoolDataFetching for Web3 {
 
         let tokens = token_data.await?.0;
         // This is already a batch call for a list of token decimals.
-        let token_decimals = TokenInfoFetcher { web3: self.clone() }
-            .get_token_infos(&tokens)
-            .await;
-        let scaling_factors = token_decimals
+        let mut batch = CallBatch::new(self.transport());
+        let futures = tokens
             .iter()
-            .map(|(_, info)| {
+            .map(|address| {
+                let erc20 = ERC20::at(&self, *address);
+                erc20.methods().decimals().batch_call(&mut batch)
+            })
+            .collect::<Vec<_>>();
+        batch.execute_all(MAX_BATCH_SIZE).await;
+        let token_decimals = join_all(futures)
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?;
+        let scaling_exponents = token_decimals
+            .iter()
+            .map(|decimals| {
                 // Note that balancer does not support tokens with more than 18 decimals
                 // https://github.com/balancer-labs/balancer-v2-monorepo/blob/ce70f7663e0ac94b25ed60cb86faaa8199fd9e13/pkg/pool-utils/contracts/BasePool.sol#L497-L508
-                18 - info
-                    .decimals
-                    .expect("all token decimals must be available build pool data")
+                18 - decimals
             })
             .collect();
         Ok(WeightedPoolData {
             pool_id,
             tokens,
             weights: normalized_weights.await?,
-            scaling_factors,
+            scaling_exponents,
         })
     }
 }
