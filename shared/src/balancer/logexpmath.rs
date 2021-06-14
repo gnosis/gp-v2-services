@@ -17,8 +17,9 @@ lazy_static! {
     static ref MIN_NATURAL_EXPONENT: I256 = ONE_18.checked_mul(I256::from(-41_i128)).unwrap();
     static ref LN_36_LOWER_BOUND: I256 = ONE_18.checked_sub(I256::from(10_u128.pow(17))).unwrap();
     static ref LN_36_UPPER_BOUND: I256 = ONE_18.checked_add(I256::from(10_u128.pow(17))).unwrap();
-    static ref MILD_EXPONENT_BOUND: I256 =
-        I256::from(2_u32).pow(254_u32).checked_div(*ONE_20).unwrap();
+    static ref MILD_EXPONENT_BOUND: U256 = (U256::one() << 254_u32)
+        .checked_div(U256::try_from(*ONE_20).unwrap())
+        .unwrap();
 }
 fn constant_x_20(i: u32) -> I256 {
     match i {
@@ -91,9 +92,10 @@ pub fn pow(x: U256, y: U256) -> Result<U256, Errors> {
         Err(_) => return Err(Errors::XOutOfBounds),
     };
 
-    let y_int256 = match I256::try_from(y) {
-        Ok(y) if y < *MILD_EXPONENT_BOUND => y,
-        _ => return Err(Errors::YOutOfBounds),
+    let y_int256 = if y < *MILD_EXPONENT_BOUND {
+        I256::try_from(y).unwrap()
+    } else {
+        return Err(Errors::YOutOfBounds);
     };
 
     let mut logx_times_y = if *LN_36_LOWER_BOUND < x_int256 && x_int256 < *LN_36_UPPER_BOUND {
