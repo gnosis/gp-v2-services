@@ -335,7 +335,7 @@ impl Maintaining for BalancerEventUpdater {
         // Might want to know if a new pool has actually been retrieved.
         // Could adjust return value of run_maintenance to a boolean representing if new info was added.
         if let Some(path) = self.filestore.clone() {
-            self.handler.lock().await.store.write_to_file(&path)?
+            self.handler.lock().await.get_store().write_to_file(&path)?
         }
         Ok(())
     }

@@ -22,7 +22,7 @@ where
 {
     block_retriever: B,
     contract: C,
-    pub store: S,
+    store: S,
     last_handled_block: Option<u64>,
 }
 
@@ -160,6 +160,10 @@ where
             .query_paginated()
             .await?
             .map_err(Error::from))
+    }
+
+    pub fn get_store(&self) -> &S {
+        &self.store
     }
 }
 
