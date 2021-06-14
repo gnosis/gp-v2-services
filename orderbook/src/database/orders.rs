@@ -201,6 +201,12 @@ struct OrdersQueryRow {
     signing_scheme: DbSigningScheme,
 }
 
+/// Amount which is the minimum to consider an order fully filled.
+/// original amount / FILLED_PERCENTAGE_DENOMINATOR => minimum amount
+/// Fully filled order => amount - executed_amount < minimum_amount
+/// The higher this number, the smaller the amount to consider an order filled.
+const FILLED_PERCENTAGE_DENOMINATOR: u32 = 10_000; // 10_000 == 0.01 %
+
 impl OrdersQueryRow {
     fn calculate_status(&self) -> OrderStatus {
         match self.kind {
