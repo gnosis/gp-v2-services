@@ -261,9 +261,11 @@ impl BalancerEventUpdater {
     ) -> Result<Self> {
         let store = match pools {
             None => match filepath.clone() {
-                None => return Err(anyhow!(
+                None => {
+                    return Err(anyhow!(
                     "Must specify an existing PoolRegistry or filepath where it can be loaded from"
-                )),
+                ))
+                }
                 Some(path) => PoolRegistry::from_path(&path, web3)?,
             },
             Some(store) => store,
