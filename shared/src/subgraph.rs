@@ -4,7 +4,7 @@ use crate::http::default_http_client;
 use anyhow::{bail, Result};
 use lazy_static::lazy_static;
 use reqwest::{Client, IntoUrl, Url};
-use serde::{de::DeserializeOwned, ser::Serializer, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use thiserror::Error;
 
 /// A general client for querying subgraphs.
@@ -41,16 +41,14 @@ impl SubgraphClient {
         })
     }
 
+    /// Performs the specified GraphQL query on the current subgraph.
     pub async fn query<T>(&self, q: impl AsRef<str>) -> Result<T>
     where
         T: DeserializeOwned,
     {
         self.client
             .post(self.subgraph_url.clone())
-            .json(&Query {
-                query: q.as_ref(),
-                _variables: None,
-            })
+            .json(&Query { query: q.as_ref() })
             .send()
             .await?
             .json::<QueryResponse<T>>()
@@ -63,11 +61,6 @@ impl SubgraphClient {
 #[derive(Serialize)]
 struct Query<'a> {
     query: &'a str,
-    /// GraphQL has variable support, and it is required to be included in the
-    /// request JSON. We don't use it for now, so it has a `Never` type and
-    /// will panic of serialization if it is not `None`.
-    #[serde(rename = "variables")]
-    _variables: Option<Never>,
 }
 
 /// A GraphQL query response.
@@ -91,7 +84,7 @@ impl<T> QueryResponse<T> {
             } => Ok(data),
             Self {
                 errors: Some(errors),
-                ..
+                data: None,
             } if !errors.is_empty() => {
                 // Make sure to log additional errors if there are more than
                 // one, and just bubble up the first error.
@@ -111,20 +104,6 @@ struct QueryError {
     message: String,
 }
 
-/// A struct that panics on serialization operations.
-///
-/// This is used as a way to assert that a specific value is never used.
-struct Never;
-
-impl Serialize for Never {
-    fn serialize<S>(&self, _: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        unimplemented!("attempt to serialize unusable value");
-    }
-}
-
 /// Function to work around the fact that `#[serde(default)]` on an `Option<T>`
 /// requires `T: Default`.
 fn empty_data<T>() -> Option<T> {
@@ -142,23 +121,12 @@ mod tests {
             serde_json::to_value(&Query {
                 query: r#"foo {
                 }"#,
-                _variables: None,
             })
             .unwrap(),
             json!({
                 "query": "foo {\n                }",
-                "variables": null,
             }),
         );
-    }
-
-    #[test]
-    #[should_panic]
-    fn panics_on_query_with_some_variables() {
-        let _ = serde_json::to_string(&Query {
-            query: "foo {}",
-            _variables: Some(Never),
-        });
     }
 
     fn response_from_json<T>(value: Value) -> Result<T>
@@ -230,6 +198,11 @@ mod tests {
         assert!(response_from_json::<bool>(json!({
             "data": true,
             "errors": [],
+        }))
+        .is_err());
+        assert!(response_from_json::<bool>(json!({
+            "data": true,
+            "errors": [{"message":"bad"}],
         }))
         .is_err());
     }
