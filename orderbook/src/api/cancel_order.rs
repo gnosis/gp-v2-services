@@ -36,8 +36,8 @@ pub fn cancel_order_response(result: Result<OrderCancellationResult>) -> impl Re
             super::error("InvalidSignature", "Likely malformed signature"),
             StatusCode::BAD_REQUEST,
         ),
-        Ok(OrderCancellationResult::OrderAlreadyCancelled) => (
-            super::error("OrderAlreadyCancelled", "Order is already cancelled"),
+        Ok(OrderCancellationResult::AlreadyCancelled) => (
+            super::error("AlreadyCancelled", "Order is already cancelled"),
             StatusCode::BAD_REQUEST,
         ),
         Ok(OrderCancellationResult::OrderFullyExecuted) => (
@@ -147,8 +147,8 @@ mod tests {
             cancel_order_response(Ok(OrderCancellationResult::OrderFullyExecuted)).into_response();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-        let response = cancel_order_response(Ok(OrderCancellationResult::OrderAlreadyCancelled))
-            .into_response();
+        let response =
+            cancel_order_response(Ok(OrderCancellationResult::AlreadyCancelled)).into_response();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
         let response =

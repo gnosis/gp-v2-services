@@ -44,7 +44,7 @@ pub enum OrderCancellationResult {
     InvalidSignature,
     WrongOwner,
     OrderNotFound,
-    OrderAlreadyCancelled,
+    AlreadyCancelled,
     OrderFullyExecuted,
     OrderExpired,
 }
@@ -167,7 +167,7 @@ impl Orderbook {
             Some(signer) => {
                 match order.order_meta_data.status {
                     OrderStatus::Fulfilled => Ok(OrderCancellationResult::OrderFullyExecuted),
-                    OrderStatus::Cancelled => Ok(OrderCancellationResult::OrderAlreadyCancelled),
+                    OrderStatus::Cancelled => Ok(OrderCancellationResult::AlreadyCancelled),
                     OrderStatus::Expired => Ok(OrderCancellationResult::OrderExpired),
                     OrderStatus::Open => {
                         if signer == order.order_meta_data.owner {
