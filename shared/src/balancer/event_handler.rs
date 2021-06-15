@@ -41,7 +41,7 @@ pub struct RegisteredWeightedPool {
     pub tokens: Vec<H160>,
     pub normalized_weights: Vec<U256>,
     pub scaling_exponents: Vec<u8>,
-    pub(crate) block_created: u64,
+    block_created: u64,
 }
 
 impl RegisteredWeightedPool {
