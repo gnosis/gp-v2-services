@@ -194,7 +194,7 @@ mod tests {
     use super::*;
     use crate::settlement::Trade;
     use maplit::hashmap;
-    use model::order::{Order, OrderCreation, OrderKind, OrderMetaData, OrderStatus, OrderUid};
+    use model::order::{Order, OrderCreation, OrderKind, OrderMetaData, OrderUid};
     use num::rational::BigRational;
     use num::traits::FromPrimitive;
     use primitive_types::U256;
@@ -230,7 +230,6 @@ mod tests {
                     kind: OrderKind::Buy,
                     ..Default::default()
                 },
-                status: OrderStatus::Open,
             },
         };
         let settlement = |executed_amount: U256, order_uid: u8| {

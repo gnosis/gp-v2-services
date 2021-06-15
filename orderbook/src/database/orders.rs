@@ -248,6 +248,7 @@ impl OrdersQueryRow {
             executed_sell_amount_before_fees,
             executed_fee_amount,
             invalidated: self.invalidated,
+            status,
         };
         let order_creation = OrderCreation {
             sell_token: h160_from_vec(self.sell_token)?,
@@ -277,7 +278,6 @@ impl OrdersQueryRow {
         Ok(Order {
             order_meta_data,
             order_creation,
-            status,
         })
     }
 }
@@ -486,7 +486,6 @@ mod tests {
                     signature: Default::default(),
                     signing_scheme: *signing_scheme,
                 },
-                status: OrderStatus::Open,
             };
             db.insert_order(&order).await.unwrap();
             assert_eq!(
@@ -568,6 +567,7 @@ mod tests {
                 order_meta_data: OrderMetaData {
                     owner: H160::from_low_u64_be(0),
                     uid: OrderUid([0u8; 56]),
+                status: OrderStatus::Expired,
                     ..Default::default()
                 },
                 order_creation: OrderCreation {
@@ -576,12 +576,12 @@ mod tests {
                     valid_to: 10,
                     ..Default::default()
                 },
-                status: OrderStatus::Expired,
             },
             Order {
                 order_meta_data: OrderMetaData {
                     owner: H160::from_low_u64_be(0),
                     uid: OrderUid([1; 56]),
+                status: OrderStatus::Expired,
                     ..Default::default()
                 },
                 order_creation: OrderCreation {
@@ -590,12 +590,12 @@ mod tests {
                     valid_to: 11,
                     ..Default::default()
                 },
-                status: OrderStatus::Expired,
             },
             Order {
                 order_meta_data: OrderMetaData {
                     owner: H160::from_low_u64_be(2),
                     uid: OrderUid([2u8; 56]),
+                status: OrderStatus::Expired,
                     ..Default::default()
                 },
                 order_creation: OrderCreation {
@@ -604,7 +604,6 @@ mod tests {
                     valid_to: 12,
                     ..Default::default()
                 },
-                status: OrderStatus::Expired,
             },
         ];
         for order in orders.iter() {
@@ -699,7 +698,6 @@ mod tests {
                 buy_amount: 100.into(),
                 ..Default::default()
             },
-            status: OrderStatus::Open,
         };
         db.insert_order(&order).await.unwrap();
 
@@ -806,7 +804,6 @@ mod tests {
                 kind: OrderKind::Sell,
                 ..Default::default()
             },
-            status: OrderStatus::Open,
         };
         db.insert_order(&order).await.unwrap();
 

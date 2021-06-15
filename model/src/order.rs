@@ -33,7 +33,6 @@ pub struct Order {
     pub order_meta_data: OrderMetaData,
     #[serde(flatten)]
     pub order_creation: OrderCreation,
-    pub status: OrderStatus,
 }
 
 impl Default for Order {
@@ -69,7 +68,6 @@ impl Order {
                 ..Default::default()
             },
             order_creation,
-            status: OrderStatus::Open,
         })
     }
     pub fn contains_token_from(&self, token_list: &HashSet<H160>) -> bool {
@@ -338,6 +336,7 @@ pub struct OrderMetaData {
     #[serde(with = "serde_with::rust::display_fromstr")]
     pub executed_fee_amount: BigUint,
     pub invalidated: bool,
+    pub status: OrderStatus,
 }
 
 impl Default for OrderMetaData {
@@ -352,6 +351,7 @@ impl Default for OrderMetaData {
             executed_sell_amount_before_fees: Default::default(),
             executed_fee_amount: Default::default(),
             invalidated: Default::default(),
+            status: OrderStatus::Open,
         }
     }
 }
@@ -501,6 +501,8 @@ mod tests {
                 executed_sell_amount_before_fees: BigUint::from_bytes_be(&[4]),
                 executed_fee_amount: BigUint::from_bytes_be(&[1]),
                 invalidated: true,
+
+            status: OrderStatus::Open,
             },
             order_creation: OrderCreation {
                 sell_token: H160::from_low_u64_be(10),
@@ -526,7 +528,6 @@ mod tests {
                 },
                 signing_scheme: SigningScheme::Eip712,
             },
-            status: OrderStatus::Open,
         };
         let deserialized: Order = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(deserialized, expected);
