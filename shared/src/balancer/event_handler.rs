@@ -25,7 +25,7 @@ use std::{
 };
 use tokio::sync::Mutex;
 
-#[derive(Copy, Debug, Default, Clone, Eq, PartialEq, Hash)]
+#[derive(Copy, Debug, Default, Clone, Eq, PartialEq)]
 pub struct PoolCreated {
     pub pool_address: H160,
 }
