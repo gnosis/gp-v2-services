@@ -1,3 +1,4 @@
+use crate::pool_fetching::MAX_BATCH_SIZE;
 use crate::{
     current_block::BlockRetrieving,
     event_handling::{BlockNumber, EventHandler, EventIndex, EventStoring},
@@ -10,11 +11,13 @@ use contracts::{
     balancer_v2_weighted_pool_2_tokens_factory::{self, Event as WeightedPool2TokensFactoryEvent},
     balancer_v2_weighted_pool_factory::{self, Event as WeightedPoolFactoryEvent},
     BalancerV2Vault, BalancerV2WeightedPool, BalancerV2WeightedPool2TokensFactory,
-    BalancerV2WeightedPoolFactory,
+    BalancerV2WeightedPoolFactory, ERC20,
 };
 use derivative::Derivative;
+use ethcontract::batch::CallBatch;
 use ethcontract::common::DeploymentInformation;
 use ethcontract::{Bytes, Event as EthContractEvent, H160, H256, U256};
+use futures::future::join_all;
 use itertools::Itertools;
 use mockall::*;
 use model::TokenPair;
@@ -36,6 +39,7 @@ pub struct RegisteredWeightedPool {
     pub pool_address: H160,
     pub tokens: Vec<H160>,
     pub normalized_weights: Vec<U256>,
+    pub scaling_exponents: Vec<u8>,
     pub(crate) block_created: u64,
 }
 
@@ -53,6 +57,7 @@ impl RegisteredWeightedPool {
             pool_address,
             tokens: pool_data.tokens,
             normalized_weights: pool_data.weights,
+            scaling_exponents: pool_data.scaling_exponents,
             block_created,
         });
     }
@@ -63,6 +68,7 @@ pub struct WeightedPoolData {
     pool_id: H256,
     tokens: Vec<H160>,
     weights: Vec<U256>,
+    scaling_exponents: Vec<u8>,
 }
 
 #[automock]
@@ -75,24 +81,51 @@ pub trait PoolDataFetching: Send + Sync {
 impl PoolDataFetching for Web3 {
     /// Could result in ethcontract::{NodeError, MethodError or ContractError}
     async fn get_pool_data(&self, pool_address: H160) -> Result<WeightedPoolData> {
+        let mut batch = CallBatch::new(self.transport());
         let pool_contract = BalancerV2WeightedPool::at(self, pool_address);
         // Need vault and pool_id before we can fetch tokens.
         let vault = BalancerV2Vault::deployed(&self).await?;
         let pool_id = H256::from(pool_contract.methods().get_pool_id().call().await?.0);
-        let tokens = vault
+
+        // token_data and weight calls can be batched
+        let token_data = vault
             .methods()
             .get_pool_tokens(Bytes(pool_id.0))
-            .call()
-            .await?
-            .0;
+            .batch_call(&mut batch);
+        let normalized_weights = pool_contract
+            .methods()
+            .get_normalized_weights()
+            .batch_call(&mut batch);
+        batch.execute_all(MAX_BATCH_SIZE).await;
+
+        let tokens = token_data.await?.0;
+        // This is already a batch call for a list of token decimals.
+        let mut batch = CallBatch::new(self.transport());
+        let futures = tokens
+            .iter()
+            .map(|address| {
+                let erc20 = ERC20::at(&self, *address);
+                erc20.methods().decimals().batch_call(&mut batch)
+            })
+            .collect::<Vec<_>>();
+        batch.execute_all(MAX_BATCH_SIZE).await;
+        let token_decimals = join_all(futures)
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?;
+        let scaling_exponents = token_decimals
+            .iter()
+            .map(|decimals| {
+                // Note that balancer does not support tokens with more than 18 decimals
+                // https://github.com/balancer-labs/balancer-v2-monorepo/blob/ce70f7663e0ac94b25ed60cb86faaa8199fd9e13/pkg/pool-utils/contracts/BasePool.sol#L497-L508
+                18 - decimals
+            })
+            .collect();
         Ok(WeightedPoolData {
             pool_id,
             tokens,
-            weights: pool_contract
-                .methods()
-                .get_normalized_weights()
-                .call()
-                .await?,
+            weights: normalized_weights.await?,
+            scaling_exponents,
         })
     }
 }
@@ -433,6 +466,7 @@ mod tests {
                 pool_id: pool_ids[i],
                 tokens: vec![tokens[i], tokens[i + 1]],
                 weights: vec![weights[i], weights[i + 1]],
+                scaling_exponents: vec![0, 0],
             };
             dummy_data_fetcher
                 .expect_get_pool_data()
@@ -473,6 +507,7 @@ mod tests {
                     pool_address: pool_addresses[i],
                     tokens: vec![tokens[i], tokens[i + 1]],
                     normalized_weights: vec![weights[i], weights[i + 1]],
+                    scaling_exponents: vec![0, 0],
                     block_created: i as u64 + 1
                 },
                 "failed assertion at index {}",
@@ -514,6 +549,7 @@ mod tests {
                 pool_id: pool_ids[i],
                 tokens: vec![tokens[i], tokens[i + 1]],
                 weights: vec![weights[i], weights[i + 1]],
+                scaling_exponents: vec![0, 0],
             };
             dummy_data_fetcher
                 .expect_get_pool_data()
@@ -538,6 +574,7 @@ mod tests {
                     pool_id: new_pool_id,
                     tokens: vec![new_token],
                     weights: vec![new_weight],
+                    scaling_exponents: vec![0],
                 })
             });
 
@@ -562,7 +599,8 @@ mod tests {
                     pool_address: pool_addresses[i],
                     tokens: vec![tokens[i], tokens[i + 1]],
                     normalized_weights: vec![weights[i], weights[i + 1]],
-                    block_created: i as u64,
+                    scaling_exponents: vec![0, 0],
+                    block_created: i as u64
                 },
                 "assertion failed at index {}",
                 i
@@ -603,6 +641,7 @@ mod tests {
                 pool_address: new_pool_address,
                 tokens: vec![new_token],
                 normalized_weights: vec![new_weight],
+                scaling_exponents: vec![0],
                 block_created: new_event_block
             }
         );
@@ -647,6 +686,7 @@ mod tests {
                 pool_id: pool_ids[i],
                 tokens: tokens[i..n].to_owned(),
                 normalized_weights: vec![],
+                scaling_exponents: vec![],
                 block_created: 0,
                 pool_address: pool_addresses[i],
             });
