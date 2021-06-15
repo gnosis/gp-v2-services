@@ -502,7 +502,7 @@ mod tests {
                 executed_fee_amount: BigUint::from_bytes_be(&[1]),
                 invalidated: true,
 
-            status: OrderStatus::Open,
+                status: OrderStatus::Open,
             },
             order_creation: OrderCreation {
                 sell_token: H160::from_low_u64_be(10),

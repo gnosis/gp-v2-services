@@ -567,7 +567,7 @@ mod tests {
                 order_meta_data: OrderMetaData {
                     owner: H160::from_low_u64_be(0),
                     uid: OrderUid([0u8; 56]),
-                status: OrderStatus::Expired,
+                    status: OrderStatus::Expired,
                     ..Default::default()
                 },
                 order_creation: OrderCreation {
@@ -581,7 +581,7 @@ mod tests {
                 order_meta_data: OrderMetaData {
                     owner: H160::from_low_u64_be(0),
                     uid: OrderUid([1; 56]),
-                status: OrderStatus::Expired,
+                    status: OrderStatus::Expired,
                     ..Default::default()
                 },
                 order_creation: OrderCreation {
@@ -595,7 +595,7 @@ mod tests {
                 order_meta_data: OrderMetaData {
                     owner: H160::from_low_u64_be(2),
                     uid: OrderUid([2u8; 56]),
-                status: OrderStatus::Expired,
+                    status: OrderStatus::Expired,
                     ..Default::default()
                 },
                 order_creation: OrderCreation {
