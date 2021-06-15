@@ -461,6 +461,9 @@ components:
         invalidated:
           description: Has this order been invalidated?
           type: boolean
+        status:
+          description: Order status
+          $ref: "#/components/schemas/OrderStatus"
       required:
         - creationTime
         - owner
@@ -474,9 +477,6 @@ components:
       allOf:
         - $ref: "#/components/schemas/OrderCreation"
         - $ref: "#/components/schemas/OrderMetaData"
-      properties:
-        status: 
-          $ref: "#/components/schemas/OrderStatus"
     OrderCancellation:
       description: |
         EIP712 signature of struct OrderCancellation { orderUid: bytes } from the order's owner
