@@ -333,16 +333,6 @@ mod tests {
 
         assert_eq!(order_row.calculate_status(), OrderStatus::Open);
 
-        // Filled - sell (filled - 99.991%)
-        let order_row = OrdersQueryRow {
-            kind: DbOrderKind::Sell,
-            sell_amount: BigDecimal::from(100_000),
-            sum_sell: BigDecimal::from(99_991),
-            ..order_row
-        };
-
-        assert_eq!(order_row.calculate_status(), OrderStatus::Fulfilled);
-
         // Filled - sell (filled - 100%)
         let order_row = OrdersQueryRow {
             kind: DbOrderKind::Sell,
@@ -372,16 +362,6 @@ mod tests {
         };
 
         assert_eq!(order_row.calculate_status(), OrderStatus::Open);
-
-        // Filled - buy (filled - 99.991%)
-        let order_row = OrdersQueryRow {
-            kind: DbOrderKind::Buy,
-            buy_amount: BigDecimal::from(100_000),
-            sum_buy: BigDecimal::from(99_991),
-            ..order_row
-        };
-
-        assert_eq!(order_row.calculate_status(), OrderStatus::Fulfilled);
 
         // Filled - buy (filled - 100%)
         let order_row = OrdersQueryRow {
