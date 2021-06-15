@@ -207,29 +207,16 @@ struct OrdersQueryRow {
 /// The higher this number, the smaller the amount to consider an order filled.
 const FILLED_PERCENTAGE_DENOMINATOR: u32 = 10_000; // 10_000 == 0.01 %
 
-/// Based on given amounts and a constant fill percentage,
-/// determines whether given difference is enough for considering
-/// the order as fully filled
-fn is_fully_filled(amount: &BigDecimal, executed_amount: &BigDecimal) -> bool {
-    if executed_amount.is_zero() {
-        return false;
-    }
-    let negligible_amount = amount / FILLED_PERCENTAGE_DENOMINATOR;
-    let difference = amount - executed_amount;
-
-    difference < negligible_amount
-}
-
 impl OrdersQueryRow {
     fn calculate_status(&self) -> OrderStatus {
         match self.kind {
             DbOrderKind::Buy => {
-                if is_fully_filled(&self.buy_amount, &self.sum_buy) {
+                if !self.sum_buy.is_zero() && self.sum_buy == self.buy_amount {
                     return OrderStatus::Fulfilled;
                 }
             }
             DbOrderKind::Sell => {
-                if is_fully_filled(&self.sell_amount, &self.sum_sell) {
+                if !self.sum_sell.is_zero() && self.sum_sell == self.sell_amount {
                     return OrderStatus::Fulfilled;
                 }
             }
