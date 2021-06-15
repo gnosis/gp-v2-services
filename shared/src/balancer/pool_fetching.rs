@@ -76,15 +76,15 @@ impl WeightedPoolFetching for BalancerPoolFetcher {
             .get_pools_containing_token_pairs(token_pairs)
             .await
             .into_iter()
-            .map(|weighted_pool| {
+            .map(|registered_pool| {
                 let reserves = self
                     .vault
-                    .get_pool_tokens(Bytes(weighted_pool.pool_id.0))
+                    .get_pool_tokens(Bytes(registered_pool.pool_id.0))
                     .block(block)
                     .batch_call(&mut batch);
                 async move {
                     FetchedWeightedPool {
-                        pool_data: weighted_pool,
+                        registered_pool,
                         reserves: reserves.await,
                     }
                 }
@@ -103,7 +103,7 @@ impl WeightedPoolFetching for BalancerPoolFetcher {
 
 /// An internal temporary struct used during pool fetching to handle errors.
 struct FetchedWeightedPool {
-    pool_data: RegisteredWeightedPool,
+    registered_pool: RegisteredWeightedPool,
     /// getPoolTokens returns (Tokens, Balances, LastBlockUpdated)
     reserves: Result<(Vec<H160>, Vec<U256>, U256), MethodError>,
 }
@@ -117,7 +117,7 @@ fn handle_results(results: Vec<FetchedWeightedPool>) -> Result<Vec<WeightedPool>
                 Some(reserves) => reserves.1,
                 None => return Ok(acc),
             };
-            acc.push(WeightedPool::new(fetched_pool.pool_data, balances));
+            acc.push(WeightedPool::new(fetched_pool.registered_pool, balances));
             Ok(acc)
         })
 }
@@ -130,7 +130,7 @@ mod tests {
     #[test]
     fn pool_fetcher_forwards_node_error() {
         let results = vec![FetchedWeightedPool {
-            pool_data: RegisteredWeightedPool::default(),
+            registered_pool: RegisteredWeightedPool::default(),
             reserves: Err(ethcontract_error::testing_node_error()),
         }];
         assert!(handle_results(results).is_err());
@@ -140,11 +140,11 @@ mod tests {
     fn pool_fetcher_skips_contract_error() {
         let results = vec![
             FetchedWeightedPool {
-                pool_data: RegisteredWeightedPool::default(),
+                registered_pool: RegisteredWeightedPool::default(),
                 reserves: Err(ethcontract_error::testing_contract_error()),
             },
             FetchedWeightedPool {
-                pool_data: RegisteredWeightedPool::default(),
+                registered_pool: RegisteredWeightedPool::default(),
                 reserves: Ok((vec![], vec![], U256::zero())),
             },
         ];
