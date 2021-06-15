@@ -109,16 +109,16 @@ impl PoolDataFetching for PoolDataFetcher {
         let tokens = token_data.await?.0;
 
         let token_decimals = self.token_info_fetcher.get_token_infos(&tokens).await;
-        // Note that balancer does not support tokens with more than 18 decimals
-        // https://github.com/balancer-labs/balancer-v2-monorepo/blob/ce70f7663e0ac94b25ed60cb86faaa8199fd9e13/pkg/pool-utils/contracts/BasePool.sol#L497-L508
         let ordered_decimals = tokens
             .iter()
             .map(|token| token_decimals.get(token).and_then(|t| t.decimals))
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| anyhow!("all token decimals required to build scaling factors"))?;
+        // Note that balancer does not support tokens with more than 18 decimals
+        // https://github.com/balancer-labs/balancer-v2-monorepo/blob/ce70f7663e0ac94b25ed60cb86faaa8199fd9e13/pkg/pool-utils/contracts/BasePool.sol#L497-L508
         let scaling_exponents = ordered_decimals
             .iter()
-            .map(|decimals| 18 - decimals)
+            .map(|decimals| 18.checked_sub(decimals).ok_or_else(|| anyhow!("token with more than 18 decimals")))
             .collect();
         Ok(WeightedPoolData {
             pool_id,
