@@ -371,7 +371,7 @@ mod tests {
                 pool_id: pool_ids[i],
                 tokens: vec![tokens[i], tokens[i + 1]],
                 weights: vec![weights[i], weights[i + 1]],
-                scaling_factors: vec![0, 0],
+                scaling_exponents: vec![0, 0],
             };
             dummy_data_fetcher
                 .expect_get_pool_data()
@@ -412,7 +412,7 @@ mod tests {
                     pool_address: pool_addresses[i],
                     tokens: vec![tokens[i], tokens[i + 1]],
                     normalized_weights: vec![weights[i], weights[i + 1]],
-                    scaling_factors: vec![0, 0],
+                    scaling_exponents: vec![0, 0],
                     block_created: i as u64 + 1
                 },
                 "failed assertion at index {}",
@@ -454,7 +454,7 @@ mod tests {
                 pool_id: pool_ids[i],
                 tokens: vec![tokens[i], tokens[i + 1]],
                 weights: vec![weights[i], weights[i + 1]],
-                scaling_factors: vec![0, 0],
+                scaling_exponents: vec![0, 0],
             };
             dummy_data_fetcher
                 .expect_get_pool_data()
@@ -479,7 +479,7 @@ mod tests {
                     pool_id: new_pool_id,
                     tokens: vec![new_token],
                     weights: vec![new_weight],
-                    scaling_factors: vec![0],
+                    scaling_exponents: vec![0],
                 })
             });
 
@@ -502,7 +502,7 @@ mod tests {
                     pool_address: pool_addresses[i],
                     tokens: vec![tokens[i], tokens[i + 1]],
                     normalized_weights: vec![weights[i], weights[i + 1]],
-                    scaling_factors: vec![0, 0],
+                    scaling_exponents: vec![0, 0],
                     block_created: i as u64
                 },
                 "assertion failed at index {}",
@@ -544,7 +544,7 @@ mod tests {
                 pool_address: new_pool_address,
                 tokens: vec![new_token],
                 normalized_weights: vec![new_weight],
-                scaling_factors: vec![0],
+                scaling_exponents: vec![0],
                 block_created: new_event_block
             }
         );
@@ -574,7 +574,7 @@ mod tests {
                 pool_id: pool_ids[i],
                 tokens: tokens[i..n].to_owned(),
                 weights: vec![],
-                scaling_factors: vec![],
+                scaling_exponents: vec![],
             };
             dummy_data_fetcher
                 .expect_get_pool_data()
@@ -606,7 +606,7 @@ mod tests {
                 pool_id: pool_ids[i],
                 tokens: tokens[i..n].to_owned(),
                 normalized_weights: vec![],
-                scaling_factors: vec![],
+                scaling_exponents: vec![],
                 block_created: 0,
                 pool_address: pool_addresses[i],
             });
