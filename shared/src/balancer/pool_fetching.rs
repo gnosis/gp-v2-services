@@ -2,7 +2,7 @@ use anyhow::Result;
 use model::TokenPair;
 use std::collections::{HashMap, HashSet};
 
-use crate::balancer::event_handler::{BalancerEventUpdater, RegisteredWeightedPool};
+use crate::balancer::event_handler::{BalancerPoolRegistry, RegisteredWeightedPool};
 use crate::pool_fetching::{handle_contract_error, MAX_BATCH_SIZE};
 use crate::recent_block_cache::Block;
 use crate::Web3;
@@ -57,7 +57,7 @@ pub trait WeightedPoolFetching: Send + Sync {
 }
 
 pub struct BalancerPoolFetcher {
-    pool_data: BalancerEventUpdater,
+    pool_registry: BalancerPoolRegistry,
     vault: BalancerV2Vault,
     web3: Web3,
 }
@@ -72,10 +72,9 @@ impl WeightedPoolFetching for BalancerPoolFetcher {
         let mut batch = CallBatch::new(self.web3.transport());
         let block = BlockId::Number(at_block.into());
         let futures = self
-            .pool_data
-            .get_latest_registry()
+            .pool_registry
+            .get_pools_containing_token_pairs(token_pairs)
             .await
-            .pools_containing_token_pairs(token_pairs)
             .into_iter()
             .map(|weighted_pool| {
                 let reserves = self

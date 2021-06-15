@@ -130,15 +130,19 @@ impl PoolDataFetching for Web3 {
     }
 }
 
-#[derive(Default, Debug, Eq, PartialEq)]
-pub struct PoolRegistry {
+/// The BalancerPool struct represents in-memory storage of all deployed Balancer Pools
+#[derive(Derivative)]
+#[derivative(Debug)]
+pub struct DynPoolRegistry {
     /// Used for O(1) access to all pool_ids for a given token
     pools_by_token: HashMap<H160, HashSet<H256>>,
     /// WeightedPool data for a given PoolId
     pools: HashMap<H256, RegisteredWeightedPool>,
+    #[derivative(Debug = "ignore")]
+    data_fetcher: Box<dyn PoolDataFetching>,
 }
 
-impl PoolRegistry {
+impl DynPoolRegistry {
     // Since all the fields are private, we expose helper methods to fetch relevant information
     /// Returns all pools containing both tokens from TokenPair
     pub fn pools_containing_token_pair(
@@ -177,41 +181,12 @@ impl PoolRegistry {
             .unique_by(|pool| pool.pool_id)
             .collect()
     }
-}
 
-/// The BalancerPool struct represents in-memory storage of all deployed Balancer Pools
-#[derive(Derivative)]
-#[derivative(Debug)]
-pub struct DynPoolRegistry {
-    /// Used for O(1) access to all pool_ids for a given token
-    pools_by_token: HashMap<H160, HashSet<H256>>,
-    /// WeightedPool data for a given PoolId
-    pools: HashMap<H256, RegisteredWeightedPool>,
-    #[derivative(Debug = "ignore")]
-    data_fetcher: Box<dyn PoolDataFetching>,
-}
-
-impl DynPoolRegistry {
     pub fn new(data_fetcher: Box<dyn PoolDataFetching>) -> Self {
         DynPoolRegistry {
             pools_by_token: Default::default(),
             pools: Default::default(),
             data_fetcher,
-        }
-    }
-
-    pub fn merge(&self, other: &DynPoolRegistry) -> PoolRegistry {
-        tracing::debug!("Merging Balancer Pool Registries");
-        let mut pools_by_token = self.pools_by_token.clone();
-        for (token, pool_set) in other.pools_by_token.clone() {
-            pools_by_token.entry(token).or_default().extend(pool_set)
-        }
-        // There should be no overlap between the two pool maps.
-        let mut pools = self.pools.clone();
-        pools.extend(other.pools.clone());
-        PoolRegistry {
-            pools_by_token,
-            pools,
         }
     }
 
@@ -275,14 +250,35 @@ impl DynPoolRegistry {
     }
 }
 
-pub struct BalancerEventUpdater {
+pub struct BalancerPoolRegistry {
     weighted_pool_updater:
         Mutex<EventHandler<Web3, BalancerV2WeightedPoolFactoryContract, DynPoolRegistry>>,
     two_token_pool_updater:
         Mutex<EventHandler<Web3, BalancerV2WeightedPool2TokensFactoryContract, DynPoolRegistry>>,
 }
 
-impl BalancerEventUpdater {
+impl BalancerPoolRegistry {
+    pub async fn get_pools_containing_token_pairs(
+        &self,
+        token_pairs: HashSet<TokenPair>,
+    ) -> HashSet<RegisteredWeightedPool> {
+        let pool_set_1 = self
+            .weighted_pool_updater
+            .lock()
+            .await
+            .store
+            .pools_containing_token_pairs(token_pairs.clone());
+        let pool_set_2 = self
+            .two_token_pool_updater
+            .lock()
+            .await
+            .store
+            .pools_containing_token_pairs(token_pairs);
+        pool_set_1.union(&pool_set_2).cloned().collect()
+    }
+}
+
+impl BalancerPoolRegistry {
     pub async fn new(web3: Web3) -> Result<Self> {
         let weighted_pool_factory = BalancerV2WeightedPoolFactory::deployed(&web3).await?;
         let two_token_pool_factory = BalancerV2WeightedPool2TokensFactory::deployed(&web3).await?;
@@ -382,16 +378,8 @@ impl_event_retrieving! {
     pub BalancerV2WeightedPool2TokensFactoryContract for balancer_v2_weighted_pool_2_tokens_factory
 }
 
-impl BalancerEventUpdater {
-    pub async fn get_latest_registry(&self) -> PoolRegistry {
-        let registry_1 = &self.weighted_pool_updater.lock().await.store;
-        let registry_2 = &self.two_token_pool_updater.lock().await.store;
-        registry_1.merge(registry_2)
-    }
-}
-
 #[async_trait::async_trait]
-impl Maintaining for BalancerEventUpdater {
+impl Maintaining for BalancerPoolRegistry {
     async fn run_maintenance(&self) -> Result<()> {
         self.two_token_pool_updater.run_maintenance().await?;
         self.weighted_pool_updater.run_maintenance().await
@@ -435,7 +423,7 @@ fn convert_two_token_pool_created(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use maplit::{hashmap, hashset};
+    use maplit::hashset;
     use mockall::predicate::eq;
 
     #[tokio::test]
@@ -665,9 +653,24 @@ mod tests {
             .collect();
 
         // Test the empty registry.
-        let mut registry = PoolRegistry {
+        let mut dummy_data_fetcher = MockPoolDataFetching::new();
+        // Have to load all expected data into fetcher before it is passed on.
+        for i in 0..n {
+            let expected_pool_data = WeightedPoolData {
+                pool_id: pool_ids[i],
+                tokens: tokens[i..n].to_owned(),
+                weights: vec![],
+                scaling_exponents: vec![],
+            };
+            dummy_data_fetcher
+                .expect_get_pool_data()
+                .with(eq(pool_addresses[i]))
+                .returning(move |_| Ok(expected_pool_data.clone()));
+        }
+        let mut registry = DynPoolRegistry {
             pools_by_token: Default::default(),
             pools: Default::default(),
+            data_fetcher: Box::new(dummy_data_fetcher),
         };
         for token_pair in token_pairs.iter().take(n) {
             assert!(registry.pools_containing_token_pair(*token_pair).is_empty());
@@ -726,71 +729,6 @@ mod tests {
         assert_eq!(
             registry.pools_containing_token_pair(token_pairs[2]),
             hashset! { weighted_pools[0].clone() }
-        );
-    }
-
-    #[test]
-    fn merge_dyn_registry() {
-        let n = 3;
-        let pool_ids: Vec<H256> = (0..n).map(|i| H256::from_low_u64_be(i as u64)).collect();
-        let tokens: Vec<H160> = (0..n)
-            .map(|i| H160::from_low_u64_be(2 * i as u64 + 1))
-            .collect();
-
-        let registry_1 = DynPoolRegistry {
-            pools_by_token: Default::default(),
-            pools: Default::default(),
-            data_fetcher: Box::new(MockPoolDataFetching::new()),
-        };
-
-        let registry_2 = DynPoolRegistry {
-            pools_by_token: Default::default(),
-            pools: Default::default(),
-            data_fetcher: Box::new(MockPoolDataFetching::new()),
-        };
-        assert_eq!(registry_1.merge(&registry_2), PoolRegistry::default());
-
-        let registry_1 = DynPoolRegistry {
-            pools_by_token: hashmap! { tokens[0] => hashset!{ pool_ids[0], pool_ids[1] }},
-            pools: Default::default(),
-            data_fetcher: Box::new(MockPoolDataFetching::new()),
-        };
-
-        let registry_2 = DynPoolRegistry {
-            pools_by_token: hashmap! { tokens[0] => hashset!{ pool_ids[2] }},
-            pools: Default::default(),
-            data_fetcher: Box::new(MockPoolDataFetching::new()),
-        };
-
-        assert_eq!(
-            registry_1.merge(&registry_2),
-            PoolRegistry {
-                pools_by_token: hashmap! { tokens[0] => hashset!{ pool_ids[0], pool_ids[1], pool_ids[2] }},
-                pools: Default::default()
-            }
-        );
-
-        let registry_1 = DynPoolRegistry {
-            pools_by_token: Default::default(),
-            pools: hashmap! { pool_ids[0] => RegisteredWeightedPool::default() },
-            data_fetcher: Box::new(MockPoolDataFetching::new()),
-        };
-
-        let registry_2 = DynPoolRegistry {
-            pools_by_token: Default::default(),
-            pools: hashmap! { pool_ids[1] => RegisteredWeightedPool::default() },
-            data_fetcher: Box::new(MockPoolDataFetching::new()),
-        };
-
-        assert_eq!(
-            registry_1.merge(&registry_2),
-            PoolRegistry {
-                pools_by_token: Default::default(),
-                pools: hashmap! {
-                    pool_ids[0] => RegisteredWeightedPool::default(),
-                    pool_ids[1] => RegisteredWeightedPool::default()
-                },
-            }
         );
     }
 }
