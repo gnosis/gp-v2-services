@@ -33,7 +33,7 @@ pub struct PoolCreated {
     pub pool_address: H160,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RegisteredWeightedPool {
     pub pool_id: H256,
     pub pool_address: H160,
@@ -133,7 +133,7 @@ impl PoolDataFetching for Web3 {
 /// The BalancerPool struct represents in-memory storage of all deployed Balancer Pools
 #[derive(Derivative)]
 #[derivative(Debug)]
-pub struct DynPoolRegistry {
+pub struct PoolStorage {
     /// Used for O(1) access to all pool_ids for a given token
     pools_by_token: HashMap<H160, HashSet<H256>>,
     /// WeightedPool data for a given PoolId
@@ -142,13 +142,13 @@ pub struct DynPoolRegistry {
     data_fetcher: Box<dyn PoolDataFetching>,
 }
 
-impl DynPoolRegistry {
+impl PoolStorage {
     // Since all the fields are private, we expose helper methods to fetch relevant information
     /// Returns all pools containing both tokens from TokenPair
     pub fn pools_containing_token_pair(
         &self,
         token_pair: TokenPair,
-    ) -> HashSet<RegisteredWeightedPool> {
+    ) -> Vec<RegisteredWeightedPool> {
         let empty_set = HashSet::new();
         let pools_0 = self
             .pools_by_token
@@ -167,14 +167,14 @@ impl DynPoolRegistry {
                     .expect("failed iterating over known pools")
                     .clone()
             })
-            .collect::<HashSet<RegisteredWeightedPool>>()
+            .collect::<Vec<RegisteredWeightedPool>>()
     }
 
     /// Given a collection of TokenPair, returns all pools containing at least one of the pairs.
     pub fn pools_containing_token_pairs(
         &self,
         token_pairs: HashSet<TokenPair>,
-    ) -> HashSet<RegisteredWeightedPool> {
+    ) -> Vec<RegisteredWeightedPool> {
         token_pairs
             .into_iter()
             .flat_map(|pair| self.pools_containing_token_pair(pair))
@@ -183,7 +183,7 @@ impl DynPoolRegistry {
     }
 
     pub fn new(data_fetcher: Box<dyn PoolDataFetching>) -> Self {
-        DynPoolRegistry {
+        PoolStorage {
             pools_by_token: Default::default(),
             pools: Default::default(),
             data_fetcher,
@@ -252,17 +252,17 @@ impl DynPoolRegistry {
 
 pub struct BalancerPoolRegistry {
     weighted_pool_updater:
-        Mutex<EventHandler<Web3, BalancerV2WeightedPoolFactoryContract, DynPoolRegistry>>,
+        Mutex<EventHandler<Web3, BalancerV2WeightedPoolFactoryContract, PoolStorage>>,
     two_token_pool_updater:
-        Mutex<EventHandler<Web3, BalancerV2WeightedPool2TokensFactoryContract, DynPoolRegistry>>,
+        Mutex<EventHandler<Web3, BalancerV2WeightedPool2TokensFactoryContract, PoolStorage>>,
 }
 
 impl BalancerPoolRegistry {
     pub async fn get_pools_containing_token_pairs(
         &self,
         token_pairs: HashSet<TokenPair>,
-    ) -> HashSet<RegisteredWeightedPool> {
-        let pool_set_1 = self
+    ) -> Vec<RegisteredWeightedPool> {
+        let mut pool_set_1 = self
             .weighted_pool_updater
             .lock()
             .await
@@ -274,7 +274,8 @@ impl BalancerPoolRegistry {
             .await
             .store
             .pools_containing_token_pairs(token_pairs);
-        pool_set_1.union(&pool_set_2).cloned().collect()
+        pool_set_1.extend(pool_set_2);
+        pool_set_1
     }
 }
 
@@ -289,13 +290,13 @@ impl BalancerPoolRegistry {
         let weighted_pool_updater = Mutex::new(EventHandler::new(
             web3.clone(),
             BalancerV2WeightedPoolFactoryContract(weighted_pool_factory),
-            DynPoolRegistry::new(Box::new(web3.clone())),
+            PoolStorage::new(Box::new(web3.clone())),
             deployment_block_weighted_pool,
         ));
         let two_token_pool_updater = Mutex::new(EventHandler::new(
             web3.clone(),
             BalancerV2WeightedPool2TokensFactoryContract(two_token_pool_factory),
-            DynPoolRegistry::new(Box::new(web3)),
+            PoolStorage::new(Box::new(web3)),
             deployment_block_two_token_pool,
         ));
         Ok(Self {
@@ -319,15 +320,14 @@ async fn get_deployment_block(
 }
 
 #[async_trait::async_trait]
-impl EventStoring<WeightedPoolFactoryEvent> for DynPoolRegistry {
+impl EventStoring<WeightedPoolFactoryEvent> for PoolStorage {
     async fn replace_events(
         &mut self,
         events: Vec<EthContractEvent<WeightedPoolFactoryEvent>>,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<()> {
         let balancer_events = convert_weighted_pool_created(events)?;
-        DynPoolRegistry::replace_events_inner(self, range.start().to_u64(), balancer_events)
-            .await?;
+        PoolStorage::replace_events_inner(self, range.start().to_u64(), balancer_events).await?;
         Ok(())
     }
 
@@ -345,15 +345,14 @@ impl EventStoring<WeightedPoolFactoryEvent> for DynPoolRegistry {
 }
 
 #[async_trait::async_trait]
-impl EventStoring<WeightedPool2TokensFactoryEvent> for DynPoolRegistry {
+impl EventStoring<WeightedPool2TokensFactoryEvent> for PoolStorage {
     async fn replace_events(
         &mut self,
         events: Vec<EthContractEvent<WeightedPool2TokensFactoryEvent>>,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<()> {
         let balancer_events = convert_two_token_pool_created(events)?;
-        DynPoolRegistry::replace_events_inner(self, range.start().to_u64(), balancer_events)
-            .await?;
+        PoolStorage::replace_events_inner(self, range.start().to_u64(), balancer_events).await?;
         Ok(())
     }
 
@@ -462,7 +461,7 @@ mod tests {
                 .returning(move |_| Ok(expected_pool_data.clone()));
         }
 
-        let mut pool_store = DynPoolRegistry {
+        let mut pool_store = PoolStorage {
             pools_by_token: Default::default(),
             pools: Default::default(),
             data_fetcher: Box::new(dummy_data_fetcher),
@@ -566,7 +565,7 @@ mod tests {
                 })
             });
 
-        let mut pool_store = DynPoolRegistry {
+        let mut pool_store = PoolStorage {
             pools_by_token: Default::default(),
             pools: Default::default(),
             data_fetcher: Box::new(dummy_data_fetcher),
@@ -667,7 +666,7 @@ mod tests {
                 .with(eq(pool_addresses[i]))
                 .returning(move |_| Ok(expected_pool_data.clone()));
         }
-        let mut registry = DynPoolRegistry {
+        let mut registry = PoolStorage {
             pools_by_token: Default::default(),
             pools: Default::default(),
             data_fetcher: Box::new(dummy_data_fetcher),
@@ -720,15 +719,15 @@ mod tests {
 
         assert_eq!(
             registry.pools_containing_token_pair(token_pairs[0]),
-            hashset! { weighted_pools[0].clone() }
+            vec![weighted_pools[0].clone()]
         );
         assert_eq!(
             registry.pools_containing_token_pair(token_pairs[1]),
-            hashset! { weighted_pools[1].clone(), weighted_pools[0].clone() }
+            vec![weighted_pools[0].clone(), weighted_pools[1].clone()]
         );
         assert_eq!(
             registry.pools_containing_token_pair(token_pairs[2]),
-            hashset! { weighted_pools[0].clone() }
+            vec![weighted_pools[0].clone()]
         );
     }
 }
