@@ -118,8 +118,9 @@ impl PoolDataFetching for PoolDataFetcher {
         // https://github.com/balancer-labs/balancer-v2-monorepo/blob/ce70f7663e0ac94b25ed60cb86faaa8199fd9e13/pkg/pool-utils/contracts/BasePool.sol#L497-L508
         let scaling_exponents = ordered_decimals
             .iter()
-            .map(|decimals| 18.checked_sub(decimals).ok_or_else(|| anyhow!("token with more than 18 decimals")))
-            .collect();
+            .map(|decimals| 18u8.checked_sub(*decimals))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| anyhow!("token with more than 18 decimals"))?;
         Ok(WeightedPoolData {
             pool_id,
             tokens,
