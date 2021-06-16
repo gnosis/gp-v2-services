@@ -26,7 +26,7 @@ pub struct WeightedPoolInfo {
 ///     Technically, `normalized_weights` could be queried along with `pool_id` in step 1,
 ///     but batching here or there doesn't make a difference.
 /// 3. Finally, the `scaling_exponents` are derived as 18 - decimals (for each the token in the pool)
-///     `TokenInfoFetching` is used for this which implements this query as a BatchCall internally.
+///     `TokenInfoFetching` is used here since it is optimized for recovering ERC20 info internally.
 ///
 /// Note that all token decimals are required to be returned from `TokenInfoFetching` in order
 /// to accurately construct `WeightedPoolInfo`.
