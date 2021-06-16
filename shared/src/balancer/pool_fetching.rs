@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use crate::balancer::{
     event_handler::BalancerPoolRegistry,
-    pool_models::{RegisteredWeightedPool, WeightedPool},
+    pool_storage::{RegisteredWeightedPool, WeightedPool},
 };
 use crate::pool_fetching::{handle_contract_error, MAX_BATCH_SIZE};
 use crate::recent_block_cache::Block;

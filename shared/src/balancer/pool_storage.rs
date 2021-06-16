@@ -206,7 +206,7 @@ mod tests {
     use mockall::predicate::eq;
 
     #[tokio::test]
-    async fn balancer_insert_events() {
+    async fn insert_events() {
         let n = 3usize;
         let pool_ids: Vec<H256> = (0..n).map(|i| H256::from_low_u64_be(i as u64)).collect();
         let pool_addresses: Vec<H160> = (0..n).map(|i| H160::from_low_u64_be(i as u64)).collect();
@@ -279,7 +279,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn balancer_replace_events() {
+    async fn replace_events() {
         let start_block = 0;
         let end_block = 5;
         // Setup all the variables to initialize Balancer Pool State
@@ -413,7 +413,7 @@ mod tests {
     }
 
     #[test]
-    fn pools_containing_pair_test() {
+    fn pools_containing_token_pairs() {
         let n = 3;
         let pool_ids: Vec<H256> = (0..n).map(|i| H256::from_low_u64_be(i as u64)).collect();
         let pool_addresses: Vec<H160> = (0..n)

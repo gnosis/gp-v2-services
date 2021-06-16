@@ -1,6 +1,6 @@
 use crate::balancer::{
     info_fetching::PoolInfoFetcher,
-    pool_models::{PoolCreated, PoolStorage, RegisteredWeightedPool},
+    pool_storage::{PoolCreated, PoolStorage, RegisteredWeightedPool},
 };
 use crate::token_info::TokenInfoFetching;
 use crate::{
@@ -16,8 +16,7 @@ use contracts::{
     balancer_v2_weighted_pool_factory::{self, Event as WeightedPoolFactoryEvent},
     BalancerV2WeightedPool2TokensFactory, BalancerV2WeightedPoolFactory,
 };
-use ethcontract::common::DeploymentInformation;
-use ethcontract::Event as EthContractEvent;
+use ethcontract::{common::DeploymentInformation, Event as EthContractEvent};
 use model::TokenPair;
 use std::sync::Arc;
 use std::{collections::HashSet, ops::RangeInclusive};
