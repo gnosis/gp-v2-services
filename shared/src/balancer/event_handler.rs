@@ -1,17 +1,17 @@
-/// This event handler contains mostly boiler plate code for the implementation of `EventReceiving`
-/// and `EventStoring` for Balancer Pool Factory contracts and `PoolStorage` respectively.
-/// Because there are multiple factory contracts for which we rely on event data, the
-/// `BalancerPoolRegistry` is responsible for multiple EventHandlers.
-///
-/// Apart from the event handling boiler plate, there are a few helper methods used as adapters
-/// for converting received contract event data into appropriate internal structs to be passed
-/// along to the `PoolStorage` (database) for update
-///
-/// Due to limitations of `EventReceiving` we must put each event handler behind its own Mutex.
-/// - These mutexes are locked during synchronization and pool fetching.
-///
-/// *Note that* when loading pool from a cold start synchronization can take quite long, but is
-/// otherwise as quick as possible (i.e. taking advantage of as much cached information as possible).
+//! This event handler contains mostly boiler plate code for the implementation of [`EventRetrieving`](crate::event_handling::EventRetrieving)
+//! and [`EventStoring`](crate::event_handling::EventStoring) for Balancer Pool Factory contracts and `PoolStorage` respectively.
+//! Because there are multiple factory contracts for which we rely on event data, the
+//! [`BalancerPoolRegistry`](BalancerPoolRegistry) is responsible for multiple EventHandlers.
+//!
+//! Apart from the event handling boiler plate, there are a few helper methods used as adapters
+//! for converting received contract event data into appropriate internal structs to be passed
+//! along to the `PoolStorage` (database) for update
+//!
+//! Due to limitations of [`EventRetrieving`](crate::event_handling::EventRetrieving) we must put each event handler behind its own Mutex.
+//! - These mutexes are locked during synchronization and pool fetching.
+//!
+//! *Note that* when loading pool from a cold start synchronization can take quite long, but is
+//! otherwise as quick as possible (i.e. taking advantage of as much cached information as possible).
 use crate::balancer::{
     info_fetching::PoolInfoFetcher,
     pool_storage::{PoolCreated, PoolStorage, RegisteredWeightedPool},

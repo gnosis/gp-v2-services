@@ -1,5 +1,5 @@
-/// Responsible for conversion of a `pool_address` into `WeightedPoolInfo` which is used by the
-/// event handler to construct a `RegisteredWeightedPool`.
+//! Responsible for conversion of a `pool_address` into `WeightedPoolInfo` which is used by the
+//! event handler to construct a `RegisteredWeightedPool`.
 use crate::pool_fetching::MAX_BATCH_SIZE;
 use crate::token_info::TokenInfoFetching;
 use crate::Web3;
