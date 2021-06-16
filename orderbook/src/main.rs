@@ -15,6 +15,8 @@ use orderbook::{
 };
 use primitive_types::H160;
 use prometheus::Registry;
+use shared::balancer::event_handler::BalancerPoolRegistry;
+use shared::token_info::{CachedTokenInfoFetcher, TokenInfoFetcher};
 use shared::{
     amm_pair_provider::AmmPairProvider,
     bad_token::{
@@ -88,7 +90,7 @@ struct Arguments {
     #[structopt(long, env = "UNSUPPORTED_TOKENS", use_delimiter = true)]
     pub unsupported_tokens: Vec<H160>,
 
-    /// List of token addresses that shoud be allowed regardless of whether the bad token detector
+    /// List of token addresses that should be allowed regardless of whether the bad token detector
     /// thinks they are bad. Base tokens are automatically allowed.
     #[structopt(long, env = "ALLOWED_TOKENS", use_delimiter = true)]
     pub allowed_tokens: Vec<H160>,
@@ -161,6 +163,12 @@ async fn main() {
 
     let event_updater =
         EventUpdater::new(settlement_contract.clone(), database.clone(), sync_start);
+    let token_info_fetcher = Arc::new(CachedTokenInfoFetcher::new(Box::new(TokenInfoFetcher {
+        web3: web3.clone(),
+    })));
+    let balancer_event_handler = BalancerPoolRegistry::new(web3.clone(), token_info_fetcher)
+        .await
+        .unwrap();
     let balance_fetcher =
         Web3BalanceFetcher::new(web3.clone(), gp_allowance, settlement_contract.address());
 
@@ -272,6 +280,7 @@ async fn main() {
             orderbook.clone(),
             Arc::new(database.clone()),
             Arc::new(event_updater),
+            Arc::new(balancer_event_handler),
             pool_fetcher,
         ],
     };
