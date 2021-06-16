@@ -126,8 +126,7 @@ impl EventStoring<WeightedPoolFactoryEvent> for PoolStorage {
         events: Vec<EthContractEvent<WeightedPoolFactoryEvent>>,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<()> {
-        PoolStorage::replace_events_inner(
-            self,
+        self.replace_events_inner(
             range.start().to_u64(),
             convert_weighted_pool_created(events)?,
         )
@@ -154,8 +153,7 @@ impl EventStoring<WeightedPool2TokensFactoryEvent> for PoolStorage {
         events: Vec<EthContractEvent<WeightedPool2TokensFactoryEvent>>,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<()> {
-        PoolStorage::replace_events_inner(
-            self,
+        self.replace_events_inner(
             range.start().to_u64(),
             convert_two_token_pool_created(events)?,
         )
