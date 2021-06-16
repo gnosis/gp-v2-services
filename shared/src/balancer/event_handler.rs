@@ -1,3 +1,17 @@
+/// This event handler contains mostly boiler plate code for the implementation of `EventReceiving`
+/// and `EventStoring` for Balancer Pool Factory contracts and `PoolStorage` respectively.
+/// Because there are multiple factory contracts for which we rely on event data, the
+/// `BalancerPoolRegistry` is responsible for multiple EventHandlers.
+///
+/// Apart from the event handling boiler plate, there are a few helper methods used as adapters
+/// for converting received contract event data into appropriate internal structs to be passed
+/// along to the `PoolStorage` (database) for update
+///
+/// Due to limitations of `EventReceiving` we must put each event handler behind its own Mutex.
+/// - These mutexes are locked during synchronization and pool fetching.
+///
+/// *Note that* when loading pool from a cold start synchronization can take quite long, but is
+/// otherwise as quick as possible (i.e. taking advantage of as much cached information as possible).
 use crate::balancer::{
     info_fetching::PoolInfoFetcher,
     pool_storage::{PoolCreated, PoolStorage, RegisteredWeightedPool},
@@ -22,6 +36,11 @@ use std::sync::Arc;
 use std::{collections::HashSet, ops::RangeInclusive};
 use tokio::sync::Mutex;
 
+/// The Pool Registry maintains an event handler for each of the Balancer Pool Factory contracts
+/// and maintains a `PoolStorage` for each.
+/// Pools are read from this registry, via the public method `get_pools_containing_token_pairs`
+/// which takes a collection of `TokenPair`, gets the relevant pools from each `PoolStorage`
+/// and returns a merged de-duplicated version of the results.
 pub struct BalancerPoolRegistry {
     weighted_pool_updater:
         Mutex<EventHandler<Web3, BalancerV2WeightedPoolFactoryContract, PoolStorage>>,
@@ -30,6 +49,8 @@ pub struct BalancerPoolRegistry {
 }
 
 impl BalancerPoolRegistry {
+    /// Deployed Pool Factories are loaded internally from the provided `web3` which is also used
+    /// together with `token_info_fetcher` to construct a `PoolInfoFetcher` for each Event Handler.
     pub async fn new(web3: Web3, token_info_fetcher: Arc<dyn TokenInfoFetching>) -> Result<Self> {
         let weighted_pool_factory = BalancerV2WeightedPoolFactory::deployed(&web3).await?;
         let two_token_pool_factory = BalancerV2WeightedPool2TokensFactory::deployed(&web3).await?;
@@ -61,6 +82,9 @@ impl BalancerPoolRegistry {
         })
     }
 
+    /// Retrieves `RegisteredWeightedPool`s from each Pool Store in the Registry and
+    /// returns the merged result.
+    /// Primarily intended to be used by `BalancerPoolFetcher`.
     pub async fn get_pools_containing_token_pairs(
         &self,
         token_pairs: HashSet<TokenPair>,
@@ -170,6 +194,8 @@ impl Maintaining for BalancerPoolRegistry {
     }
 }
 
+/// Adapter methods for converting contract events from each pool factory into a single
+/// `PoolCreated` struct that all event handlers are compatible with.
 fn contract_to_pool_creation<T>(
     contract_events: Vec<EthContractEvent<T>>,
     adapter: impl Fn(T) -> PoolCreated,
