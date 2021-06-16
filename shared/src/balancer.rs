@@ -19,7 +19,7 @@
 //! which returns a collection of relevant `WeightedPools` for a given collection of `TokenPair`.
 //!
 //! For this reason, only the `event_handler` and `pool_fetching` are declared as public,
-//! while `pool_storage` and `info_fetching` merely contains internal logic regarding how
+//! while `pool_storage` and `info_fetching` merely contain internal logic regarding how
 //! information is collected and stored.
 //!
 //! Once should think of `PoolStorage` as a type of Database for which one is not concerned
