@@ -8,16 +8,20 @@ use ethcontract::{I256, U256};
 use lazy_static::lazy_static;
 use std::convert::TryFrom;
 
+/// Fixed point number stored in a type of bit size 256 that stores exactly 18
+/// decimal digits.
+type Ufixed256x18 = U256;
+
 lazy_static! {
     static ref ONE_18: I256 = I256::exp10(18);
     static ref ONE_20: I256 = I256::exp10(20);
     static ref ONE_36: I256 = I256::exp10(36);
-    static ref UNSIGNED_ONE_18: U256 = U256::try_from(*ONE_18).unwrap();
+    static ref UFIXED256X18_ONE: Ufixed256x18 = U256::try_from(*ONE_18).unwrap();
     static ref MAX_NATURAL_EXPONENT: I256 = ONE_18.checked_mul(I256::from(130_i128)).unwrap();
     static ref MIN_NATURAL_EXPONENT: I256 = ONE_18.checked_mul(I256::from(-41_i128)).unwrap();
     static ref LN_36_LOWER_BOUND: I256 = ONE_18.checked_sub(I256::exp10(17)).unwrap();
     static ref LN_36_UPPER_BOUND: I256 = ONE_18.checked_add(I256::exp10(17)).unwrap();
-    static ref MILD_EXPONENT_BOUND: U256 = (U256::one() << 254_u32)
+    static ref MILD_EXPONENT_BOUND: Ufixed256x18 = (U256::one() << 254_u32)
         .checked_div(U256::try_from(*ONE_20).unwrap())
         .unwrap();
 }
@@ -79,9 +83,9 @@ pub enum Errors {
     InvalidExponent,
 }
 
-pub fn pow(x: U256, y: U256) -> Result<U256, Errors> {
+pub fn pow(x: Ufixed256x18, y: Ufixed256x18) -> Result<Ufixed256x18, Errors> {
     if y == U256::zero() {
-        return Ok(*UNSIGNED_ONE_18);
+        return Ok(*UFIXED256X18_ONE);
     }
     if x == U256::zero() {
         return Ok(U256::zero());
