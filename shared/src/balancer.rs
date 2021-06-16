@@ -18,7 +18,7 @@
 //! implements `WeightedPoolFetching` and thus exposes a `fetch` method
 //! which returns a collection of relevant `WeightedPools` for a given collection of `TokenPair`.
 //!
-//! For this reason, only the `event_handler` and `pool_fetching` are declare as public,
+//! For this reason, only the `event_handler` and `pool_fetching` are declared as public,
 //! while `pool_storage` and `info_fetching` merely contains internal logic regarding how
 //! information is collected and stored.
 //!
