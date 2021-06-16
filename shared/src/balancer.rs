@@ -8,7 +8,7 @@
 //! For this we provide `BalancerPoolFetcher` which is responsible for
 //! retrieving requested pools from the registry and attaching the most recent reserves to the result.
 //!
-//! The module is designed return the most recent pool info on demand.
+//! The module is designed to return the most recent pool info on demand.
 //! The only public facing components necessary to achieve this are
 //!
 //! 1. `BalancerPoolRegistry` which contains an event handler for each distinct Balancer Pool
