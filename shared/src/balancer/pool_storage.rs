@@ -1,31 +1,31 @@
-/// Pool Storage contains all the essential Models the balancer module requires for
-/// operating between different knowledge-levels of pool information.
+/// Pool Storage contains all the essential models required by the balancer module for operating
+/// between different knowledge-levels of pool information.
 ///
 /// To briefly list and describe each of the models.
 ///
 /// 1. `PoolCreated`:
-///     contains only the `pool_address` as this is all the information known about the pool
+///     contains only the `pool_address` as this is the only information known about the pool
 ///     at the time of event emission from the pool's factory contract.
 ///
 /// 2. `RegisteredWeightedPool`:
-///     contains all constant/static information about the pool (i.e. that which is not block-sensitive)
-///     That is, `pool_id`, `address`, `tokens`, `normalized_weights`, `scaling_exponents` and `block_created`
+///     contains all constant/static information about the pool (that which is not block-sensitive).
+///     That is, `pool_id`, `address`, `tokens`, `normalized_weights`, `scaling_exponents` and `block_created`.
 ///     When the `PoolCreated` event is received by the event handler, an instance of this type is
 ///     constructed by fetching all additional information about the pool via `PoolInfoFetching`.
 ///
-///     It is these pools which are stored in-memory as part of the `BalancerPoolRegistry`.
+///     It is these pools which are stored, in memory, as part of the `BalancerPoolRegistry`.
 ///
 /// 3. `PoolStorage`:
-///     This should be thought of as the PoolRegistry's database which stores all static pool
-///     information in data structures which natively provide efficient lookup for the `PoolFetcher`.
+///     This should be thought of as the Pool Registry's database which stores all static pool
+///     information in data structures that provide efficient lookup for the `PoolFetcher`.
 ///
-///     Pool Storage also implements all the CRUD methods expected of such a database.
+///     Pool Storage implements all the CRUD methods expected of such a database.
 ///
 /// 4. `WeightedPool`:
-///     This is the public facing Pool structure returned by the `PoolFetcher` consisting of all
+///     This is the public facing pool structure returned by the `PoolFetcher` consisting of all
 ///     the pool's most recent information (both static and dynamic).
 ///     Essentially, this is all the relevant data from `RegisteredWeightedPool` along with the
-///     current balances of each of the pools tokens (aka the pool's "reserves").
+///     current balances of each of the pool's tokens (aka the pool's "reserves").
 ///
 /// Tests included here are those pertaining to the expected functionality of `PoolStorage`
 
