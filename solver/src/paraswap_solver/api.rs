@@ -1,13 +1,11 @@
 #![allow(dead_code)]
 
-use std::convert::TryFrom;
-
 use anyhow::{Context, Result};
 use derivative::Derivative;
 use ethcontract::{H160, U256};
 use reqwest::{Client, RequestBuilder, Url};
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde::{de::Error, Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 
 use model::u256_decimal;
 use web3::types::Bytes;
@@ -35,10 +33,9 @@ impl ParaswapApi for DefaultParaswapApi {
         reqwest::get(query.into_url())
             .await
             .context("PriceQuery failed")?
-            .json::<Value>()
+            .json::<PriceResponse>()
             .await
             .context("PriceQuery result parsing failed")
-            .and_then(PriceResponse::try_from)
     }
     async fn transaction(
         &self,
@@ -106,52 +103,56 @@ impl PriceQuery {
 /// A Paraswap API price response.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PriceResponse {
-    pub price_route: Map<String, Value>,
+    /// Opaque type, which the API expects to get echoed back in the exact form when requesting settlement transaction data
+    pub price_route_raw: Value,
+    /// The estimated in amount (part of price_route but extracted for type safety & convenience)
     pub src_amount: U256,
+    /// The estimated out amount (part of price_route but extracted for type safety & convenience)
     pub dest_amount: U256,
 }
 
-/// The reason we do not `#[derive(Deserialize)]` is that the structure of `price_route` is opaque and may change over time.
-/// In order to get the transaction data from the API, it expects `price_route` to be echoed back in the exact form as it was sent in the price estimation response.
-/// We therefore leave it as an opaque mapping and only extract the effective in and out amounts from the struct (which we hope will remain in the same place).
-/// We don't implement `Deserialize` manually as writing a custom MapVisitor leads to convoluted code.
-impl TryFrom<Value> for PriceResponse {
-    type Error = anyhow::Error;
+impl<'de> Deserialize<'de> for PriceResponse {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Parsed {
+            price_route: PriceRoute,
+        }
 
-    fn try_from(value: Value) -> Result<Self> {
-        let root = value
-            .as_object()
-            .context(format!("{:?} is not an object", value))?;
-        let price_route = root
-            .get("priceRoute")
-            .and_then(|v| v.as_object())
-            .context(format!("{:?} has no priceRoute object field", root))?
-            .clone();
-        let best_route = price_route
-            .get("bestRoute")
-            .context(format!("{:?} has no bestRoute field", price_route))?
-            .as_array()
-            .context(format!("{:?} bestRoute is not an array", price_route))?
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PriceRoute {
+            best_route: Vec<BestRoute>,
+        }
+
+        #[derive(Deserialize, Clone)]
+        #[serde(rename_all = "camelCase")]
+        struct BestRoute {
+            #[serde(with = "u256_decimal")]
+            src_amount: U256,
+            #[serde(with = "u256_decimal")]
+            dest_amount: U256,
+        }
+
+        let price_route_raw = Value::deserialize(deserializer)?;
+        let parsed =
+            serde_json::from_value::<Parsed>(price_route_raw.clone()).map_err(D::Error::custom)?;
+        let BestRoute {
+            src_amount,
+            dest_amount,
+        } = parsed
+            .price_route
+            .best_route
             .first()
-            .context(format!("{:?} bestRoute is empty", price_route))?;
-        let get_amount = |field| {
-            best_route
-                .get(field)
-                .context(format!(
-                    "{:?} Best route doesn't have {} field",
-                    best_route, field
-                ))?
-                .as_str()
-                .and_then(|s| U256::from_dec_str(s).ok())
-                .context(format!(
-                    "{:?} {} cannot be converted to U256",
-                    best_route, field
-                ))
-        };
+            .cloned()
+            .ok_or_else(|| D::Error::custom("No best route"))?;
         Ok(PriceResponse {
-            price_route: price_route.clone(),
-            src_amount: get_amount("srcAmount")?,
-            dest_amount: get_amount("destAmount")?,
+            price_route_raw,
+            src_amount,
+            dest_amount,
         })
     }
 }
@@ -175,7 +176,7 @@ pub struct TransactionBuilderQuery {
     /// The decimals of the destination token
     pub to_decimals: usize,
     /// priceRoute part from /prices endpoint response (without any change)
-    pub price_route: Map<String, Value>,
+    pub price_route: Value,
     /// The address of the signer
     pub user_address: H160,
     /// partner's referrer string, important if the partner takes fees
@@ -222,8 +223,6 @@ fn debug_bytes(bytes: &Bytes, formatter: &mut std::fmt::Formatter) -> Result<(),
 
 #[cfg(test)]
 mod tests {
-    use std::convert::TryInto;
-
     use reqwest::StatusCode;
 
     use super::*;
@@ -245,11 +244,9 @@ mod tests {
         let price_response: PriceResponse = reqwest::get(price_query.into_url())
             .await
             .expect("price query failed")
-            .json::<Value>()
+            .json()
             .await
-            .expect("Response is not json")
-            .try_into()
-            .expect("price query response serialization failed");
+            .expect("Response is not json");
 
         println!("Price Response: {:?}", &price_response,);
 
@@ -261,7 +258,7 @@ mod tests {
             dest_amount: price_response.dest_amount * 90 / 100,
             from_decimals: 18,
             to_decimals: 18,
-            price_route: price_response.price_route,
+            price_route: price_response.price_route_raw,
             user_address: shared::addr!("E0B3700e0aadcb18ed8d4BFF648Bc99896a18ad1"),
             referrer: "GPv2".to_string(),
         };
@@ -297,7 +294,7 @@ mod tests {
 
     #[test]
     fn test_price_query_response_deserialization() {
-        let result: PriceResponse = serde_json::from_str::<Value>(
+        let result: PriceResponse = serde_json::from_str::<PriceResponse>(
             r#"{
                 "priceRoute": {
                   "bestRoute": [
@@ -426,7 +423,7 @@ mod tests {
                   "priceID": "a515b0ec-6cb8-4062-b6d1-b38b33bd05cb",
                   "hmac": "f82acc4c0191938b6eebc6eada0899e53e03d377"
                 }
-              }"#).unwrap().try_into().unwrap();
+              }"#).unwrap();
 
         assert_eq!(result.src_amount, 100_000_000_000_000_000u128.into());
         assert_eq!(result.dest_amount, 1_444_292_761_374_042_400u128.into());
