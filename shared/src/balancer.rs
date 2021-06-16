@@ -1,21 +1,21 @@
 //! Contains event handling for maintaining in-memory storage of a
-//! [`BalancerPoolRegistry`](crate::balancer::event_handler::BalancerPoolRegistry) along with tools for retrieving
+//! `BalancerPoolRegistry` along with tools for retrieving
 //! known pools from this registry on demand.
 //!
 //! While the static information of the pools (such as `pool_id`, `address`, `tokens`) can be
 //! kept in memory as part of the registry, their dynamic information (such as current reserves)
 //! is block-dependent and must be queried from the EVM upon request.
-//! For this we provide [`BalancerPoolFetcher`](crate::balancer::pool_fetching::BalancerPoolFetcher) which is responsible for
+//! For this we provide `BalancerPoolFetcher` which is responsible for
 //! retrieving requested pools from the registry and attaching the most recent reserves to the result.
 //!
 //! The module is designed return the most recent pool info on demand.
 //! The only public facing components necessary to achieve this are
 //!
-//! 1. [`BalancerPoolRegistry`](crate::balancer::event_handler::BalancerPoolRegistry) which contains an event handler for each distinct Balancer Pool
+//! 1. `BalancerPoolRegistry` which contains an event handler for each distinct Balancer Pool
 //! Factory contract and maintains its own in-memory storage of each pool and its static information.
 //!
-//! 2. [`BalancerPoolFetcher`](crate::balancer::pool_fetching::BalancerPoolFetcher) which holds an instance of `BalancerPoolRegistry`,
-//! implements [`WeightedPoolFetching`](crate::balancer::pool_fetching::WeightedPoolFetching) and thus exposes a `fetch` method
+//! 2. `BalancerPoolFetcher` which holds an instance of `BalancerPoolRegistry`,
+//! implements `WeightedPoolFetching` and thus exposes a `fetch` method
 //! which returns a collection of relevant `WeightedPools` for a given collection of `TokenPair`.
 //!
 //! For this reason, only the `event_handler` and `pool_fetching` are declare as public,

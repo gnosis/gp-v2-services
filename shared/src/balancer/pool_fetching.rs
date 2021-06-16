@@ -1,5 +1,5 @@
-//! Pool Fetching is primarily concerned with retrieving relevant pools from the [`BalancerPoolRegistry`](BalancerPoolRegistry)
-//! when given a collection of [`TokenPair`](TokenPair). Each of these pools are then queried for
+//! Pool Fetching is primarily concerned with retrieving relevant pools from the `BalancerPoolRegistry`
+//! when given a collection of `TokenPair`. Each of these pools are then queried for
 //! their `token_balances` and the `PoolFetcher` returns all up-to-date `WeightedPools`
 //! to be consumed by external users (e.g. Price Estimators and Solvers).
 use anyhow::Result;
