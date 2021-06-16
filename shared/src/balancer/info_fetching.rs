@@ -1,3 +1,6 @@
+/// Responsible for conversion of a `pool_address` into `WeightedPoolInfo` which is used by the
+/// event handler to construct a `RegisteredWeightedPool`.
+
 use crate::pool_fetching::MAX_BATCH_SIZE;
 use crate::token_info::TokenInfoFetching;
 use crate::Web3;
@@ -16,6 +19,17 @@ pub struct WeightedPoolInfo {
     pub scaling_exponents: Vec<u8>,
 }
 
+/// Via `PoolInfoFetcher` (leverages a combination of `Web3` and `TokenInfoFetching`)
+/// to recover `WeightedPoolInfo` from a `pool_address` in steps as follows:
+/// 1. The `pool_id` is recovered first from the deployed `BalancerV2Vault` contract.
+/// 2. With `pool_id` we can BatchCall for `tokens` (just the addresses) and `normalized_weights`
+///     Technically, `normalized_weights` could be queried along with `pool_id` in step 1,
+///     but batching here or there doesn't make a difference.
+/// 3. Finally, the `scaling_exponents` are derived as 18 - decimals (for each the token in the pool)
+///     `TokenInfoFetching` is used for this which implements this query as a BatchCall internally.
+///
+/// Note that all token decimals are required to be returned from `TokenInfoFetching` in order
+/// to accurately construct `WeightedPoolInfo`.
 pub struct PoolInfoFetcher {
     pub web3: Web3,
     pub token_info_fetcher: Arc<dyn TokenInfoFetching>,
