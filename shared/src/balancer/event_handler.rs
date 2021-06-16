@@ -1,4 +1,4 @@
-use crate::pool_fetching::MAX_BATCH_SIZE;
+use crate::balancer::info_fetching::{PoolInfoFetcher, PoolInfoFetching};
 use crate::token_info::TokenInfoFetching;
 use crate::{
     current_block::BlockRetrieving,
@@ -11,15 +11,12 @@ use anyhow::{anyhow, Context, Result};
 use contracts::{
     balancer_v2_weighted_pool_2_tokens_factory::{self, Event as WeightedPool2TokensFactoryEvent},
     balancer_v2_weighted_pool_factory::{self, Event as WeightedPoolFactoryEvent},
-    BalancerV2Vault, BalancerV2WeightedPool, BalancerV2WeightedPool2TokensFactory,
-    BalancerV2WeightedPoolFactory,
+    BalancerV2WeightedPool2TokensFactory, BalancerV2WeightedPoolFactory,
 };
 use derivative::Derivative;
-use ethcontract::batch::CallBatch;
 use ethcontract::common::DeploymentInformation;
-use ethcontract::{Bytes, Event as EthContractEvent, H160, H256, U256};
+use ethcontract::{Event as EthContractEvent, H160, H256, U256};
 use itertools::Itertools;
-use mockall::*;
 use model::TokenPair;
 use std::sync::Arc;
 use std::{
@@ -49,7 +46,7 @@ impl RegisteredWeightedPool {
     async fn from_event(
         block_created: u64,
         creation: PoolCreated,
-        data_fetcher: &dyn PoolDataFetching,
+        data_fetcher: &dyn PoolInfoFetching,
     ) -> Result<RegisteredWeightedPool> {
         let pool_address = creation.pool_address;
         let pool_data = data_fetcher.get_pool_data(pool_address).await?;
@@ -64,70 +61,6 @@ impl RegisteredWeightedPool {
     }
 }
 
-#[derive(Clone)]
-pub struct WeightedPoolData {
-    pool_id: H256,
-    tokens: Vec<H160>,
-    weights: Vec<U256>,
-    scaling_exponents: Vec<u8>,
-}
-
-struct PoolDataFetcher {
-    web3: Web3,
-    token_info_fetcher: Arc<dyn TokenInfoFetching>,
-}
-
-#[automock]
-#[async_trait::async_trait]
-pub trait PoolDataFetching: Send + Sync {
-    async fn get_pool_data(&self, pool_address: H160) -> Result<WeightedPoolData>;
-}
-
-#[async_trait::async_trait]
-impl PoolDataFetching for PoolDataFetcher {
-    /// Could result in ethcontract::{NodeError, MethodError or ContractError}
-    async fn get_pool_data(&self, pool_address: H160) -> Result<WeightedPoolData> {
-        let mut batch = CallBatch::new(self.web3.transport());
-        let pool_contract = BalancerV2WeightedPool::at(&self.web3, pool_address);
-        // Need vault and pool_id before we can fetch tokens.
-        let vault = BalancerV2Vault::deployed(&self.web3).await?;
-        let pool_id = H256::from(pool_contract.methods().get_pool_id().call().await?.0);
-
-        // token_data and weight calls can be batched
-        let token_data = vault
-            .methods()
-            .get_pool_tokens(Bytes(pool_id.0))
-            .batch_call(&mut batch);
-        let normalized_weights = pool_contract
-            .methods()
-            .get_normalized_weights()
-            .batch_call(&mut batch);
-        batch.execute_all(MAX_BATCH_SIZE).await;
-
-        let tokens = token_data.await?.0;
-
-        let token_decimals = self.token_info_fetcher.get_token_infos(&tokens).await;
-        let ordered_decimals = tokens
-            .iter()
-            .map(|token| token_decimals.get(token).and_then(|t| t.decimals))
-            .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| anyhow!("all token decimals required to build scaling factors"))?;
-        // Note that balancer does not support tokens with more than 18 decimals
-        // https://github.com/balancer-labs/balancer-v2-monorepo/blob/ce70f7663e0ac94b25ed60cb86faaa8199fd9e13/pkg/pool-utils/contracts/BasePool.sol#L497-L508
-        let scaling_exponents = ordered_decimals
-            .iter()
-            .map(|decimals| 18u8.checked_sub(*decimals))
-            .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| anyhow!("token with more than 18 decimals"))?;
-        Ok(WeightedPoolData {
-            pool_id,
-            tokens,
-            weights: normalized_weights.await?,
-            scaling_exponents,
-        })
-    }
-}
-
 /// The BalancerPool struct represents in-memory storage of all deployed Balancer Pools
 #[derive(Derivative)]
 #[derivative(Debug)]
@@ -137,7 +70,7 @@ pub struct PoolStorage {
     /// WeightedPool data for a given PoolId
     pools: HashMap<H256, RegisteredWeightedPool>,
     #[derivative(Debug = "ignore")]
-    data_fetcher: Box<dyn PoolDataFetching>,
+    data_fetcher: Box<dyn PoolInfoFetching>,
 }
 
 impl PoolStorage {
@@ -180,7 +113,7 @@ impl PoolStorage {
             .collect()
     }
 
-    pub fn new(data_fetcher: Box<dyn PoolDataFetching>) -> Self {
+    pub fn new(data_fetcher: Box<dyn PoolInfoFetching>) -> Self {
         PoolStorage {
             pools_by_token: Default::default(),
             pools: Default::default(),
@@ -288,7 +221,7 @@ impl BalancerPoolRegistry {
         let weighted_pool_updater = Mutex::new(EventHandler::new(
             web3.clone(),
             BalancerV2WeightedPoolFactoryContract(weighted_pool_factory),
-            PoolStorage::new(Box::new(PoolDataFetcher {
+            PoolStorage::new(Box::new(PoolInfoFetcher {
                 web3: web3.clone(),
                 token_info_fetcher: token_info_fetcher.clone(),
             })),
@@ -297,7 +230,7 @@ impl BalancerPoolRegistry {
         let two_token_pool_updater = Mutex::new(EventHandler::new(
             web3.clone(),
             BalancerV2WeightedPool2TokensFactoryContract(two_token_pool_factory),
-            PoolStorage::new(Box::new(PoolDataFetcher {
+            PoolStorage::new(Box::new(PoolInfoFetcher {
                 web3,
                 token_info_fetcher,
             })),
@@ -429,6 +362,7 @@ fn convert_two_token_pool_created(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::balancer::info_fetching::{MockPoolInfoFetching, WeightedPoolInfo};
     use maplit::hashset;
     use mockall::predicate::eq;
 
@@ -453,9 +387,9 @@ mod tests {
             (EventIndex::new(3, 0), creation_events[2]),
         ];
 
-        let mut dummy_data_fetcher = MockPoolDataFetching::new();
+        let mut dummy_data_fetcher = MockPoolInfoFetching::new();
         for i in 0..n {
-            let expected_pool_data = WeightedPoolData {
+            let expected_pool_data = WeightedPoolInfo {
                 pool_id: pool_ids[i],
                 tokens: vec![tokens[i], tokens[i + 1]],
                 weights: vec![weights[i], weights[i + 1]],
@@ -536,9 +470,9 @@ mod tests {
             .map(|i| (EventIndex::new(i as u64, 0), creation_events[i]))
             .collect();
 
-        let mut dummy_data_fetcher = MockPoolDataFetching::new();
+        let mut dummy_data_fetcher = MockPoolInfoFetching::new();
         for i in start_block..end_block + 1 {
-            let expected_pool_data = WeightedPoolData {
+            let expected_pool_data = WeightedPoolInfo {
                 pool_id: pool_ids[i],
                 tokens: vec![tokens[i], tokens[i + 1]],
                 weights: vec![weights[i], weights[i + 1]],
@@ -563,7 +497,7 @@ mod tests {
             .expect_get_pool_data()
             .with(eq(new_pool_address))
             .returning(move |_| {
-                Ok(WeightedPoolData {
+                Ok(WeightedPoolInfo {
                     pool_id: new_pool_id,
                     tokens: vec![new_token],
                     weights: vec![new_weight],
@@ -658,10 +592,10 @@ mod tests {
             .collect();
 
         // Test the empty registry.
-        let mut dummy_data_fetcher = MockPoolDataFetching::new();
+        let mut dummy_data_fetcher = MockPoolInfoFetching::new();
         // Have to load all expected data into fetcher before it is passed on.
         for i in 0..n {
-            let expected_pool_data = WeightedPoolData {
+            let expected_pool_data = WeightedPoolInfo {
                 pool_id: pool_ids[i],
                 tokens: tokens[i..n].to_owned(),
                 weights: vec![],
