@@ -201,6 +201,18 @@ struct OrdersQueryRow {
     signing_scheme: DbSigningScheme,
 }
 
+fn is_sell_order_filled(
+    amount: &BigDecimal,
+    executed_amount: &BigDecimal,
+    executed_fee: &BigDecimal,
+) -> bool {
+    if executed_amount.is_zero() {
+        return false;
+    }
+    let total_amount = executed_amount + executed_fee;
+    total_amount == *amount
+}
+
 impl OrdersQueryRow {
     fn calculate_status(&self) -> OrderStatus {
         match self.kind {
@@ -210,7 +222,7 @@ impl OrdersQueryRow {
                 }
             }
             DbOrderKind::Sell => {
-                if !self.sum_sell.is_zero() && self.sum_sell == self.sell_amount {
+                if is_sell_order_filled(&self.sell_amount, &self.sum_sell, &self.sum_fee) {
                     return OrderStatus::Fulfilled;
                 }
             }
