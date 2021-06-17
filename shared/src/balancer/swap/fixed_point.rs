@@ -43,7 +43,9 @@ impl FromStr for Bfp {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut split_dot = s.splitn(2, '.');
-        let units = split_dot.next().unwrap();
+        let units = split_dot
+            .next()
+            .expect("Splitting a string slice yields at least one element");
         let decimals = split_dot.next().unwrap_or("0");
         if units.is_empty() || decimals.is_empty() || decimals.len() > 18 {
             bail!("Invalid decimal representation");
