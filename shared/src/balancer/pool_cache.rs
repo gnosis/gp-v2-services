@@ -1,22 +1,41 @@
+use crate::balancer::event_handler::BalancerPoolRegistry;
+use crate::balancer::pool_storage::RegisteredWeightedPool;
+use crate::pool_fetching::{handle_contract_error, MAX_BATCH_SIZE};
 use crate::{
-    current_block::CurrentBlockStream,
-    maintenance::Maintaining,
-    balancer::{pool_fetching::PoolReserveFetching, pool_storage::WeightedPool},
-    recent_block_cache::{
-        Block, CacheConfig, CacheFetching, CacheKey, CacheMetrics, RecentBlockCache,
-    },
+    balancer::pool_storage::WeightedPool,
+    recent_block_cache::{Block, CacheFetching, CacheKey, CacheMetrics, RecentBlockCache},
+    Web3,
 };
 use anyhow::Result;
+use contracts::BalancerV2Vault;
+use ethcontract::batch::CallBatch;
+use ethcontract::errors::MethodError;
+use ethcontract::{BlockId, Bytes, H160, H256, U256};
 use std::{collections::HashSet, sync::Arc};
-use ethcontract::H256;
 
 pub trait PoolCacheMetrics: Send + Sync {
     fn pools_fetched(&self, cache_hits: usize, cache_misses: usize);
 }
 
-pub struct BalancerPoolCache(
-    RecentBlockCache<H256, WeightedPool, Box<dyn PoolReserveFetching>, Arc<dyn PoolCacheMetrics>>,
-);
+pub struct PoolReserveFetcher {
+    pool_registry: Arc<BalancerPoolRegistry>,
+    vault: BalancerV2Vault,
+    web3: Web3,
+}
+
+impl PoolReserveFetcher {
+    pub async fn new(pool_registry: Arc<BalancerPoolRegistry>, web3: Web3) -> Result<Self> {
+        let vault = BalancerV2Vault::deployed(&web3).await?;
+        Ok(Self {
+            pool_registry,
+            vault,
+            web3,
+        })
+    }
+}
+
+pub type BalancerPoolReserveCache =
+    RecentBlockCache<H256, WeightedPool, PoolReserveFetcher, Arc<dyn PoolCacheMetrics>>;
 
 impl CacheKey<WeightedPool> for H256 {
     fn first_ord() -> Self {
@@ -29,9 +48,41 @@ impl CacheKey<WeightedPool> for H256 {
 }
 
 #[async_trait::async_trait]
-impl CacheFetching<H256, WeightedPool> for Box<dyn PoolReserveFetching> {
-    async fn fetch_values(&self, keys: HashSet<H256>, block: Block) -> Result<Vec<WeightedPool>> {
-        self.fetch(keys, block).await
+impl CacheFetching<H256, WeightedPool> for PoolReserveFetcher {
+    async fn fetch_values(
+        &self,
+        pool_ids: HashSet<H256>,
+        at_block: Block,
+    ) -> Result<Vec<WeightedPool>> {
+        let mut batch = CallBatch::new(self.web3.transport());
+        let block = BlockId::Number(at_block.into());
+        let futures = self
+            .pool_registry
+            .get_pools(&pool_ids)
+            .await
+            .into_iter()
+            .map(|registered_pool| {
+                let reserves = self
+                    .vault
+                    .get_pool_tokens(Bytes(registered_pool.pool_id.0))
+                    .block(block)
+                    .batch_call(&mut batch);
+                async move {
+                    FetchedWeightedPool {
+                        registered_pool,
+                        reserves: reserves.await,
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+        batch.execute_all(MAX_BATCH_SIZE).await;
+
+        let mut results = Vec::new();
+        for future in futures {
+            // Batch has already been executed, so these awaits resolve immediately.
+            results.push(future.await);
+        }
+        handle_results(results)
     }
 }
 
@@ -41,33 +92,53 @@ impl CacheMetrics for Arc<dyn PoolCacheMetrics> {
     }
 }
 
-impl BalancerPoolCache {
-    /// Creates a new pool cache.
-    pub fn new(
-        config: CacheConfig,
-        fetcher: Box<dyn PoolReserveFetching>,
-        block_stream: CurrentBlockStream,
-        metrics: Arc<dyn PoolCacheMetrics>,
-    ) -> Result<Self> {
-        Ok(Self(RecentBlockCache::new(
-            config,
-            fetcher,
-            block_stream,
-            metrics,
-        )?))
-    }
+/// An internal temporary struct used during pool fetching to handle errors.
+struct FetchedWeightedPool {
+    registered_pool: RegisteredWeightedPool,
+    /// getPoolTokens returns (Tokens, Balances, LastBlockUpdated)
+    reserves: Result<(Vec<H160>, Vec<U256>, U256), MethodError>,
 }
 
-#[async_trait::async_trait]
-impl PoolReserveFetching for BalancerPoolCache {
-    async fn fetch(&self, pool_ids: HashSet<H256>, block: Block) -> Result<Vec<WeightedPool>> {
-        self.0.fetch(pool_ids, block).await
-    }
+fn handle_results(results: Vec<FetchedWeightedPool>) -> Result<Vec<WeightedPool>> {
+    results
+        .into_iter()
+        .try_fold(Vec::new(), |mut acc, fetched_pool| {
+            let balances = match handle_contract_error(fetched_pool.reserves)? {
+                // We only keep the balances entry of reserves query.
+                Some(reserves) => reserves.1,
+                None => return Ok(acc),
+            };
+            acc.push(WeightedPool::new(fetched_pool.registered_pool, balances));
+            Ok(acc)
+        })
 }
 
-#[async_trait::async_trait]
-impl Maintaining for BalancerPoolCache {
-    async fn run_maintenance(&self) -> Result<()> {
-        self.0.update_cache().await
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ethcontract_error;
+
+    #[test]
+    fn pool_fetcher_forwards_node_error() {
+        let results = vec![FetchedWeightedPool {
+            registered_pool: RegisteredWeightedPool::default(),
+            reserves: Err(ethcontract_error::testing_node_error()),
+        }];
+        assert!(handle_results(results).is_err());
+    }
+
+    #[test]
+    fn pool_fetcher_skips_contract_error() {
+        let results = vec![
+            FetchedWeightedPool {
+                registered_pool: RegisteredWeightedPool::default(),
+                reserves: Err(ethcontract_error::testing_contract_error()),
+            },
+            FetchedWeightedPool {
+                registered_pool: RegisteredWeightedPool::default(),
+                reserves: Ok((vec![], vec![], U256::zero())),
+            },
+        ];
+        assert_eq!(handle_results(results).unwrap().len(), 1);
     }
 }

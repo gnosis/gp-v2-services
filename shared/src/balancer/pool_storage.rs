@@ -33,7 +33,6 @@ use crate::event_handling::EventIndex;
 use anyhow::Result;
 use derivative::Derivative;
 use ethcontract::{H160, H256, U256};
-use itertools::Itertools;
 use model::TokenPair;
 use std::collections::{HashMap, HashSet};
 
@@ -124,10 +123,7 @@ pub struct PoolStorage {
 
 impl PoolStorage {
     /// Returns all pools containing both tokens from `TokenPair`
-    pub fn pools_containing_token_pair(
-        &self,
-        token_pair: TokenPair,
-    ) -> Vec<RegisteredWeightedPool> {
+    pub fn pools_containing_token_pair(&self, token_pair: TokenPair) -> HashSet<H256> {
         let empty_set = HashSet::new();
         let pools_0 = self
             .pools_by_token
@@ -137,27 +133,28 @@ impl PoolStorage {
             .pools_by_token
             .get(&token_pair.get().1)
             .unwrap_or(&empty_set);
-        pools_0
-            .intersection(pools_1)
-            .into_iter()
-            .map(|pool_id| {
-                self.pools
-                    .get(pool_id)
-                    .expect("failed iterating over known pools")
-                    .clone()
-            })
-            .collect::<Vec<RegisteredWeightedPool>>()
+        pools_0.intersection(pools_1).copied().collect()
     }
 
     /// Given a collection of `TokenPair`, returns all pools containing at least one of the pairs.
-    pub fn pools_containing_token_pairs(
-        &self,
-        token_pairs: HashSet<TokenPair>,
-    ) -> Vec<RegisteredWeightedPool> {
+    pub fn pools_containing_token_pairs(&self, token_pairs: HashSet<TokenPair>) -> HashSet<H256> {
         token_pairs
             .into_iter()
             .flat_map(|pair| self.pools_containing_token_pair(pair))
-            .unique_by(|pool| pool.pool_id)
+            .collect()
+    }
+
+    pub fn pools_for(&self, pool_ids: &HashSet<H256>) -> Vec<RegisteredWeightedPool> {
+        self.pools
+            .iter()
+            .filter_map(|(pool_id, pool)| {
+                if pool_ids.contains(pool_id) {
+                    Some(pool)
+                } else {
+                    None
+                }
+            })
+            .cloned()
             .collect()
     }
 
