@@ -117,7 +117,7 @@ where
             dest_amount: price_response.dest_amount,
             from_decimals: decimals(&order.sell_token)?,
             to_decimals: decimals(&order.buy_token)?,
-            price_route: price_response.price_route,
+            price_route: price_response.price_route_raw,
             user_address: self.settlement_contract.address(),
             referrer: REFERRER.to_string(),
         };
@@ -264,7 +264,7 @@ mod test {
 
         client.expect_price().returning(|_| {
             Ok(PriceResponse {
-                price_route: Default::default(),
+                price_route_raw: Default::default(),
                 src_amount: 100.into(),
                 dest_amount: 99.into(),
             })
@@ -332,7 +332,7 @@ mod test {
 
         client.expect_price().returning(|_| {
             Ok(PriceResponse {
-                price_route: Default::default(),
+                price_route_raw: Default::default(),
                 src_amount: 100.into(),
                 dest_amount: 99.into(),
             })
