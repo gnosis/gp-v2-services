@@ -42,12 +42,9 @@ impl FromStr for Bfp {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut split_dot = s.split('.');
+        let mut split_dot = s.splitn(2, '.');
         let units = split_dot.next().unwrap();
         let decimals = split_dot.next().unwrap_or("0");
-        if split_dot.next().is_some() {
-            bail!("Too many decimal separators");
-        }
         if units.is_empty() || decimals.is_empty() || decimals.len() > 18 {
             bail!("Invalid decimal representation");
         }
