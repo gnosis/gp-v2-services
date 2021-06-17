@@ -31,13 +31,13 @@ pub struct ParaswapSolver<F> {
     client: Box<dyn ParaswapApi + Send + Sync>,
 }
 
-impl ParaswapSolver<H160> {
+impl ParaswapSolver<GPv2Settlement> {
     pub fn new(
         settlement_contract: GPv2Settlement,
         solver_address: H160,
         token_info: Arc<dyn TokenInfoFetching>,
     ) -> Self {
-        let allowance_fetcher = settlement_contract.address();
+        let allowance_fetcher = settlement_contract.clone();
         Self {
             settlement_contract,
             solver_address,
@@ -57,7 +57,7 @@ impl<F> std::fmt::Debug for ParaswapSolver<F> {
 /// Helper trait to mock the smart contract interaction
 #[cfg_attr(test, mockall::automock)]
 #[async_trait::async_trait]
-trait AllowanceFetching: Send + Sync {
+pub trait AllowanceFetching: Send + Sync {
     async fn existing_allowance(&self, token: H160, spender: H160) -> Result<U256>;
 }
 
