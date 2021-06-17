@@ -16,13 +16,22 @@ use crate::Web3;
 use contracts::BalancerV2Vault;
 use ethcontract::batch::CallBatch;
 use ethcontract::errors::MethodError;
-use ethcontract::{BlockId, Bytes, H160, U256};
+use ethcontract::{BlockId, Bytes, H160, U256, H256};
 
 #[async_trait::async_trait]
 pub trait WeightedPoolFetching: Send + Sync {
     async fn fetch(
         &self,
         token_pairs: HashSet<TokenPair>,
+        at_block: Block,
+    ) -> Result<Vec<WeightedPool>>;
+}
+
+#[async_trait::async_trait]
+pub trait PoolReserveFetching: Send + Sync {
+    async fn fetch(
+        &self,
+        pool_ids: HashSet<H256>,
         at_block: Block,
     ) -> Result<Vec<WeightedPool>>;
 }

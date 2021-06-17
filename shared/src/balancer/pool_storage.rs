@@ -37,12 +37,14 @@ use itertools::Itertools;
 use model::TokenPair;
 use std::collections::{HashMap, HashSet};
 
+#[derive(Clone)]
 pub struct PoolTokenState {
     pub balance: U256,
     pub weight: U256,
     pub scaling_exponent: u8,
 }
 
+#[derive(Clone)]
 pub struct WeightedPool {
     pub pool_id: H256,
     pub pool_address: H160,

@@ -30,3 +30,5 @@ mod info_fetching;
 mod logexpmath;
 pub mod pool_fetching;
 mod pool_storage;
+pub mod pool_cache;
+pub mod registered_pool_fetching;
