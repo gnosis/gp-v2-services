@@ -72,8 +72,6 @@ impl Debug for Bfp {
 }
 
 impl Bfp {
-    pub const MAX: Self = Self(U256::MAX);
-
     pub fn as_uint256(self) -> U256 {
         self.0
     }
@@ -84,10 +82,6 @@ impl Bfp {
 
     pub fn one() -> Self {
         *ONE
-    }
-
-    pub fn epsilon() -> Self {
-        *EPSILON
     }
 
     pub fn from_wei(num: U256) -> Self {
@@ -192,7 +186,7 @@ mod tests {
         assert_eq!(Bfp::from(40).add(2.into()).unwrap(), 42.into());
 
         assert_eq!(
-            Bfp::MAX.add(Bfp::epsilon()).unwrap_err(),
+            Bfp(U256::MAX).add(*EPSILON).unwrap_err(),
             Error::AddOverflow
         );
     }
@@ -228,8 +222,8 @@ mod tests {
         test_mul!(mul_up);
 
         let one_half = Bfp((5 * 10_u128.pow(17)).into());
-        assert_eq!(Bfp::epsilon().mul_down(one_half).unwrap(), Bfp::zero());
-        assert_eq!(Bfp::epsilon().mul_up(one_half).unwrap(), Bfp::epsilon());
+        assert_eq!(EPSILON.mul_down(one_half).unwrap(), Bfp::zero());
+        assert_eq!(EPSILON.mul_up(one_half).unwrap(), *EPSILON);
     }
 
     macro_rules! test_div {
@@ -255,8 +249,8 @@ mod tests {
         test_div!(div_down);
         test_div!(div_up);
 
-        assert_eq!(Bfp::epsilon().div_down(2.into()).unwrap(), Bfp::zero());
-        assert_eq!(Bfp::epsilon().div_up(2.into()).unwrap(), Bfp::epsilon());
+        assert_eq!(EPSILON.div_down(2.into()).unwrap(), Bfp::zero());
+        assert_eq!(EPSILON.div_up(2.into()).unwrap(), *EPSILON);
     }
 
     #[test]
@@ -275,7 +269,7 @@ mod tests {
         ); // powDown: 0
 
         assert_eq!(
-            Bfp::MAX.pow_up(Bfp::one()).unwrap_err(),
+            Bfp(U256::MAX).pow_up(Bfp::one()).unwrap_err(),
             Error::XOutOfBounds,
         );
         // note: the values were chosen to get a large value from `pow`
