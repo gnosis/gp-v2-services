@@ -344,8 +344,9 @@ mod tests {
         // Filled - sell (filled - 100%)
         let order_row = OrdersQueryRow {
             kind: DbOrderKind::Sell,
-            sell_amount: BigDecimal::from(1),
+            sell_amount: BigDecimal::from(2),
             sum_sell: BigDecimal::from(1),
+            sum_fee: BigDecimal::from(1),
             ..order_row
         };
 
@@ -416,6 +417,7 @@ mod tests {
             kind: DbOrderKind::Sell,
             sell_amount: BigDecimal::from(2),
             sum_sell: BigDecimal::from(1),
+            sum_fee: BigDecimal::default(),
             invalidated: true,
             ..order_row
         };
