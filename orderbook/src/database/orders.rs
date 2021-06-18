@@ -205,7 +205,7 @@ impl OrdersQueryRow {
     fn calculate_status(&self) -> OrderStatus {
         match self.kind {
             DbOrderKind::Buy => {
-                if !self.sum_buy.is_zero() && self.sum_buy == self.buy_amount {
+                if is_buy_order_filled(&self.buy_amount, &self.sum_buy) {
                     return OrderStatus::Fulfilled;
                 }
             }
@@ -292,6 +292,10 @@ fn is_sell_order_filled(
     }
     let total_amount = executed_amount + executed_fee;
     total_amount == *amount
+}
+
+fn is_buy_order_filled(amount: &BigDecimal, executed_amount: &BigDecimal) -> bool {
+    !executed_amount.is_zero() && *amount == *executed_amount
 }
 
 #[cfg(test)]
