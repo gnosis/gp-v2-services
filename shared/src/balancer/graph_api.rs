@@ -9,13 +9,9 @@
 //!   from the node
 
 use super::pool_storage::RegisteredWeightedPool;
-use crate::subgraph::SubgraphClient;
+use crate::{event_handling::MAX_REORG_BLOCK_COUNT, subgraph::SubgraphClient};
 use anyhow::{bail, Result};
 use serde_json::json;
-
-/// The threshold of number of blocks after which its considered safe that there
-/// will not be futher re-orgs
-const REORG_THRESHOLD: u64 = 10;
 
 /// The page size when querying pools.
 #[cfg(not(test))]
@@ -42,8 +38,6 @@ impl BalancerSubgraphClient {
 
     /// Retrieves the list of registered pools from the subgraph.
     pub async fn get_weighted_pools(&self) -> Result<(u64, Vec<RegisteredWeightedPool>)> {
-        use pools_query::*;
-
         let block_number = self.get_safe_block().await?;
         let mut results = Vec::<RegisteredWeightedPool>::new();
         while {
@@ -57,8 +51,8 @@ impl BalancerSubgraphClient {
 
             let page = self
                 .0
-                .query::<Data>(
-                    QUERY,
+                .query::<pools_query::Data>(
+                    pools_query::QUERY,
                     Some(json_map! {
                         "block" => block_number,
                         "pageSize" => QUERY_PAGE_SIZE,
@@ -83,26 +77,24 @@ impl BalancerSubgraphClient {
     /// Retrieves a recent block number for which it is safe to assume no
     /// reorgs will happen.
     async fn get_safe_block(&self) -> Result<u64> {
-        use block_number_query::*;
-
         // Ideally we would want to use block hash here so that we can check
         // that there indeed is no reorg. However, it does not seem possible to
         // retrieve historic block hashes just from the subgraph (it always
         // returns `null`).
         Ok(self
             .0
-            .query::<Data>(QUERY, None)
+            .query::<block_number_query::Data>(block_number_query::QUERY, None)
             .await?
             .meta
             .block
             .number
-            .saturating_sub(REORG_THRESHOLD))
+            .saturating_sub(MAX_REORG_BLOCK_COUNT))
     }
 }
 
 mod pools_query {
     use crate::balancer::{pool_storage::RegisteredWeightedPool, swap::fixed_point::Bfp};
-    use anyhow::{anyhow, ensure, Result};
+    use anyhow::{anyhow, Result};
     use ethcontract::{H160, H256};
     use serde::Deserialize;
 
@@ -123,12 +115,6 @@ mod pools_query {
                     decimals
                     weight
                 }
-                historicalValues(
-                    first: 1
-                    orderBy: block
-                ) {
-                    block
-                }
             }
         }
     "#;
@@ -144,7 +130,6 @@ mod pools_query {
         pub id: H256,
         pub address: H160,
         pub tokens: Vec<Token>,
-        pub historical_values: Vec<HistoricalValue>,
     }
 
     #[derive(Debug, Deserialize, PartialEq)]
@@ -155,27 +140,13 @@ mod pools_query {
         pub weight: Bfp,
     }
 
-    #[derive(Debug, Deserialize, PartialEq)]
-    pub struct HistoricalValue {
-        #[serde(with = "serde_with::rust::display_fromstr")]
-        pub block: u64,
-    }
-
     impl Pool {
         pub fn into_registered(self, block_fetched: u64) -> Result<RegisteredWeightedPool> {
             // The Balancer subgraph does not contain information for the block
-            // in which a pool was created. Instead, we assume it is the block
-            // that the data was fetched or the oldest historical liquidity
-            // values, depending on whether the latter is available.
-            let block_created_guesstimate = self
-                .historical_values
-                .get(0)
-                .map(|value| value.block)
-                .unwrap_or(block_fetched);
-            ensure!(
-                block_created_guesstimate <= block_fetched,
-                "historical data more recent than fetched block",
-            );
+            // in which a pool was created. Instead, we just use the block that
+            // the data was fetched for, as the created block is guaranteed to
+            // be older than that.
+            let block_created_upper_bound = block_fetched;
 
             let token_count = self.tokens.len();
             self.tokens.iter().try_fold(
@@ -185,7 +156,7 @@ mod pools_query {
                     tokens: Vec::with_capacity(token_count),
                     normalized_weights: Vec::with_capacity(token_count),
                     scaling_exponents: Vec::with_capacity(token_count),
-                    block_created: block_created_guesstimate,
+                    block_created: block_created_upper_bound,
                 },
                 |mut registered_pool, token| {
                     registered_pool.tokens.push(token.address);
@@ -245,7 +216,6 @@ mod tests {
                 "pools": [
                     {
                         "address": "0x2222222222222222222222222222222222222222",
-                        "historicalValues": [{ "block": "42" }],
                         "id": "0x1111111111111111111111111111111111111111111111111111111111111111",
                         "tokens": [
                             {
@@ -279,7 +249,6 @@ mod tests {
                             weight: Bfp::from_wei(500_000_000_000_000_000u128.into()),
                         },
                     ],
-                    historical_values: vec![HistoricalValue { block: 42 }],
                 }],
             }
         );
@@ -325,11 +294,10 @@ mod tests {
                     weight: "4.2".parse().unwrap(),
                 },
             ],
-            historical_values: vec![HistoricalValue { block: 1 }],
         };
 
         assert_eq!(
-            pool.into_registered(2).unwrap(),
+            pool.into_registered(42).unwrap(),
             RegisteredWeightedPool {
                 pool_id: H256([2; 32]),
                 pool_address: H160([1; 20]),
@@ -339,46 +307,9 @@ mod tests {
                     1_337_000_000_000_000_000u128.into(),
                     4_200_000_000_000_000_000u128.into(),
                 ],
-                block_created: 1,
+                block_created: 42,
             }
         );
-    }
-
-    #[test]
-    fn pool_conversion_with_missing_historical_data() {
-        use pools_query::*;
-
-        let pool = Pool {
-            id: H256([2; 32]),
-            address: H160([1; 20]),
-            tokens: vec![],
-            historical_values: vec![],
-        };
-
-        assert_eq!(
-            pool.into_registered(2).unwrap(),
-            RegisteredWeightedPool {
-                pool_id: H256([2; 32]),
-                pool_address: H160([1; 20]),
-                tokens: vec![],
-                scaling_exponents: vec![],
-                normalized_weights: vec![],
-                block_created: 2,
-            }
-        );
-    }
-
-    #[test]
-    fn pool_conversion_inconsistent_block_data() {
-        use pools_query::*;
-
-        let pool = Pool {
-            id: H256([2; 32]),
-            address: H160([1; 20]),
-            tokens: vec![],
-            historical_values: vec![HistoricalValue { block: 3 }],
-        };
-        assert!(pool.into_registered(2).is_err());
     }
 
     #[test]
@@ -393,7 +324,6 @@ mod tests {
                 decimals: 19,
                 weight: "1.337".parse().unwrap(),
             }],
-            historical_values: vec![],
         };
         assert!(pool.into_registered(2).is_err());
     }
