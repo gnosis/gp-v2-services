@@ -6,10 +6,11 @@ use anyhow::Result;
 use model::TokenPair;
 use std::collections::HashSet;
 
-use crate::balancer::pool_cache::{BalancerPoolReserveCache, PoolCacheMetrics, PoolReserveFetcher};
+use crate::balancer::pool_cache::{BalancerPoolReserveCache, PoolReserveFetcher};
 use crate::balancer::{event_handler::BalancerPoolRegistry, pool_storage::WeightedPool};
 use crate::current_block::CurrentBlockStream;
 use crate::maintenance::Maintaining;
+use crate::pool_cache::PoolCacheMetrics;
 use crate::recent_block_cache::{Block, CacheConfig, RecentBlockCache};
 use crate::token_info::TokenInfoFetching;
 use crate::Web3;

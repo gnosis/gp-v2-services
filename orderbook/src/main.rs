@@ -16,6 +16,7 @@ use orderbook::{
 use primitive_types::H160;
 use prometheus::Registry;
 use shared::balancer::event_handler::BalancerPoolRegistry;
+use shared::balancer::pool_fetching::BalancerPoolFetcher;
 use shared::token_info::{CachedTokenInfoFetcher, TokenInfoFetcher};
 use shared::{
     amm_pair_provider::AmmPairProvider,
@@ -163,12 +164,6 @@ async fn main() {
 
     let event_updater =
         EventUpdater::new(settlement_contract.clone(), database.clone(), sync_start);
-    let token_info_fetcher = Arc::new(CachedTokenInfoFetcher::new(Box::new(TokenInfoFetcher {
-        web3: web3.clone(),
-    })));
-    let balancer_event_handler = BalancerPoolRegistry::new(web3.clone(), token_info_fetcher)
-        .await
-        .unwrap();
     let balance_fetcher =
         Web3BalanceFetcher::new(web3.clone(), gp_allowance, settlement_contract.address());
 
@@ -222,6 +217,30 @@ async fn main() {
         current_block_stream(web3.clone(), args.shared.block_stream_poll_interval_seconds)
             .await
             .unwrap();
+    let cache_config = CacheConfig {
+        number_of_blocks_to_cache: args.shared.pool_cache_blocks,
+        number_of_entries_to_auto_update: args.pool_cache_lru_size,
+        maximum_recent_block_age: args.shared.pool_cache_maximum_recent_block_age,
+        max_retries: args.shared.pool_cache_maximum_retries,
+        delay_between_retries: args.shared.pool_cache_delay_between_retries_seconds,
+    };
+
+    let token_info_fetcher = Arc::new(CachedTokenInfoFetcher::new(Box::new(TokenInfoFetcher {
+        web3: web3.clone(),
+    })));
+    let balancer_event_handler =
+        BalancerPoolRegistry::new(web3.clone(), token_info_fetcher.clone())
+            .await
+            .unwrap();
+    let balancer_pool_fetcher = BalancerPoolFetcher::new(
+        web3.clone(),
+        token_info_fetcher,
+        cache_config,
+        current_block_stream.clone(),
+        metrics.clone(),
+    )
+    .await
+    .unwrap();
 
     let pool_aggregator = PoolAggregator {
         pool_fetchers: pair_providers
@@ -236,13 +255,7 @@ async fn main() {
     };
     let pool_fetcher = Arc::new(
         PoolCache::new(
-            CacheConfig {
-                number_of_blocks_to_cache: args.shared.pool_cache_blocks,
-                number_of_entries_to_auto_update: args.pool_cache_lru_size,
-                maximum_recent_block_age: args.shared.pool_cache_maximum_recent_block_age,
-                max_retries: args.shared.pool_cache_maximum_retries,
-                delay_between_retries: args.shared.pool_cache_delay_between_retries_seconds,
-            },
+            cache_config,
             Box::new(pool_aggregator),
             current_block_stream.clone(),
             metrics.clone(),
@@ -282,6 +295,7 @@ async fn main() {
             Arc::new(event_updater),
             Arc::new(balancer_event_handler),
             pool_fetcher,
+            Arc::new(balancer_pool_fetcher),
         ],
     };
     check_database_connection(orderbook.as_ref()).await;
