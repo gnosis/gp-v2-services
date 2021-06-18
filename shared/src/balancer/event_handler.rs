@@ -38,7 +38,7 @@ use tokio::sync::Mutex;
 
 /// The Pool Registry maintains an event handler for each of the Balancer Pool Factory contracts
 /// and maintains a `PoolStorage` for each.
-/// Pools are read from this registry, via the public method `get_pools_containing_token_pairs`
+/// Pools are read from this registry, via the public method `get_pool_ids_containing_token_pairs`
 /// which takes a collection of `TokenPair`, gets the relevant pools from each `PoolStorage`
 /// and returns a merged de-duplicated version of the results.
 pub struct BalancerPoolRegistry {
@@ -85,7 +85,7 @@ impl BalancerPoolRegistry {
     /// Retrieves `RegisteredWeightedPool`s from each Pool Store in the Registry and
     /// returns the merged result.
     /// Primarily intended to be used by `BalancerPoolFetcher`.
-    pub async fn get_pools_containing_token_pairs(
+    pub async fn get_pool_ids_containing_token_pairs(
         &self,
         token_pairs: HashSet<TokenPair>,
     ) -> HashSet<H256> {
@@ -94,13 +94,13 @@ impl BalancerPoolRegistry {
             .lock()
             .await
             .store
-            .pools_containing_token_pairs(token_pairs.clone());
+            .ids_for_pools_containing_token_pairs(token_pairs.clone());
         let pool_set_2 = self
             .two_token_pool_updater
             .lock()
             .await
             .store
-            .pools_containing_token_pairs(token_pairs);
+            .ids_for_pools_containing_token_pairs(token_pairs);
         pool_set_1.union(&pool_set_2).copied().collect()
     }
 

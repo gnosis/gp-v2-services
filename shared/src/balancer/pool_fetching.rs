@@ -58,7 +58,7 @@ impl WeightedPoolFetching for BalancerPoolFetcher {
     ) -> Result<Vec<WeightedPool>> {
         let pool_ids = self
             .pool_registry
-            .get_pools_containing_token_pairs(token_pairs)
+            .get_pool_ids_containing_token_pairs(token_pairs)
             .await;
         self.pool_reserve_cache.fetch(pool_ids, at_block).await
     }
