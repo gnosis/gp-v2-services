@@ -176,6 +176,7 @@ impl PoolStorage {
     }
 
     pub async fn insert_events(&mut self, events: Vec<(EventIndex, PoolCreated)>) -> Result<()> {
+        tracing::info!("inserting {} events", events.len());
         for (index, creation) in events {
             let weighted_pool = RegisteredWeightedPool::from_event(
                 index.block_number,
@@ -200,17 +201,13 @@ impl PoolStorage {
         delete_from_block_number: u64,
         events: Vec<(EventIndex, PoolCreated)>,
     ) -> Result<()> {
-        tracing::debug!(
-            "replacing {} events from block number {}",
-            events.len(),
-            delete_from_block_number,
-        );
         self.delete_pools(delete_from_block_number);
         self.insert_events(events).await?;
         Ok(())
     }
 
     fn delete_pools(&mut self, delete_from_block_number: u64) {
+        tracing::info!("deleting pools from block number {}", delete_from_block_number);
         self.pools
             .retain(|_, pool| pool.block_created < delete_from_block_number);
         // Note that this could result in an empty set for some tokens.
