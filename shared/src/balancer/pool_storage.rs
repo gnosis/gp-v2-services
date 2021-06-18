@@ -36,6 +36,7 @@ use ethcontract::{H160, H256, U256};
 use model::TokenPair;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+use itertools::Itertools;
 
 #[derive(Clone, Serialize, Debug)]
 pub struct PoolTokenState {
@@ -174,6 +175,24 @@ impl PoolStorage {
             pools: Default::default(),
             data_fetcher,
         }
+    }
+
+    pub async fn new_with_data(data_fetcher: Box<dyn PoolInfoFetching>) -> (Self, u64) {
+        let client = crate::balancer::graph_api::BalancerSubgraphClient::for_chain(1).unwrap();
+        let (block_number, registered_pools) = client.get_weighted_pools().await.unwrap();
+        let mut pools_by_token:HashMap<_, HashSet<H256>> = HashMap::new();
+        let mut pools = HashMap::new();
+        for pool in registered_pools {
+            for token in &pool.tokens {
+                pools_by_token.entry(*token).or_default().insert(pool.pool_id);
+            }
+            pools.insert(pool.pool_id, pool);
+        }
+        (PoolStorage {
+            pools_by_token,
+            pools,
+            data_fetcher,
+        }, block_number)
     }
 
     pub async fn insert_events(&mut self, events: Vec<(EventIndex, PoolCreated)>) -> Result<()> {

@@ -58,14 +58,15 @@ impl BalancerPoolRegistry {
             get_deployment_block(weighted_pool_factory.deployment_information(), &web3).await;
         let deployment_block_two_token_pool =
             get_deployment_block(two_token_pool_factory.deployment_information(), &web3).await;
+        let weighted_pool_registry = PoolStorage::new_with_data(Box::new(PoolInfoFetcher {
+            web3: web3.clone(),
+            token_info_fetcher: token_info_fetcher.clone(),
+        })).await;
         let weighted_pool_updater = Mutex::new(EventHandler::new(
             web3.clone(),
             BalancerV2WeightedPoolFactoryContract(weighted_pool_factory),
-            PoolStorage::new(Box::new(PoolInfoFetcher {
-                web3: web3.clone(),
-                token_info_fetcher: token_info_fetcher.clone(),
-            })),
-            deployment_block_weighted_pool,
+            weighted_pool_registry.0,
+            Some(weighted_pool_registry.1),
         ));
         let two_token_pool_updater = Mutex::new(EventHandler::new(
             web3.clone(),
@@ -74,7 +75,7 @@ impl BalancerPoolRegistry {
                 web3,
                 token_info_fetcher,
             })),
-            deployment_block_two_token_pool,
+            Some(weighted_pool_registry.1),
         ));
         Ok(Self {
             weighted_pool_updater,
