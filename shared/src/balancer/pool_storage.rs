@@ -259,6 +259,7 @@ mod tests {
                 pool_address: pool_addresses[i],
             })
             .collect();
+
         (pool_ids, pool_addresses, tokens, weights, creation_events)
     }
 
@@ -447,7 +448,6 @@ mod tests {
     fn ids_for_pools_containing_token_pairs_() {
         let n = 3;
         let (pool_ids, pool_addresses, tokens, _, _) = pool_init_data(0, n);
-
         let token_pairs: Vec<TokenPair> = (0..n)
             .map(|i| TokenPair::new(tokens[i], tokens[(i + 1) % n]).unwrap())
             .collect();
