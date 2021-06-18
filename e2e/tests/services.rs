@@ -5,8 +5,12 @@ use ethcontract::{
 };
 use model::DomainSeparator;
 use orderbook::{
-    account_balances::Web3BalanceFetcher, database::Database, event_updater::EventUpdater,
-    fee::EthAwareMinFeeCalculator, metrics::Metrics, orderbook::Orderbook,
+    account_balances::Web3BalanceFetcher,
+    database::{Database, Postgres},
+    event_updater::EventUpdater,
+    fee::EthAwareMinFeeCalculator,
+    metrics::Metrics,
+    orderbook::Orderbook,
 };
 use prometheus::Registry;
 use shared::{
@@ -134,7 +138,7 @@ impl OrderbookServices {
             .await
             .expect("Could not get chainId")
             .as_u64();
-        let db = Database::new("postgresql://").unwrap();
+        let db = Arc::new(Postgres::new("postgresql://").unwrap());
         db.clear().await.unwrap();
         let event_updater = Arc::new(EventUpdater::new(gpv2.settlement.clone(), db.clone(), None));
         let pair_provider = Arc::new(UniswapPairProvider {
@@ -190,7 +194,7 @@ impl OrderbookServices {
             Box::new(web3.clone()),
         ));
         let maintenance = ServiceMaintenance {
-            maintainers: vec![orderbook.clone(), Arc::new(db.clone()), event_updater],
+            maintainers: vec![orderbook.clone(), db.clone(), event_updater],
         };
         orderbook::serve_task(
             db.clone(),

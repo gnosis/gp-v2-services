@@ -12,7 +12,7 @@ use primitive_types::H160;
 use std::{borrow::Cow, convert::TryInto};
 
 /// Any default value means that this field is unfiltered.
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 pub struct OrderFilter {
     pub min_valid_to: u32,
     pub owner: Option<H160>,
@@ -73,8 +73,8 @@ impl DbSigningScheme {
     }
 }
 
-impl Database {
-    pub async fn insert_order(&self, order: &Order) -> Result<(), InsertionError> {
+impl Postgres {
+    pub async fn insert_order_(&self, order: &Order) -> Result<(), InsertionError> {
         const QUERY: &str = "\
             INSERT INTO orders (
                 uid, owner, creation_timestamp, sell_token, buy_token, receiver, sell_amount, buy_amount, \
@@ -113,7 +113,7 @@ impl Database {
             })
     }
 
-    pub async fn cancel_order(&self, order_uid: &OrderUid, now: DateTime<Utc>) -> Result<()> {
+    pub async fn cancel_order_(&self, order_uid: &OrderUid, now: DateTime<Utc>) -> Result<()> {
         // We do not overwrite previously cancelled orders,
         // but this query does allow the user to soft cancel
         // an order that has already been invalidated on-chain.
@@ -131,7 +131,10 @@ impl Database {
             .map(|_| ())
     }
 
-    pub fn orders<'a>(&'a self, filter: &'a OrderFilter) -> impl Stream<Item = Result<Order>> + 'a {
+    pub fn orders_<'a>(
+        &'a self,
+        filter: &'a OrderFilter,
+    ) -> impl Stream<Item = Result<Order>> + 'a {
         // The `or`s in the `where` clause are there so that each filter is ignored when not set.
         // We use a subquery instead of a `having` clause in the inner query because we would not be
         // able to use the `sum_*` columns there.
@@ -300,7 +303,7 @@ fn is_buy_order_filled(amount: &BigDecimal, executed_amount: &BigDecimal) -> boo
 
 #[cfg(test)]
 mod tests {
-
+    use super::super::Database;
     use super::*;
     use chrono::{Duration, NaiveDateTime};
     use futures::StreamExt;
@@ -464,7 +467,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_insert_same_order_twice_fails() {
-        let db = Database::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://").unwrap();
         db.clear().await.unwrap();
         let order = Order::default();
         db.insert_order(&order).await.unwrap();
@@ -477,7 +480,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_order_roundtrip() {
-        let db = Database::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://").unwrap();
         for signing_scheme in &[SigningScheme::Eip712, SigningScheme::EthSign] {
             db.clear().await.unwrap();
             let filter = OrderFilter::default();
@@ -524,7 +527,7 @@ mod tests {
             cancellation_timestamp: DateTime<Utc>,
         }
 
-        let db = Database::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://").unwrap();
         db.clear().await.unwrap();
         let filter = OrderFilter::default();
         assert!(db.orders(&filter).boxed().next().await.is_none());
@@ -577,7 +580,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_filter_orders_by_address() {
-        let db = Database::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://").unwrap();
         db.clear().await.unwrap();
 
         let orders = vec![
@@ -628,7 +631,7 @@ mod tests {
             db.insert_order(order).await.unwrap();
         }
 
-        async fn assert_orders(db: &Database, filter: &OrderFilter, expected: &[Order]) {
+        async fn assert_orders(db: &Postgres, filter: &OrderFilter, expected: &[Order]) {
             let filtered = db
                 .orders(&filter)
                 .try_collect::<HashSet<Order>>()
@@ -705,7 +708,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_filter_orders_by_fully_executed() {
-        let db = Database::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://").unwrap();
         db.clear().await.unwrap();
 
         let order = Order {
@@ -813,7 +816,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_summed_executed_amount_does_not_overflow() {
-        let db = Database::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://").unwrap();
         db.clear().await.unwrap();
 
         let order = Order {
@@ -857,7 +860,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_filter_orders_by_invalidated() {
-        let db = Database::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://").unwrap();
         db.clear().await.unwrap();
         let uid = OrderUid([0u8; 56]);
         let order = Order {

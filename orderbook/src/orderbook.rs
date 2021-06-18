@@ -51,7 +51,7 @@ pub enum OrderCancellationResult {
 
 pub struct Orderbook {
     domain_separator: DomainSeparator,
-    database: Database,
+    database: Arc<dyn Database>,
     balance_fetcher: Box<dyn BalanceFetching>,
     fee_validator: Arc<EthAwareMinFeeCalculator>,
     min_order_validity_period: Duration,
@@ -62,7 +62,7 @@ pub struct Orderbook {
 impl Orderbook {
     pub fn new(
         domain_separator: DomainSeparator,
-        database: Database,
+        database: Arc<dyn Database>,
         balance_fetcher: Box<dyn BalanceFetching>,
         fee_validator: Arc<EthAwareMinFeeCalculator>,
         min_order_validity_period: Duration,

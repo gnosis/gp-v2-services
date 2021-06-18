@@ -7,6 +7,7 @@ use model::order::OrderUid;
 use model::trade::Trade;
 use serde::Deserialize;
 use std::convert::Infallible;
+use std::sync::Arc;
 use warp::reply::{Json, WithStatus};
 use warp::{hyper::StatusCode, Filter, Rejection, Reply};
 
@@ -56,7 +57,9 @@ fn get_trades_response(result: Result<Vec<Trade>>) -> WithStatus<Json> {
     }
 }
 
-pub fn get_trades(db: Database) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
+pub fn get_trades(
+    db: Arc<dyn Database>,
+) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
     get_trades_request().and_then(move |request_result| {
         let database = db.clone();
         async move {

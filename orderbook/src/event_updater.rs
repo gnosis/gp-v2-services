@@ -10,19 +10,22 @@ use shared::{
     impl_event_retrieving,
     maintenance::Maintaining,
 };
-use std::ops::RangeInclusive;
+use std::{ops::RangeInclusive, sync::Arc};
 use tokio::sync::Mutex;
 
-pub struct EventUpdater(Mutex<EventHandler<DynWeb3, GPv2SettlementContract, Database>>);
+pub struct DatabaseEventStoring(Arc<dyn Database>);
+
+pub struct EventUpdater(Mutex<EventHandler<DynWeb3, GPv2SettlementContract, DatabaseEventStoring>>);
 
 #[async_trait::async_trait]
-impl EventStoring<ContractEvent> for Database {
+impl EventStoring<ContractEvent> for DatabaseEventStoring {
     async fn replace_events(
         &mut self,
         events: Vec<Event<ContractEvent>>,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<()> {
         let db_events = self
+            .0
             .contract_to_db_events(events)
             .context("replace - failed to convert events")?;
         tracing::debug!(
@@ -30,7 +33,7 @@ impl EventStoring<ContractEvent> for Database {
             db_events.len(),
             range.start().to_u64()
         );
-        Database::replace_events(self, range.start().to_u64(), db_events)
+        Database::replace_events(self.0.as_ref(), range.start().to_u64(), db_events)
             .await
             .context("failed to replace trades")?;
         Ok(())
@@ -38,17 +41,19 @@ impl EventStoring<ContractEvent> for Database {
 
     async fn append_events(&mut self, events: Vec<Event<ContractEvent>>) -> Result<()> {
         let db_events = self
+            .0
             .contract_to_db_events(events)
             .context("append - failed to convert events")?;
         tracing::debug!("inserting {} new events", db_events.len());
-        self.insert_events(db_events)
+        self.0
+            .insert_events(db_events)
             .await
             .context("failed to insert trades")?;
         Ok(())
     }
 
     async fn last_event_block(&self) -> Result<u64> {
-        self.block_number_of_most_recent_event().await
+        self.0.block_number_of_most_recent_event().await
     }
 }
 
@@ -57,11 +62,15 @@ impl_event_retrieving! {
 }
 
 impl EventUpdater {
-    pub fn new(contract: GPv2Settlement, db: Database, start_sync_at_block: Option<u64>) -> Self {
+    pub fn new(
+        contract: GPv2Settlement,
+        db: Arc<dyn Database>,
+        start_sync_at_block: Option<u64>,
+    ) -> Self {
         Self(Mutex::new(EventHandler::new(
             contract.raw_instance().web3(),
             GPv2SettlementContract(contract),
-            db,
+            DatabaseEventStoring(db),
             start_sync_at_block,
         )))
     }
