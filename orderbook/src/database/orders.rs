@@ -337,11 +337,7 @@ mod tests {
             signing_scheme: DbSigningScheme::Eip712,
         };
 
-        assert_eq!(
-            order_row.calculate_status(),
-            OrderStatus::Open,
-            "Open - sell (filled - 0%)"
-        );
+        assert_eq!(order_row.calculate_status(), OrderStatus::Open);
 
         // Open - sell (almost filled - 99.99%)
         let order_row = OrdersQueryRow {
@@ -351,11 +347,7 @@ mod tests {
             ..order_row
         };
 
-        assert_eq!(
-            order_row.calculate_status(),
-            OrderStatus::Open,
-            "Open - sell (almost filled - 99.99%)"
-        );
+        assert_eq!(order_row.calculate_status(), OrderStatus::Open);
 
         // Filled - sell (filled - 100%)
         let order_row = OrdersQueryRow {
@@ -366,11 +358,7 @@ mod tests {
             ..order_row
         };
 
-        assert_eq!(
-            order_row.calculate_status(),
-            OrderStatus::Fulfilled,
-            "Filled - sell (filled - 100%)"
-        );
+        assert_eq!(order_row.calculate_status(), OrderStatus::Fulfilled);
 
         // Open - buy (filled - 0%)
         let order_row = OrdersQueryRow {
@@ -380,11 +368,7 @@ mod tests {
             ..order_row
         };
 
-        assert_eq!(
-            order_row.calculate_status(),
-            OrderStatus::Open,
-            "Open - buy (filled - 0%)"
-        );
+        assert_eq!(order_row.calculate_status(), OrderStatus::Open);
 
         // Open - buy (almost filled - 99.99%)
         let order_row = OrdersQueryRow {
@@ -394,11 +378,7 @@ mod tests {
             ..order_row
         };
 
-        assert_eq!(
-            order_row.calculate_status(),
-            OrderStatus::Open,
-            "Open - buy (almost filled - 99.99%)"
-        );
+        assert_eq!(order_row.calculate_status(), OrderStatus::Open);
 
         // Filled - buy (filled - 100%)
         let order_row = OrdersQueryRow {
@@ -408,11 +388,7 @@ mod tests {
             ..order_row
         };
 
-        assert_eq!(
-            order_row.calculate_status(),
-            OrderStatus::Fulfilled,
-            "Filled - buy (filled - 100%)"
-        );
+        assert_eq!(order_row.calculate_status(), OrderStatus::Fulfilled);
 
         // Cancelled - no fills - sell
         let order_row = OrdersQueryRow {
@@ -422,11 +398,7 @@ mod tests {
             ..order_row
         };
 
-        assert_eq!(
-            order_row.calculate_status(),
-            OrderStatus::Cancelled,
-            "Cancelled - no fills - sell"
-        );
+        assert_eq!(order_row.calculate_status(), OrderStatus::Cancelled);
 
         // Cancelled - partial fill - sell
         let order_row = OrdersQueryRow {
@@ -438,11 +410,7 @@ mod tests {
             ..order_row
         };
 
-        assert_eq!(
-            order_row.calculate_status(),
-            OrderStatus::Cancelled,
-            "Cancelled - partial fill - sell"
-        );
+        assert_eq!(order_row.calculate_status(), OrderStatus::Cancelled);
 
         // Cancelled - partial fill - buy
         let order_row = OrdersQueryRow {
@@ -453,11 +421,7 @@ mod tests {
             ..order_row
         };
 
-        assert_eq!(
-            order_row.calculate_status(),
-            OrderStatus::Cancelled,
-            "Cancelled - partial fill - buy"
-        );
+        assert_eq!(order_row.calculate_status(), OrderStatus::Cancelled);
 
         // Expired - no fills
         let valid_to_yesterday = Utc::now() - Duration::days(1);
@@ -470,11 +434,7 @@ mod tests {
             ..order_row
         };
 
-        assert_eq!(
-            order_row.calculate_status(),
-            OrderStatus::Expired,
-            "Expired - no fills"
-        );
+        assert_eq!(order_row.calculate_status(), OrderStatus::Expired);
 
         // Expired - partial fill - sell
         let order_row = OrdersQueryRow {
@@ -486,11 +446,7 @@ mod tests {
             ..order_row
         };
 
-        assert_eq!(
-            order_row.calculate_status(),
-            OrderStatus::Expired,
-            "Expired - partial fill - sell"
-        );
+        assert_eq!(order_row.calculate_status(), OrderStatus::Expired);
 
         // Expired - partial fill - buy
         let order_row = OrdersQueryRow {
@@ -502,11 +458,7 @@ mod tests {
             ..order_row
         };
 
-        assert_eq!(
-            order_row.calculate_status(),
-            OrderStatus::Expired,
-            "Expired - partial fill - buy"
-        );
+        assert_eq!(order_row.calculate_status(), OrderStatus::Expired);
     }
 
     #[tokio::test]
