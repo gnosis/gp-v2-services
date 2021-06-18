@@ -7,7 +7,7 @@ use crate::{
     Web3,
 };
 use anyhow::Result;
-use contracts::BalancerV2Vault;
+use contracts::{BalancerV2Vault, BalancerV2WeightedPool};
 use ethcontract::batch::CallBatch;
 use ethcontract::errors::MethodError;
 use ethcontract::{BlockId, Bytes, H160, H256, U256};
@@ -62,14 +62,23 @@ impl CacheFetching<H256, WeightedPool> for PoolReserveFetcher {
             .await
             .into_iter()
             .map(|registered_pool| {
+                let pool_contract =
+                    BalancerV2WeightedPool::at(&self.web3, registered_pool.pool_address);
+                let swap_fee = pool_contract
+                    .get_swap_fee_percentage()
+                    .block(block)
+                    .batch_call(&mut batch);
                 let reserves = self
                     .vault
                     .get_pool_tokens(Bytes(registered_pool.pool_id.0))
                     .block(block)
                     .batch_call(&mut batch);
+
                 async move {
+                    #[allow(clippy::eval_order_dependence)]
                     FetchedWeightedPool {
                         registered_pool,
+                        swap_fee_percentage: swap_fee.await,
                         reserves: reserves.await,
                     }
                 }
@@ -95,6 +104,7 @@ impl CacheMetrics for Arc<dyn PoolCacheMetrics> {
 /// An internal temporary struct used during pool fetching to handle errors.
 struct FetchedWeightedPool {
     registered_pool: RegisteredWeightedPool,
+    swap_fee_percentage: Result<U256, MethodError>,
     /// getPoolTokens returns (Tokens, Balances, LastBlockUpdated)
     reserves: Result<(Vec<H160>, Vec<U256>, U256), MethodError>,
 }
@@ -108,7 +118,16 @@ fn handle_results(results: Vec<FetchedWeightedPool>) -> Result<Vec<WeightedPool>
                 Some(reserves) => reserves.1,
                 None => return Ok(acc),
             };
-            acc.push(WeightedPool::new(fetched_pool.registered_pool, balances));
+            let swap_fee_percentage = match handle_contract_error(fetched_pool.swap_fee_percentage)?
+            {
+                Some(swap_fee) => swap_fee,
+                None => return Ok(acc),
+            };
+            acc.push(WeightedPool::new(
+                fetched_pool.registered_pool,
+                balances,
+                swap_fee_percentage,
+            ));
             Ok(acc)
         })
 }
@@ -122,7 +141,14 @@ mod tests {
     fn pool_fetcher_forwards_node_error() {
         let results = vec![FetchedWeightedPool {
             registered_pool: RegisteredWeightedPool::default(),
+            swap_fee_percentage: Ok(U256::zero()),
             reserves: Err(ethcontract_error::testing_node_error()),
+        }];
+        assert!(handle_results(results).is_err());
+        let results = vec![FetchedWeightedPool {
+            registered_pool: RegisteredWeightedPool::default(),
+            swap_fee_percentage: Err(ethcontract_error::testing_node_error()),
+            reserves: Ok((vec![], vec![], U256::zero())),
         }];
         assert!(handle_results(results).is_err());
     }
@@ -132,10 +158,17 @@ mod tests {
         let results = vec![
             FetchedWeightedPool {
                 registered_pool: RegisteredWeightedPool::default(),
+                swap_fee_percentage: Ok(U256::zero()),
                 reserves: Err(ethcontract_error::testing_contract_error()),
             },
             FetchedWeightedPool {
                 registered_pool: RegisteredWeightedPool::default(),
+                swap_fee_percentage: Err(ethcontract_error::testing_contract_error()),
+                reserves: Ok((vec![], vec![], U256::zero())),
+            },
+            FetchedWeightedPool {
+                registered_pool: RegisteredWeightedPool::default(),
+                swap_fee_percentage: Ok(U256::zero()),
                 reserves: Ok((vec![], vec![], U256::zero())),
             },
         ];

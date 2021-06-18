@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use anyhow::{Context, Result};
 use derivative::Derivative;
 use ethcontract::{H160, U256};
@@ -23,19 +21,22 @@ pub trait ParaswapApi {
     ) -> Result<TransactionBuilderResponse>;
 }
 
-struct DefaultParaswapApi {
+#[derive(Default)]
+pub struct DefaultParaswapApi {
     client: Client,
 }
 
 #[async_trait::async_trait]
 impl ParaswapApi for DefaultParaswapApi {
     async fn price(&self, query: PriceQuery) -> Result<PriceResponse> {
-        reqwest::get(query.into_url())
+        let text = reqwest::get(query.into_url())
             .await
             .context("PriceQuery failed")?
-            .json::<PriceResponse>()
-            .await
-            .context("PriceQuery result parsing failed")
+            .text()
+            .await?;
+
+        serde_json::from_str::<PriceResponse>(&text)
+            .context(format!("PriceQuery result parsing failed: {}", text))
     }
     async fn transaction(
         &self,
@@ -93,6 +94,8 @@ impl PriceQuery {
         url.query_pairs_mut()
             .append_pair("from", &format!("{:#x}", self.from))
             .append_pair("to", &format!("{:#x}", self.to))
+            .append_pair("fromDecimals", &self.from_decimals.to_string())
+            .append_pair("toDecimals", &self.to_decimals.to_string())
             .append_pair("amount", &self.amount.to_string())
             .append_pair("side", side)
             .append_pair("network", "1");
@@ -101,7 +104,7 @@ impl PriceQuery {
 }
 
 /// A Paraswap API price response.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct PriceResponse {
     /// Opaque type, which the API expects to get echoed back in the exact form when requesting settlement transaction data
     pub price_route_raw: Value,
@@ -118,8 +121,8 @@ impl<'de> Deserialize<'de> for PriceResponse {
     {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
-        struct Parsed {
-            price_route: PriceRoute,
+        struct ParsedRaw {
+            price_route: Value,
         }
 
         #[derive(Deserialize)]
@@ -137,20 +140,19 @@ impl<'de> Deserialize<'de> for PriceResponse {
             dest_amount: U256,
         }
 
-        let price_route_raw = Value::deserialize(deserializer)?;
-        let parsed =
-            serde_json::from_value::<Parsed>(price_route_raw.clone()).map_err(D::Error::custom)?;
+        let parsed = ParsedRaw::deserialize(deserializer)?;
+        let price_route = serde_json::from_value::<PriceRoute>(parsed.price_route.clone())
+            .map_err(D::Error::custom)?;
         let BestRoute {
             src_amount,
             dest_amount,
-        } = parsed
-            .price_route
+        } = price_route
             .best_route
             .first()
             .cloned()
             .ok_or_else(|| D::Error::custom("No best route"))?;
         Ok(PriceResponse {
-            price_route_raw,
+            price_route_raw: parsed.price_route,
             src_amount,
             dest_amount,
         })
@@ -231,7 +233,7 @@ mod tests {
     #[ignore]
     async fn test_api_e2e() {
         let from = shared::addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE");
-        let to = shared::addr!("6810e776880C02933D47DB1b9fc05908e5386b96");
+        let to = shared::addr!("1a5f9352af8af974bfc03399e3767df6370d82e4");
         let price_query = PriceQuery {
             from,
             to,
@@ -284,12 +286,12 @@ mod tests {
             from: shared::addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
             to: shared::addr!("6810e776880C02933D47DB1b9fc05908e5386b96"),
             from_decimals: 18,
-            to_decimals: 18,
+            to_decimals: 8,
             amount: 1_000_000_000_000_000_000u128.into(),
             side: Side::Sell,
         };
 
-        assert_eq!(&query.into_url().to_string(), "https://apiv4.paraswap.io/v2/prices?from=0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee&to=0x6810e776880c02933d47db1b9fc05908e5386b96&amount=1000000000000000000&side=SELL&network=1");
+        assert_eq!(&query.into_url().to_string(), "https://apiv4.paraswap.io/v2/prices?from=0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee&to=0x6810e776880c02933d47db1b9fc05908e5386b96&fromDecimals=18&toDecimals=8&amount=1000000000000000000&side=SELL&network=1");
     }
 
     #[test]

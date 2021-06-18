@@ -47,11 +47,16 @@ pub struct PoolTokenState {
 pub struct WeightedPool {
     pub pool_id: H256,
     pub pool_address: H160,
+    pub swap_fee_percentage: U256,
     pub reserves: HashMap<H160, PoolTokenState>,
 }
 
 impl WeightedPool {
-    pub fn new(pool_data: RegisteredWeightedPool, balances: Vec<U256>) -> Self {
+    pub fn new(
+        pool_data: RegisteredWeightedPool,
+        balances: Vec<U256>,
+        swap_fee_percentage: U256,
+    ) -> Self {
         let mut reserves = HashMap::new();
         // We expect the weight and token indices are aligned with balances returned from EVM query.
         // If necessary we would also pass the tokens along with the query result,
@@ -69,6 +74,7 @@ impl WeightedPool {
         WeightedPool {
             pool_id: pool_data.pool_id,
             pool_address: pool_data.pool_address,
+            swap_fee_percentage,
             reserves,
         }
     }
@@ -98,14 +104,14 @@ impl RegisteredWeightedPool {
     ) -> Result<RegisteredWeightedPool> {
         let pool_address = creation.pool_address;
         let pool_data = data_fetcher.get_pool_data(pool_address).await?;
-        return Ok(RegisteredWeightedPool {
+        Ok(RegisteredWeightedPool {
             pool_id: pool_data.pool_id,
             pool_address,
             tokens: pool_data.tokens,
             normalized_weights: pool_data.weights,
             scaling_exponents: pool_data.scaling_exponents,
             block_created,
-        });
+        })
     }
 }
 
@@ -199,12 +205,12 @@ impl PoolStorage {
             events.len(),
             delete_from_block_number,
         );
-        self.delete_pools(delete_from_block_number)?;
+        self.delete_pools(delete_from_block_number);
         self.insert_events(events).await?;
         Ok(())
     }
 
-    fn delete_pools(&mut self, delete_from_block_number: u64) -> Result<()> {
+    fn delete_pools(&mut self, delete_from_block_number: u64) {
         self.pools
             .retain(|_, pool| pool.block_created < delete_from_block_number);
         // Note that this could result in an empty set for some tokens.
@@ -215,7 +221,6 @@ impl PoolStorage {
                 .cloned()
                 .collect::<HashSet<H256>>();
         }
-        Ok(())
     }
 
     pub fn last_event_block(&self) -> u64 {
