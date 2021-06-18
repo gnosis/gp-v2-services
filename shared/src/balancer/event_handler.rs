@@ -120,6 +120,13 @@ impl BalancerPoolRegistry {
         pool_set_1.extend(pool_set_2);
         pool_set_1
     }
+
+    pub async fn get_all_pools(&self) -> Vec<RegisteredWeightedPool> {
+        let mut pool_set_1 = self.weighted_pool_updater.lock().await.store.all_pools();
+        let pool_set_2 = self.two_token_pool_updater.lock().await.store.all_pools();
+        pool_set_1.extend(pool_set_2);
+        pool_set_1
+    }
 }
 
 async fn get_deployment_block(
@@ -153,8 +160,15 @@ impl EventStoring<WeightedPoolFactoryEvent> for PoolStorage {
         &mut self,
         events: Vec<EthContractEvent<WeightedPoolFactoryEvent>>,
     ) -> Result<()> {
+        tracing::info!("inserting {} Weighted Pools from events", events.len());
         self.insert_events(convert_weighted_pool_created(events)?)
-            .await
+            .await?;
+        tracing::info!(
+            "now holding {} Weighted Pools upto block {}",
+            self.all_pools().len(),
+            self.last_event_block()
+        );
+        Ok(())
     }
 
     async fn last_event_block(&self) -> Result<u64> {
@@ -180,8 +194,18 @@ impl EventStoring<WeightedPool2TokensFactoryEvent> for PoolStorage {
         &mut self,
         events: Vec<EthContractEvent<WeightedPool2TokensFactoryEvent>>,
     ) -> Result<()> {
+        tracing::info!(
+            "Inserting {} Weighted 2-Token Pools from events",
+            events.len()
+        );
         self.insert_events(convert_two_token_pool_created(events)?)
-            .await
+            .await?;
+        tracing::info!(
+            "now holding {} 2-Token Weighted Pools upto block {}",
+            self.all_pools().len(),
+            self.last_event_block()
+        );
+        Ok(())
     }
 
     async fn last_event_block(&self) -> Result<u64> {
@@ -200,10 +224,22 @@ impl_event_retrieving! {
 #[async_trait::async_trait]
 impl Maintaining for BalancerPoolRegistry {
     async fn run_maintenance(&self) -> Result<()> {
-        futures::try_join!(
-            self.two_token_pool_updater.run_maintenance(),
-            self.weighted_pool_updater.run_maintenance(),
-        )?;
+        // Using try join here destroys all progress if one fails.
+        self.two_token_pool_updater.run_maintenance().await?;
+        tracing::info!("completed one round of 2-token pool sync");
+        self.weighted_pool_updater.run_maintenance().await?;
+        tracing::info!("completed one round of weighted pool sync");
+        let all_pools = self.get_all_pools().await;
+        let last_event = all_pools
+            .iter()
+            .map(|pool| pool.block_created)
+            .max()
+            .unwrap_or(0);
+        tracing::info!(
+            "all {} known balancer pools loaded! Last event block: {}",
+            all_pools.len(),
+            last_event
+        );
         Ok(())
     }
 }

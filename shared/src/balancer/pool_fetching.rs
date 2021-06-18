@@ -7,6 +7,7 @@ use model::TokenPair;
 use std::collections::HashSet;
 
 use crate::balancer::pool_cache::{BalancerPoolReserveCache, PoolReserveFetcher};
+use crate::balancer::pool_storage::RegisteredWeightedPool;
 use crate::balancer::{event_handler::BalancerPoolRegistry, pool_storage::WeightedPool};
 use crate::current_block::CurrentBlockStream;
 use crate::maintenance::Maintaining;
@@ -47,6 +48,21 @@ impl BalancerPoolFetcher {
             pool_registry,
             pool_reserve_cache,
         })
+    }
+
+    pub async fn fetch_all_static(&self) -> Vec<RegisteredWeightedPool> {
+        self.pool_registry.get_all_pools().await
+    }
+
+    pub async fn fetch_all(&self) -> Result<Vec<WeightedPool>> {
+        let pool_ids = self
+            .pool_registry
+            .get_all_pools()
+            .await
+            .iter()
+            .map(|pool| pool.pool_id)
+            .collect::<HashSet<_>>();
+        self.pool_reserve_cache.fetch(pool_ids, Block::Recent).await
     }
 }
 

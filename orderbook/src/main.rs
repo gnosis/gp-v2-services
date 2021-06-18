@@ -15,7 +15,6 @@ use orderbook::{
 };
 use primitive_types::H160;
 use prometheus::Registry;
-use shared::balancer::event_handler::BalancerPoolRegistry;
 use shared::balancer::pool_fetching::BalancerPoolFetcher;
 use shared::token_info::{CachedTokenInfoFetcher, TokenInfoFetcher};
 use shared::{
@@ -225,22 +224,19 @@ async fn main() {
         delay_between_retries: args.shared.pool_cache_delay_between_retries_seconds,
     };
 
-    let token_info_fetcher = Arc::new(CachedTokenInfoFetcher::new(Box::new(TokenInfoFetcher {
-        web3: web3.clone(),
-    })));
-    let balancer_event_handler =
-        BalancerPoolRegistry::new(web3.clone(), token_info_fetcher.clone())
-            .await
-            .unwrap();
-    let balancer_pool_fetcher = BalancerPoolFetcher::new(
-        web3.clone(),
-        token_info_fetcher,
-        cache_config,
-        current_block_stream.clone(),
-        metrics.clone(),
-    )
-    .await
-    .unwrap();
+    let balancer_pool_fetcher = Arc::new(
+        BalancerPoolFetcher::new(
+            web3.clone(),
+            Arc::new(CachedTokenInfoFetcher::new(Box::new(TokenInfoFetcher {
+                web3: web3.clone(),
+            }))),
+            cache_config,
+            current_block_stream.clone(),
+            metrics.clone(),
+        )
+        .await
+        .unwrap(),
+    );
 
     let pool_aggregator = PoolAggregator {
         pool_fetchers: pair_providers
@@ -293,9 +289,8 @@ async fn main() {
             orderbook.clone(),
             Arc::new(database.clone()),
             Arc::new(event_updater),
-            Arc::new(balancer_event_handler),
             pool_fetcher,
-            Arc::new(balancer_pool_fetcher),
+            balancer_pool_fetcher.clone(),
         ],
     };
     check_database_connection(orderbook.as_ref()).await;
@@ -307,6 +302,7 @@ async fn main() {
         price_estimator,
         args.bind_address,
         registry,
+        balancer_pool_fetcher.clone(),
         metrics.clone(),
     );
     let maintenance_task =

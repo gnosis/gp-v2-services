@@ -22,6 +22,8 @@ use shared::{
 };
 use solver::orderbook::OrderBookApi;
 use std::{collections::HashSet, num::NonZeroU64, str::FromStr, sync::Arc, time::Duration};
+use shared::balancer::pool_fetching::BalancerPoolFetcher;
+use shared::token_info::{CachedTokenInfoFetcher, TokenInfoFetcher};
 
 pub const API_HOST: &str = "http://127.0.0.1:8080";
 
@@ -192,6 +194,20 @@ impl OrderbookServices {
         let maintenance = ServiceMaintenance {
             maintainers: vec![orderbook.clone(), Arc::new(db.clone()), event_updater],
         };
+        let balancer_pool_fetcher = Arc::new(
+            BalancerPoolFetcher::new(
+                web3.clone(),
+                Arc::new(CachedTokenInfoFetcher::new(Box::new(TokenInfoFetcher {
+                    web3: web3.clone(),
+                }))),
+                cache_config,
+                current_block_stream.clone(),
+                metrics.clone(),
+            )
+                .await
+                .unwrap(),
+        );
+
         orderbook::serve_task(
             db.clone(),
             orderbook,
@@ -199,6 +215,7 @@ impl OrderbookServices {
             price_estimator.clone(),
             API_HOST[7..].parse().expect("Couldn't parse API address"),
             registry,
+            balancer_pool_fetcher,
             metrics,
         );
 

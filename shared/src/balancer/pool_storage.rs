@@ -34,16 +34,17 @@ use anyhow::Result;
 use derivative::Derivative;
 use ethcontract::{H160, H256, U256};
 use model::TokenPair;
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Debug)]
 pub struct PoolTokenState {
     pub balance: U256,
     pub weight: U256,
     pub scaling_exponent: u8,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Debug)]
 pub struct WeightedPool {
     pub pool_id: H256,
     pub pool_address: H160,
@@ -176,7 +177,7 @@ impl PoolStorage {
     }
 
     pub async fn insert_events(&mut self, events: Vec<(EventIndex, PoolCreated)>) -> Result<()> {
-        tracing::info!("inserting {} events", events.len());
+        let num_events = events.len();
         for (index, creation) in events {
             let weighted_pool = RegisteredWeightedPool::from_event(
                 index.block_number,
@@ -193,6 +194,11 @@ impl PoolStorage {
                     .insert(pool_id);
             }
         }
+        tracing::info!(
+            "inserted {} balancer pool creation events. Synced to block {}",
+            num_events,
+            self.last_event_block()
+        );
         Ok(())
     }
 
@@ -207,7 +213,10 @@ impl PoolStorage {
     }
 
     fn delete_pools(&mut self, delete_from_block_number: u64) {
-        tracing::info!("deleting pools from block number {}", delete_from_block_number);
+        tracing::info!(
+            "deleting balancer pools from block number {}",
+            delete_from_block_number
+        );
         self.pools
             .retain(|_, pool| pool.block_created < delete_from_block_number);
         // Note that this could result in an empty set for some tokens.
@@ -228,6 +237,10 @@ impl PoolStorage {
             .map(|(_, pool)| pool.block_created)
             .max()
             .unwrap_or(0)
+    }
+
+    pub fn all_pools(&self) -> Vec<RegisteredWeightedPool> {
+        self.pools.values().cloned().collect()
     }
 }
 

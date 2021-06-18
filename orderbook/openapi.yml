@@ -18,6 +18,20 @@ servers:
   - url: http://localhost:8080
     description: Local
 paths:
+  /api/v1/get_pools:
+    get:
+      summary: Get Balancer Pools.
+      description: |
+        Get em!
+      responses:
+        200:
+          description: existing pools
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WeightedPool"
   /api/v1/orders:
     post:
       summary: Create a new order.
@@ -473,6 +487,19 @@ components:
         - executedBuyAmount
         - executedFeeAmount
         - invalidated
+    WeightedPool:
+      description: |
+        Balancer Weighted Pool
+      type: object
+      properties:
+        pool_id:
+          description: Pool Id
+        pool_address:
+          $ref: "#/components/schemas/Address"
+        swap_fee_percentage:
+          $ref: "#/components/schemas/BigUint"
+        reserves:
+          description: Token Data
     Order:
       allOf:
         - $ref: "#/components/schemas/OrderCreation"

@@ -15,6 +15,7 @@ use fee::EthAwareMinFeeCalculator;
 use metrics::Metrics;
 use model::DomainSeparator;
 use prometheus::Registry;
+use shared::balancer::pool_fetching::BalancerPoolFetcher;
 use shared::{
     metrics::{serve_metrics, DEFAULT_METRICS_PORT},
     price_estimate::PriceEstimating,
@@ -22,6 +23,7 @@ use shared::{
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{task, task::JoinHandle};
 
+#[allow(clippy::too_many_arguments)]
 pub fn serve_task(
     database: Database,
     orderbook: Arc<Orderbook>,
@@ -29,6 +31,7 @@ pub fn serve_task(
     price_estimator: Arc<dyn PriceEstimating>,
     address: SocketAddr,
     registry: Registry,
+    balancer_pool_fetcher: Arc<BalancerPoolFetcher>,
     metrics: Arc<Metrics>,
 ) -> JoinHandle<()> {
     let filter = api::handle_all_routes(
@@ -36,6 +39,7 @@ pub fn serve_task(
         orderbook,
         fee_calculator,
         price_estimator,
+        balancer_pool_fetcher,
         metrics,
     );
     let mut metrics_address = address;

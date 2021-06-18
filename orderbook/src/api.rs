@@ -1,5 +1,6 @@
 mod cancel_order;
 mod create_order;
+mod get_balancer_pools;
 mod get_fee_info;
 mod get_markets;
 mod get_order_by_uid;
@@ -16,6 +17,7 @@ use model::h160_hexadecimal;
 use primitive_types::H160;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use shared::balancer::pool_fetching::BalancerPoolFetcher;
 use shared::price_estimate::PriceEstimating;
 use std::{convert::Infallible, str::FromStr, sync::Arc};
 use warp::{
@@ -29,6 +31,7 @@ pub fn handle_all_routes(
     orderbook: Arc<Orderbook>,
     fee_calculator: Arc<EthAwareMinFeeCalculator>,
     price_estimator: Arc<dyn PriceEstimating>,
+    balancer_pool_fetcher: Arc<BalancerPoolFetcher>,
     metrics: Arc<Metrics>,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
     let create_order = create_order::create_order(orderbook.clone());
@@ -36,6 +39,7 @@ pub fn handle_all_routes(
     let legacy_fee_info = get_fee_info::legacy_get_fee_info(fee_calculator.clone());
     let fee_info = get_fee_info::get_fee_info(fee_calculator);
     let get_order = get_order_by_uid::get_order_by_uid(orderbook.clone());
+    let get_pools = get_balancer_pools::get_pools(balancer_pool_fetcher);
     let get_solvable_orders = get_solvable_orders::get_solvable_orders(orderbook.clone());
     let get_trades = get_trades::get_trades(database);
     let cancel_order = cancel_order::cancel_order(orderbook);
@@ -47,6 +51,8 @@ pub fn handle_all_routes(
     let routes_with_labels = warp::path!("api" / "v1" / ..).and(
         (create_order.map(|reply| LabelledReply::new(reply, "create_order")))
             .or(get_orders.map(|reply| LabelledReply::new(reply, "get_orders")))
+            .unify()
+            .or(get_pools.map(|reply| LabelledReply::new(reply, "get_pools")))
             .unify()
             .or(fee_info.map(|reply| LabelledReply::new(reply, "fee_info")))
             .unify()
