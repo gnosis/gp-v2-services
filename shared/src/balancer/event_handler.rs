@@ -153,6 +153,10 @@ impl EventStoring<WeightedPoolFactoryEvent> for PoolStorage {
         &mut self,
         events: Vec<EthContractEvent<WeightedPoolFactoryEvent>>,
     ) -> Result<()> {
+        tracing::info!(
+            "inserting {} Balancer Weighted Pools from events",
+            events.len()
+        );
         self.insert_events(convert_weighted_pool_created(events)?)
             .await
     }
@@ -180,6 +184,10 @@ impl EventStoring<WeightedPool2TokensFactoryEvent> for PoolStorage {
         &mut self,
         events: Vec<EthContractEvent<WeightedPool2TokensFactoryEvent>>,
     ) -> Result<()> {
+        tracing::info!(
+            "Inserting {} Balancer Weighted 2-Token Pools from events",
+            events.len()
+        );
         self.insert_events(convert_two_token_pool_created(events)?)
             .await
     }

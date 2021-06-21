@@ -1,9 +1,10 @@
 use crate::balancer::event_handler::BalancerPoolRegistry;
 use crate::balancer::pool_storage::RegisteredWeightedPool;
+use crate::pool_cache::PoolCacheMetrics;
 use crate::pool_fetching::{handle_contract_error, MAX_BATCH_SIZE};
 use crate::{
     balancer::pool_storage::WeightedPool,
-    recent_block_cache::{Block, CacheFetching, CacheKey, CacheMetrics, RecentBlockCache},
+    recent_block_cache::{Block, CacheFetching, CacheKey, RecentBlockCache},
     Web3,
 };
 use anyhow::Result;
@@ -12,10 +13,6 @@ use ethcontract::batch::CallBatch;
 use ethcontract::errors::MethodError;
 use ethcontract::{BlockId, Bytes, H160, H256, U256};
 use std::{collections::HashSet, sync::Arc};
-
-pub trait PoolCacheMetrics: Send + Sync {
-    fn pools_fetched(&self, cache_hits: usize, cache_misses: usize);
-}
 
 pub struct PoolReserveFetcher {
     pool_registry: Arc<BalancerPoolRegistry>,
@@ -92,12 +89,6 @@ impl CacheFetching<H256, WeightedPool> for PoolReserveFetcher {
             results.push(future.await);
         }
         handle_results(results)
-    }
-}
-
-impl CacheMetrics for Arc<dyn PoolCacheMetrics> {
-    fn entries_fetched(&self, cache_hits: usize, cache_misses: usize) {
-        self.pools_fetched(cache_hits, cache_misses)
     }
 }
 
