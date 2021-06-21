@@ -41,8 +41,10 @@ pub fn handle_all_routes(
     let get_trades = get_trades::get_trades(database);
     let cancel_order = cancel_order::cancel_order(orderbook);
     let get_amount_estimate = get_markets::get_amount_estimate(price_estimator.clone());
-    let get_fee_and_quote =
-        get_fee_and_quote::get_fee_and_quote(fee_calculator, price_estimator.clone());
+    let get_fee_and_quote_sell =
+        get_fee_and_quote::get_fee_and_quote_sell(fee_calculator.clone(), price_estimator.clone());
+    let get_fee_and_quote_buy =
+        get_fee_and_quote::get_fee_and_quote_buy(fee_calculator, price_estimator.clone());
     let cors = warp::cors()
         .allow_any_origin()
         .allow_methods(vec!["GET", "POST", "DELETE", "OPTIONS", "PUT", "PATCH"])
@@ -65,7 +67,11 @@ pub fn handle_all_routes(
             .unify()
             .or(get_amount_estimate.map(|reply| LabelledReply::new(reply, "get_amount_estimate")))
             .unify()
-            .or(get_fee_and_quote.map(|reply| LabelledReply::new(reply, "get_fee_and_price")))
+            .or(get_fee_and_quote_sell
+                .map(|reply| LabelledReply::new(reply, "get_fee_and_quote_sell")))
+            .unify()
+            .or(get_fee_and_quote_buy
+                .map(|reply| LabelledReply::new(reply, "get_fee_and_quote_buy")))
             .unify(),
     );
     routes_with_labels
