@@ -193,21 +193,34 @@ impl HttpSolver {
         &self,
         amms: &HashMap<String, AmmOrder>,
         gas_price: f64,
-    ) -> HashMap<String, UniswapModel> {
+    ) -> HashMap<String, PoolModel> {
         let uniswap_cost = self.uniswap_cost(gas_price).await;
         amms.iter()
             .map(|(index, amm)| {
-                let uniswap = UniswapModel {
-                    token1: self.token_to_string(&amm.tokens.get().0),
-                    token2: self.token_to_string(&amm.tokens.get().1),
-                    balance1: amm.reserves.0,
-                    balance2: amm.reserves.1,
+                let mut reserves = HashMap::new();
+                reserves.insert(
+                    self.token_to_string(&amm.tokens.get().0),
+                    PoolTokenData {
+                        balance: amm.reserves.0,
+                        weight: "500000000000000000".to_string(),
+                    },
+                );
+                reserves.insert(
+                    self.token_to_string(&amm.tokens.get().1),
+                    PoolTokenData {
+                        balance: amm.reserves.1,
+                        weight: "500000000000000000".to_string(),
+                    },
+                );
+                let uniswap = PoolModel {
+                    pool_type: "UNISWAP_V2".to_string(),
                     fee: *amm.fee.numer() as f64 / *amm.fee.denom() as f64,
                     cost: CostModel {
                         amount: uniswap_cost,
                         token: self.token_to_string(&self.native_token),
                     },
                     mandatory: false,
+                    reserves,
                 };
                 (index.clone(), uniswap)
             })

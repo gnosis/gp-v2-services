@@ -7,7 +7,7 @@ use std::collections::HashMap;
 pub struct BatchAuctionModel {
     pub tokens: HashMap<String, TokenInfoModel>,
     pub orders: HashMap<String, OrderModel>,
-    pub uniswaps: HashMap<String, UniswapModel>,
+    pub uniswaps: HashMap<String, PoolModel>,
     pub metadata: Option<MetadataModel>,
 }
 
@@ -26,14 +26,16 @@ pub struct OrderModel {
 }
 
 #[derive(Debug, Serialize)]
-pub struct UniswapModel {
-    pub token1: String,
-    pub token2: String,
+pub struct PoolTokenData {
     #[serde(with = "serde_with::rust::display_fromstr")]
-    pub balance1: u128,
-    #[serde(with = "serde_with::rust::display_fromstr")]
-    pub balance2: u128,
-    #[serde(with = "serde_with::rust::display_fromstr")]
+    pub balance: u128,
+    pub weight: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PoolModel {
+    pub pool_type: String,
+    pub reserves: HashMap<String, PoolTokenData>,
     pub fee: f64,
     pub cost: CostModel,
     pub mandatory: bool,
