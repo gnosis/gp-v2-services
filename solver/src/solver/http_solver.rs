@@ -202,18 +202,18 @@ impl HttpSolver {
                     self.token_to_string(&amm.tokens.get().0),
                     PoolTokenData {
                         balance: amm.reserves.0,
-                        weight: "500000000000000000".to_string(),
+                        weight: 500_000_000_000_000_000u128,
                     },
                 );
                 reserves.insert(
                     self.token_to_string(&amm.tokens.get().1),
                     PoolTokenData {
                         balance: amm.reserves.1,
-                        weight: "500000000000000000".to_string(),
+                        weight: 500_000_000_000_000_000u128,
                     },
                 );
                 let uniswap = PoolModel {
-                    pool_type: "UNISWAP_V2".to_string(),
+                    pool_type: PoolType::UniswapV2,
                     fee: *amm.fee.numer() as f64 / *amm.fee.denom() as f64,
                     cost: CostModel {
                         amount: uniswap_cost,

@@ -29,12 +29,18 @@ pub struct OrderModel {
 pub struct PoolTokenData {
     #[serde(with = "serde_with::rust::display_fromstr")]
     pub balance: u128,
-    pub weight: String,
+    #[serde(with = "serde_with::rust::display_fromstr")]
+    pub weight: u128,
+}
+
+#[derive(Debug, Serialize)]
+pub enum PoolType {
+    UniswapV2,
 }
 
 #[derive(Debug, Serialize)]
 pub struct PoolModel {
-    pub pool_type: String,
+    pub pool_type: PoolType,
     pub reserves: HashMap<String, PoolTokenData>,
     pub fee: f64,
     pub cost: CostModel,
