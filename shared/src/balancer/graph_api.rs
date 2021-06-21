@@ -362,7 +362,11 @@ mod tests {
         println!("{:#?}", pools.pools_by_factory);
         println!(
             "Retrieved {} total pools at block {}",
-            pools.pools_by_factory.values().map(|p| p.len()).sum::<usize>(),
+            pools
+                .pools_by_factory
+                .values()
+                .map(|p| p.len())
+                .sum::<usize>(),
             pools.fetched_block_number,
         );
     }
