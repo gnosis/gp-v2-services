@@ -7,6 +7,7 @@ use anyhow::{anyhow, ensure, Result};
 use itertools::Itertools;
 use model::order::OrderKind;
 use primitive_types::{H160, U256};
+use std::str::FromStr;
 use std::{
     collections::{hash_map::Entry, HashMap},
     iter,
@@ -15,7 +16,7 @@ use std::{
 // To send an instance to the solver we need to identify tokens and orders through strings. This
 // struct combines the created model and a mapping of those identifiers to their original value.
 pub struct SettlementContext {
-    pub tokens: HashMap<String, H160>,
+    // pub tokens: Vec<H160>,
     pub limit_orders: HashMap<String, LimitOrder>,
     pub amm_orders: HashMap<String, AmmOrder>,
 }
@@ -63,7 +64,6 @@ impl IntermediateSettlement {
             match_prepared_and_settled_orders(context.limit_orders, settled.orders)?;
         let executed_amms = match_prepared_and_settled_amms(context.amm_orders, settled.uniswaps)?;
         let prices = match_settled_prices(
-            &context.tokens,
             executed_limit_orders.as_slice(),
             executed_amms.as_slice(),
             settled.prices,
@@ -153,7 +153,6 @@ fn match_prepared_and_settled_amms(
 }
 
 fn match_settled_prices(
-    prepared_tokens: &HashMap<String, H160>,
     executed_limit_orders: &[ExecutedLimitOrder],
     executed_amms: &[ExecutedAmm],
     solver_prices: HashMap<String, Price>,
@@ -161,11 +160,9 @@ fn match_settled_prices(
     // Remove the indirection over the token string index from the solver prices.
     let solver_prices: HashMap<H160, Price> = solver_prices
         .into_iter()
-        .map(|(index, price)| {
-            let token = prepared_tokens
-                .get(&index)
-                .ok_or_else(|| anyhow!("invalid token {}", index))?;
-            Ok((*token, price))
+        .map(|(address_string, price)| {
+            let token = H160::from_str(&address_string).expect("token string not parsable.");
+            Ok((token, price))
         })
         .collect::<Result<_>>()?;
 
@@ -209,9 +206,10 @@ mod tests {
 
     #[test]
     fn convert_settlement_() {
-        let t0 = H160::from_low_u64_be(0);
-        let t1 = H160::from_low_u64_be(1);
-        let tokens = hashmap! { "t0".to_string() => t0, "t1".to_string() => t1 };
+        let token_0 = "0x0000000000000000000000000000000000000000";
+        let token_1 = "0x0000000000000000000000000000000000000001";
+        let t0 = H160::from_str(token_0).unwrap();
+        let t1 = H160::from_str(token_1).unwrap();
 
         let limit_handler = CapturingSettlementHandler::arc();
         let limit_order = LimitOrder {
@@ -251,12 +249,11 @@ mod tests {
         let settled = SettledBatchAuctionModel {
             orders: hashmap! { "lo0".to_string() => executed_order },
             uniswaps: hashmap! { "amm0".to_string() => updated_uniswap },
-            ref_token: "t0".to_string(),
-            prices: hashmap! { "t0".to_string() => Price(10.0), "t1".to_string() => Price(11.0) },
+            ref_token: t0,
+            prices: hashmap! { String::from(token_0) => Price(10.0), String::from(token_1) => Price(11.0) },
         };
 
         let prepared = SettlementContext {
-            tokens,
             limit_orders: orders,
             amm_orders: amms,
         };

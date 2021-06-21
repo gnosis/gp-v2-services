@@ -92,15 +92,7 @@ impl HttpSolver {
         }
     }
 
-    // Solver api requires specifying token as strings. We use the address as a string for now.
-    // Later we could use a more meaningful name like the token symbol but we have to ensure
-    // uniqueness.
-    fn token_to_string(&self, token: &H160) -> String {
-        // Token names must start with a letter.
-        format!("t{:x}", token)
-    }
-
-    fn map_tokens_for_solver(&self, orders: &[Liquidity]) -> HashMap<String, H160> {
+    fn map_tokens_for_solver(&self, orders: &[Liquidity]) -> Vec<H160> {
         orders
             .iter()
             .flat_map(|liquidity| match liquidity {
@@ -113,7 +105,6 @@ impl HttpSolver {
             })
             .collect::<HashSet<_>>()
             .into_iter()
-            .map(|token| (self.token_to_string(&token), token))
             .collect()
     }
 
@@ -167,11 +158,11 @@ impl HttpSolver {
                 is_sell_order: matches!(order.kind, OrderKind::Sell),
                 fee: FeeModel {
                     amount: order_fee,
-                    token: self.token_to_string(&order.sell_token),
+                    token: order.sell_token,
                 },
                 cost: CostModel {
                     amount: order_cost,
-                    token: self.token_to_string(&self.native_token),
+                    token: self.native_token,
                 },
             };
             result.insert(index.clone(), order);
@@ -215,7 +206,7 @@ impl HttpSolver {
                     fee: *amm.fee.numer() as f64 / *amm.fee.denom() as f64,
                     cost: CostModel {
                         amount: uniswap_cost,
-                        token: self.token_to_string(&self.native_token),
+                        token: self.native_token,
                     },
                     mandatory: false,
                     reserves,
@@ -230,22 +221,16 @@ impl HttpSolver {
         liquidity: Vec<Liquidity>,
         gas_price: f64,
     ) -> Result<(BatchAuctionModel, SettlementContext)> {
-        // To send an instance to the solver we need to identify tokens and orders through strings.
-        // In order to map back and forth we store the original tokens, orders and the models for
-        // via the same mapping.
         let tokens = self.map_tokens_for_solver(liquidity.as_slice());
 
-        let addresses: Vec<H160> = tokens.values().into_iter().cloned().collect();
-
         let (token_infos, price_estimates) = join!(
-            self.token_info_fetcher
-                .get_token_infos(addresses.as_slice()),
+            self.token_info_fetcher.get_token_infos(tokens.as_slice()),
             self.price_estimator
-                .estimate_prices(addresses.as_slice(), addresses[0])
+                .estimate_prices(tokens.as_slice(), tokens[0])
         );
 
         let price_estimates: HashMap<H160, Result<BigRational, _>> =
-            addresses.iter().cloned().zip(price_estimates).collect();
+            tokens.iter().cloned().zip(price_estimates).collect();
 
         let mut orders = split_liquidity(liquidity);
 
@@ -270,7 +255,6 @@ impl HttpSolver {
             }),
         };
         let context = SettlementContext {
-            tokens,
             limit_orders,
             amm_orders,
         };

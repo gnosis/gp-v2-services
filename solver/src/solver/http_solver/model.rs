@@ -58,20 +58,20 @@ pub struct TokenInfoModel {
 #[derive(Debug, Serialize)]
 pub struct CostModel {
     pub amount: u128,
-    pub token: String,
+    pub token: H160,
 }
 
 #[derive(Debug, Serialize)]
 pub struct FeeModel {
     pub amount: u128,
-    pub token: String,
+    pub token: H160,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct SettledBatchAuctionModel {
     pub orders: HashMap<String, ExecutedOrderModel>,
     pub uniswaps: HashMap<String, UpdatedUniswapModel>,
-    pub ref_token: String,
+    pub ref_token: H160,
     pub prices: HashMap<String, Price>,
 }
 
