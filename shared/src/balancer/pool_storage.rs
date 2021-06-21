@@ -136,32 +136,6 @@ impl PoolStorage {
         }
     }
 
-    // Builds Balancer Pool Storage from The Graph Client.
-    pub async fn _new_with_data(data_fetcher: Box<dyn PoolInfoFetching>) -> Result<(Self, u64)> {
-        let client = graph_api::BalancerSubgraphClient::for_chain(1)?;
-        // TODO - implement get_two_token_weighted_pools as well.
-        let (block_number, registered_pools) = client.get_weighted_pools().await?;
-        let mut pools_by_token: HashMap<_, HashSet<H256>> = HashMap::new();
-        let mut pools = HashMap::new();
-        for pool in registered_pools {
-            for token in &pool.tokens {
-                pools_by_token
-                    .entry(*token)
-                    .or_default()
-                    .insert(pool.pool_id);
-            }
-            pools.insert(pool.pool_id, pool);
-        }
-        Ok((
-            PoolStorage {
-                pools_by_token,
-                pools,
-                data_fetcher,
-            },
-            block_number,
-        ))
-    }
-
     /// Returns all pools containing both tokens from `TokenPair`
     pub fn ids_for_pools_containing_token_pair(&self, token_pair: TokenPair) -> HashSet<H256> {
         let empty_set = HashSet::new();
