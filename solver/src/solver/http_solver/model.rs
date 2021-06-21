@@ -1,3 +1,4 @@
+use ethcontract::H160;
 use model::u256_decimal;
 use primitive_types::U256;
 use serde::{Deserialize, Serialize};
@@ -5,7 +6,7 @@ use std::collections::HashMap;
 
 #[derive(Debug, Default, Serialize)]
 pub struct BatchAuctionModel {
-    pub tokens: HashMap<String, TokenInfoModel>,
+    pub tokens: HashMap<H160, TokenInfoModel>,
     pub orders: HashMap<String, OrderModel>,
     pub uniswaps: HashMap<String, PoolModel>,
     pub metadata: Option<MetadataModel>,
@@ -13,8 +14,8 @@ pub struct BatchAuctionModel {
 
 #[derive(Debug, Serialize)]
 pub struct OrderModel {
-    pub sell_token: String,
-    pub buy_token: String,
+    pub sell_token: H160,
+    pub buy_token: H160,
     #[serde(with = "u256_decimal")]
     pub sell_amount: U256,
     #[serde(with = "u256_decimal")]
@@ -41,7 +42,7 @@ pub enum PoolType {
 #[derive(Debug, Serialize)]
 pub struct PoolModel {
     pub pool_type: PoolType,
-    pub reserves: HashMap<String, PoolTokenData>,
+    pub reserves: HashMap<H160, PoolTokenData>,
     pub fee: f64,
     pub cost: CostModel,
     pub mandatory: bool,

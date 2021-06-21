@@ -119,20 +119,18 @@ impl HttpSolver {
 
     async fn token_models(
         &self,
-        tokens: &HashMap<String, H160>,
         token_infos: &HashMap<H160, TokenInfo>,
         price_estimates: &HashMap<H160, Result<BigRational, PriceEstimationError>>,
-    ) -> HashMap<String, TokenInfoModel> {
-        tokens
+    ) -> HashMap<H160, TokenInfoModel> {
+        token_infos
             .iter()
-            .map(|(index, address)| {
-                let token_info = token_infos[address];
+            .map(|(address, token_info)| {
                 let external_price = price_estimates[address]
                     .as_ref()
                     .ok()
                     .and_then(|price| price.to_f64());
                 (
-                    index.clone(),
+                    *address,
                     TokenInfoModel {
                         decimals: token_info.decimals.map(|d| d as u32),
                         external_price,
@@ -161,8 +159,8 @@ impl HttpSolver {
         for (index, order) in orders {
             let order_fee = self.order_fee(&order)?;
             let order = OrderModel {
-                sell_token: self.token_to_string(&order.sell_token),
-                buy_token: self.token_to_string(&order.buy_token),
+                sell_token: order.sell_token,
+                buy_token: order.buy_token,
                 sell_amount: order.sell_amount,
                 buy_amount: order.buy_amount,
                 allow_partial_fill: order.partially_fillable,
@@ -199,14 +197,14 @@ impl HttpSolver {
             .map(|(index, amm)| {
                 let mut reserves = HashMap::new();
                 reserves.insert(
-                    self.token_to_string(&amm.tokens.get().0),
+                    amm.tokens.get().0,
                     PoolTokenData {
                         balance: amm.reserves.0,
                         weight: 500_000_000_000_000_000u128,
                     },
                 );
                 reserves.insert(
-                    self.token_to_string(&amm.tokens.get().1),
+                    amm.tokens.get().1,
                     PoolTokenData {
                         balance: amm.reserves.1,
                         weight: 500_000_000_000_000_000u128,
@@ -260,9 +258,7 @@ impl HttpSolver {
         );
         let limit_orders = self.map_orders_for_solver(orders.0);
         let amm_orders = self.map_amms_for_solver(orders.1);
-        let token_models = self
-            .token_models(&tokens, &token_infos, &price_estimates)
-            .await;
+        let token_models = self.token_models(&token_infos, &price_estimates).await;
         let order_models = self.order_models(&limit_orders, gas_price).await?;
         let uniswap_models = self.amm_models(&amm_orders, gas_price).await;
         let model = BatchAuctionModel {
