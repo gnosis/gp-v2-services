@@ -202,7 +202,6 @@ impl PoolStorage {
     }
 
     pub async fn insert_events(&mut self, events: Vec<(EventIndex, PoolCreated)>) -> Result<()> {
-        let num_events = events.len();
         for (index, creation) in events {
             let weighted_pool = RegisteredWeightedPool::from_event(
                 index.block_number,
@@ -219,11 +218,6 @@ impl PoolStorage {
                     .insert(pool_id);
             }
         }
-        tracing::info!(
-            "inserted {} balancer pool creation events. Synced to block {}",
-            num_events,
-            self.last_event_block()
-        );
         Ok(())
     }
 
