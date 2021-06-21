@@ -12,16 +12,16 @@
 //!
 //! *Note that* when loading pool from a cold start synchronization can take quite long, but is
 //! otherwise as quick as possible (i.e. taking advantage of as much cached information as possible).
-use crate::balancer::{
-    info_fetching::PoolInfoFetcher,
-    pool_storage::{PoolCreated, PoolStorage, RegisteredWeightedPool},
-};
-use crate::token_info::TokenInfoFetching;
 use crate::{
+    balancer::{
+        info_fetching::PoolInfoFetcher,
+        pool_storage::{PoolCreated, PoolStorage, RegisteredWeightedPool},
+    },
     current_block::BlockRetrieving,
     event_handling::{BlockNumber, EventHandler, EventIndex, EventStoring},
     impl_event_retrieving,
     maintenance::Maintaining,
+    token_info::TokenInfoFetching,
     Web3,
 };
 use anyhow::{anyhow, Context, Result};
@@ -32,8 +32,7 @@ use contracts::{
 };
 use ethcontract::{common::DeploymentInformation, Event as EthContractEvent, H256};
 use model::TokenPair;
-use std::sync::Arc;
-use std::{collections::HashSet, ops::RangeInclusive};
+use std::{collections::HashSet, ops::RangeInclusive, sync::Arc};
 use tokio::sync::Mutex;
 
 /// The Pool Registry maintains an event handler for each of the Balancer Pool Factory contracts

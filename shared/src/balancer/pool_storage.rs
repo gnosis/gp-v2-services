@@ -28,8 +28,10 @@
 //!     current balances of each of the pool's tokens (aka the pool's "reserves").
 //!
 //! Tests included here are those pertaining to the expected functionality of `PoolStorage`
-use crate::balancer::{info_fetching::PoolInfoFetching, swap::fixed_point::Bfp};
-use crate::event_handling::EventIndex;
+use crate::{
+    balancer::{info_fetching::PoolInfoFetching, swap::fixed_point::Bfp},
+    event_handling::EventIndex,
+};
 use anyhow::Result;
 use derivative::Derivative;
 use ethcontract::{H160, H256, U256};

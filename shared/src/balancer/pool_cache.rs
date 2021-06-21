@@ -1,18 +1,16 @@
-use crate::balancer::event_handler::BalancerPoolRegistry;
-use crate::balancer::pool_storage::RegisteredWeightedPool;
-use crate::pool_fetching::{handle_contract_error, MAX_BATCH_SIZE};
 use crate::{
-    balancer::pool_storage::WeightedPool,
-    recent_block_cache::{Block, CacheFetching, CacheKey, RecentBlockCache},
+    balancer::{
+        event_handler::BalancerPoolRegistry,
+        pool_storage::{RegisteredWeightedPool, WeightedPool},
+    },
+    pool_fetching::{handle_contract_error, MAX_BATCH_SIZE},
+    recent_block_cache::{Block, CacheFetching, CacheKey, CacheMetrics, RecentBlockCache},
     Web3,
 };
 use anyhow::Result;
 use contracts::{BalancerV2Vault, BalancerV2WeightedPool};
-use ethcontract::batch::CallBatch;
-use ethcontract::errors::MethodError;
-use ethcontract::{BlockId, Bytes, H160, H256, U256};
+use ethcontract::{batch::CallBatch, errors::MethodError, BlockId, Bytes, H160, H256, U256};
 use std::{collections::HashSet, sync::Arc};
-use crate::recent_block_cache::CacheMetrics;
 
 pub struct PoolReserveFetcher {
     pool_registry: Arc<BalancerPoolRegistry>,

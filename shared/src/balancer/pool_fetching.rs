@@ -2,18 +2,21 @@
 //! when given a collection of `TokenPair`. Each of these pools are then queried for
 //! their `token_balances` and the `PoolFetcher` returns all up-to-date `WeightedPools`
 //! to be consumed by external users (e.g. Price Estimators and Solvers).
+use crate::{
+    balancer::{
+        event_handler::BalancerPoolRegistry,
+        pool_cache::{BalancerPoolReserveCache, PoolReserveFetcher, WeightedPoolCacheMetrics},
+        pool_storage::WeightedPool,
+    },
+    current_block::CurrentBlockStream,
+    maintenance::Maintaining,
+    recent_block_cache::{Block, CacheConfig, RecentBlockCache},
+    token_info::TokenInfoFetching,
+    Web3,
+};
 use anyhow::Result;
 use model::TokenPair;
-use std::collections::HashSet;
-
-use crate::balancer::pool_cache::{BalancerPoolReserveCache, PoolReserveFetcher, WeightedPoolCacheMetrics};
-use crate::balancer::{event_handler::BalancerPoolRegistry, pool_storage::WeightedPool};
-use crate::current_block::CurrentBlockStream;
-use crate::maintenance::Maintaining;
-use crate::recent_block_cache::{Block, CacheConfig, RecentBlockCache};
-use crate::token_info::TokenInfoFetching;
-use crate::Web3;
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 #[async_trait::async_trait]
 pub trait WeightedPoolFetching: Send + Sync {
