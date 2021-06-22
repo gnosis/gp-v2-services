@@ -1,3 +1,4 @@
+use bigdecimal::BigDecimal;
 use ethcontract::H160;
 use model::u256_decimal;
 use primitive_types::U256;
@@ -43,7 +44,8 @@ pub enum PoolType {
 pub struct PoolModel {
     pub pool_type: PoolType,
     pub reserves: HashMap<H160, PoolTokenData>,
-    pub fee: f64,
+    #[serde(with = "serde_with::rust::display_fromstr")]
+    pub fee: BigDecimal,
     pub cost: CostModel,
     pub mandatory: bool,
 }
@@ -57,12 +59,14 @@ pub struct TokenInfoModel {
 
 #[derive(Debug, Serialize)]
 pub struct CostModel {
+    #[serde(with = "serde_with::rust::display_fromstr")]
     pub amount: u128,
     pub token: H160,
 }
 
 #[derive(Debug, Serialize)]
 pub struct FeeModel {
+    #[serde(with = "serde_with::rust::display_fromstr")]
     pub amount: u128,
     pub token: H160,
 }

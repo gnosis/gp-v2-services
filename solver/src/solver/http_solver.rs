@@ -9,6 +9,7 @@ use crate::{
 };
 use ::model::order::OrderKind;
 use anyhow::{ensure, Context, Result};
+use bigdecimal::BigDecimal;
 use ethcontract::U256;
 use futures::join;
 use num::{BigRational, ToPrimitive};
@@ -18,6 +19,7 @@ use shared::{
     price_estimate::{PriceEstimating, PriceEstimationError},
     token_info::{TokenInfo, TokenInfoFetching},
 };
+use std::ops::Div;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -202,9 +204,10 @@ impl HttpSolver {
                         weight: U256::from(500_000_000_000_000_000u128),
                     },
                 );
+
                 let uniswap = PoolModel {
                     pool_type: PoolType::UniswapV2,
-                    fee: *amm.fee.numer() as f64 / *amm.fee.denom() as f64,
+                    fee: BigDecimal::from(*amm.fee.numer()).div(BigDecimal::from(*amm.fee.denom())),
                     cost: CostModel {
                         amount: uniswap_cost,
                         token: self.native_token,
