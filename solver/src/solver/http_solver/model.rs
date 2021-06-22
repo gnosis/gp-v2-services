@@ -7,7 +7,7 @@ use std::collections::HashMap;
 pub struct BatchAuctionModel {
     pub tokens: HashMap<String, TokenInfoModel>,
     pub orders: HashMap<String, OrderModel>,
-    pub uniswaps: HashMap<String, PoolModel>,
+    pub amms: HashMap<String, PoolModel>,
     pub metadata: Option<MetadataModel>,
 }
 
