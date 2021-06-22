@@ -44,7 +44,6 @@ pub enum PoolType {
 pub struct PoolModel {
     pub pool_type: PoolType,
     pub reserves: HashMap<H160, PoolTokenData>,
-    #[serde(with = "serde_with::rust::display_fromstr")]
     pub fee: BigDecimal,
     pub cost: CostModel,
     pub mandatory: bool,

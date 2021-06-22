@@ -19,7 +19,6 @@ use shared::{
     price_estimate::{PriceEstimating, PriceEstimationError},
     token_info::{TokenInfo, TokenInfoFetching},
 };
-use std::ops::Div;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -207,7 +206,7 @@ impl HttpSolver {
 
                 let uniswap = PoolModel {
                     pool_type: PoolType::UniswapV2,
-                    fee: BigDecimal::from(*amm.fee.numer()).div(BigDecimal::from(*amm.fee.denom())),
+                    fee: BigDecimal::from(*amm.fee.numer()) / BigDecimal::from(*amm.fee.denom()),
                     cost: CostModel {
                         amount: uniswap_cost,
                         token: self.native_token,
