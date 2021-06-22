@@ -9,6 +9,7 @@ use crate::{
 };
 use ::model::order::OrderKind;
 use anyhow::{ensure, Context, Result};
+use ethcontract::U256;
 use futures::join;
 use num::{BigRational, ToPrimitive};
 use primitive_types::H160;
@@ -190,15 +191,15 @@ impl HttpSolver {
                 reserves.insert(
                     amm.tokens.get().0,
                     PoolTokenData {
-                        balance: amm.reserves.0,
-                        weight: 500_000_000_000_000_000u128,
+                        balance: U256::from(amm.reserves.0),
+                        weight: U256::from(500_000_000_000_000_000u128),
                     },
                 );
                 reserves.insert(
                     amm.tokens.get().1,
                     PoolTokenData {
-                        balance: amm.reserves.1,
-                        weight: 500_000_000_000_000_000u128,
+                        balance: U256::from(amm.reserves.1),
+                        weight: U256::from(500_000_000_000_000_000u128),
                     },
                 );
                 let uniswap = PoolModel {
