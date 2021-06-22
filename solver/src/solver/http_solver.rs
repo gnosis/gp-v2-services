@@ -113,7 +113,7 @@ impl HttpSolver {
             .collect()
     }
 
-    async fn token_models(
+    fn token_models(
         &self,
         token_infos: &HashMap<H160, TokenInfo>,
         price_estimates: &HashMap<H160, Result<BigRational, PriceEstimationError>>,
@@ -145,12 +145,12 @@ impl HttpSolver {
             .collect()
     }
 
-    async fn order_models(
+    fn order_models(
         &self,
         orders: &HashMap<usize, LimitOrder>,
         gas_price: f64,
-    ) -> Result<HashMap<usize, OrderModel>> {
-        let order_cost = self.order_cost(gas_price).await;
+    ) -> HashMap<usize, OrderModel> {
+        let order_cost = self.order_cost(gas_price);
         let mut result: HashMap<usize, OrderModel> = HashMap::new();
         for (index, order) in orders {
             let order_fee = self.order_fee(&order);
@@ -172,7 +172,7 @@ impl HttpSolver {
             };
             result.insert(*index, order);
         }
-        Ok(result)
+        result
     }
 
     fn map_amms_for_solver(&self, orders: Vec<AmmOrder>) -> HashMap<usize, AmmOrder> {
@@ -183,12 +183,12 @@ impl HttpSolver {
             .collect()
     }
 
-    async fn amm_models(
+    fn amm_models(
         &self,
         amms: &HashMap<usize, AmmOrder>,
         gas_price: f64,
     ) -> HashMap<usize, PoolModel> {
-        let uniswap_cost = self.uniswap_cost(gas_price).await;
+        let uniswap_cost = self.uniswap_cost(gas_price);
         amms.iter()
             .map(|(index, amm)| {
                 let mut reserves = HashMap::new();
@@ -249,9 +249,9 @@ impl HttpSolver {
         );
         let limit_orders = self.map_orders_for_solver(orders.0);
         let amm_orders = self.map_amms_for_solver(orders.1);
-        let token_models = self.token_models(&token_infos, &price_estimates).await;
-        let order_models = self.order_models(&limit_orders, gas_price).await?;
-        let amm_models = self.amm_models(&amm_orders, gas_price).await;
+        let token_models = self.token_models(&token_infos, &price_estimates);
+        let order_models = self.order_models(&limit_orders, gas_price);
+        let amm_models = self.amm_models(&amm_orders, gas_price);
         let model = BatchAuctionModel {
             tokens: token_models,
             orders: order_models,
@@ -310,11 +310,11 @@ impl HttpSolver {
             .with_context(|| format!("failed to decode response json, {}", context()))
     }
 
-    async fn order_cost(&self, gas_price: f64) -> U256 {
+    fn order_cost(&self, gas_price: f64) -> U256 {
         U256::from_f64_lossy(gas_price) * *GAS_PER_ORDER
     }
 
-    async fn uniswap_cost(&self, gas_price: f64) -> U256 {
+    fn uniswap_cost(&self, gas_price: f64) -> U256 {
         U256::from_f64_lossy(gas_price) * *GAS_PER_UNISWAP
     }
 
