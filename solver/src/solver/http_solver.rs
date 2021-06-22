@@ -424,13 +424,16 @@ mod tests {
         let url = std::env::var("GP_V2_OPTIMIZER_URL")
             .unwrap_or_else(|_| "http://localhost:8000".to_string());
 
+        let buy_token = H160::from_low_u64_be(1337);
+        let sell_token = H160::from_low_u64_be(43110);
+
         let mut mock_token_info_fetcher = MockTokenInfoFetching::new();
         mock_token_info_fetcher
             .expect_get_token_infos()
             .return_once(move |_| {
                 hashmap! {
-                    H160::zero() => TokenInfo { decimals: Some(18)},
-                    H160::from_low_u64_be(1) => TokenInfo { decimals: Some(18)},
+                    buy_token => TokenInfo { decimals: Some(18)},
+                    sell_token => TokenInfo { decimals: Some(18)},
                 }
             });
         let mock_token_info_fetcher: Arc<dyn TokenInfoFetching> = Arc::new(mock_token_info_fetcher);
@@ -457,8 +460,8 @@ mod tests {
         let base = |x: u128| x * 10u128.pow(18);
         let orders = vec![
             Liquidity::Limit(LimitOrder {
-                buy_token: H160::zero(),
-                sell_token: H160::from_low_u64_be(1),
+                buy_token,
+                sell_token,
                 buy_amount: base(1).into(),
                 sell_amount: base(2).into(),
                 kind: OrderKind::Sell,
@@ -468,7 +471,7 @@ mod tests {
                 id: "0".to_string(),
             }),
             Liquidity::Amm(AmmOrder {
-                tokens: TokenPair::new(H160::zero(), H160::from_low_u64_be(1)).unwrap(),
+                tokens: TokenPair::new(buy_token, sell_token).unwrap(),
                 reserves: (base(100), base(100)),
                 fee: Ratio::new(0, 1),
                 settlement_handling: CapturingSettlementHandler::arc(),

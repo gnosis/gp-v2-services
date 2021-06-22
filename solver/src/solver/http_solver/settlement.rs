@@ -203,6 +203,7 @@ mod tests {
     use crate::liquidity::tests::CapturingSettlementHandler;
     use maplit::hashmap;
     use model::TokenPair;
+    use std::str::FromStr;
 
     #[test]
     fn convert_settlement_() {
