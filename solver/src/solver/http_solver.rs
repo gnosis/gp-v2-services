@@ -246,11 +246,11 @@ impl HttpSolver {
         let amm_orders = self.map_amms_for_solver(orders.1);
         let token_models = self.token_models(&token_infos, &price_estimates).await;
         let order_models = self.order_models(&limit_orders, gas_price).await?;
-        let uniswap_models = self.amm_models(&amm_orders, gas_price).await;
+        let amm_models = self.amm_models(&amm_orders, gas_price).await;
         let model = BatchAuctionModel {
             tokens: token_models,
             orders: order_models,
-            uniswaps: uniswap_models,
+            amms: amm_models,
             metadata: Some(MetadataModel {
                 environment: Some(self.network_id.clone()),
             }),
