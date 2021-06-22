@@ -65,8 +65,8 @@ pub struct CostModel {
 
 #[derive(Debug, Serialize)]
 pub struct FeeModel {
-    #[serde(with = "serde_with::rust::display_fromstr")]
-    pub amount: u128,
+    #[serde(with = "u256_decimal")]
+    pub amount: U256,
     pub token: H160,
 }
 
