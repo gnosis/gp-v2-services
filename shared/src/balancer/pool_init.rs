@@ -120,6 +120,7 @@ fn deployment_address(artifact: &Artifact, chain_id: u64) -> Result<H160> {
 mod tests {
     use super::*;
     use crate::balancer::swap::fixed_point::Bfp;
+    use anyhow::bail;
     use ethcontract::H256;
     use maplit::hashmap;
 
@@ -214,5 +215,42 @@ mod tests {
             initializer.initialize_pools_inner().await.unwrap(),
             BalancerRegisteredPools::default(),
         );
+    }
+
+    #[tokio::test]
+    async fn errors_on_subgraph_error() {
+        let chain_id = 1;
+
+        let mut subgraph = MockBalancerSubgraph::new();
+        subgraph
+            .expect_weighted_pools()
+            .returning(move || bail!("test error"));
+
+        let initializer = SubgraphPoolInitializerInner {
+            chain_id,
+            client: subgraph,
+        };
+
+        assert!(initializer.initialize_pools_inner().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn errors_on_missing_deployment() {
+        let chain_id = 999;
+
+        let mut subgraph = MockBalancerSubgraph::new();
+        subgraph.expect_weighted_pools().returning(|| {
+            Ok(RegisteredWeightedPools {
+                pools_by_factory: hashmap! {},
+                fetched_block_number: 0,
+            })
+        });
+
+        let initializer = SubgraphPoolInitializerInner {
+            chain_id,
+            client: subgraph,
+        };
+
+        assert!(initializer.initialize_pools_inner().await.is_err());
     }
 }
