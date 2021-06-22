@@ -17,8 +17,8 @@ use std::{
 // struct combines the created model and a mapping of those identifiers to their original value.
 pub struct SettlementContext {
     // pub tokens: Vec<H160>,
-    pub limit_orders: HashMap<String, LimitOrder>,
-    pub amm_orders: HashMap<String, AmmOrder>,
+    pub limit_orders: HashMap<usize, LimitOrder>,
+    pub amm_orders: HashMap<usize, AmmOrder>,
 }
 
 pub fn convert_settlement(
@@ -95,7 +95,7 @@ impl IntermediateSettlement {
 }
 
 fn match_prepared_and_settled_orders(
-    mut prepared_orders: HashMap<String, LimitOrder>,
+    mut prepared_orders: HashMap<usize, LimitOrder>,
     settled_orders: HashMap<String, ExecutedOrderModel>,
 ) -> Result<Vec<ExecutedLimitOrder>> {
     settled_orders
@@ -105,7 +105,7 @@ fn match_prepared_and_settled_orders(
         })
         .map(|(index, settled)| {
             let prepared = prepared_orders
-                .remove(index.as_str())
+                .remove(&usize::from_str(&index).expect("Index String not parsable."))
                 .ok_or_else(|| anyhow!("invalid order {}", index))?;
             Ok(ExecutedLimitOrder {
                 order: prepared,
@@ -117,7 +117,7 @@ fn match_prepared_and_settled_orders(
 }
 
 fn match_prepared_and_settled_amms(
-    mut prepared_orders: HashMap<String, AmmOrder>,
+    mut prepared_orders: HashMap<usize, AmmOrder>,
     settled_orders: HashMap<String, UpdatedUniswapModel>,
 ) -> Result<Vec<ExecutedAmm>> {
     settled_orders
@@ -126,7 +126,7 @@ fn match_prepared_and_settled_amms(
         .sorted_by(|a, b| a.1.exec_plan.cmp(&b.1.exec_plan))
         .map(|(index, settled)| {
             let prepared = prepared_orders
-                .remove(index.as_str())
+                .remove(&usize::from_str(&index).expect("Index string not parsable."))
                 .ok_or_else(|| anyhow!("invalid amm {}", index))?;
             let tokens = prepared.tokens.get();
             let updates = (settled.balance_update1, settled.balance_update2);
@@ -224,7 +224,7 @@ mod tests {
             settlement_handling: limit_handler.clone(),
             id: "0".to_string(),
         };
-        let orders = hashmap! { "lo0".to_string() => limit_order };
+        let orders = hashmap! { 0 => limit_order };
 
         let amm_handler = CapturingSettlementHandler::arc();
         let amm_order = AmmOrder {
@@ -233,7 +233,7 @@ mod tests {
             fee: 5.into(),
             settlement_handling: amm_handler.clone(),
         };
-        let amms = hashmap! { "amm0".to_string() => amm_order };
+        let amms = hashmap! { 0 => amm_order };
 
         let executed_order = ExecutedOrderModel {
             exec_buy_amount: 6.into(),
@@ -248,8 +248,8 @@ mod tests {
             }),
         };
         let settled = SettledBatchAuctionModel {
-            orders: hashmap! { "lo0".to_string() => executed_order },
-            uniswaps: hashmap! { "amm0".to_string() => updated_uniswap },
+            orders: hashmap! { "0".to_string() => executed_order },
+            uniswaps: hashmap! { "0".to_string() => updated_uniswap },
             ref_token: t0,
             prices: hashmap! { String::from(token_0) => Price(10.0), String::from(token_1) => Price(11.0) },
         };

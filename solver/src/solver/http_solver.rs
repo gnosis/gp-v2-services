@@ -135,21 +135,21 @@ impl HttpSolver {
             .collect()
     }
 
-    fn map_orders_for_solver(&self, orders: Vec<LimitOrder>) -> HashMap<String, LimitOrder> {
+    fn map_orders_for_solver(&self, orders: Vec<LimitOrder>) -> HashMap<usize, LimitOrder> {
         orders
             .into_iter()
             .enumerate()
-            .map(|(index, order)| (index.to_string(), order))
+            .map(|(index, order)| (index, order))
             .collect()
     }
 
     async fn order_models(
         &self,
-        orders: &HashMap<String, LimitOrder>,
+        orders: &HashMap<usize, LimitOrder>,
         gas_price: f64,
-    ) -> Result<HashMap<String, OrderModel>> {
+    ) -> Result<HashMap<usize, OrderModel>> {
         let order_cost = self.order_cost(gas_price).await;
-        let mut result: HashMap<String, OrderModel> = HashMap::new();
+        let mut result: HashMap<usize, OrderModel> = HashMap::new();
         for (index, order) in orders {
             let order_fee = self.order_fee(&order)?;
             let order = OrderModel {
@@ -168,24 +168,24 @@ impl HttpSolver {
                     token: self.native_token,
                 },
             };
-            result.insert(index.clone(), order);
+            result.insert(*index, order);
         }
         Ok(result)
     }
 
-    fn map_amms_for_solver(&self, orders: Vec<AmmOrder>) -> HashMap<String, AmmOrder> {
+    fn map_amms_for_solver(&self, orders: Vec<AmmOrder>) -> HashMap<usize, AmmOrder> {
         orders
             .into_iter()
             .enumerate()
-            .map(|(index, amm)| (index.to_string(), amm))
+            .map(|(index, amm)| (index, amm))
             .collect()
     }
 
     async fn amm_models(
         &self,
-        amms: &HashMap<String, AmmOrder>,
+        amms: &HashMap<usize, AmmOrder>,
         gas_price: f64,
-    ) -> HashMap<String, PoolModel> {
+    ) -> HashMap<usize, PoolModel> {
         let uniswap_cost = self.uniswap_cost(gas_price).await;
         amms.iter()
             .map(|(index, amm)| {
@@ -215,7 +215,7 @@ impl HttpSolver {
                     mandatory: false,
                     reserves,
                 };
-                (index.clone(), uniswap)
+                (*index, uniswap)
             })
             .collect()
     }

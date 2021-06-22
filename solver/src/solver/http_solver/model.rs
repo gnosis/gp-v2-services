@@ -8,8 +8,8 @@ use std::collections::HashMap;
 #[derive(Debug, Default, Serialize)]
 pub struct BatchAuctionModel {
     pub tokens: HashMap<H160, TokenInfoModel>,
-    pub orders: HashMap<String, OrderModel>,
-    pub amms: HashMap<String, PoolModel>,
+    pub orders: HashMap<usize, OrderModel>,
+    pub amms: HashMap<usize, PoolModel>,
     pub metadata: Option<MetadataModel>,
 }
 
