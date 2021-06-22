@@ -51,15 +51,15 @@ pub struct PoolModel {
 
 #[derive(Debug, Serialize)]
 pub struct TokenInfoModel {
-    pub decimals: Option<u32>,
+    pub decimals: Option<u8>,
     pub external_price: Option<f64>,
     pub normalize_priority: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct CostModel {
-    #[serde(with = "serde_with::rust::display_fromstr")]
-    pub amount: u128,
+    #[serde(with = "u256_decimal")]
+    pub amount: U256,
     pub token: H160,
 }
 

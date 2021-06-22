@@ -12,6 +12,7 @@ use anyhow::{ensure, Context, Result};
 use bigdecimal::BigDecimal;
 use ethcontract::U256;
 use futures::join;
+use lazy_static::lazy_static;
 use num::{BigRational, ToPrimitive};
 use primitive_types::H160;
 use reqwest::{header::HeaderValue, Client, Url};
@@ -26,8 +27,10 @@ use std::{
 
 // Estimates from multivariate linear regression here:
 // https://docs.google.com/spreadsheets/d/13UeUQ9DA4bHlcy9-i8d4nSLlCxSfjcXpTelvXYzyJzQ/edit?usp=sharing
-const GAS_PER_ORDER: u128 = 66315;
-const GAS_PER_UNISWAP: u128 = 94696;
+lazy_static! {
+    static ref GAS_PER_ORDER: U256 = U256::from(66315);
+    static ref GAS_PER_UNISWAP: U256 = U256::from(94696);
+}
 
 // TODO: exclude partially fillable orders
 // TODO: set settlement.fee_factor
@@ -125,7 +128,7 @@ impl HttpSolver {
                 (
                     *address,
                     TokenInfoModel {
-                        decimals: token_info.decimals.map(|d| d as u32),
+                        decimals: token_info.decimals,
                         external_price,
                         normalize_priority: Some(if &self.native_token == address { 1 } else { 0 }),
                     },
@@ -150,7 +153,7 @@ impl HttpSolver {
         let order_cost = self.order_cost(gas_price).await;
         let mut result: HashMap<usize, OrderModel> = HashMap::new();
         for (index, order) in orders {
-            let order_fee = self.order_fee(&order)?;
+            let order_fee = self.order_fee(&order);
             let order = OrderModel {
                 sell_token: order.sell_token,
                 buy_token: order.buy_token,
@@ -307,19 +310,17 @@ impl HttpSolver {
             .with_context(|| format!("failed to decode response json, {}", context()))
     }
 
-    async fn order_cost(&self, gas_price: f64) -> u128 {
-        gas_price as u128 * GAS_PER_ORDER
+    async fn order_cost(&self, gas_price: f64) -> U256 {
+        U256::from_f64_lossy(gas_price) * *GAS_PER_ORDER
     }
 
-    async fn uniswap_cost(&self, gas_price: f64) -> u128 {
-        gas_price as u128 * GAS_PER_UNISWAP
+    async fn uniswap_cost(&self, gas_price: f64) -> U256 {
+        U256::from_f64_lossy(gas_price) * *GAS_PER_UNISWAP
     }
 
-    fn order_fee(&self, order: &LimitOrder) -> Result<u128> {
-        (order.fee_amount.to_f64_lossy() / self.fee_discount_factor)
-            .ceil()
-            .to_u128()
-            .context("failed to compute order fee")
+    fn order_fee(&self, order: &LimitOrder) -> U256 {
+        let ceiled_div = (order.fee_amount.to_f64_lossy() / self.fee_discount_factor).ceil();
+        U256::from_f64_lossy(ceiled_div)
     }
 
     pub fn generate_instance_name(&self) -> String {
