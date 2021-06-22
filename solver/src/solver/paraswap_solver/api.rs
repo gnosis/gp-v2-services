@@ -221,14 +221,14 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_api_e2e() {
-        let from = shared::addr!("6810e776880c02933d47db1b9fc05908e5386b96");
-        let to = shared::addr!("960b236a07cf122663c4303350609a66a7b288c0");
+        let from = shared::addr!("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
+        let to = shared::addr!("6810e776880c02933d47db1b9fc05908e5386b96");
         let price_query = PriceQuery {
             from,
             to,
             from_decimals: 18,
             to_decimals: 18,
-            amount: 1_499_200_000_000_000_000u128.into(),
+            amount: 135_000_000_000_000_000_000u128.into(),
             side: Side::Sell,
         };
 
