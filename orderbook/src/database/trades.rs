@@ -3,10 +3,15 @@ use crate::database::Postgres;
 use anyhow::{anyhow, Context, Result};
 use bigdecimal::BigDecimal;
 use ethcontract::H160;
-use futures::{stream::TryStreamExt, Stream};
+use futures::stream::{BoxStream, StreamExt, TryStreamExt};
 use model::order::OrderUid;
 use model::trade::Trade;
 use std::convert::TryInto;
+
+#[async_trait::async_trait]
+pub trait TradeRetrieving: Send + Sync {
+    fn trades<'a>(&'a self, filter: &'a TradeFilter) -> BoxStream<'a, Result<Trade>>;
+}
 
 /// Any default value means that this field is unfiltered.
 #[derive(Debug, Default, PartialEq)]
@@ -15,11 +20,8 @@ pub struct TradeFilter {
     pub order_uid: Option<OrderUid>,
 }
 
-impl Postgres {
-    pub fn trades_<'a>(
-        &'a self,
-        filter: &'a TradeFilter,
-    ) -> impl Stream<Item = Result<Trade>> + 'a {
+impl TradeRetrieving for Postgres {
+    fn trades<'a>(&'a self, filter: &'a TradeFilter) -> BoxStream<'a, Result<Trade>> {
         const QUERY: &str = "\
             SELECT \
                 t.block_number, \
@@ -55,6 +57,7 @@ impl Postgres {
             .fetch(&self.pool)
             .err_into()
             .and_then(|row: TradesQueryRow| async move { row.into_trade() })
+            .boxed()
     }
 }
 
@@ -112,7 +115,8 @@ impl TradesQueryRow {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::database::{Database, Event, Settlement as DbSettlement, Trade as DbTrade};
+    use crate::database::events::{Event, Settlement as DbSettlement, Trade as DbTrade};
+    use crate::database::orders::OrderStoring;
     use ethcontract::H256;
     use model::order::{Order, OrderCreation, OrderMetaData};
     use model::trade::Trade;
@@ -145,7 +149,7 @@ mod tests {
             owner,
             ..Default::default()
         };
-        db.insert_events(vec![(
+        db.append_events_(vec![(
             event_index,
             Event::Trade(DbTrade {
                 order_uid,
@@ -354,7 +358,7 @@ mod tests {
         solver: H160,
         transaction_hash: H256,
     ) -> DbSettlement {
-        db.insert_events(vec![(
+        db.append_events_(vec![(
             event_index,
             Event::Settlement(DbSettlement {
                 solver,

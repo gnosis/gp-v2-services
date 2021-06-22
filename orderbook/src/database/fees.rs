@@ -1,13 +1,17 @@
 use super::{orders::DbOrderKind, Postgres};
 use crate::conversions::*;
+use crate::fee::MinFeeStoring;
+
 use anyhow::{anyhow, Context, Result};
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, Utc};
 use ethcontract::{H160, U256};
 use model::order::OrderKind;
+use shared::maintenance::Maintaining;
 
-impl Postgres {
-    pub async fn save_fee_measurement_(
+#[async_trait::async_trait]
+impl MinFeeStoring for Postgres {
+    async fn save_fee_measurement(
         &self,
         sell_token: H160,
         buy_token: Option<H160>,
@@ -31,7 +35,7 @@ impl Postgres {
             .map(|_| ())
     }
 
-    pub async fn get_min_fee_(
+    async fn get_min_fee(
         &self,
         sell_token: H160,
         buy_token: Option<H160>,
@@ -66,8 +70,10 @@ impl Postgres {
             None => Ok(None),
         }
     }
+}
 
-    pub async fn remove_expired_fee_measurements_(&self, max_expiry: DateTime<Utc>) -> Result<()> {
+impl Postgres {
+    pub async fn remove_expired_fee_measurements(&self, max_expiry: DateTime<Utc>) -> Result<()> {
         const QUERY: &str = "DELETE FROM min_fee_measurements WHERE expiration_timestamp < $1;";
         sqlx::query(QUERY)
             .bind(max_expiry)
@@ -78,9 +84,17 @@ impl Postgres {
     }
 }
 
+#[async_trait::async_trait]
+impl Maintaining for Postgres {
+    async fn run_maintenance(&self) -> Result<()> {
+        self.remove_expired_fee_measurements(Utc::now())
+            .await
+            .context("fee measurement maintenance error")
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::super::Database;
     use super::*;
     use chrono::Duration;
 

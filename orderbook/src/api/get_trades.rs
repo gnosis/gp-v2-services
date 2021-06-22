@@ -1,6 +1,7 @@
 use super::H160Wrapper;
 use crate::api::convert_get_trades_error_to_reply;
-use crate::database::{Database, TradeFilter};
+use crate::database::trades::TradeFilter;
+use crate::database::trades::TradeRetrieving;
 use anyhow::Result;
 use futures::TryStreamExt;
 use model::order::OrderUid;
@@ -58,7 +59,7 @@ fn get_trades_response(result: Result<Vec<Trade>>) -> WithStatus<Json> {
 }
 
 pub fn get_trades(
-    db: Arc<dyn Database>,
+    db: Arc<dyn TradeRetrieving>,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
     get_trades_request().and_then(move |request_result| {
         let database = db.clone();

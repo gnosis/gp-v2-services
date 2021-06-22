@@ -11,7 +11,7 @@ use contracts::gpv2_settlement::{
 use ethcontract::{Event as EthContractEvent, EventMetadata, H160, H256, U256};
 use futures::FutureExt;
 use model::order::OrderUid;
-use shared::event_handling::EventIndex;
+use shared::event_handling::{EventIndex, EventStoring};
 use sqlx::{Connection, Executor, Transaction};
 use std::convert::TryInto;
 
@@ -42,28 +42,15 @@ pub struct Settlement {
 }
 
 impl Postgres {
-    pub async fn block_number_of_most_recent_event_(&self) -> Result<u64> {
-        const QUERY: &str = "\
-            SELECT GREATEST( \
-                (SELECT COALESCE(MAX(block_number), 0) FROM trades), \
-                (SELECT COALESCE(MAX(block_number), 0) FROM settlements), \
-                (SELECT COALESCE(MAX(block_number), 0) FROM invalidations));";
-        let block_number: i64 = sqlx::query_scalar(QUERY)
-            .fetch_one(&self.pool)
-            .await
-            .context("block_number_of_most_recent_trade failed")?;
-        block_number.try_into().context("block number is negative")
-    }
-
     // All insertions happen in one transaction.
-    pub async fn insert_events_(&self, events: Vec<(EventIndex, Event)>) -> Result<()> {
+    pub async fn append_events_(&self, events: Vec<(EventIndex, Event)>) -> Result<()> {
         let mut connection = self.pool.acquire().await?;
         connection
             .transaction(move |transaction| {
                 async move {
-                    insert_events(transaction, events.as_slice())
+                    append_events(transaction, events.as_slice())
                         .await
-                        .context("insert_events failed")
+                        .context("append_events failed")
                 }
                 .boxed()
             })
@@ -84,7 +71,7 @@ impl Postgres {
                     delete_events(transaction, delete_from_block_number)
                         .await
                         .context("delete_events failed")?;
-                    insert_events(transaction, events.as_slice())
+                    append_events(transaction, events.as_slice())
                         .await
                         .context("insert_events failed")
                 }
@@ -93,30 +80,56 @@ impl Postgres {
             .await?;
         Ok(())
     }
+}
 
-    pub fn contract_to_db_events_(
-        &self,
-        contract_events: Vec<EthContractEvent<ContractEvent>>,
-    ) -> Result<Vec<(EventIndex, Event)>> {
-        contract_events
-            .into_iter()
-            .filter_map(|EthContractEvent { data, meta }| {
-                let meta = match meta {
-                    Some(meta) => meta,
-                    None => return Some(Err(anyhow!("event without metadata"))),
-                };
-                match data {
-                    ContractEvent::Trade(event) => Some(convert_trade(&event, &meta)),
-                    ContractEvent::Settlement(event) => Some(Ok(convert_settlement(&event, &meta))),
-                    ContractEvent::OrderInvalidated(event) => {
-                        Some(convert_invalidation(&event, &meta))
-                    }
-                    // TODO: handle new events
-                    ContractEvent::Interaction(_) => None,
-                    ContractEvent::PreSignature(_) => None,
-                }
-            })
-            .collect::<Result<Vec<_>>>()
+pub fn contract_to_db_events(
+    contract_events: Vec<EthContractEvent<ContractEvent>>,
+) -> Result<Vec<(EventIndex, Event)>> {
+    contract_events
+        .into_iter()
+        .filter_map(|EthContractEvent { data, meta }| {
+            let meta = match meta {
+                Some(meta) => meta,
+                None => return Some(Err(anyhow!("event without metadata"))),
+            };
+            match data {
+                ContractEvent::Trade(event) => Some(convert_trade(&event, &meta)),
+                ContractEvent::Settlement(event) => Some(Ok(convert_settlement(&event, &meta))),
+                ContractEvent::OrderInvalidated(event) => Some(convert_invalidation(&event, &meta)),
+                // TODO: handle new events
+                ContractEvent::Interaction(_) => None,
+                ContractEvent::PreSignature(_) => None,
+            }
+        })
+        .collect::<Result<Vec<_>>>()
+}
+
+#[async_trait::async_trait]
+impl EventStoring<ContractEvent> for Postgres {
+    async fn last_event_block(&self) -> Result<u64> {
+        const QUERY: &str = "\
+            SELECT GREATEST( \
+                (SELECT COALESCE(MAX(block_number), 0) FROM trades), \
+                (SELECT COALESCE(MAX(block_number), 0) FROM settlements), \
+                (SELECT COALESCE(MAX(block_number), 0) FROM invalidations));";
+        let block_number: i64 = sqlx::query_scalar(QUERY)
+            .fetch_one(&self.pool)
+            .await
+            .context("block_number_of_most_recent_trade failed")?;
+        block_number.try_into().context("block number is negative")
+    }
+
+    async fn append_events(&mut self, events: Vec<EthContractEvent<ContractEvent>>) -> Result<()> {
+        self.append_events_(contract_to_db_events(events)?).await
+    }
+
+    async fn replace_events(
+        &mut self,
+        events: Vec<EthContractEvent<ContractEvent>>,
+        range: std::ops::RangeInclusive<shared::event_handling::BlockNumber>,
+    ) -> Result<()> {
+        self.replace_events_(range.start().to_u64(), contract_to_db_events(events)?)
+            .await
     }
 }
 
@@ -142,7 +155,7 @@ async fn delete_events(
     Ok(())
 }
 
-async fn insert_events(
+async fn append_events(
     transaction: &mut Transaction<'_, sqlx::Postgres>,
     events: &[(EventIndex, Event)],
 ) -> Result<(), sqlx::Error> {
@@ -270,7 +283,6 @@ fn convert_invalidation(
 
 #[cfg(test)]
 mod tests {
-    use super::super::Database;
     use super::*;
 
     #[tokio::test]
@@ -279,9 +291,9 @@ mod tests {
         let db = Postgres::new("postgresql://").unwrap();
         db.clear().await.unwrap();
 
-        assert_eq!(db.block_number_of_most_recent_event().await.unwrap(), 0);
+        assert_eq!(db.last_event_block().await.unwrap(), 0);
 
-        db.insert_events(vec![(
+        db.append_events_(vec![(
             EventIndex {
                 block_number: 1,
                 log_index: 0,
@@ -290,9 +302,9 @@ mod tests {
         )])
         .await
         .unwrap();
-        assert_eq!(db.block_number_of_most_recent_event().await.unwrap(), 1);
+        assert_eq!(db.last_event_block().await.unwrap(), 1);
 
-        db.insert_events(vec![(
+        db.append_events_(vec![(
             EventIndex {
                 block_number: 2,
                 log_index: 0,
@@ -301,9 +313,9 @@ mod tests {
         )])
         .await
         .unwrap();
-        assert_eq!(db.block_number_of_most_recent_event().await.unwrap(), 2);
+        assert_eq!(db.last_event_block().await.unwrap(), 2);
 
-        db.replace_events(
+        db.replace_events_(
             0,
             vec![(
                 EventIndex {
@@ -315,12 +327,12 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(db.block_number_of_most_recent_event().await.unwrap(), 3);
+        assert_eq!(db.last_event_block().await.unwrap(), 3);
 
-        db.replace_events(2, vec![]).await.unwrap();
-        assert_eq!(db.block_number_of_most_recent_event().await.unwrap(), 0);
+        db.replace_events_(2, vec![]).await.unwrap();
+        assert_eq!(db.last_event_block().await.unwrap(), 0);
 
-        db.insert_events(vec![(
+        db.append_events_(vec![(
             EventIndex {
                 block_number: 1,
                 log_index: 2,
@@ -333,10 +345,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(db.block_number_of_most_recent_event().await.unwrap(), 1);
+        assert_eq!(db.last_event_block().await.unwrap(), 1);
 
-        db.replace_events(1, vec![]).await.unwrap();
-        assert_eq!(db.block_number_of_most_recent_event().await.unwrap(), 0);
+        db.replace_events_(1, vec![]).await.unwrap();
+        assert_eq!(db.last_event_block().await.unwrap(), 0);
     }
 
     #[tokio::test]
@@ -345,7 +357,7 @@ mod tests {
         let db = Postgres::new("postgresql://").unwrap();
         db.clear().await.unwrap();
         for _ in 0..2 {
-            db.insert_events(vec![(
+            db.append_events_(vec![(
                 EventIndex {
                     block_number: 2,
                     log_index: 0,
@@ -354,7 +366,7 @@ mod tests {
             )])
             .await
             .unwrap();
-            db.insert_events(vec![(
+            db.append_events_(vec![(
                 EventIndex {
                     block_number: 2,
                     log_index: 1,
@@ -363,7 +375,7 @@ mod tests {
             )])
             .await
             .unwrap();
-            db.insert_events(vec![(
+            db.append_events_(vec![(
                 EventIndex {
                     block_number: 2,
                     log_index: 2,
@@ -373,6 +385,6 @@ mod tests {
             .await
             .unwrap();
         }
-        assert_eq!(db.block_number_of_most_recent_event().await.unwrap(), 2);
+        assert_eq!(db.last_event_block().await.unwrap(), 2);
     }
 }

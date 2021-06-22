@@ -9,7 +9,7 @@ mod get_solvable_orders;
 mod get_trades;
 
 use crate::{
-    database::Database,
+    database::trades::TradeRetrieving,
     fee::EthAwareMinFeeCalculator,
     metrics::start_request,
     metrics::{end_request, LabelledReply, Metrics},
@@ -30,7 +30,7 @@ use warp::{
 };
 
 pub fn handle_all_routes(
-    database: Arc<dyn Database>,
+    database: Arc<dyn TradeRetrieving>,
     orderbook: Arc<Orderbook>,
     fee_calculator: Arc<EthAwareMinFeeCalculator>,
     price_estimator: Arc<dyn PriceEstimating>,
