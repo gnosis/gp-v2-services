@@ -72,10 +72,10 @@ pub struct FeeModel {
 
 #[derive(Debug, Deserialize)]
 pub struct SettledBatchAuctionModel {
-    pub orders: HashMap<String, ExecutedOrderModel>,
-    pub uniswaps: HashMap<String, UpdatedUniswapModel>,
+    pub orders: HashMap<usize, ExecutedOrderModel>,
+    pub uniswaps: HashMap<usize, UpdatedUniswapModel>,
     pub ref_token: H160,
-    pub prices: HashMap<String, Price>,
+    pub prices: HashMap<H160, Price>,
 }
 
 impl SettledBatchAuctionModel {

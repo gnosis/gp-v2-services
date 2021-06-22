@@ -7,7 +7,6 @@ use anyhow::{anyhow, ensure, Result};
 use itertools::Itertools;
 use model::order::OrderKind;
 use primitive_types::{H160, U256};
-use std::str::FromStr;
 use std::{
     collections::{hash_map::Entry, HashMap},
     iter,
@@ -16,7 +15,6 @@ use std::{
 // To send an instance to the solver we need to identify tokens and orders through strings. This
 // struct combines the created model and a mapping of those identifiers to their original value.
 pub struct SettlementContext {
-    // pub tokens: Vec<H160>,
     pub limit_orders: HashMap<usize, LimitOrder>,
     pub amm_orders: HashMap<usize, AmmOrder>,
 }
@@ -96,7 +94,7 @@ impl IntermediateSettlement {
 
 fn match_prepared_and_settled_orders(
     mut prepared_orders: HashMap<usize, LimitOrder>,
-    settled_orders: HashMap<String, ExecutedOrderModel>,
+    settled_orders: HashMap<usize, ExecutedOrderModel>,
 ) -> Result<Vec<ExecutedLimitOrder>> {
     settled_orders
         .into_iter()
@@ -105,7 +103,7 @@ fn match_prepared_and_settled_orders(
         })
         .map(|(index, settled)| {
             let prepared = prepared_orders
-                .remove(&usize::from_str(&index).expect("Index String not parsable."))
+                .remove(&index)
                 .ok_or_else(|| anyhow!("invalid order {}", index))?;
             Ok(ExecutedLimitOrder {
                 order: prepared,
@@ -118,7 +116,7 @@ fn match_prepared_and_settled_orders(
 
 fn match_prepared_and_settled_amms(
     mut prepared_orders: HashMap<usize, AmmOrder>,
-    settled_orders: HashMap<String, UpdatedUniswapModel>,
+    settled_orders: HashMap<usize, UpdatedUniswapModel>,
 ) -> Result<Vec<ExecutedAmm>> {
     settled_orders
         .into_iter()
@@ -126,7 +124,7 @@ fn match_prepared_and_settled_amms(
         .sorted_by(|a, b| a.1.exec_plan.cmp(&b.1.exec_plan))
         .map(|(index, settled)| {
             let prepared = prepared_orders
-                .remove(&usize::from_str(&index).expect("Index string not parsable."))
+                .remove(&index)
                 .ok_or_else(|| anyhow!("invalid amm {}", index))?;
             let tokens = prepared.tokens.get();
             let updates = (settled.balance_update1, settled.balance_update2);
@@ -155,17 +153,8 @@ fn match_prepared_and_settled_amms(
 fn match_settled_prices(
     executed_limit_orders: &[ExecutedLimitOrder],
     executed_amms: &[ExecutedAmm],
-    solver_prices: HashMap<String, Price>,
+    solver_prices: HashMap<H160, Price>,
 ) -> Result<HashMap<H160, U256>> {
-    // Remove the indirection over the token string index from the solver prices.
-    let solver_prices: HashMap<H160, Price> = solver_prices
-        .into_iter()
-        .map(|(address_string, price)| {
-            let token = H160::from_str(&address_string).expect("token string not parsable.");
-            Ok((token, price))
-        })
-        .collect::<Result<_>>()?;
-
     let mut prices = HashMap::new();
     let executed_tokens = executed_limit_orders
         .iter()
@@ -203,14 +192,11 @@ mod tests {
     use crate::liquidity::tests::CapturingSettlementHandler;
     use maplit::hashmap;
     use model::TokenPair;
-    use std::str::FromStr;
 
     #[test]
     fn convert_settlement_() {
-        let token_0 = "0x0000000000000000000000000000000000000000";
-        let token_1 = "0x0000000000000000000000000000000000000001";
-        let t0 = H160::from_str(token_0).unwrap();
-        let t1 = H160::from_str(token_1).unwrap();
+        let t0 = H160::zero();
+        let t1 = H160::from_low_u64_be(1);
 
         let limit_handler = CapturingSettlementHandler::arc();
         let limit_order = LimitOrder {
@@ -248,10 +234,10 @@ mod tests {
             }),
         };
         let settled = SettledBatchAuctionModel {
-            orders: hashmap! { "0".to_string() => executed_order },
-            uniswaps: hashmap! { "0".to_string() => updated_uniswap },
+            orders: hashmap! { 0 => executed_order },
+            uniswaps: hashmap! { 0 => updated_uniswap },
             ref_token: t0,
-            prices: hashmap! { String::from(token_0) => Price(10.0), String::from(token_1) => Price(11.0) },
+            prices: hashmap! { t0 => Price(10.0), t1 => Price(11.0) },
         };
 
         let prepared = SettlementContext {
