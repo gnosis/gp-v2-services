@@ -27,9 +27,9 @@ pub struct OrderModel {
 
 #[derive(Debug, Serialize)]
 pub struct PoolTokenData {
-    #[serde(with = "serde_with::rust::display_fromstr")]
+    #[serde(with = "u256_decimal")]
     pub balance: U256,
-    #[serde(with = "serde_with::rust::display_fromstr")]
+    #[serde(with = "u256_decimal")]
     pub weight: U256,
 }
 
