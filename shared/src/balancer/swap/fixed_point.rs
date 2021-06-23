@@ -5,12 +5,14 @@
 
 use super::error::Error;
 use anyhow::{anyhow, bail};
+use bigdecimal::BigDecimal;
 use ethcontract::U256;
 use lazy_static::lazy_static;
 use std::{
     fmt::{self, Debug, Formatter},
     str::FromStr,
 };
+use crate::conversions::u256_to_big_decimal;
 
 mod logexpmath;
 
@@ -36,9 +38,9 @@ impl From<usize> for Bfp {
     }
 }
 
-impl From<Bfp> for usize {
+impl From<Bfp> for BigDecimal {
     fn from(num: Bfp) -> Self {
-        num.as_uint256().checked_div(*ONE_18).unwrap().as_usize()
+        u256_to_big_decimal(&num.as_uint256()) / u256_to_big_decimal(&*ONE_18)
     }
 }
 
@@ -164,6 +166,7 @@ impl Bfp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bigdecimal::Zero;
 
     #[test]
     fn parsing() {
@@ -302,5 +305,13 @@ mod tests {
             "1.000000000000000001".parse::<Bfp>().unwrap().complement(),
             Bfp::zero()
         );
+    }
+
+    #[test]
+    fn to_big_decimal() {
+        assert_eq!(BigDecimal::from(Bfp::zero()), BigDecimal::zero());
+        assert_eq!(BigDecimal::from(Bfp::one()), BigDecimal::from(1));
+        assert_eq!(BigDecimal::from(Bfp::from(500)), BigDecimal::from(500));
+        // TODO - not sure how high this can go.
     }
 }

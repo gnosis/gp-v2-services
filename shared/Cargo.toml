@@ -10,6 +10,7 @@ anyhow = "1.0"
 assert_approx_eq = "1.1"
 async-trait = "0.1"
 atty = "0.2"
+bigdecimal = "0.2"
 contracts = { path = "../contracts" }
 derivative = "2.2"
 ethcontract = { version = "0.12.2", default-features = false }
