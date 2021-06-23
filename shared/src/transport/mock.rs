@@ -5,6 +5,7 @@ use ethcontract::{
     futures::future::{self, Ready},
     jsonrpc::{Call, Id, MethodCall, Params},
     web3::{self, BatchTransport, RequestId, Transport},
+    Web3,
 };
 use serde_json::Value;
 use std::{
@@ -14,6 +15,10 @@ use std::{
         Arc, Mutex, MutexGuard,
     },
 };
+
+pub fn web3() -> Web3<MockTransport> {
+    Web3::new(MockTransport::new())
+}
 
 /// An intermediate trait used for `mockall` to automatically generate a mock
 /// transport for us.
