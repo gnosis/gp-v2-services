@@ -312,5 +312,12 @@ mod tests {
         assert_eq!(BigDecimal::from(Bfp::zero()), BigDecimal::zero());
         assert_eq!(BigDecimal::from(Bfp::one()), BigDecimal::from(1));
         assert_eq!(BigDecimal::from(Bfp::from(500)), BigDecimal::from(500));
+        assert_eq!(
+            BigDecimal::from(Bfp::from_wei(U256::MAX)),
+            BigDecimal::from_str(
+                "115792089237316195423570985008687907853269984665640564039457.584007913129639935"
+            )
+            .unwrap()
+        );
     }
 }
