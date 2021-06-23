@@ -149,8 +149,8 @@ struct Arguments {
     )]
     gas_price_cap: f64,
 
-    /// The maximum gas price the solver is willing to pay in a settlement
-    #[structopt(long, env, default_value = "0")]
+    /// The slippage tolerance we apply to the price quoted by Paraswap
+    #[structopt(long, env, default_value = "10")]
     paraswap_slippage_bps: usize,
 }
 
