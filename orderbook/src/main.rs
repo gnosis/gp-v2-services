@@ -23,7 +23,7 @@ use shared::{
         trace_call::TraceCallDetector,
     },
     current_block::current_block_stream,
-    http_transport::HttpTransport,
+    transport::http::HttpTransport,
     maintenance::ServiceMaintenance,
     pool_aggregating::{self, PoolAggregator},
     pool_cache::PoolCache,
