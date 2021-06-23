@@ -36,6 +36,12 @@ impl From<usize> for Bfp {
     }
 }
 
+impl From<Bfp> for usize {
+    fn from(num: Bfp) -> Self {
+        num.as_uint256().checked_div(*ONE_18).unwrap().as_usize()
+    }
+}
+
 impl FromStr for Bfp {
     type Err = anyhow::Error;
 
@@ -90,10 +96,12 @@ impl Bfp {
         self.0.is_zero()
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn add(self, other: Self) -> Result<Self, Error> {
         Ok(Self(self.0.checked_add(other.0).ok_or(Error::AddOverflow)?))
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn sub(self, other: Self) -> Result<Self, Error> {
         Ok(Self(self.0.checked_sub(other.0).ok_or(Error::SubOverflow)?))
     }
