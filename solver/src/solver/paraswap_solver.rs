@@ -29,6 +29,7 @@ pub struct ParaswapSolver<F> {
     token_info: Arc<dyn TokenInfoFetching>,
     allowance_fetcher: F,
     client: Box<dyn ParaswapApi + Send + Sync>,
+    slippage_bps: usize,
 }
 
 impl ParaswapSolver<GPv2Settlement> {
@@ -36,6 +37,7 @@ impl ParaswapSolver<GPv2Settlement> {
         settlement_contract: GPv2Settlement,
         solver_address: H160,
         token_info: Arc<dyn TokenInfoFetching>,
+        slippage_bps: usize,
     ) -> Self {
         let allowance_fetcher = settlement_contract.clone();
         Self {
@@ -44,6 +46,7 @@ impl ParaswapSolver<GPv2Settlement> {
             token_info,
             allowance_fetcher,
             client: Box::new(DefaultParaswapApi::default()),
+            slippage_bps,
         }
     }
 }
@@ -111,12 +114,11 @@ where
             return Ok(None);
         }
 
-        // 0.1% slippage
         let dest_amount_with_slippage = price_response
             .dest_amount
-            .checked_mul(999.into())
+            .checked_mul((10000 - self.slippage_bps).into())
             .ok_or_else(|| anyhow!("Overflow during slippage computation"))?
-            / 1000;
+            / 10000;
         let transaction_query = TransactionBuilderQuery {
             src_token: order.sell_token,
             dest_token: order.buy_token,
@@ -245,6 +247,7 @@ mod test {
             token_info: Arc::new(token_info),
             allowance_fetcher,
             settlement_contract: dummy_contract!(GPv2Settlement, H160::zero()),
+            slippage_bps: 10,
         };
 
         let order = LimitOrder::default();
@@ -291,6 +294,7 @@ mod test {
             token_info: Arc::new(token_info),
             allowance_fetcher,
             settlement_contract: dummy_contract!(GPv2Settlement, H160::zero()),
+            slippage_bps: 10,
         };
 
         let order_passing_limit = LimitOrder {
@@ -373,6 +377,7 @@ mod test {
             token_info: Arc::new(token_info),
             allowance_fetcher,
             settlement_contract: dummy_contract!(GPv2Settlement, H160::zero()),
+            slippage_bps: 10,
         };
 
         let order = LimitOrder {
