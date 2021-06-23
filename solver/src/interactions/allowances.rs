@@ -178,6 +178,10 @@ mod tests {
             allowances.approve_token(token, 42.into()).unwrap(),
             Approval::Sufficient
         );
+        assert_eq!(
+            allowances.approve_token(token, 100.into()).unwrap(),
+            Approval::Sufficient
+        );
     }
 
     #[test]
