@@ -80,8 +80,8 @@ impl Settleable for LimitOrder {
 impl From<Order> for LimitOrder {
     fn from(order: Order) -> Self {
         use self::offchain_orderbook::normalize_limit_order;
-        use shared::dummy_contract;
         use contracts::WETH9;
+        use shared::dummy_contract;
 
         let native_token = dummy_contract!(WETH9, H160([0x42; 20]));
         normalize_limit_order(order, native_token)

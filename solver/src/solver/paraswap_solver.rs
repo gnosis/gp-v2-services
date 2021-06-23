@@ -182,7 +182,10 @@ mod test {
     use super::api::MockParaswapApi;
     use super::*;
     use mockall::Sequence;
-    use shared::{dummy_contract, token_info::{MockTokenInfoFetching, TokenInfo}};
+    use shared::{
+        dummy_contract,
+        token_info::{MockTokenInfoFetching, TokenInfo},
+    };
 
     #[test]
     fn test_satisfies_limit_price() {
