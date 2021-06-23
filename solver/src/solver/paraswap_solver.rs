@@ -396,4 +396,61 @@ mod test {
         let result = solver.settle_order(order).await.unwrap().unwrap();
         assert_eq!(result.encoder.finish().interactions[1].len(), 1)
     }
+
+    #[tokio::test]
+    async fn test_sets_slippage() {
+        let mut client = Box::new(MockParaswapApi::new());
+        let mut allowance_fetcher = MockAllowanceFetching::new();
+        let mut token_info = MockTokenInfoFetching::new();
+
+        let sell_token = H160::from_low_u64_be(1);
+        let buy_token = H160::from_low_u64_be(1);
+
+        client.expect_price().returning(|_| {
+            Ok(PriceResponse {
+                price_route_raw: Default::default(),
+                src_amount: 100.into(),
+                dest_amount: 99.into(),
+            })
+        });
+
+        // Check slippage is applied to PriceResponse
+        client.expect_transaction().returning(|transaction| {
+            assert_eq!(transaction.dest_amount, 89.into());
+            Ok(Default::default())
+        });
+
+        allowance_fetcher
+            .expect_existing_allowance()
+            .returning(|_, _| Ok(U256::zero()));
+
+        token_info.expect_get_token_infos().returning(move |_| {
+            hashmap! {
+                sell_token => TokenInfo { decimals: Some(18)},
+                buy_token => TokenInfo { decimals: Some(18)},
+            }
+        });
+
+        let solver = ParaswapSolver {
+            client,
+            solver_address: Default::default(),
+            token_info: Arc::new(token_info),
+            allowance_fetcher,
+            settlement_contract: GPv2Settlement::at(&testutil::dummy_web3(), H160::zero()),
+            slippage_bps: 1000, // 10%
+        };
+
+        let order = LimitOrder {
+            sell_token,
+            buy_token,
+            sell_amount: 100.into(),
+            buy_amount: 90.into(),
+            kind: model::order::OrderKind::Sell,
+            ..Default::default()
+        };
+
+        let result = solver.settle_order(order).await.unwrap();
+        // Actual assertion is inside the client's `expect_transaction` mock
+        assert!(result.is_some(),);
+    }
 }
