@@ -4,6 +4,7 @@
 //! https://github.com/balancer-labs/balancer-v2-monorepo/blob/6c9e24e22d0c46cca6dd15861d3d33da61a60b98/pkg/solidity-utils/contracts/math/FixedPoint.sol
 
 use super::error::Error;
+use crate::conversions::u256_to_big_decimal;
 use anyhow::{anyhow, bail};
 use bigdecimal::BigDecimal;
 use ethcontract::U256;
@@ -12,7 +13,6 @@ use std::{
     fmt::{self, Debug, Formatter},
     str::FromStr,
 };
-use crate::conversions::u256_to_big_decimal;
 
 mod logexpmath;
 
@@ -312,6 +312,5 @@ mod tests {
         assert_eq!(BigDecimal::from(Bfp::zero()), BigDecimal::zero());
         assert_eq!(BigDecimal::from(Bfp::one()), BigDecimal::from(1));
         assert_eq!(BigDecimal::from(Bfp::from(500)), BigDecimal::from(500));
-        // TODO - not sure how high this can go.
     }
 }

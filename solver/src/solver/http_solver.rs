@@ -110,7 +110,7 @@ impl HttpSolver {
                 Liquidity::ConstantProduct(amm) => {
                     vec![amm.tokens.get().0, amm.tokens.get().1]
                 }
-                _ => vec![]
+                _ => vec![],
             })
             .collect::<HashSet<_>>()
             .into_iter()
@@ -348,7 +348,7 @@ fn split_liquidity(liquidity: Vec<Liquidity>) -> (Vec<LimitOrder>, Vec<ConstantP
         match order {
             Liquidity::Limit(order) => limit_orders.push(order),
             Liquidity::ConstantProduct(order) => constant_product_orders.push(order),
-            Liquidity::WeightedProduct(_) => () // TODO - include something here.
+            Liquidity::WeightedProduct(_) => (), // TODO - include something here.
         }
     }
     (limit_orders, constant_product_orders)
