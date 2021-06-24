@@ -29,9 +29,8 @@ pub struct DefaultParaswapApi {
 #[async_trait::async_trait]
 impl ParaswapApi for DefaultParaswapApi {
     async fn price(&self, query: PriceQuery) -> Result<PriceResponse> {
-        tracing::debug!("Querying Paraswap API (price) with {:?}", query);
         let url = query.into_url();
-        tracing::debug!("Paraswap API (price) query url: {}", url);
+        tracing::debug!("Querying Paraswap API (price) for url {}", url);
         let text = reqwest::get(url)
             .await
             .context("PriceQuery failed")?
