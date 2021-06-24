@@ -319,5 +319,9 @@ mod tests {
             )
             .unwrap()
         );
+        assert_eq!(
+            BigDecimal::from("0.4".parse::<Bfp>().unwrap()),
+            "0.4".parse::<BigDecimal>().unwrap()
+        );
     }
 }
