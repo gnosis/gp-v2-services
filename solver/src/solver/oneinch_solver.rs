@@ -95,6 +95,12 @@ where
         let spender = self.client.get_spender().await?;
         let sell_token = ERC20::at(&self.web3(), order.sell_token);
 
+        // Fetching allowance before making the SwapQuery so that the Swap info is as recent as possible
+        let existing_allowance = self
+            .allowance_fetcher
+            .existing_allowance(order.sell_token, spender.address)
+            .await?;
+
         let query = SwapQuery {
             from_token_address: order.sell_token,
             to_token_address: order.buy_token,
@@ -128,11 +134,6 @@ where
         });
 
         settlement.with_liquidity(&order, order.sell_amount)?;
-
-        let existing_allowance = self
-            .allowance_fetcher
-            .existing_allowance(order.sell_token, spender.address)
-            .await?;
 
         if existing_allowance < order.sell_amount {
             settlement
@@ -303,7 +304,11 @@ mod tests {
     #[tokio::test]
     async fn filters_disabled_protocols() {
         let mut client = Box::new(MockOneInchClient::new());
-        let allowance_fetcher = MockAllowanceFetching::new();
+        let mut allowance_fetcher = MockAllowanceFetching::new();
+
+        allowance_fetcher
+            .expect_existing_allowance()
+            .returning(|_, _| Ok(U256::zero()));
 
         client.expect_get_protocols().returning(|| {
             Ok(Protocols {
@@ -389,6 +394,7 @@ mod tests {
             buy_token,
             sell_amount: 100.into(),
             buy_amount: 90.into(),
+            kind: OrderKind::Sell,
             ..Default::default()
         };
 
@@ -401,10 +407,10 @@ mod tests {
         assert_eq!(result.encoder.finish().interactions[1].len(), 1)
     }
 
-    #[tokio::test]
-    async fn returns_error_on_non_mainnet() {
+    #[test]
+    fn returns_error_on_non_mainnet() {
         let chain_id = 42;
-        let settlement = GPv2Settlement::deployed(&dummy::web3()).await.unwrap();
+        let settlement = GPv2Settlement::at(&dummy::web3(), H160::zero());
 
         assert!(
             OneInchSolver::with_disabled_protocols(settlement, chain_id, iter::empty()).is_err()
