@@ -436,7 +436,7 @@ mod test {
             solver_address: Default::default(),
             token_info: Arc::new(token_info),
             allowance_fetcher,
-            settlement_contract: GPv2Settlement::at(&testutil::dummy_web3(), H160::zero()),
+            settlement_contract: dummy_contract!(GPv2Settlement, H160::zero()),
             slippage_bps: 1000, // 10%
         };
 
