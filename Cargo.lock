@@ -2502,6 +2502,7 @@ dependencies = [
  "ethcontract",
  "futures",
  "gas-estimation",
+ "hex",
  "hex-literal",
  "itertools 0.10.1",
  "lazy_static",
