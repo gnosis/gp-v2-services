@@ -107,12 +107,6 @@ impl Default for LimitOrder {
     }
 }
 
-// pub struct AmmOrder<T> {
-//     pub reserves: HashMap<H160, T>,
-//     pub fee: Ratio<u32>,
-//     pub settlement_handling: Arc<dyn SettlementHandling<Self>>,
-// }
-
 /// 2 sided constant product automated market maker with equal reserve value and a trading fee (e.g. Uniswap, Sushiswap)
 #[derive(Clone)]
 pub struct ConstantProductOrder {
