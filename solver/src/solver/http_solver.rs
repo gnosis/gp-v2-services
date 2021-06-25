@@ -9,7 +9,10 @@ use crate::{
 };
 use ::model::order::OrderKind;
 use anyhow::{ensure, Context, Result};
+use bigdecimal::BigDecimal;
+use ethcontract::U256;
 use futures::join;
+use lazy_static::lazy_static;
 use num::{BigRational, ToPrimitive};
 use primitive_types::H160;
 use reqwest::{header::HeaderValue, Client, Url};
@@ -24,8 +27,10 @@ use std::{
 
 // Estimates from multivariate linear regression here:
 // https://docs.google.com/spreadsheets/d/13UeUQ9DA4bHlcy9-i8d4nSLlCxSfjcXpTelvXYzyJzQ/edit?usp=sharing
-const GAS_PER_ORDER: u128 = 66315;
-const GAS_PER_UNISWAP: u128 = 94696;
+lazy_static! {
+    static ref GAS_PER_ORDER: U256 = U256::from(66315);
+    static ref GAS_PER_UNISWAP: U256 = U256::from(94696);
+}
 
 // TODO: exclude partially fillable orders
 // TODO: set settlement.fee_factor
@@ -92,15 +97,7 @@ impl HttpSolver {
         }
     }
 
-    // Solver api requires specifying token as strings. We use the address as a string for now.
-    // Later we could use a more meaningful name like the token symbol but we have to ensure
-    // uniqueness.
-    fn token_to_string(&self, token: &H160) -> String {
-        // Token names must start with a letter.
-        format!("t{:x}", token)
-    }
-
-    fn map_tokens_for_solver(&self, orders: &[Liquidity]) -> HashMap<String, H160> {
+    fn map_tokens_for_solver(&self, orders: &[Liquidity]) -> Vec<H160> {
         orders
             .iter()
             .flat_map(|liquidity| match liquidity {
@@ -114,28 +111,25 @@ impl HttpSolver {
             })
             .collect::<HashSet<_>>()
             .into_iter()
-            .map(|token| (self.token_to_string(&token), token))
             .collect()
     }
 
-    async fn token_models(
+    fn token_models(
         &self,
-        tokens: &HashMap<String, H160>,
         token_infos: &HashMap<H160, TokenInfo>,
         price_estimates: &HashMap<H160, Result<BigRational, PriceEstimationError>>,
-    ) -> HashMap<String, TokenInfoModel> {
-        tokens
+    ) -> HashMap<H160, TokenInfoModel> {
+        token_infos
             .iter()
-            .map(|(index, address)| {
-                let token_info = token_infos[address];
+            .map(|(address, token_info)| {
                 let external_price = price_estimates[address]
                     .as_ref()
                     .ok()
                     .and_then(|price| price.to_f64());
                 (
-                    index.clone(),
+                    *address,
                     TokenInfoModel {
-                        decimals: token_info.decimals.map(|d| d as u32),
+                        decimals: token_info.decimals,
                         external_price,
                         normalize_priority: Some(if &self.native_token == address { 1 } else { 0 }),
                     },
@@ -144,76 +138,71 @@ impl HttpSolver {
             .collect()
     }
 
-    fn map_orders_for_solver(&self, orders: Vec<LimitOrder>) -> HashMap<String, LimitOrder> {
-        orders
-            .into_iter()
-            .enumerate()
-            .map(|(index, order)| (index.to_string(), order))
-            .collect()
+    fn map_orders_for_solver(&self, orders: Vec<LimitOrder>) -> HashMap<usize, LimitOrder> {
+        orders.into_iter().enumerate().collect()
     }
 
-    async fn order_models(
+    fn order_models(
         &self,
-        orders: &HashMap<String, LimitOrder>,
+        orders: &HashMap<usize, LimitOrder>,
         gas_price: f64,
-    ) -> Result<HashMap<String, OrderModel>> {
-        let order_cost = self.order_cost(gas_price).await;
-        let mut result: HashMap<String, OrderModel> = HashMap::new();
+    ) -> HashMap<usize, OrderModel> {
+        let order_cost = self.order_cost(gas_price);
+        let mut result: HashMap<usize, OrderModel> = HashMap::new();
         for (index, order) in orders {
-            let order_fee = self.order_fee(&order)?;
+            let order_fee = self.order_fee(&order);
             let order = OrderModel {
-                sell_token: self.token_to_string(&order.sell_token),
-                buy_token: self.token_to_string(&order.buy_token),
+                sell_token: order.sell_token,
+                buy_token: order.buy_token,
                 sell_amount: order.sell_amount,
                 buy_amount: order.buy_amount,
                 allow_partial_fill: order.partially_fillable,
                 is_sell_order: matches!(order.kind, OrderKind::Sell),
                 fee: FeeModel {
                     amount: order_fee,
-                    token: self.token_to_string(&order.sell_token),
+                    token: order.sell_token,
                 },
                 cost: CostModel {
                     amount: order_cost,
-                    token: self.token_to_string(&self.native_token),
+                    token: self.native_token,
                 },
             };
-            result.insert(index.clone(), order);
+            result.insert(*index, order);
         }
-        Ok(result)
+        result
     }
 
     fn map_constant_product_orders_for_solver(
         &self,
         orders: Vec<ConstantProductOrder>,
-    ) -> HashMap<String, ConstantProductOrder> {
-        orders
-            .into_iter()
-            .enumerate()
-            .map(|(index, amm)| (index.to_string(), amm))
-            .collect()
+    ) -> HashMap<usize, ConstantProductOrder> {
+        orders.into_iter().enumerate().collect()
     }
 
-    async fn amm_models(
+    fn amm_models(
         &self,
-        amms: &HashMap<String, ConstantProductOrder>,
+        amms: &HashMap<usize, ConstantProductOrder>,
         gas_price: f64,
-    ) -> HashMap<String, UniswapModel> {
-        let uniswap_cost = self.uniswap_cost(gas_price).await;
+    ) -> HashMap<usize, AmmModel> {
+        let uniswap_cost = self.uniswap_cost(gas_price);
         amms.iter()
             .map(|(index, amm)| {
-                let uniswap = UniswapModel {
-                    token1: self.token_to_string(&amm.tokens.get().0),
-                    token2: self.token_to_string(&amm.tokens.get().1),
-                    balance1: amm.reserves.0,
-                    balance2: amm.reserves.1,
-                    fee: *amm.fee.numer() as f64 / *amm.fee.denom() as f64,
+                let mut reserves = HashMap::new();
+                reserves.insert(amm.tokens.get().0, U256::from(amm.reserves.0));
+                reserves.insert(amm.tokens.get().1, U256::from(amm.reserves.1));
+
+                let uniswap = AmmModel {
+                    parameters: AmmParameters::ConstantProduct(ConstantProductPoolParameters {
+                        reserves,
+                    }),
+                    fee: BigDecimal::from(*amm.fee.numer()) / BigDecimal::from(*amm.fee.denom()),
                     cost: CostModel {
                         amount: uniswap_cost,
-                        token: self.token_to_string(&self.native_token),
+                        token: self.native_token,
                     },
                     mandatory: false,
                 };
-                (index.clone(), uniswap)
+                (*index, uniswap)
             })
             .collect()
     }
@@ -223,22 +212,16 @@ impl HttpSolver {
         liquidity: Vec<Liquidity>,
         gas_price: f64,
     ) -> Result<(BatchAuctionModel, SettlementContext)> {
-        // To send an instance to the solver we need to identify tokens and orders through strings.
-        // In order to map back and forth we store the original tokens, orders and the models for
-        // via the same mapping.
         let tokens = self.map_tokens_for_solver(liquidity.as_slice());
 
-        let addresses: Vec<H160> = tokens.values().into_iter().cloned().collect();
-
         let (token_infos, price_estimates) = join!(
-            self.token_info_fetcher
-                .get_token_infos(addresses.as_slice()),
+            self.token_info_fetcher.get_token_infos(tokens.as_slice()),
             self.price_estimator
-                .estimate_prices(addresses.as_slice(), addresses[0])
+                .estimate_prices(tokens.as_slice(), tokens[0])
         );
 
         let price_estimates: HashMap<H160, Result<BigRational, _>> =
-            addresses.iter().cloned().zip(price_estimates).collect();
+            tokens.iter().cloned().zip(price_estimates).collect();
 
         let mut orders = split_liquidity(liquidity);
 
@@ -251,21 +234,18 @@ impl HttpSolver {
         );
         let limit_orders = self.map_orders_for_solver(orders.0);
         let constant_product_orders = self.map_constant_product_orders_for_solver(orders.1);
-        let token_models = self
-            .token_models(&tokens, &token_infos, &price_estimates)
-            .await;
-        let order_models = self.order_models(&limit_orders, gas_price).await?;
-        let uniswap_models = self.amm_models(&constant_product_orders, gas_price).await;
+        let token_models = self.token_models(&token_infos, &price_estimates);
+        let order_models = self.order_models(&limit_orders, gas_price);
+        let amm_models = self.amm_models(&constant_product_orders, gas_price);
         let model = BatchAuctionModel {
             tokens: token_models,
             orders: order_models,
-            uniswaps: uniswap_models,
+            amms: amm_models,
             metadata: Some(MetadataModel {
                 environment: Some(self.network_id.clone()),
             }),
         };
         let context = SettlementContext {
-            tokens,
             limit_orders,
             constant_product_orders,
         };
@@ -315,19 +295,17 @@ impl HttpSolver {
             .with_context(|| format!("failed to decode response json, {}", context()))
     }
 
-    async fn order_cost(&self, gas_price: f64) -> u128 {
-        gas_price as u128 * GAS_PER_ORDER
+    fn order_cost(&self, gas_price: f64) -> U256 {
+        U256::from_f64_lossy(gas_price) * *GAS_PER_ORDER
     }
 
-    async fn uniswap_cost(&self, gas_price: f64) -> u128 {
-        gas_price as u128 * GAS_PER_UNISWAP
+    fn uniswap_cost(&self, gas_price: f64) -> U256 {
+        U256::from_f64_lossy(gas_price) * *GAS_PER_UNISWAP
     }
 
-    fn order_fee(&self, order: &LimitOrder) -> Result<u128> {
-        (order.fee_amount.to_f64_lossy() / self.fee_discount_factor)
-            .ceil()
-            .to_u128()
-            .context("failed to compute order fee")
+    fn order_fee(&self, order: &LimitOrder) -> U256 {
+        let ceiled_div = (order.fee_amount.to_f64_lossy() / self.fee_discount_factor).ceil();
+        U256::from_f64_lossy(ceiled_div)
     }
 
     pub fn generate_instance_name(&self) -> String {
@@ -435,13 +413,16 @@ mod tests {
         let url = std::env::var("GP_V2_OPTIMIZER_URL")
             .unwrap_or_else(|_| "http://localhost:8000".to_string());
 
+        let buy_token = H160::from_low_u64_be(1337);
+        let sell_token = H160::from_low_u64_be(43110);
+
         let mut mock_token_info_fetcher = MockTokenInfoFetching::new();
         mock_token_info_fetcher
             .expect_get_token_infos()
             .return_once(move |_| {
                 hashmap! {
-                    H160::zero() => TokenInfo { decimals: Some(18)},
-                    H160::from_low_u64_be(1) => TokenInfo { decimals: Some(18)},
+                    buy_token => TokenInfo { decimals: Some(18)},
+                    sell_token => TokenInfo { decimals: Some(18)},
                 }
             });
         let mock_token_info_fetcher: Arc<dyn TokenInfoFetching> = Arc::new(mock_token_info_fetcher);
@@ -468,8 +449,8 @@ mod tests {
         let base = |x: u128| x * 10u128.pow(18);
         let orders = vec![
             Liquidity::Limit(LimitOrder {
-                buy_token: H160::zero(),
-                sell_token: H160::from_low_u64_be(1),
+                buy_token,
+                sell_token,
                 buy_amount: base(1).into(),
                 sell_amount: base(2).into(),
                 kind: OrderKind::Sell,
@@ -479,7 +460,7 @@ mod tests {
                 id: "0".to_string(),
             }),
             Liquidity::ConstantProduct(ConstantProductOrder {
-                tokens: TokenPair::new(H160::zero(), H160::from_low_u64_be(1)).unwrap(),
+                tokens: TokenPair::new(buy_token, sell_token).unwrap(),
                 reserves: (base(100), base(100)),
                 fee: Ratio::new(0, 1),
                 settlement_handling: CapturingSettlementHandler::arc(),
@@ -493,7 +474,7 @@ mod tests {
         assert_eq!(exec_order.exec_sell_amount.as_u128(), base(2));
         assert!(exec_order.exec_buy_amount.as_u128() > 0);
 
-        let uniswap = settled.uniswaps.values().next().unwrap();
+        let uniswap = settled.amms.values().next().unwrap();
         assert!(uniswap.balance_update1 < 0);
         assert_eq!(uniswap.balance_update2 as u128, base(2));
         assert!(uniswap.exec_plan.is_some());
