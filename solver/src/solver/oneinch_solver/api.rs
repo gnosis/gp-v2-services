@@ -4,7 +4,7 @@
 //! <https://docs.1inch.io/api/quote-swap>
 //! <https://api.1inch.exchange/swagger/ethereum/>
 
-use anyhow::{ensure, Result};
+use anyhow::{ensure, Context, Result};
 use ethcontract::{H160, U256};
 use reqwest::{Client, IntoUrl, Url};
 use serde::{
@@ -245,14 +245,28 @@ pub struct Protocols {
     pub protocols: Vec<String>,
 }
 
+// Mockable version of API Client
+#[cfg_attr(test, mockall::automock)]
+#[async_trait::async_trait]
+pub trait OneInchClient: Send + Sync + std::fmt::Debug {
+    /// Retrieves a swap for the specified parameters from the 1Inch API.
+    async fn get_swap(&self, query: SwapQuery) -> Result<Swap>;
+
+    /// Retrieves the address of the spender to use for token approvals.
+    async fn get_spender(&self) -> Result<Spender>;
+
+    /// Retrieves a list of the on-chain protocols supported by 1Inch.
+    async fn get_protocols(&self) -> Result<Protocols>;
+}
+
 /// 1Inch API Client implementation.
 #[derive(Debug)]
-pub struct OneInchClient {
+pub struct OneInchClientImpl {
     client: Client,
     base_url: Url,
 }
 
-impl OneInchClient {
+impl OneInchClientImpl {
     /// Create a new 1Inch HTTP API client with the specified base URL.
     pub fn new(base_url: impl IntoUrl) -> Result<Self> {
         Ok(Self {
@@ -260,38 +274,42 @@ impl OneInchClient {
             base_url: base_url.into_url()?,
         })
     }
+}
 
-    /// Retrieves a swap for the specified parameters from the 1Inch API.
-    pub async fn get_swap(&self, query: SwapQuery) -> Result<Swap> {
-        Ok(self
-            .client
-            .get(query.into_url(&self.base_url))
-            .send()
-            .await?
-            .json()
-            .await?)
+#[async_trait::async_trait]
+impl OneInchClient for OneInchClientImpl {
+    async fn get_swap(&self, query: SwapQuery) -> Result<Swap> {
+        logged_query(&self.client, query.into_url(&self.base_url)).await
     }
 
-    /// Retrieves the address of the spender to use for token approvals.
-    pub async fn get_spender(&self) -> Result<Spender> {
+    async fn get_spender(&self) -> Result<Spender> {
         let url = self
             .base_url
             .join("v3.0/1/approve/spender")
             .expect("unexpectedly invalid URL");
-        Ok(self.client.get(url).send().await?.json().await?)
+        logged_query(&self.client, url).await
     }
 
-    /// Retrieves a list of the on-chain protocols supported by 1Inch.
-    pub async fn get_protocols(&self) -> Result<Protocols> {
+    async fn get_protocols(&self) -> Result<Protocols> {
         let url = self
             .base_url
             .join("v3.0/1/protocols")
             .expect("unexpectedly invalid URL");
-        Ok(self.client.get(url).send().await?.json().await?)
+        logged_query(&self.client, url).await
     }
 }
 
-impl Default for OneInchClient {
+async fn logged_query<D>(client: &Client, url: Url) -> Result<D>
+where
+    D: for<'de> Deserialize<'de>,
+{
+    tracing::debug!("Query 1inch API for url {}", url);
+    let response = client.get(url).send().await?.text().await;
+    tracing::debug!("Response from 1inch API: {:?}", response);
+    serde_json::from_str(&response?).context("1inch result parsing failed")
+}
+
+impl Default for OneInchClientImpl {
     fn default() -> Self {
         Self::new("https://api.1inch.exchange/").expect("unexpected error parsing URL")
     }
@@ -509,7 +527,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn oneinch_swap() {
-        let swap = OneInchClient::default()
+        let swap = OneInchClientImpl::default()
             .get_swap(SwapQuery {
                 from_token_address: shared::addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
                 to_token_address: shared::addr!("111111111117dc0aa78b770fa6a738034120c302"),
@@ -531,7 +549,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn oneinch_swap_fully_parameterized() {
-        let swap = OneInchClient::default()
+        let swap = OneInchClientImpl::default()
             .get_swap(SwapQuery {
                 from_token_address: shared::addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
                 to_token_address: shared::addr!("a3BeD4E1c75D00fa6f4E5E6922DB7261B5E9AcD2"),
@@ -553,14 +571,14 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn oneinch_protocols() {
-        let protocols = OneInchClient::default().get_protocols().await.unwrap();
+        let protocols = OneInchClientImpl::default().get_protocols().await.unwrap();
         println!("{:#?}", protocols);
     }
 
     #[tokio::test]
     #[ignore]
     async fn oneinch_spender_address() {
-        let spender = OneInchClient::default().get_spender().await.unwrap();
+        let spender = OneInchClientImpl::default().get_spender().await.unwrap();
         println!("{:#?}", spender);
     }
 }

@@ -29,11 +29,14 @@ pub struct DefaultParaswapApi {
 #[async_trait::async_trait]
 impl ParaswapApi for DefaultParaswapApi {
     async fn price(&self, query: PriceQuery) -> Result<PriceResponse> {
-        let text = reqwest::get(query.into_url())
+        let url = query.into_url();
+        tracing::debug!("Querying Paraswap API (price) for url {}", url);
+        let text = reqwest::get(url)
             .await
             .context("PriceQuery failed")?
             .text()
             .await?;
+        tracing::debug!("Response from Paraswap API (price): {}", text);
 
         serde_json::from_str::<PriceResponse>(&text)
             .context(format!("PriceQuery result parsing failed: {}", text))
@@ -42,6 +45,7 @@ impl ParaswapApi for DefaultParaswapApi {
         &self,
         query: TransactionBuilderQuery,
     ) -> Result<TransactionBuilderResponse> {
+        tracing::debug!("Querying Paraswap API (transaction) with {:?}", query);
         let text = query
             .into_request(&self.client)
             .send()
@@ -49,6 +53,8 @@ impl ParaswapApi for DefaultParaswapApi {
             .context("TransactionBuilderQuery failed")?
             .text()
             .await?;
+        tracing::debug!("Response from Paraswap API (transaction): {}", text);
+
         serde_json::from_str::<TransactionBuilderResponse>(&text).context(format!(
             "TransactionBuilderQuery result parsing failed: {}",
             text
@@ -182,6 +188,7 @@ impl TransactionBuilderQuery {
             .expect("unexpectedly invalid URL segment");
         url.query_pairs_mut().append_pair("skipChecks", "true");
 
+        tracing::debug!("Paraswap API (transaction) query url: {}", url);
         client.post(url).json(&self)
     }
 }
@@ -220,7 +227,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
-    async fn test_api_e2e() {
+    async fn test_api_e2e_sell() {
         let from = shared::addr!("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
         let to = shared::addr!("6810e776880c02933d47db1b9fc05908e5386b96");
         let price_query = PriceQuery {
@@ -247,6 +254,57 @@ mod tests {
             src_amount: price_response.src_amount,
             // 10% slippage
             dest_amount: price_response.dest_amount * 90 / 100,
+            from_decimals: 18,
+            to_decimals: 18,
+            price_route: price_response.price_route_raw,
+            user_address: shared::addr!("E0B3700e0aadcb18ed8d4BFF648Bc99896a18ad1"),
+            referrer: "GPv2".to_string(),
+        };
+
+        let client = Client::new();
+        let transaction_response = transaction_query
+            .into_request(&client)
+            .send()
+            .await
+            .unwrap();
+
+        let response_status = transaction_response.status();
+        let response_text = transaction_response.text().await.unwrap();
+        println!("Transaction Response: {}", &response_text);
+
+        assert_eq!(response_status, StatusCode::OK);
+        assert!(serde_json::from_str::<TransactionBuilderResponse>(&response_text).is_ok());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_api_e2e_buy() {
+        let from = shared::addr!("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
+        let to = shared::addr!("6810e776880c02933d47db1b9fc05908e5386b96");
+        let price_query = PriceQuery {
+            from,
+            to,
+            from_decimals: 18,
+            to_decimals: 18,
+            amount: 1_800_000_000_000_000_000_000u128.into(),
+            side: Side::Buy,
+        };
+
+        let price_response: PriceResponse = reqwest::get(price_query.into_url())
+            .await
+            .expect("price query failed")
+            .json()
+            .await
+            .expect("Response is not json");
+
+        println!("Price Response: {:?}", &price_response,);
+
+        let transaction_query = TransactionBuilderQuery {
+            src_token: from,
+            dest_token: to,
+            // 10% slippage
+            src_amount: price_response.src_amount * 110 / 100,
+            dest_amount: price_response.dest_amount,
             from_decimals: 18,
             to_decimals: 18,
             price_route: price_response.price_route_raw,
