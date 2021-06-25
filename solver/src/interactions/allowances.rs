@@ -5,9 +5,9 @@
 use crate::{
     encoding::EncodedInteraction, interactions::Erc20ApproveInteraction, settlement::Interaction,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use contracts::ERC20;
-use ethcontract::{batch::CallBatch, H160, U256};
+use ethcontract::{batch::CallBatch, errors::ExecutionError, H160, U256};
 use maplit::hashset;
 use shared::{dummy_contract, Web3};
 use std::collections::{HashMap, HashSet};
@@ -20,13 +20,13 @@ pub trait AllowanceManaging {
     ///
     /// This can be used to cache allowances for a bunch of tokens so that they
     /// can be used within a context that doesn't allow `async` or errors.
-    async fn get_allowances(&self, tokens: HashSet<H160>, spender: H160) -> Allowances;
+    async fn get_allowances(&self, tokens: HashSet<H160>, spender: H160) -> Result<Allowances>;
 
     /// Returns the approval interaction for the specified token and spender for
     /// at least the specified amount.
     async fn get_approval(&self, token: H160, spender: H160, amount: U256) -> Result<Approval> {
         self.get_allowances(hashset![token], spender)
-            .await
+            .await?
             .approve_token(token, amount)
     }
 }
@@ -106,11 +106,11 @@ pub struct AllowanceManager {
 
 #[async_trait::async_trait]
 impl AllowanceManaging for AllowanceManager {
-    async fn get_allowances(&self, tokens: HashSet<H160>, spender: H160) -> Allowances {
-        Allowances::new(
+    async fn get_allowances(&self, tokens: HashSet<H160>, spender: H160) -> Result<Allowances> {
+        Ok(Allowances::new(
             spender,
-            fetch_allowances(self.web3.clone(), tokens, self.owner, spender).await,
-        )
+            fetch_allowances(self.web3.clone(), tokens, self.owner, spender).await?,
+        ))
     }
 }
 
@@ -119,7 +119,7 @@ async fn fetch_allowances<T>(
     tokens: HashSet<H160>,
     owner: H160,
     spender: H160,
-) -> HashMap<H160, U256>
+) -> Result<HashMap<H160, U256>>
 where
     T: ethcontract::web3::BatchTransport + Send + Sync + 'static,
     T::Out: Send,
@@ -135,12 +135,13 @@ where
         })
         .collect();
 
-    let _ = batch.execute_all(MAX_BATCH_SIZE).await;
+    batch.execute_all(MAX_BATCH_SIZE).await;
 
     let mut allowances = HashMap::new();
     for (token, allowance) in results {
         let allowance = match allowance.await {
             Ok(value) => value,
+            Err(err) if is_batch_error(&err.inner) => bail!(err),
             Err(err) => {
                 tracing::warn!("error retrieving allowance for token {:?}: {}", token, err);
                 continue;
@@ -149,7 +150,21 @@ where
         allowances.insert(token, allowance);
     }
 
-    allowances
+    Ok(allowances)
+}
+
+fn is_batch_error(err: &ExecutionError) -> bool {
+    match &err {
+        ExecutionError::Web3(web3::Error::Transport(message)) => {
+            // Currently, there is no sure-fire way to determine if a Web3 error
+            // is caused because of a failing batch request, or some a call
+            // specific error, so we test that the method starts with "Batch"
+            // string as a best guess.
+            // <https://github.com/gnosis/ethcontract-rs/issues/550>
+            message.starts_with("Batch")
+        }
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -271,7 +286,7 @@ mod tests {
                                 Ok(allowance_return_data(1337.into()))
                             }
                             addr!("2222222222222222222222222222222222222222") => {
-                                Err(anyhow!("test error"))
+                                Err(web3::Error::Decoder("test error".to_string()))
                             }
                             token => panic!("call to unexpected token {:?}", token),
                         }
@@ -285,7 +300,28 @@ mod tests {
             owner,
             spender,
         )
-        .await;
+        .await
+        .unwrap();
+
         assert_eq!(allowances, hashmap! { H160([0x11; 20]) => 1337.into() });
+    }
+
+    #[tokio::test]
+    async fn fetch_fails_on_batch_errors() {
+        let web3 = mock::web3();
+        web3.transport()
+            .mock()
+            .expect_execute_batch()
+            .returning(|_| Err(web3::Error::Decoder("test error".to_string())));
+
+        let allowances = fetch_allowances(
+            web3,
+            hashset![H160([0x11; 20]), H160([0x22; 20])],
+            H160([1; 20]),
+            H160([2; 20]),
+        )
+        .await;
+
+        assert!(allowances.is_err());
     }
 }
