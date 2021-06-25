@@ -1,6 +1,6 @@
 //! Module containing implementation of the Matcha solver.
 //!
-//! This simple solver will simply use the Matcha API to get a quote for a
+//! This solver will simply use the Matcha API to get a quote for a
 //! single GPv2 order and produce a settlement directly against Matcha.
 
 pub mod api;
@@ -25,7 +25,7 @@ use model::order::OrderKind;
 use std::fmt::{self, Display, Formatter};
 
 /// Constant maximum slippage of 5 BPS (0.05%) to use for on-chain liquidity.
-/// This is halve the 1inch slippage
+/// This is half the 1inch slippage
 pub const STANDARD_MATCHA_SLIPPAGE_BPS: u16 = 5;
 
 /// A GPv2 solver that matches GP orders to direct Matcha swaps.
@@ -153,7 +153,7 @@ impl<F: AllowanceFetching> SingleOrderSolving for MatchaSolver<F> {
 
 impl Interaction for SwapResponse {
     fn encode(&self) -> Vec<EncodedInteraction> {
-        vec![(self.to, self.value, Bytes(self.data.clone()))]
+        vec![(self.to, self.value, Bytes(self.data.0.clone()))]
     }
 }
 
@@ -209,7 +209,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
+    // #[ignore]
     async fn solve_buy_order_on_matcha() {
         let web3 = Web3::new(create_env_test_transport());
         let chain_id = web3.eth().chain_id().await.unwrap().as_u64();
@@ -267,9 +267,9 @@ mod tests {
                  allowance_target: shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff"),
                 price: 13.121_002_575_170_278_f64,
                 to: shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff"),
-                data: hex::decode(
+                data: web3::types::Bytes(hex::decode(
                     "d9627aa40000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000016345785d8a00000000000000000000000000000000000000000000000000001206e6c0056936e100000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc20000000000000000000000006810e776880c02933d47db1b9fc05908e5386b96869584cd0000000000000000000000001000000000000000000000000000000000000011000000000000000000000000000000000000000000000092415e982f60d431ba"
-                ).unwrap(),
+                ).unwrap()),
                 value: U256::from_dec_str("0").unwrap(),
             })
         });

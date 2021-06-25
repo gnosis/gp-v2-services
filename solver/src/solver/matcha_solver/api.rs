@@ -5,14 +5,16 @@
 //! <https://api.0x.org/>
 
 use crate::solver::solver_utils::{
-    deserialize_decimal_f64, deserialize_decimal_u256, deserialize_prefixed_hex, Slippage,
+    debug_bytes, deserialize_decimal_f64, deserialize_decimal_u256, Slippage,
 };
-
 use anyhow::Result;
+use derivative::Derivative;
 use ethcontract::{H160, U256};
+use model::u256_decimal;
 use reqwest::{Client, IntoUrl, Url};
 use serde::Deserialize;
 use shared::http::default_http_client;
+use web3::types::Bytes;
 
 /// A Matcha API quote query parameters.
 ///
@@ -70,19 +72,20 @@ impl SwapQuery {
 }
 
 /// A Matcha API swap response.
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Derivative, Deserialize, PartialEq)]
+#[derivative(Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SwapResponse {
-    #[serde(deserialize_with = "deserialize_decimal_u256")]
+    #[serde(with = "u256_decimal")]
     pub sell_amount: U256,
-    #[serde(deserialize_with = "deserialize_decimal_u256")]
+    #[serde(with = "u256_decimal")]
     pub buy_amount: U256,
     pub allowance_target: H160,
     #[serde(deserialize_with = "deserialize_decimal_f64")]
     pub price: f64,
     pub to: H160,
-    #[serde(deserialize_with = "deserialize_prefixed_hex")]
-    pub data: Vec<u8>,
+    #[derivative(Debug(format_with = "debug_bytes"))]
+    pub data: Bytes,
     #[serde(deserialize_with = "deserialize_decimal_u256")]
     pub value: U256,
 }
@@ -136,7 +139,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    // #[ignore]
+    #[ignore]
     async fn test_api_e2e() {
         let matcha_client = DefaultMatchaApi::default();
         let sell_token = shared::addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE");
@@ -217,9 +220,9 @@ mod tests {
                      allowance_target: shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff"),
                     price: 13.121_002_575_170_278_f64,
                     to: shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff"),
-                    data: hex::decode(
+                    data: Bytes(hex::decode(
                         "d9627aa40000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000016345785d8a00000000000000000000000000000000000000000000000000001206e6c0056936e100000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc20000000000000000000000006810e776880c02933d47db1b9fc05908e5386b96869584cd0000000000000000000000001000000000000000000000000000000000000011000000000000000000000000000000000000000000000092415e982f60d431ba"
-                    ).unwrap(),
+                    ).unwrap()),
                     value: U256::from_dec_str("0").unwrap(),
                 }
             );
