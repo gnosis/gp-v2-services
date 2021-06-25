@@ -98,10 +98,17 @@ impl Interaction for Approval {
     }
 }
 
-/// An allowance manager that an address.
+/// An allowance manager that retrive approval interactions for a given owner
+/// address.
 pub struct AllowanceManager {
     web3: Web3,
     owner: H160,
+}
+
+impl AllowanceManager {
+    pub fn new(web3: Web3, owner: H160) -> Self {
+        Self { web3, owner }
+    }
 }
 
 #[async_trait::async_trait]
