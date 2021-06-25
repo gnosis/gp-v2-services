@@ -75,6 +75,7 @@ pub fn create(
     min_order_size_one_inch: U256,
     disabled_one_inch_protocols: Vec<String>,
     solver_address: H160,
+    paraswap_slippage_bps: usize,
 ) -> Result<Vec<Box<dyn Solver>>> {
     // Tiny helper function to help out with type inference. Otherwise, all
     // `Box::new(...)` expressions would have to be cast `as Box<dyn Solver>`.
@@ -107,13 +108,12 @@ pub fn create(
                 fee_discount_factor,
             )),
             SolverType::OneInch => {
-                let one_inch_solver: SingleOrderSolver<OneInchSolver> =
-                    OneInchSolver::with_disabled_protocols(
-                        settlement_contract.clone(),
-                        chain_id,
-                        disabled_one_inch_protocols.clone(),
-                    )?
-                    .into();
+                let one_inch_solver: SingleOrderSolver<_> = OneInchSolver::with_disabled_protocols(
+                    settlement_contract.clone(),
+                    chain_id,
+                    disabled_one_inch_protocols.clone(),
+                )?
+                .into();
                 // We only want to use 1Inch for high value orders
                 boxed(SellVolumeFilteringSolver::new(
                     Box::new(one_inch_solver),
@@ -126,6 +126,7 @@ pub fn create(
                 settlement_contract.clone(),
                 solver_address,
                 token_info_fetcher.clone(),
+                paraswap_slippage_bps,
             ))),
         })
         .collect()
