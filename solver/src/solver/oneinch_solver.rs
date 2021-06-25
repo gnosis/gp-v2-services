@@ -4,9 +4,10 @@
 //! single GPv2 order and produce a settlement directly against 1Inch.
 
 pub mod api;
+use super::solver_utils::{AllowanceFetching, Slippage};
 
-use self::api::{Amount, OneInchClient, Slippage, Swap, SwapQuery};
-use super::{paraswap_solver::AllowanceFetching, single_order_solver::SingleOrderSolving};
+use self::api::{Amount, OneInchClient, Swap, SwapQuery};
+use super::single_order_solver::SingleOrderSolving;
 use crate::{
     encoding::EncodedInteraction,
     interactions::Erc20ApproveInteraction,
@@ -196,7 +197,7 @@ mod tests {
     use crate::liquidity::LimitOrder;
     use crate::solver::oneinch_solver::api::Protocols;
     use crate::solver::oneinch_solver::api::Spender;
-    use crate::solver::paraswap_solver::MockAllowanceFetching;
+    use crate::solver::solver_utils::MockAllowanceFetching;
     use contracts::{GPv2Settlement, WETH9};
     use ethcontract::{Web3, H160};
     use maplit::hashset;

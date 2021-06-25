@@ -3,47 +3,13 @@
 //! For more information on the HTTP API, consult:
 //! <https://docs.1inch.io/api/quote-swap>
 //! <https://api.1inch.exchange/swagger/ethereum/>
-
+use crate::solver::solver_utils::{deserialize_decimal_u256, deserialize_prefixed_hex, Slippage};
 use anyhow::{ensure, Context, Result};
 use ethcontract::{H160, U256};
 use reqwest::{Client, IntoUrl, Url};
-use serde::{
-    de::{Deserializer, Error as _},
-    Deserialize,
-};
+use serde::Deserialize;
 use shared::http::default_http_client;
-use std::{
-    borrow::Cow,
-    fmt::{self, Display, Formatter},
-};
-
-/// A slippage amount.
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
-pub struct Slippage(f64);
-
-impl Slippage {
-    /// Creates a slippage amount from the specified percentage.
-    pub fn percentage(amount: f64) -> Result<Self> {
-        // 1Inch API only accepts a slippage from 0 to 50.
-        ensure!(
-            (0. ..=50.).contains(&amount),
-            "slippage outside of [0%, 50%] range"
-        );
-        Ok(Slippage(amount))
-    }
-
-    /// Creates a slippage amount from the specified basis points.
-    pub fn basis_points(bps: u16) -> Result<Self> {
-        let percent = (bps as f64) / 100.;
-        Slippage::percentage(percent)
-    }
-}
-
-impl Display for Slippage {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+use std::fmt::{self, Display, Formatter};
 
 /// Parts to split a swap.
 ///
@@ -213,26 +179,6 @@ impl std::fmt::Debug for Transaction {
             .finish()
     }
 }
-
-fn deserialize_decimal_u256<'de, D>(deserializer: D) -> Result<U256, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let decimal_str = Cow::<str>::deserialize(deserializer)?;
-    U256::from_dec_str(&*decimal_str).map_err(D::Error::custom)
-}
-
-fn deserialize_prefixed_hex<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let prefixed_hex_str = Cow::<str>::deserialize(deserializer)?;
-    let hex_str = prefixed_hex_str
-        .strip_prefix("0x")
-        .ok_or_else(|| D::Error::custom("hex missing '0x' prefix"))?;
-    hex::decode(hex_str).map_err(D::Error::custom)
-}
-
 /// Approve spender response.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct Spender {

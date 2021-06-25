@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use super::solver_utils::AllowanceFetching;
 use anyhow::{anyhow, Result};
 use contracts::{GPv2Settlement, ERC20};
 use ethcontract::{Bytes, H160, U256};
@@ -54,24 +55,6 @@ impl ParaswapSolver<GPv2Settlement> {
 impl<F> std::fmt::Debug for ParaswapSolver<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("ParaswapSolver")
-    }
-}
-
-/// Helper trait to mock the smart contract interaction
-#[cfg_attr(test, mockall::automock)]
-#[async_trait::async_trait]
-pub trait AllowanceFetching: Send + Sync {
-    async fn existing_allowance(&self, token: H160, spender: H160) -> Result<U256>;
-}
-
-#[async_trait::async_trait]
-impl AllowanceFetching for GPv2Settlement {
-    async fn existing_allowance(&self, token: H160, spender: H160) -> Result<U256> {
-        let token_contract = ERC20::at(&self.raw_instance().web3(), token);
-        Ok(token_contract
-            .allowance(self.address(), spender)
-            .call()
-            .await?)
     }
 }
 
@@ -192,15 +175,15 @@ fn satisfies_limit_price(order: &LimitOrder, response: &PriceResponse) -> bool {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
-
     use super::api::MockParaswapApi;
     use super::*;
+    use crate::solver::solver_utils::MockAllowanceFetching;
     use mockall::Sequence;
     use shared::{
         dummy_contract,
         token_info::{MockTokenInfoFetching, TokenInfo},
     };
+    use std::collections::HashMap;
 
     #[test]
     fn test_satisfies_limit_price() {
