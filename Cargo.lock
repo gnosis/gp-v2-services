@@ -2497,7 +2497,6 @@ dependencies = [
  "assert_approx_eq",
  "async-trait",
  "atty",
- "bigdecimal",
  "contracts",
  "derivative",
  "ethcontract",

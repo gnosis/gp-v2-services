@@ -1,7 +1,5 @@
 use anyhow::{ensure, Result};
-use bigdecimal::BigDecimal;
 use num::{bigint::Sign, rational::Ratio, BigInt, BigRational, ToPrimitive as _, Zero as _};
-use num_bigint::BigInt as NumBigInt;
 use primitive_types::U256;
 
 pub fn big_rational_to_float(ratio: &BigRational) -> Option<f64> {
@@ -20,16 +18,6 @@ pub fn u256_to_big_int(input: &U256) -> BigInt {
     let mut bytes = [0; 32];
     input.to_big_endian(&mut bytes);
     BigInt::from_bytes_be(Sign::Plus, &bytes)
-}
-
-pub fn u256_to_num_big_int(input: &U256) -> NumBigInt {
-    let mut bytes = [0; 32];
-    input.to_big_endian(&mut bytes);
-    NumBigInt::from_bytes_be(num_bigint::Sign::Plus, &bytes)
-}
-
-pub fn u256_to_big_decimal(u256: &U256) -> BigDecimal {
-    BigDecimal::from(u256_to_num_big_int(u256))
 }
 
 pub fn u256_to_big_rational(input: &U256) -> BigRational {

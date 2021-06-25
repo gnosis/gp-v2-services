@@ -4,11 +4,11 @@
 //! https://github.com/balancer-labs/balancer-v2-monorepo/blob/6c9e24e22d0c46cca6dd15861d3d33da61a60b98/pkg/solidity-utils/contracts/math/FixedPoint.sol
 
 use super::error::Error;
-use crate::conversions::u256_to_big_decimal;
+use crate::conversions::u256_to_big_int;
 use anyhow::{anyhow, bail};
-use bigdecimal::BigDecimal;
 use ethcontract::U256;
 use lazy_static::lazy_static;
+use num::BigRational;
 use std::{
     fmt::{self, Debug, Formatter},
     str::FromStr,
@@ -38,9 +38,12 @@ impl From<usize> for Bfp {
     }
 }
 
-impl From<Bfp> for BigDecimal {
+impl From<Bfp> for BigRational {
     fn from(num: Bfp) -> Self {
-        u256_to_big_decimal(&num.as_uint256()) / u256_to_big_decimal(&*ONE_18)
+        BigRational::new(
+            u256_to_big_int(&num.as_uint256()),
+            u256_to_big_int(&*ONE_18),
+        )
     }
 }
 
@@ -166,7 +169,7 @@ impl Bfp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bigdecimal::Zero;
+    use num::{BigInt, One, Zero};
 
     #[test]
     fn parsing() {
@@ -308,20 +311,27 @@ mod tests {
     }
 
     #[test]
-    fn to_big_decimal() {
-        assert_eq!(BigDecimal::from(Bfp::zero()), BigDecimal::zero());
-        assert_eq!(BigDecimal::from(Bfp::one()), BigDecimal::from(1));
-        assert_eq!(BigDecimal::from(Bfp::from(500)), BigDecimal::from(500));
+    fn bfp_to_big_rational() {
+        assert_eq!(BigRational::from(Bfp::zero()), BigRational::zero());
+        assert_eq!(BigRational::from(Bfp::one()), BigRational::one());
         assert_eq!(
-            BigDecimal::from(Bfp::from_wei(U256::MAX)),
-            BigDecimal::from_str(
-                "115792089237316195423570985008687907853269984665640564039457.584007913129639935"
-            )
-            .unwrap()
+            BigRational::from(Bfp::from(500)),
+            BigRational::new(BigInt::from(500), BigInt::one())
         );
         assert_eq!(
-            BigDecimal::from("0.4".parse::<Bfp>().unwrap()),
-            "0.4".parse::<BigDecimal>().unwrap()
+            BigRational::from(Bfp::from_wei(U256::MAX)),
+            BigRational::new(
+                BigInt::from_str(&"115792089237316195423570985008687907853269984665640564039457584007913129639935").unwrap(),
+                BigInt::from(1_000_000_000_000_000_000u64)
+            )
+        );
+        assert_eq!(
+            BigRational::from("0.4".parse::<Bfp>().unwrap()),
+            BigRational::new(BigInt::from(4), BigInt::from(10))
+        );
+        assert_eq!(
+            BigRational::from("0.4".parse::<Bfp>().unwrap()),
+            BigRational::new(BigInt::from(2), BigInt::from(5))
         );
     }
 }
