@@ -68,7 +68,7 @@ impl<F> std::fmt::Debug for MatchaSolver<F> {
 #[async_trait::async_trait]
 impl<F: AllowanceFetching> SingleOrderSolving for MatchaSolver<F> {
     async fn settle_order(&self, order: LimitOrder) -> Result<Option<Settlement>> {
-        let (swap, mut settlement) = match order.kind {
+        let swap = match order.kind {
             OrderKind::Sell => {
                 let query = SwapQuery {
                     sell_token: order.sell_token,
@@ -88,11 +88,7 @@ impl<F: AllowanceFetching> SingleOrderSolving for MatchaSolver<F> {
                     tracing::debug!("Order limit price not respected");
                     return Ok(None);
                 }
-                let settlement = Settlement::new(hashmap! {
-                    order.sell_token => swap.sell_amount,
-                    order.buy_token => swap.buy_amount,
-                });
-                (swap, settlement)
+                swap
             }
             OrderKind::Buy => {
                 let query = SwapQuery {
@@ -117,13 +113,13 @@ impl<F: AllowanceFetching> SingleOrderSolving for MatchaSolver<F> {
                     tracing::debug!("Order limit price not respected");
                     return Ok(None);
                 }
-                let settlement = Settlement::new(hashmap! {
-                    order.sell_token => swap.sell_amount,
-                    order.buy_token => swap.buy_amount,
-                });
-                (swap, settlement)
+                swap
             }
         };
+        let mut settlement = Settlement::new(hashmap! {
+            order.sell_token => swap.buy_amount,
+            order.buy_token => swap.sell_amount,
+        });
         let spender = swap.allowance_target;
         let sell_token = ERC20::at(&self.web3(), order.sell_token);
         let existing_allowance = self
@@ -296,8 +292,8 @@ mod tests {
         assert_eq!(
             result.clearing_prices(),
             &hashmap! {
-                sell_token => 99.into(),
-                buy_token => 91.into(),
+                sell_token => 91.into(),
+                buy_token => 100.into(),
             }
         );
 
@@ -360,8 +356,8 @@ mod tests {
         assert_eq!(
             result.clearing_prices(),
             &hashmap! {
-                sell_token => 99.into(),
-                buy_token => 91.into(),
+                sell_token => 91.into(),
+                buy_token => 100.into(),
             }
         );
 
