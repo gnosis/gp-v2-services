@@ -104,11 +104,11 @@ impl UniswapLikeLiquidity {
             .get_allowances(tokens, router)
             .await?;
 
-        *self
-            .inner
+        self.inner
             .allowances
             .lock()
-            .expect("Thread holding mutex panicked") = allowances;
+            .expect("Thread holding mutex panicked")
+            .extend(allowances)?;
 
         Ok(())
     }

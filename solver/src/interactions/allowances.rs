@@ -5,7 +5,7 @@
 use crate::{
     encoding::EncodedInteraction, interactions::Erc20ApproveInteraction, settlement::Interaction,
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, ensure, Result};
 use contracts::ERC20;
 use ethcontract::{batch::CallBatch, errors::ExecutionError, H160, U256};
 use maplit::hashset;
@@ -70,6 +70,17 @@ impl Allowances {
                 token,
                 spender: self.spender,
             })
+    }
+
+    /// Extends the allowance cache with another.
+    pub fn extend(&mut self, other: Self) -> Result<()> {
+        ensure!(
+            self.spender == other.spender,
+            "failed to extend allowance cache for different spender"
+        );
+        self.allowances.extend(other.allowances);
+
+        Ok(())
     }
 }
 
@@ -263,6 +274,43 @@ mod tests {
             allowances.approve_token_or_default(token, 1337.into()),
             Approval::Approve { token, spender }
         );
+    }
+
+    #[test]
+    fn extend_allowances_cache() {
+        let mut allowances = Allowances::new(
+            H160([0x01; 20]),
+            hashmap! {
+                H160([0x11; 20]) => U256::from(1),
+                H160([0x12; 20]) => U256::from(2),
+            },
+        );
+        allowances
+            .extend(Allowances::new(
+                H160([0x01; 20]),
+                hashmap! {
+                    H160([0x11; 20]) => U256::from(42),
+                    H160([0x13; 20]) => U256::from(3),
+                },
+            ))
+            .unwrap();
+
+        assert_eq!(
+            allowances.allowances,
+            hashmap! {
+                H160([0x11; 20]) => U256::from(42),
+                H160([0x12; 20]) => U256::from(2),
+                H160([0x13; 20]) => U256::from(3),
+            },
+        );
+    }
+
+    #[test]
+    fn error_extending_allowances_for_different_spenders() {
+        let mut allowances = Allowances::empty(H160([0x01; 20]));
+        assert!(allowances
+            .extend(Allowances::empty(H160([0x02; 20])))
+            .is_err());
     }
 
     #[test]
