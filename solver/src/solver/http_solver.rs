@@ -475,8 +475,8 @@ mod tests {
         assert!(exec_order.exec_buy_amount.as_u128() > 0);
 
         let uniswap = settled.amms.values().next().unwrap();
-        assert!(uniswap.balance_update1 < 0);
-        assert_eq!(uniswap.balance_update2 as u128, base(2));
+        assert!(*uniswap.updates.get(&buy_token).unwrap() < 0);
+        assert_eq!(*uniswap.updates.get(&sell_token).unwrap() as u128, base(2));
         assert!(uniswap.exec_plan.is_some());
         assert_eq!(uniswap.exec_plan.as_ref().unwrap().sequence, 0);
         assert_eq!(uniswap.exec_plan.as_ref().unwrap().position, 0);

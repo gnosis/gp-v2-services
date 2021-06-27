@@ -74,7 +74,7 @@ pub struct FeeModel {
 #[derive(Debug, Deserialize)]
 pub struct SettledBatchAuctionModel {
     pub orders: HashMap<usize, ExecutedOrderModel>,
-    pub amms: HashMap<usize, UpdatedUniswapModel>,
+    pub amms: HashMap<usize, UpdatedAmmModel>,
     pub ref_token: H160,
     pub prices: HashMap<H160, Price>,
 }
@@ -105,13 +105,20 @@ pub struct ExecutedOrderModel {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct UpdatedUniswapModel {
-    #[serde(with = "serde_with::rust::display_fromstr")]
-    pub balance_update1: i128,
-    #[serde(with = "serde_with::rust::display_fromstr")]
-    pub balance_update2: i128,
-    // pub updates: HashMap<H160Wrapper, i128>, // TODO - use this after https://github.com/gnosis/gp-v2-services/pull/787
+pub struct UpdatedAmmModel {
+    pub updates: HashMap<H160, i128>, // TODO - use this after https://github.com/gnosis/gp-v2-services/pull/787
     pub exec_plan: Option<ExecutionPlanCoordinatesModel>,
+}
+
+impl UpdatedAmmModel {
+    /// Returns true there is at least one non-zero update.
+    pub fn is_non_trivial(&self) -> bool {
+        // Check with the largest update by absolute value.
+        match self.updates.values().into_iter().map(|v| v.abs()).max() {
+            Some(value) => value > 0,
+            None => false,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -125,6 +132,45 @@ mod tests {
     use super::*;
     use maplit::hashmap;
     use serde_json::json;
+
+    #[test]
+    fn updated_amm_model_is_non_trivial() {
+        assert_eq!(
+            UpdatedAmmModel {
+                updates: hashmap! { H160::zero() => 0, H160::from_low_u64_be(1) => 0 },
+                exec_plan: None
+            }
+            .is_non_trivial(),
+            false
+        );
+
+        assert_eq!(
+            UpdatedAmmModel {
+                updates: HashMap::new(),
+                exec_plan: None
+            }
+            .is_non_trivial(),
+            false
+        );
+
+        assert_eq!(
+            UpdatedAmmModel {
+                updates: hashmap! { H160::zero() => -1, H160::from_low_u64_be(1) => 0 },
+                exec_plan: None
+            }
+            .is_non_trivial(),
+            true
+        );
+
+        assert_eq!(
+            UpdatedAmmModel {
+                updates: hashmap! { H160::zero() => 1, H160::from_low_u64_be(1) => 0 },
+                exec_plan: None
+            }
+            .is_non_trivial(),
+            true
+        );
+    }
 
     #[test]
     fn model_serialization() {

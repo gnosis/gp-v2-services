@@ -116,19 +116,31 @@ fn match_prepared_and_settled_orders(
 }
 
 fn match_prepared_and_settled_amms(
+    // TODO - this is going to have to operate on Weighted Product Orders too...
     mut prepared_orders: HashMap<usize, ConstantProductOrder>,
-    settled_orders: HashMap<usize, UpdatedUniswapModel>,
+    settled_orders: HashMap<usize, UpdatedAmmModel>,
 ) -> Result<Vec<ExecutedAmm>> {
     settled_orders
         .into_iter()
-        .filter(|(_, settled)| !(settled.balance_update1 == 0 && settled.balance_update2 == 0))
+        .filter(|(_, settled)| settled.is_non_trivial())
         .sorted_by(|a, b| a.1.exec_plan.cmp(&b.1.exec_plan))
         .map(|(index, settled)| {
             let prepared = prepared_orders
                 .remove(&index)
                 .ok_or_else(|| anyhow!("invalid amm {}", index))?;
+
+            // TODO - Having ConstantProductOrder with tuples and WeightedProductOrder with HashMap is making this unnecessarily complicated.
             let tokens = prepared.tokens.get();
-            let updates = (settled.balance_update1, settled.balance_update2);
+            let updates = (
+                *settled
+                    .updates
+                    .get(&tokens.0)
+                    .expect("received update for unknown token"),
+                *settled
+                    .updates
+                    .get(&tokens.1)
+                    .expect("received update for unknown token"),
+            );
             let (input, output) = if updates.0.is_positive() && updates.1.is_negative() {
                 (
                     (tokens.0, i128_abs_to_u256(updates.0)),
@@ -226,9 +238,8 @@ mod tests {
             exec_buy_amount: 6.into(),
             exec_sell_amount: 7.into(),
         };
-        let updated_uniswap = UpdatedUniswapModel {
-            balance_update1: 8,
-            balance_update2: -9,
+        let updated_uniswap = UpdatedAmmModel {
+            updates: hashmap! { t0 => 8, t1 => -9 },
             exec_plan: Some(ExecutionPlanCoordinatesModel {
                 sequence: 0,
                 position: 0,
