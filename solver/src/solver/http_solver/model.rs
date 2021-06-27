@@ -106,7 +106,7 @@ pub struct ExecutedOrderModel {
 
 #[derive(Debug, Deserialize)]
 pub struct UpdatedAmmModel {
-    pub updates: HashMap<H160, i128>, // TODO - use this after https://github.com/gnosis/gp-v2-services/pull/787
+    pub updates: HashMap<H160, i128>,
     pub exec_plan: Option<ExecutionPlanCoordinatesModel>,
 }
 
