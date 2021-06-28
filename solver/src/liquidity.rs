@@ -301,7 +301,7 @@ pub mod tests {
                 H160([0x11; 20]) => token_state.clone(),
                 H160([0x22; 20]) => token_state.clone(),
                 H160([0x33; 20]) => token_state.clone(),
-                H160([0x44; 20]) => token_state.clone(),
+                H160([0x44; 20]) => token_state,
             },
             ..Default::default()
         };
