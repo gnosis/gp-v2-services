@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::{
     baseline_solver::BaselineSolvable,
     conversions::u256_to_big_int,
@@ -9,6 +7,7 @@ use error::Error;
 use ethcontract::{H160, U256};
 use fixed_point::Bfp;
 use num::{BigRational, CheckedDiv};
+use std::collections::HashMap;
 use weighted_math::{calc_in_given_out, calc_out_given_in};
 
 mod error;

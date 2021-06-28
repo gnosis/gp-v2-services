@@ -11,12 +11,14 @@ use maplit::hashmap;
 use model::TokenPair;
 use num::BigRational;
 use shared::{
-    balancer::swap::{fixed_point::Bfp, WeightedPoolRef},
     baseline_solver::{
         estimate_buy_amount, estimate_sell_amount, path_candidates, BaselineSolvable,
         DEFAULT_MAX_HOPS,
     },
-    sources::uniswap::pool_fetching::Pool,
+    sources::{
+        balancer::swap::{fixed_point::Bfp, WeightedPoolRef},
+        uniswap::pool_fetching::Pool,
+    },
 };
 use std::{
     collections::{HashMap, HashSet},
