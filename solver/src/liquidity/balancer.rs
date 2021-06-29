@@ -20,6 +20,11 @@ use shared::{
 };
 use std::{collections::HashSet, sync::Arc};
 
+struct Contracts {
+    settlement: GPv2Settlement,
+    vault: BalancerV2Vault,
+}
+
 /// A liquidity provider for Balancer V2 weighted pools.
 pub struct BalancerV2Liquidity {
     contracts: Arc<Contracts>,
@@ -75,11 +80,6 @@ impl BalancerV2Liquidity {
 
         Ok(liquidity)
     }
-}
-
-struct Contracts {
-    settlement: GPv2Settlement,
-    vault: BalancerV2Vault,
 }
 
 struct SettlementHandler {
