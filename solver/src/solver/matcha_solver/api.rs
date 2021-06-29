@@ -4,9 +4,7 @@
 //! <https://0x.org/docs/api#request-1>
 //! <https://api.0x.org/>
 
-use crate::solver::solver_utils::{
-    debug_bytes, deserialize_decimal_f64, deserialize_decimal_u256, Slippage,
-};
+use crate::solver::solver_utils::{debug_bytes, deserialize_decimal_f64, Slippage};
 use anyhow::Result;
 use derivative::Derivative;
 use ethcontract::{H160, U256};
@@ -86,7 +84,7 @@ pub struct SwapResponse {
     pub to: H160,
     #[derivative(Debug(format_with = "debug_bytes"))]
     pub data: Bytes,
-    #[serde(deserialize_with = "deserialize_decimal_u256")]
+    #[serde(with = "u256_decimal")]
     pub value: U256,
 }
 

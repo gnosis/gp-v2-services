@@ -1,5 +1,4 @@
 use anyhow::{ensure, Result};
-use ethcontract::U256;
 use serde::{
     de::{Deserializer, Error as _},
     Deserialize,
@@ -45,14 +44,6 @@ where
 {
     let decimal_str = Cow::<str>::deserialize(deserializer)?;
     decimal_str.parse::<f64>().map_err(D::Error::custom)
-}
-
-pub fn deserialize_decimal_u256<'de, D>(deserializer: D) -> Result<U256, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let decimal_str = Cow::<str>::deserialize(deserializer)?;
-    U256::from_dec_str(&*decimal_str).map_err(D::Error::custom)
 }
 
 pub fn deserialize_prefixed_hex<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>

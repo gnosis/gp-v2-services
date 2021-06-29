@@ -3,9 +3,10 @@
 //! For more information on the HTTP API, consult:
 //! <https://docs.1inch.io/api/quote-swap>
 //! <https://api.1inch.exchange/swagger/ethereum/>
-use crate::solver::solver_utils::{deserialize_decimal_u256, deserialize_prefixed_hex, Slippage};
+use crate::solver::solver_utils::{deserialize_prefixed_hex, Slippage};
 use anyhow::{ensure, Context, Result};
 use ethcontract::{H160, U256};
+use model::u256_decimal;
 use reqwest::{Client, IntoUrl, Url};
 use serde::Deserialize;
 use shared::http::default_http_client;
@@ -125,9 +126,9 @@ impl SwapQuery {
 pub struct Swap {
     pub from_token: Token,
     pub to_token: Token,
-    #[serde(deserialize_with = "deserialize_decimal_u256")]
+    #[serde(with = "u256_decimal")]
     pub from_token_amount: U256,
-    #[serde(deserialize_with = "deserialize_decimal_u256")]
+    #[serde(with = "u256_decimal")]
     pub to_token_amount: U256,
     pub protocols: Vec<Vec<Vec<Protocol>>>,
     pub tx: Transaction,
@@ -160,9 +161,9 @@ pub struct Transaction {
     pub to: H160,
     #[serde(deserialize_with = "deserialize_prefixed_hex")]
     pub data: Vec<u8>,
-    #[serde(deserialize_with = "deserialize_decimal_u256")]
+    #[serde(with = "u256_decimal")]
     pub value: U256,
-    #[serde(deserialize_with = "deserialize_decimal_u256")]
+    #[serde(with = "u256_decimal")]
     pub gas_price: U256,
     pub gas: u64,
 }
