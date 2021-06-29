@@ -1,9 +1,3 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-    time::Duration,
-};
-
 use crate::{liquidity::Liquidity, settlement::Settlement};
 use anyhow::Result;
 use baseline_solver::BaselineSolver;
@@ -16,9 +10,14 @@ use oneinch_solver::OneInchSolver;
 use paraswap_solver::ParaswapSolver;
 use reqwest::Url;
 use shared::{
-    conversions::U256Ext, price_estimate::PriceEstimating, token_info::TokenInfoFetching,
+    conversions::U256Ext, price_estimate::PriceEstimating, token_info::TokenInfoFetching, Web3,
 };
 use single_order_solver::SingleOrderSolver;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Duration,
+};
 use structopt::clap::arg_enum;
 
 mod baseline_solver;
@@ -65,6 +64,7 @@ arg_enum! {
 
 #[allow(clippy::too_many_arguments)]
 pub fn create(
+    web3: Web3,
     solvers: Vec<SolverType>,
     base_tokens: HashSet<H160>,
     native_token: H160,
@@ -113,6 +113,7 @@ pub fn create(
             )),
             SolverType::OneInch => {
                 let one_inch_solver: SingleOrderSolver<_> = OneInchSolver::with_disabled_protocols(
+                    web3.clone(),
                     settlement_contract.clone(),
                     chain_id,
                     disabled_one_inch_protocols.clone(),
@@ -128,10 +129,11 @@ pub fn create(
             }
             SolverType::Matcha => {
                 let matcha_solver =
-                    MatchaSolver::new(settlement_contract.clone(), chain_id).unwrap();
+                    MatchaSolver::new(web3.clone(), settlement_contract.clone(), chain_id).unwrap();
                 boxed(SingleOrderSolver::from(matcha_solver))
             }
             SolverType::Paraswap => boxed(SingleOrderSolver::from(ParaswapSolver::new(
+                web3.clone(),
                 settlement_contract.clone(),
                 solver_address,
                 token_info_fetcher.clone(),

@@ -5,11 +5,12 @@
 
 pub mod api;
 
-use super::solver_utils::{AllowanceFetching, Slippage};
+use super::solver_utils::Slippage;
+use crate::interactions::allowances::{AllowanceManager, AllowanceManaging};
 use crate::solver::matcha_solver::api::MatchaApi;
 use anyhow::{ensure, Result};
-use contracts::{GPv2Settlement, ERC20};
-use ethcontract::{dyns::DynWeb3, Bytes, U256};
+use contracts::GPv2Settlement;
+use ethcontract::Bytes;
 use maplit::hashmap;
 
 use super::single_order_solver::SingleOrderSolving;
@@ -17,11 +18,11 @@ use super::single_order_solver::SingleOrderSolving;
 use self::api::{DefaultMatchaApi, SwapQuery, SwapResponse};
 use crate::{
     encoding::EncodedInteraction,
-    interactions::Erc20ApproveInteraction,
     liquidity::LimitOrder,
     settlement::{Interaction, Settlement},
 };
 use model::order::OrderKind;
+use shared::Web3;
 use std::fmt::{self, Display, Formatter};
 
 /// Constant maximum slippage of 5 BPS (0.05%) to use for on-chain liquidity.
@@ -29,44 +30,30 @@ use std::fmt::{self, Display, Formatter};
 pub const STANDARD_MATCHA_SLIPPAGE_BPS: u16 = 5;
 
 /// A GPv2 solver that matches GP orders to direct Matcha swaps.
-pub struct MatchaSolver<F> {
-    settlement_contract: GPv2Settlement,
+pub struct MatchaSolver {
     client: Box<dyn MatchaApi + Send + Sync>,
-    allowance_fetcher: F,
+    allowance_fetcher: Box<dyn AllowanceManaging>,
 }
 
 /// Chain ID for Mainnet.
 const MAINNET_CHAIN_ID: u64 = 1;
 
-impl MatchaSolver<GPv2Settlement> {
-    pub fn new(settlement_contract: GPv2Settlement, chain_id: u64) -> Result<Self> {
+impl MatchaSolver {
+    pub fn new(web3: Web3, settlement_contract: GPv2Settlement, chain_id: u64) -> Result<Self> {
         ensure!(
             chain_id == MAINNET_CHAIN_ID,
             "Matcha solver only supported on Mainnet",
         );
-
-        let allowance_fetcher = settlement_contract.clone();
+        let allowance_fetcher = AllowanceManager::new(web3, settlement_contract.address());
         Ok(Self {
-            settlement_contract,
-            allowance_fetcher,
+            allowance_fetcher: Box::new(allowance_fetcher),
             client: Box::new(DefaultMatchaApi::default()),
         })
     }
 }
-impl<F> MatchaSolver<F> {
-    fn web3(&self) -> DynWeb3 {
-        self.settlement_contract.raw_instance().web3()
-    }
-}
-
-impl<F> std::fmt::Debug for MatchaSolver<F> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("MatchaSolver")
-    }
-}
 
 #[async_trait::async_trait]
-impl<F: AllowanceFetching> SingleOrderSolving for MatchaSolver<F> {
+impl SingleOrderSolving for MatchaSolver {
     async fn settle_order(&self, order: LimitOrder) -> Result<Option<Settlement>> {
         let swap = match order.kind {
             OrderKind::Sell => {
@@ -121,23 +108,14 @@ impl<F: AllowanceFetching> SingleOrderSolving for MatchaSolver<F> {
             order.buy_token => swap.sell_amount,
         });
         let spender = swap.allowance_target;
-        let sell_token = ERC20::at(&self.web3(), order.sell_token);
-        let existing_allowance = self
-            .allowance_fetcher
-            .existing_allowance(order.sell_token, spender)
-            .await?;
 
         settlement.with_liquidity(&order, swap.sell_amount)?;
 
-        if existing_allowance < swap.sell_amount {
-            settlement
-                .encoder
-                .append_to_execution_plan(Erc20ApproveInteraction {
-                    token: sell_token,
-                    spender,
-                    amount: U256::MAX,
-                });
-        }
+        settlement.encoder.append_to_execution_plan(
+            self.allowance_fetcher
+                .get_approval(order.sell_token, spender, swap.sell_amount)
+                .await?,
+        );
         settlement.encoder.append_to_execution_plan(swap);
         Ok(Some(settlement))
     }
@@ -153,7 +131,7 @@ impl Interaction for SwapResponse {
     }
 }
 
-impl<F> Display for MatchaSolver<F> {
+impl Display for MatchaSolver {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "MatchaSolver")
     }
@@ -162,15 +140,15 @@ impl<F> Display for MatchaSolver<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::interactions::allowances::{Approval, MockAllowanceManaging};
     use crate::liquidity::LimitOrder;
     use crate::solver::matcha_solver::api::MockMatchaApi;
-    use crate::solver::solver_utils::MockAllowanceFetching;
     use contracts::{GPv2Settlement, WETH9};
-    use ethcontract::{Web3, H160};
+    use ethcontract::{Web3, H160, U256};
+    use mockall::predicate::*;
     use mockall::Sequence;
     use model::order::{Order, OrderCreation, OrderKind};
-    use shared::dummy_contract;
-    use shared::transport::{create_env_test_transport, create_test_transport, dummy};
+    use shared::transport::{create_env_test_transport, create_test_transport};
 
     #[tokio::test]
     #[ignore]
@@ -182,7 +160,7 @@ mod tests {
         let weth = WETH9::deployed(&web3).await.unwrap();
         let gno = shared::addr!("6810e776880c02933d47db1b9fc05908e5386b96");
 
-        let solver = MatchaSolver::new(settlement, chain_id).unwrap();
+        let solver = MatchaSolver::new(web3, settlement, chain_id).unwrap();
         let settlement = solver
             .settle_order(
                 Order {
@@ -214,7 +192,7 @@ mod tests {
         let weth = WETH9::deployed(&web3).await.unwrap();
         let gno = shared::addr!("6810e776880c02933d47db1b9fc05908e5386b96");
 
-        let solver = MatchaSolver::new(settlement, chain_id).unwrap();
+        let solver = MatchaSolver::new(web3, settlement, chain_id).unwrap();
         let settlement = solver
             .settle_order(
                 Order {
@@ -239,16 +217,17 @@ mod tests {
     #[tokio::test]
     async fn test_satisfies_limit_price_for_sell_order() {
         let mut client = Box::new(MockMatchaApi::new());
-        let mut allowance_fetcher = MockAllowanceFetching::new();
+        let mut allowance_fetcher = Box::new(MockAllowanceManaging::new());
 
         let sell_token = H160::from_low_u64_be(1);
         let buy_token = H160::from_low_u64_be(1);
 
-        client.expect_get_swap().returning(|_| {
+        let allowance_target = shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff");
+        client.expect_get_swap().returning(move|_| {
             Ok(SwapResponse {
             sell_amount: U256::from_dec_str("100").unwrap(),
              buy_amount: U256::from_dec_str("91").unwrap(),
-             allowance_target: shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff"),
+             allowance_target,
             price: 0.91_f64,
             to: shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff"),
             data: web3::types::Bytes(hex::decode(
@@ -258,11 +237,17 @@ mod tests {
         })});
 
         allowance_fetcher
-            .expect_existing_allowance()
-            .returning(|_, _| Ok(U256::zero()));
+            .expect_get_approval()
+            .times(1)
+            .with(eq(sell_token), eq(allowance_target), eq(U256::from(100)))
+            .returning(move |_, _, _| {
+                Ok(Approval::Approve {
+                    token: sell_token,
+                    spender: allowance_target,
+                })
+            });
 
         let solver = MatchaSolver {
-            settlement_contract: GPv2Settlement::at(&dummy::web3(), H160::zero()),
             client,
             allowance_fetcher,
         };
@@ -303,16 +288,17 @@ mod tests {
     #[tokio::test]
     async fn test_satisfies_limit_price_for_buy_order() {
         let mut client = Box::new(MockMatchaApi::new());
-        let mut allowance_fetcher = MockAllowanceFetching::new();
+        let mut allowance_fetcher = Box::new(MockAllowanceManaging::new());
 
         let sell_token = H160::from_low_u64_be(1);
         let buy_token = H160::from_low_u64_be(1);
 
-        client.expect_get_swap().returning(|_| {
+        let allowance_target = shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff");
+        client.expect_get_swap().returning(move|_| {
             Ok(SwapResponse {
             sell_amount: U256::from_dec_str("100").unwrap(),
              buy_amount: U256::from_dec_str("91").unwrap(),
-             allowance_target: shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff"),
+             allowance_target,
             price: 0.91_f64,
             to: shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff"),
             data: web3::types::Bytes(hex::decode(
@@ -322,11 +308,17 @@ mod tests {
         })});
 
         allowance_fetcher
-            .expect_existing_allowance()
-            .returning(|_, _| Ok(U256::zero()));
+            .expect_get_approval()
+            .times(1)
+            .with(eq(sell_token), eq(allowance_target), eq(U256::from(100)))
+            .returning(move |_, _, _| {
+                Ok(Approval::Approve {
+                    token: sell_token,
+                    spender: allowance_target,
+                })
+            });
 
         let solver = MatchaSolver {
-            settlement_contract: GPv2Settlement::at(&dummy::web3(), H160::zero()),
             client,
             allowance_fetcher,
         };
@@ -374,22 +366,23 @@ mod tests {
         let chain_id = web3.eth().chain_id().await.unwrap().as_u64();
         let settlement = GPv2Settlement::deployed(&web3).await.unwrap();
 
-        assert!(MatchaSolver::new(settlement, chain_id).is_err())
+        assert!(MatchaSolver::new(web3, settlement, chain_id).is_err())
     }
 
     #[tokio::test]
     async fn test_sets_allowance_if_necessary() {
         let mut client = Box::new(MockMatchaApi::new());
-        let mut allowance_fetcher = MockAllowanceFetching::new();
+        let mut allowance_fetcher = Box::new(MockAllowanceManaging::new());
 
         let sell_token = H160::from_low_u64_be(1);
         let buy_token = H160::from_low_u64_be(1);
 
-        client.expect_get_swap().returning(|_| {
+        let allowance_target = shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff");
+        client.expect_get_swap().returning(move |_| {
             Ok(SwapResponse {
                 sell_amount: U256::from_dec_str("100").unwrap(),
                  buy_amount: U256::from_dec_str("91").unwrap(),
-                 allowance_target: shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff"),
+                 allowance_target ,
                 price: 13.121_002_575_170_278_f64,
                 to: shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff"),
                 data: web3::types::Bytes(hex::decode(
@@ -402,20 +395,25 @@ mod tests {
         // On first invocation no prior allowance, then max allowance set.
         let mut seq = Sequence::new();
         allowance_fetcher
-            .expect_existing_allowance()
+            .expect_get_approval()
             .times(1)
-            .returning(|_, _| Ok(U256::zero()))
+            .with(eq(sell_token), eq(allowance_target), eq(U256::from(100)))
+            .returning(move |_, _, _| {
+                Ok(Approval::Approve {
+                    token: sell_token,
+                    spender: allowance_target,
+                })
+            })
             .in_sequence(&mut seq);
         allowance_fetcher
-            .expect_existing_allowance()
+            .expect_get_approval()
             .times(1)
-            .returning(|_, _| Ok(U256::max_value()))
+            .returning(|_, _, _| Ok(Approval::AllowanceSufficient))
             .in_sequence(&mut seq);
 
         let solver = MatchaSolver {
             client,
             allowance_fetcher,
-            settlement_contract: dummy_contract!(GPv2Settlement, H160::zero()),
         };
 
         let order = LimitOrder {

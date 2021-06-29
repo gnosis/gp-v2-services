@@ -1,6 +1,4 @@
 use anyhow::{ensure, Result};
-use contracts::{GPv2Settlement, ERC20};
-use ethcontract::H160;
 use ethcontract::U256;
 use serde::{
     de::{Deserializer, Error as _},
@@ -12,24 +10,6 @@ use std::{
     borrow::Cow,
     fmt::{self, Display, Formatter},
 };
-
-// Helper trait to mock the smart contract interaction
-#[cfg_attr(test, mockall::automock)]
-#[async_trait::async_trait]
-pub trait AllowanceFetching: Send + Sync {
-    async fn existing_allowance(&self, token: H160, spender: H160) -> Result<U256>;
-}
-
-#[async_trait::async_trait]
-impl AllowanceFetching for GPv2Settlement {
-    async fn existing_allowance(&self, token: H160, spender: H160) -> Result<U256> {
-        let token_contract = ERC20::at(&self.raw_instance().web3(), token);
-        Ok(token_contract
-            .allowance(self.address(), spender)
-            .call()
-            .await?)
-    }
-}
 
 /// A slippage amount.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Default)]

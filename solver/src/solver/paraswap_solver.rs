@@ -1,68 +1,63 @@
-use std::sync::Arc;
-
-use super::solver_utils::AllowanceFetching;
-use anyhow::{anyhow, Result};
-use contracts::{GPv2Settlement, ERC20};
-use ethcontract::{Bytes, H160, U256};
+use contracts::GPv2Settlement;
+use ethcontract::{Bytes, H160};
 use maplit::hashmap;
-use shared::{conversions::U256Ext, token_info::TokenInfoFetching};
-
+use std::sync::Arc;
+mod api;
+use self::api::{
+    DefaultParaswapApi, ParaswapApi, PriceQuery, PriceResponse, Side, TransactionBuilderQuery,
+    TransactionBuilderResponse,
+};
 use super::single_order_solver::SingleOrderSolving;
 use crate::{
     encoding::EncodedInteraction,
-    interactions::Erc20ApproveInteraction,
+    interactions::allowances::{AllowanceManager, AllowanceManaging},
     liquidity::LimitOrder,
     settlement::{Interaction, Settlement},
 };
-use api::{PriceQuery, Side, TransactionBuilderQuery};
-
-use self::api::{DefaultParaswapApi, ParaswapApi, PriceResponse, TransactionBuilderResponse};
-
-mod api;
+use anyhow::{anyhow, Result};
+use derivative::Derivative;
+use shared::{conversions::U256Ext, token_info::TokenInfoFetching, Web3};
 
 const REFERRER: &str = "GPv2";
 const APPROVAL_RECEIVER: H160 = shared::addr!("b70bc06d2c9bf03b3373799606dc7d39346c06b3");
 
 /// A GPv2 solver that matches GP orders to direct ParaSwap swaps.
-pub struct ParaswapSolver<F> {
+#[derive(Derivative)]
+#[derivative(Debug)]
+pub struct ParaswapSolver {
     settlement_contract: GPv2Settlement,
     solver_address: H160,
+    #[derivative(Debug = "ignore")]
     token_info: Arc<dyn TokenInfoFetching>,
-    allowance_fetcher: F,
+    #[derivative(Debug = "ignore")]
+    allowance_fetcher: Box<dyn AllowanceManaging>,
+    #[derivative(Debug = "ignore")]
     client: Box<dyn ParaswapApi + Send + Sync>,
     slippage_bps: usize,
 }
 
-impl ParaswapSolver<GPv2Settlement> {
+impl ParaswapSolver {
     pub fn new(
+        web3: Web3,
         settlement_contract: GPv2Settlement,
         solver_address: H160,
         token_info: Arc<dyn TokenInfoFetching>,
         slippage_bps: usize,
     ) -> Self {
-        let allowance_fetcher = settlement_contract.clone();
+        let allowance_fetcher = AllowanceManager::new(web3, settlement_contract.address());
         Self {
             settlement_contract,
             solver_address,
             token_info,
-            allowance_fetcher,
+            allowance_fetcher: Box::new(allowance_fetcher),
             client: Box::new(DefaultParaswapApi::default()),
             slippage_bps,
         }
     }
 }
 
-impl<F> std::fmt::Debug for ParaswapSolver<F> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("ParaswapSolver")
-    }
-}
-
 #[async_trait::async_trait]
-impl<F> SingleOrderSolving for ParaswapSolver<F>
-where
-    F: AllowanceFetching,
-{
+impl SingleOrderSolving for ParaswapSolver {
     async fn settle_order(&self, order: LimitOrder) -> Result<Option<Settlement>> {
         let (amount, side) = match order.kind {
             model::order::OrderKind::Buy => (order.buy_amount, Side::Buy),
@@ -134,24 +129,15 @@ where
         });
         settlement.with_liquidity(&order, amount)?;
 
-        if self
-            .allowance_fetcher
-            .existing_allowance(order.sell_token, APPROVAL_RECEIVER)
-            .await?
-            < price_response.src_amount
-        {
-            let sell_token_contract = ERC20::at(
-                &self.settlement_contract.raw_instance().web3(),
-                order.sell_token,
-            );
-            settlement
-                .encoder
-                .append_to_execution_plan(Erc20ApproveInteraction {
-                    token: sell_token_contract,
-                    spender: APPROVAL_RECEIVER,
-                    amount: U256::MAX,
-                });
-        }
+        settlement.encoder.append_to_execution_plan(
+            self.allowance_fetcher
+                .get_approval(
+                    order.sell_token,
+                    APPROVAL_RECEIVER,
+                    price_response.src_amount,
+                )
+                .await?,
+        );
         settlement.encoder.append_to_execution_plan(transaction);
         Ok(Some(settlement))
     }
@@ -174,14 +160,18 @@ fn satisfies_limit_price(order: &LimitOrder, response: &PriceResponse) -> bool {
 }
 
 #[cfg(test)]
-mod test {
-    use super::api::MockParaswapApi;
-    use super::*;
-    use crate::solver::solver_utils::MockAllowanceFetching;
+mod tests {
+    use super::{api::MockParaswapApi, *};
+    use crate::interactions::allowances::{Approval, MockAllowanceManaging};
+    use contracts::WETH9;
+    use ethcontract::U256;
+    use mockall::predicate::*;
     use mockall::Sequence;
+    use model::order::{Order, OrderCreation, OrderKind};
     use shared::{
         dummy_contract,
-        token_info::{MockTokenInfoFetching, TokenInfo},
+        token_info::{MockTokenInfoFetching, TokenInfo, TokenInfoFetcher},
+        transport::create_env_test_transport,
     };
     use std::collections::HashMap;
 
@@ -230,7 +220,7 @@ mod test {
     #[tokio::test]
     async fn test_skips_order_if_unable_to_fetch_decimals() {
         let client = Box::new(MockParaswapApi::new());
-        let allowance_fetcher = MockAllowanceFetching::new();
+        let allowance_fetcher = Box::new(MockAllowanceManaging::new());
         let mut token_info = MockTokenInfoFetching::new();
 
         token_info
@@ -256,11 +246,11 @@ mod test {
     #[tokio::test]
     async fn test_respects_limit_price() {
         let mut client = Box::new(MockParaswapApi::new());
-        let mut allowance_fetcher = MockAllowanceFetching::new();
+        let mut allowance_fetcher = Box::new(MockAllowanceManaging::new());
         let mut token_info = MockTokenInfoFetching::new();
 
         let sell_token = H160::from_low_u64_be(1);
-        let buy_token = H160::from_low_u64_be(1);
+        let buy_token = H160::from_low_u64_be(2);
 
         client.expect_price().returning(|_| {
             Ok(PriceResponse {
@@ -274,8 +264,8 @@ mod test {
             .returning(|_| Ok(Default::default()));
 
         allowance_fetcher
-            .expect_existing_allowance()
-            .returning(|_, _| Ok(U256::zero()));
+            .expect_get_approval()
+            .returning(|_, _, _| Ok(Approval::AllowanceSufficient));
 
         token_info.expect_get_token_infos().returning(move |_| {
             hashmap! {
@@ -330,11 +320,11 @@ mod test {
     #[tokio::test]
     async fn test_sets_allowance_if_necessary() {
         let mut client = Box::new(MockParaswapApi::new());
-        let mut allowance_fetcher = MockAllowanceFetching::new();
+        let mut allowance_fetcher = Box::new(MockAllowanceManaging::new());
         let mut token_info = MockTokenInfoFetching::new();
 
         let sell_token = H160::from_low_u64_be(1);
-        let buy_token = H160::from_low_u64_be(1);
+        let buy_token = H160::from_low_u64_be(2);
 
         client.expect_price().returning(|_| {
             Ok(PriceResponse {
@@ -350,14 +340,21 @@ mod test {
         // On first invocation no prior allowance, then max allowance set.
         let mut seq = Sequence::new();
         allowance_fetcher
-            .expect_existing_allowance()
+            .expect_get_approval()
             .times(1)
-            .returning(|_, _| Ok(U256::zero()))
+            .with(eq(sell_token), eq(APPROVAL_RECEIVER), eq(U256::from(100)))
+            .returning(move |_, _, _| {
+                Ok(Approval::Approve {
+                    token: sell_token,
+                    spender: APPROVAL_RECEIVER,
+                })
+            })
             .in_sequence(&mut seq);
         allowance_fetcher
-            .expect_existing_allowance()
+            .expect_get_approval()
             .times(1)
-            .returning(|_, _| Ok(U256::max_value()))
+            .with(eq(sell_token), eq(APPROVAL_RECEIVER), eq(U256::from(100)))
+            .returning(|_, _, _| Ok(Approval::AllowanceSufficient))
             .in_sequence(&mut seq);
 
         token_info.expect_get_token_infos().returning(move |_| {
@@ -396,11 +393,11 @@ mod test {
     #[tokio::test]
     async fn test_sets_slippage() {
         let mut client = Box::new(MockParaswapApi::new());
-        let mut allowance_fetcher = MockAllowanceFetching::new();
+        let mut allowance_fetcher = Box::new(MockAllowanceManaging::new());
         let mut token_info = MockTokenInfoFetching::new();
 
         let sell_token = H160::from_low_u64_be(1);
-        let buy_token = H160::from_low_u64_be(1);
+        let buy_token = H160::from_low_u64_be(2);
 
         client.expect_price().returning(|_| {
             Ok(PriceResponse {
@@ -432,8 +429,8 @@ mod test {
             .in_sequence(&mut seq);
 
         allowance_fetcher
-            .expect_existing_allowance()
-            .returning(|_, _| Ok(U256::zero()));
+            .expect_get_approval()
+            .returning(|_, _, _| Ok(Approval::AllowanceSufficient));
 
         token_info.expect_get_token_infos().returning(move |_| {
             hashmap! {
@@ -475,5 +472,41 @@ mod test {
         let result = solver.settle_order(buy_order).await.unwrap();
         // Actual assertion is inside the client's `expect_transaction` mock
         assert!(result.is_some());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn solve_order_on_paraswap() {
+        let web3 = Web3::new(create_env_test_transport());
+        let settlement = GPv2Settlement::deployed(&web3).await.unwrap();
+        // Pretend the settlement contract is solving for itself
+        let solver = settlement.address();
+        let token_info_fetcher = Arc::new(TokenInfoFetcher { web3: web3.clone() });
+
+        let weth = WETH9::deployed(&web3).await.unwrap();
+        let gno = shared::addr!("6810e776880c02933d47db1b9fc05908e5386b96");
+
+        let solver = ParaswapSolver::new(web3, settlement, solver, token_info_fetcher, 0);
+
+        let settlement = solver
+            .settle_order(
+                Order {
+                    order_creation: OrderCreation {
+                        sell_token: weth.address(),
+                        buy_token: gno,
+                        sell_amount: 1_000_000_000_000_000_000u128.into(),
+                        buy_amount: 1u128.into(),
+                        kind: OrderKind::Sell,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+                .into(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        println!("{:#?}", settlement);
     }
 }
