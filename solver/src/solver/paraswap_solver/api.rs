@@ -2,10 +2,11 @@ use crate::solver::solver_utils::debug_bytes;
 use anyhow::{Context, Result};
 use derivative::Derivative;
 use ethcontract::{H160, U256};
-use model::u256_decimal;
 use reqwest::{Client, RequestBuilder, Url};
 use serde::{de::Error, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
+
+use model::u256_decimal;
 use web3::types::Bytes;
 
 const BASE_URL: &str = "https://apiv4.paraswap.io";

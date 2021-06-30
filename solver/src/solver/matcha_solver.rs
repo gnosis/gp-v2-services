@@ -62,8 +62,10 @@ impl SingleOrderSolving for MatchaSolver {
                     buy_token: order.buy_token,
                     sell_amount: Some(order.sell_amount),
                     buy_amount: None,
-                    slippage_percentage: Slippage::basis_points(STANDARD_MATCHA_SLIPPAGE_BPS)
-                        .unwrap(),
+                    slippage_percentage: Slippage::number_from_basis_points(
+                        STANDARD_MATCHA_SLIPPAGE_BPS,
+                    )
+                    .unwrap(),
                     skip_validation: Some(true),
                 };
 
@@ -83,8 +85,10 @@ impl SingleOrderSolving for MatchaSolver {
                     buy_token: order.buy_token,
                     sell_amount: None,
                     buy_amount: Some(order.buy_amount),
-                    slippage_percentage: Slippage::basis_points(STANDARD_MATCHA_SLIPPAGE_BPS)
-                        .unwrap(),
+                    slippage_percentage: Slippage::number_from_basis_points(
+                        STANDARD_MATCHA_SLIPPAGE_BPS,
+                    )
+                    .unwrap(),
                     // From the api documentation:
                     // SlippagePercentage(Optional): The maximum acceptable slippage in % of the buyToken amount if sellAmount is provided, the maximum acceptable slippage in % of the sellAmount amount if buyAmount is provided. This parameter will change over time with market conditions.
                     // => Hence, allegedly, we don't need to build in buffers ourselves. Though the sell amount is not adjusted, if slippage is changed for buy order requests.

@@ -1,8 +1,5 @@
-use contracts::GPv2Settlement;
-use ethcontract::{Bytes, H160};
-use maplit::hashmap;
-use std::sync::Arc;
 mod api;
+
 use self::api::{
     DefaultParaswapApi, ParaswapApi, PriceQuery, PriceResponse, Side, TransactionBuilderQuery,
     TransactionBuilderResponse,
@@ -15,8 +12,12 @@ use crate::{
     settlement::{Interaction, Settlement},
 };
 use anyhow::{anyhow, Result};
+use contracts::GPv2Settlement;
 use derivative::Derivative;
+use ethcontract::{Bytes, H160};
+use maplit::hashmap;
 use shared::{conversions::U256Ext, token_info::TokenInfoFetching, Web3};
+use std::sync::Arc;
 
 const REFERRER: &str = "GPv2";
 const APPROVAL_RECEIVER: H160 = shared::addr!("b70bc06d2c9bf03b3373799606dc7d39346c06b3");

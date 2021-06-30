@@ -164,7 +164,7 @@ mod tests {
             buy_token: shared::addr!("111111111117dc0aa78b770fa6a738034120c302"),
             sell_amount: Some(1_000_000_000_000_000_000u128.into()),
             buy_amount: None,
-            slippage_percentage: Slippage::basis_points(30).unwrap(),
+            slippage_percentage: Slippage::number_from_basis_points(30).unwrap(),
             skip_validation: None,
         }
         .into_url(&base_url);
@@ -174,20 +174,20 @@ mod tests {
             "https://api.0x.org/swap/v1/quote\
                     ?sellToken=0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\
                     &buyToken=0x111111111117dc0aa78b770fa6a738034120c302\
-                    &slippagePercentage=0.3\
+                    &slippagePercentage=0.003\
                     &sellAmount=1000000000000000000",
         );
     }
 
     #[test]
-    fn swap_query_serialization_optional_skip_parameter() {
+    fn swap_query_serialization_0x_buy_order() {
         let base_url = Url::parse("https://api.0x.org/").unwrap();
         let url = SwapQuery {
             sell_token: shared::addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
             buy_token: shared::addr!("111111111117dc0aa78b770fa6a738034120c302"),
             buy_amount: Some(1_000_000_000_000_000_000u128.into()),
             sell_amount: None,
-            slippage_percentage: Slippage::basis_points(30).unwrap(),
+            slippage_percentage: Slippage::number_from_basis_points(30).unwrap(),
             skip_validation: Some(true),
         }
         .into_url(&base_url);
@@ -197,7 +197,7 @@ mod tests {
             "https://api.0x.org/swap/v1/quote\
                     ?sellToken=0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\
                     &buyToken=0x111111111117dc0aa78b770fa6a738034120c302\
-                    &slippagePercentage=0.3\
+                    &slippagePercentage=0.003\
                     &buyAmount=1000000000000000000\
                     &skipValidation=true",
         );

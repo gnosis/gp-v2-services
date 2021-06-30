@@ -108,7 +108,7 @@ impl OneInchSolver {
             to_token_address: order.buy_token,
             amount: order.sell_amount,
             from_address: self.settlement_contract.address(),
-            slippage: Slippage::basis_points(MAX_SLIPPAGE_BPS).unwrap(),
+            slippage: Slippage::percentage_from_basis_points(MAX_SLIPPAGE_BPS).unwrap(),
             protocols,
             // Disable balance/allowance checks, as the settlement contract
             // does not hold balances to traded tokens.

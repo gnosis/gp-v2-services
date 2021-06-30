@@ -269,7 +269,7 @@ mod tests {
     #[test]
     fn slippage_from_basis_points() {
         assert_eq!(
-            Slippage::basis_points(50).unwrap(),
+            Slippage::percentage_from_basis_points(50).unwrap(),
             Slippage::percentage(0.5).unwrap(),
         )
     }
@@ -296,7 +296,7 @@ mod tests {
             to_token_address: shared::addr!("111111111117dc0aa78b770fa6a738034120c302"),
             amount: 1_000_000_000_000_000_000u128.into(),
             from_address: shared::addr!("00000000219ab540356cBB839Cbe05303d7705Fa"),
-            slippage: Slippage::basis_points(50).unwrap(),
+            slippage: Slippage::percentage_from_basis_points(50).unwrap(),
             protocols: None,
             disable_estimate: None,
             complexity_level: None,
@@ -325,7 +325,7 @@ mod tests {
             to_token_address: shared::addr!("111111111117dc0aa78b770fa6a738034120c302"),
             amount: 1_000_000_000_000_000_000u128.into(),
             from_address: shared::addr!("00000000219ab540356cBB839Cbe05303d7705Fa"),
-            slippage: Slippage::basis_points(50).unwrap(),
+            slippage: Slippage::percentage_from_basis_points(50).unwrap(),
             protocols: Some(vec!["WETH".to_string(), "UNISWAP_V3".to_string()]),
             disable_estimate: Some(true),
             complexity_level: Some(Amount::new(1).unwrap()),
@@ -480,7 +480,7 @@ mod tests {
                 to_token_address: shared::addr!("111111111117dc0aa78b770fa6a738034120c302"),
                 amount: 1_000_000_000_000_000_000u128.into(),
                 from_address: shared::addr!("00000000219ab540356cBB839Cbe05303d7705Fa"),
-                slippage: Slippage::basis_points(50).unwrap(),
+                slippage: Slippage::percentage_from_basis_points(50).unwrap(),
                 protocols: None,
                 disable_estimate: None,
                 complexity_level: None,
@@ -502,7 +502,7 @@ mod tests {
                 to_token_address: shared::addr!("a3BeD4E1c75D00fa6f4E5E6922DB7261B5E9AcD2"),
                 amount: 100_000_000_000_000_000_000u128.into(),
                 from_address: shared::addr!("4e608b7da83f8e9213f554bdaa77c72e125529d0"),
-                slippage: Slippage::basis_points(50).unwrap(),
+                slippage: Slippage::percentage_from_basis_points(50).unwrap(),
                 protocols: Some(vec!["WETH".to_string(), "UNISWAP_V2".to_string()]),
                 disable_estimate: Some(true),
                 complexity_level: Some(Amount::new(2).unwrap()),
