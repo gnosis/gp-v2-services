@@ -41,7 +41,7 @@ impl SwapQuery {
         // the full address and instead uses ellipsis (e.g. "0xeeee…eeee"). This
         // helper just works around that.
         fn addr2str(addr: H160) -> String {
-            format!("{:?}", addr)
+            format!("{:#x}", addr)
         }
 
         let mut url = base_url

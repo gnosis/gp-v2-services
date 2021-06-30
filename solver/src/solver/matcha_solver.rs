@@ -2,6 +2,20 @@
 //!
 //! This solver will simply use the Matcha API to get a quote for a
 //! single GPv2 order and produce a settlement directly against Matcha.
+//!
+//! Please be aware of the following subtlety for buy orders:
+//! 0x's API is adding the defined slippage on the sellAmount of a buy order
+//! and then returns the surplus in the buy amount to the user.
+//! I.e. if the user defines a 5% slippage, they will sell 5% more, and receive 5%
+//! more buy-tokens than ordered. Here is on example tx:
+//! https://dashboard.tenderly.co/gp-v2/staging/simulator/new?block=12735030&blockIndex=0&from=0xa6ddbd0de6b310819b49f680f65871bee85f517e&gas=8000000&gasPrice=0&value=0&contractAddress=0x3328f5f2cecaf00a2443082b657cedeaf70bfaef&rawFunctionInput=0x13d79a0b000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000014000000000000000000000000000000000000000000000000000000000000003600000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000dac17f958d2ee523a2206206994597c13d831ec7000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000029143e200000000000000000000000000000000000000000000000000470de4df820000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000036416d81e590ff67370e4523b9cd3257aa0a853c000000000000000000000000000000000000000000000000000000000291f64800000000000000000000000000000000000000000000000000470de4df8200000000000000000000000000000000000000000000000000000000000060dc5839000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000003dc140000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000029143e2000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000000410a7f27a6638cc9cdaba8266a15acef4cf7e1e1c9b9b2059391b7230b67bdfeb21f1d3aa45852f527a5040d3d7a190b92764a2c854f334b7eed579b390b85fd3f1b000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000003800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000120000000000000000000000000dac17f958d2ee523a2206206994597c13d831ec7000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000044095ea7b3000000000000000000000000def1c0ded9bec7f1a1670819833240f027b25effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000def1c0ded9bec7f1a1670819833240f027b25eff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000128d9627aa400000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000002b220e100000000000000000000000000000000000000000000000000470de4df82000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000dac17f958d2ee523a2206206994597c13d831ec7000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2869584cd000000000000000000000000100000000000000000000000000000000000001100000000000000000000000000000000000000000000003239e38b8a60dc53b70000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000&network=1   
+//! This behavior has the following risks: The additional sell tokens from the slippage
+//! are not provided by the user, hence the additional tokens might be not available in
+//! the settlement contract. For smaller amounts this is unlikely, as we always charge the
+//! fees also in the sell token, though, the fee's might not always be sufficient.
+//! This risk should be covered in a future PR.
+//!
+//! Sell orders are unproblematic, especially, since the positive slippage is handed back from matcha
 
 pub mod api;
 
@@ -26,7 +40,6 @@ use shared::Web3;
 use std::fmt::{self, Display, Formatter};
 
 /// Constant maximum slippage of 5 BPS (0.05%) to use for on-chain liquidity.
-/// This is half the 1inch slippage
 pub const STANDARD_MATCHA_SLIPPAGE_BPS: u16 = 5;
 
 /// A GPv2 solver that matches GP orders to direct Matcha swaps.
@@ -89,10 +102,6 @@ impl SingleOrderSolving for MatchaSolver {
                         STANDARD_MATCHA_SLIPPAGE_BPS,
                     )
                     .unwrap(),
-                    // From the api documentation:
-                    // SlippagePercentage(Optional): The maximum acceptable slippage in % of the buyToken amount if sellAmount is provided, the maximum acceptable slippage in % of the sellAmount amount if buyAmount is provided. This parameter will change over time with market conditions.
-                    // => Hence, allegedly, we don't need to build in buffers ourselves. Though the sell amount is not adjusted, if slippage is changed for buy order requests.
-                    // Todo: Continue discussion with the 0x-team
                     skip_validation: Some(true),
                 };
 
@@ -219,7 +228,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_satisfies_limit_price_for_sell_order() {
+    async fn test_satisfies_limit_price_for_orders() {
         let mut client = Box::new(MockMatchaApi::new());
         let mut allowance_fetcher = Box::new(MockAllowanceManaging::new());
 
@@ -227,22 +236,21 @@ mod tests {
         let buy_token = H160::from_low_u64_be(1);
 
         let allowance_target = shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff");
-        client.expect_get_swap().returning(move|_| {
+        client.expect_get_swap().returning(move |_| {
             Ok(SwapResponse {
-            sell_amount: U256::from_dec_str("100").unwrap(),
-             buy_amount: U256::from_dec_str("91").unwrap(),
-             allowance_target,
-            price: 0.91_f64,
-            to: shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff"),
-            data: web3::types::Bytes(hex::decode(
-                "d9627aa40000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000016345785d8a00000000000000000000000000000000000000000000000000001206e6c0056936e100000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc20000000000000000000000006810e776880c02933d47db1b9fc05908e5386b96869584cd0000000000000000000000001000000000000000000000000000000000000011000000000000000000000000000000000000000000000092415e982f60d431ba"
-            ).unwrap()),
-            value: U256::from_dec_str("0").unwrap(),
-        })});
+                sell_amount: U256::from_dec_str("100").unwrap(),
+                buy_amount: U256::from_dec_str("91").unwrap(),
+                allowance_target,
+                price: 0.91_f64,
+                to: shared::addr!("0000000000000000000000000000000000000000"),
+                data: web3::types::Bytes(hex::decode("00").unwrap()),
+                value: U256::from_dec_str("0").unwrap(),
+            })
+        });
 
         allowance_fetcher
             .expect_get_approval()
-            .times(1)
+            .times(2)
             .with(eq(sell_token), eq(allowance_target), eq(U256::from(100)))
             .returning(move |_, _, _| {
                 Ok(Approval::Approve {
@@ -256,7 +264,23 @@ mod tests {
             allowance_fetcher,
         };
 
-        let order_passing_limit = LimitOrder {
+        let buy_order_passing_limit = LimitOrder {
+            sell_token,
+            buy_token,
+            sell_amount: 101.into(),
+            buy_amount: 91.into(),
+            kind: model::order::OrderKind::Buy,
+            ..Default::default()
+        };
+        let buy_order_violating_limit = LimitOrder {
+            sell_token,
+            buy_token,
+            sell_amount: 99.into(),
+            buy_amount: 91.into(),
+            kind: model::order::OrderKind::Buy,
+            ..Default::default()
+        };
+        let sell_order_passing_limit = LimitOrder {
             sell_token,
             buy_token,
             sell_amount: 100.into(),
@@ -264,7 +288,7 @@ mod tests {
             kind: model::order::OrderKind::Sell,
             ..Default::default()
         };
-        let order_violating_limit = LimitOrder {
+        let sell_order_violating_limit = LimitOrder {
             sell_token,
             buy_token,
             sell_amount: 100.into(),
@@ -274,7 +298,7 @@ mod tests {
         };
 
         let result = solver
-            .settle_order(order_passing_limit)
+            .settle_order(sell_order_passing_limit)
             .await
             .unwrap()
             .unwrap();
@@ -285,67 +309,15 @@ mod tests {
                 buy_token => 100.into(),
             }
         );
-
-        let result = solver.settle_order(order_violating_limit).await.unwrap();
-        assert!(result.is_none());
-    }
-    #[tokio::test]
-    async fn test_satisfies_limit_price_for_buy_order() {
-        let mut client = Box::new(MockMatchaApi::new());
-        let mut allowance_fetcher = Box::new(MockAllowanceManaging::new());
-
-        let sell_token = H160::from_low_u64_be(1);
-        let buy_token = H160::from_low_u64_be(1);
-
-        let allowance_target = shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff");
-        client.expect_get_swap().returning(move|_| {
-            Ok(SwapResponse {
-            sell_amount: U256::from_dec_str("100").unwrap(),
-             buy_amount: U256::from_dec_str("91").unwrap(),
-             allowance_target,
-            price: 0.91_f64,
-            to: shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff"),
-            data: web3::types::Bytes(hex::decode(
-                "d9627aa40000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000016345785d8a00000000000000000000000000000000000000000000000000001206e6c0056936e100000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc20000000000000000000000006810e776880c02933d47db1b9fc05908e5386b96869584cd0000000000000000000000001000000000000000000000000000000000000011000000000000000000000000000000000000000000000092415e982f60d431ba"
-            ).unwrap()),
-            value: U256::from_dec_str("0").unwrap(),
-        })});
-
-        allowance_fetcher
-            .expect_get_approval()
-            .times(1)
-            .with(eq(sell_token), eq(allowance_target), eq(U256::from(100)))
-            .returning(move |_, _, _| {
-                Ok(Approval::Approve {
-                    token: sell_token,
-                    spender: allowance_target,
-                })
-            });
-
-        let solver = MatchaSolver {
-            client,
-            allowance_fetcher,
-        };
-
-        let order_passing_limit = LimitOrder {
-            sell_token,
-            buy_token,
-            sell_amount: 101.into(),
-            buy_amount: 91.into(),
-            kind: model::order::OrderKind::Buy,
-            ..Default::default()
-        };
-        let order_violating_limit = LimitOrder {
-            sell_token,
-            buy_token,
-            sell_amount: 99.into(),
-            buy_amount: 91.into(),
-            kind: model::order::OrderKind::Buy,
-            ..Default::default()
-        };
 
         let result = solver
-            .settle_order(order_passing_limit)
+            .settle_order(sell_order_violating_limit)
+            .await
+            .unwrap();
+        assert!(result.is_none());
+
+        let result = solver
+            .settle_order(buy_order_passing_limit)
             .await
             .unwrap()
             .unwrap();
@@ -357,7 +329,10 @@ mod tests {
             }
         );
 
-        let result = solver.settle_order(order_violating_limit).await.unwrap();
+        let result = solver
+            .settle_order(buy_order_violating_limit)
+            .await
+            .unwrap();
         assert!(result.is_none());
     }
 
@@ -385,13 +360,11 @@ mod tests {
         client.expect_get_swap().returning(move |_| {
             Ok(SwapResponse {
                 sell_amount: U256::from_dec_str("100").unwrap(),
-                 buy_amount: U256::from_dec_str("91").unwrap(),
-                 allowance_target ,
+                buy_amount: U256::from_dec_str("91").unwrap(),
+                allowance_target,
                 price: 13.121_002_575_170_278_f64,
-                to: shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff"),
-                data: web3::types::Bytes(hex::decode(
-                    "d9627aa40000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000016345785d8a00000000000000000000000000000000000000000000000000001206e6c0056936e100000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc20000000000000000000000006810e776880c02933d47db1b9fc05908e5386b96869584cd0000000000000000000000001000000000000000000000000000000000000011000000000000000000000000000000000000000000000092415e982f60d431ba"
-                ).unwrap()),
+                to: shared::addr!("0000000000000000000000000000000000000000"),
+                data: web3::types::Bytes(hex::decode("").unwrap()),
                 value: U256::from_dec_str("0").unwrap(),
             })
         });
