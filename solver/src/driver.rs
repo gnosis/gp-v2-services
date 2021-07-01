@@ -417,6 +417,8 @@ impl Driver {
         let rated_settlements = self
             .rate_settlements(settlements, &estimated_prices, gas_price_wei)
             .await;
+
+        self.inflight_trades.clear();
         if let Some(mut settlement) = rated_settlements
             .clone()
             .into_iter()
@@ -441,8 +443,6 @@ impl Driver {
                     .iter()
                     .map(|t| t.order.order_meta_data.uid)
                     .collect::<HashSet<OrderUid>>();
-            } else {
-                self.inflight_trades = HashSet::new()
             }
 
             self.report_matched_but_unsettled_orders(
