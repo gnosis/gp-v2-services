@@ -1,5 +1,5 @@
 use crate::solver::solver_utils::debug_bytes;
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use derivative::Derivative;
 use ethcontract::{H160, U256};
 use reqwest::{Client, RequestBuilder, Url};
@@ -46,10 +46,7 @@ impl ParaswapApi for DefaultParaswapApi {
         &self,
         query: TransactionBuilderQuery,
     ) -> Result<TransactionBuilderResponse> {
-        tracing::debug!(
-            "Querying Paraswap API (transaction) with {}",
-            serde_json::to_string(&query).unwrap()
-        );
+        let query_str = serde_json::to_string(&query).unwrap();
         let text = query
             .into_request(&self.client)
             .send()
@@ -58,11 +55,43 @@ impl ParaswapApi for DefaultParaswapApi {
             .text()
             .await?;
         tracing::debug!("Response from Paraswap API (transaction): {}", text);
+        parse_paraswap_response(&text, &query_str)
+    }
+}
 
-        serde_json::from_str::<TransactionBuilderResponse>(&text).context(format!(
-            "TransactionBuilderQuery result parsing failed: {}",
-            text
-        ))
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RawResponse {
+    ResponseOk(TransactionBuilderResponse),
+    ResponseErr { error: String },
+}
+
+fn parse_paraswap_response(response_text: &str, query: &str) -> Result<TransactionBuilderResponse> {
+    let intermediary_response =
+        serde_json::from_str::<RawResponse>(response_text).context(format!(
+            "TransactionBuilderQuery response and known errors not parsable: {}",
+            response_text
+        ));
+
+    match intermediary_response {
+        Ok(RawResponse::ResponseOk(response)) => Ok(response),
+        Ok(RawResponse::ResponseErr { error: message }) => {
+            match &message[..] {
+                "ERROR_BUILDING_TRANSACTION" => {
+                    Err(anyhow!("ERROR_BUILDING_TRANSACTION from query {}", query))
+                }
+                // TODO - create specific Error class for these instead of lazily using anyhow!
+                // TODO - actually signal retry from beginning.
+                "It seems like the rate has changed, please re-query the latest Price" => {
+                    Err(anyhow!("Price change - Please Retry!"))
+                }
+                _ => Err(anyhow!(
+                    "TransactionBuilderQuery result parsing failed with uncatalogued error {}",
+                    message
+                )),
+            }
+        }
+        Err(other) => Err(other),
     }
 }
 
