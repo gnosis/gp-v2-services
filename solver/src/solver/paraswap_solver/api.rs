@@ -5,6 +5,7 @@ use ethcontract::{H160, U256};
 use reqwest::{Client, RequestBuilder, Url};
 use serde::{de::Error, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
+use thiserror::Error;
 
 use model::u256_decimal;
 use web3::types::Bytes;
@@ -19,7 +20,7 @@ pub trait ParaswapApi {
     async fn transaction(
         &self,
         query: TransactionBuilderQuery,
-    ) -> Result<TransactionBuilderResponse>;
+    ) -> Result<TransactionBuilderResponse, ParaswapResponseError>;
 }
 
 #[derive(Default)]
@@ -45,17 +46,16 @@ impl ParaswapApi for DefaultParaswapApi {
     async fn transaction(
         &self,
         query: TransactionBuilderQuery,
-    ) -> Result<TransactionBuilderResponse> {
+    ) -> Result<TransactionBuilderResponse, ParaswapResponseError> {
         let query_str = serde_json::to_string(&query).unwrap();
-        let text = query
-            .into_request(&self.client)
-            .send()
-            .await
-            .context("TransactionBuilderQuery failed")?
-            .text()
-            .await?;
-        tracing::debug!("Response from Paraswap API (transaction): {}", text);
-        parse_paraswap_response(&text, &query_str)
+        let response_result = query.into_request(&self.client).send().await;
+        match response_result {
+            Ok(response) => match response.text().await {
+                Ok(response_text) => parse_paraswap_response_text(&response_text, &query_str),
+                Err(text_fetch_err) => Err(ParaswapResponseError::TextFetch(text_fetch_err)),
+            },
+            Err(send_err) => Err(ParaswapResponseError::Send(send_err)),
+        }
     }
 }
 
@@ -66,7 +66,32 @@ enum RawResponse {
     ResponseErr { error: String },
 }
 
-fn parse_paraswap_response(response_text: &str, query: &str) -> Result<TransactionBuilderResponse> {
+#[derive(Error, Debug)]
+pub enum ParaswapResponseError {
+    // Represents a failure with transaction builder query
+    #[error("ERROR_BUILDING_TRANSACTION from query {0}")]
+    BuildingTransaction(String),
+
+    // Occurs when the price changes between the time the price was queried and this request
+    #[error("Suspected Rate Change - Please Retry!")]
+    PriceChange,
+
+    // Connectivity or non-response error
+    #[error("Failed on send")]
+    Send(reqwest::Error),
+
+    // Recovered Response but failed on async call of response.text()
+    #[error(transparent)]
+    TextFetch(reqwest::Error),
+
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
+fn parse_paraswap_response_text(
+    response_text: &str,
+    query_str: &str,
+) -> Result<TransactionBuilderResponse, ParaswapResponseError> {
     let intermediary_response =
         serde_json::from_str::<RawResponse>(response_text).context(format!(
             "TransactionBuilderQuery response and known errors not parsable: {}",
@@ -75,23 +100,22 @@ fn parse_paraswap_response(response_text: &str, query: &str) -> Result<Transacti
 
     match intermediary_response {
         Ok(RawResponse::ResponseOk(response)) => Ok(response),
-        Ok(RawResponse::ResponseErr { error: message }) => {
-            match &message[..] {
-                "ERROR_BUILDING_TRANSACTION" => {
-                    Err(anyhow!("ERROR_BUILDING_TRANSACTION from query {}", query))
-                }
-                // TODO - create specific Error class for these instead of lazily using anyhow!
-                // TODO - actually signal retry from beginning.
-                "It seems like the rate has changed, please re-query the latest Price" => {
-                    Err(anyhow!("Price change - Please Retry!"))
-                }
-                _ => Err(anyhow!(
-                    "TransactionBuilderQuery result parsing failed with uncatalogued error {}",
-                    message
-                )),
+        Ok(RawResponse::ResponseErr { error: message }) => match &message[..] {
+            "ERROR_BUILDING_TRANSACTION" => Err(ParaswapResponseError::BuildingTransaction(
+                query_str.parse().unwrap(),
+            )),
+            "It seems like the rate has changed, please re-query the latest Price" => {
+                Err(ParaswapResponseError::PriceChange)
             }
-        }
-        Err(other) => Err(other),
+            _ => Err(ParaswapResponseError::Other(anyhow!(
+                "uncatalogued error parsed {}",
+                message
+            ))),
+        },
+        Err(other) => Err(ParaswapResponseError::Other(anyhow!(
+            "parse failure {}",
+            other
+        ))),
     }
 }
 
