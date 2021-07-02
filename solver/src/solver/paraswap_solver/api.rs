@@ -84,8 +84,11 @@ pub enum ParaswapResponseError {
     #[error(transparent)]
     TextFetch(reqwest::Error),
 
+    #[error("unknown paraswap error: {0}")]
+    UnknownParaswapError(String)
+
     #[error(transparent)]
-    Other(#[from] anyhow::Error),
+   DeserializeError(#[from] serde_json::Error)
 }
 
 fn parse_paraswap_response_text(
