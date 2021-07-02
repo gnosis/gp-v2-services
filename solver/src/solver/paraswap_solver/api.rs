@@ -269,7 +269,7 @@ pub struct TransactionBuilderResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest::{StatusCode, Response};
+    use reqwest::StatusCode;
 
     #[tokio::test]
     #[ignore]
@@ -553,5 +553,47 @@ mod tests {
             parse_paraswap_response_text("{\"error\": \"ERROR_BUILDING_TRANSACTION\"}", "there"),
             Err(ParaswapResponseError::BuildingTransaction(_))
         ));
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn transaction_response_error() {
+        let from = shared::addr!("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
+        let to = shared::addr!("6810e776880c02933d47db1b9fc05908e5386b96");
+        let price_query = PriceQuery {
+            from,
+            to,
+            from_decimals: 18,
+            to_decimals: 18,
+            amount: 135_000_000_000_000_000_000u128.into(),
+            side: Side::Sell,
+        };
+
+        let price_response: PriceResponse = reqwest::get(price_query.into_url())
+            .await
+            .expect("price query failed")
+            .json()
+            .await
+            .expect("Response is not json");
+
+        let api = DefaultParaswapApi {
+            client: Client::new(),
+        };
+
+        let good_query = TransactionBuilderQuery {
+            src_token: from,
+            dest_token: to,
+            src_amount: price_response.src_amount,
+            // 10% slippage
+            dest_amount: price_response.dest_amount * 90 / 100,
+            from_decimals: 18,
+            to_decimals: 18,
+            price_route: price_response.price_route_raw,
+            user_address: shared::addr!("E0B3700e0aadcb18ed8d4BFF648Bc99896a18ad1"),
+            referrer: "GPv2".to_string(),
+        };
+
+        assert!(api.transaction(good_query).await.is_ok());
+        // TODO - make bad query with Send and TextFetch error
     }
 }
