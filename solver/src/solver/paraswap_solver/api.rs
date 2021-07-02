@@ -95,9 +95,7 @@ fn parse_paraswap_response_text(
     response_text: &str,
     query_str: &str,
 ) -> Result<TransactionBuilderResponse, ParaswapResponseError> {
-    let intermediary_response = serde_json::from_str::<RawResponse>(response_text);
-
-    match intermediary_response {
+    match serde_json::from_str::<RawResponse>(response_text) {
         Ok(RawResponse::ResponseOk(response)) => Ok(response),
         Ok(RawResponse::ResponseErr { error: message }) => match &message[..] {
             "ERROR_BUILDING_TRANSACTION" => Err(ParaswapResponseError::BuildingTransaction(
@@ -271,7 +269,7 @@ pub struct TransactionBuilderResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest::StatusCode;
+    use reqwest::{StatusCode, Response};
 
     #[tokio::test]
     #[ignore]
@@ -532,5 +530,28 @@ mod tests {
 
         assert_eq!(result.src_amount, 100_000_000_000_000_000u128.into());
         assert_eq!(result.dest_amount, 1_444_292_761_374_042_400u128.into());
+    }
+
+    #[test]
+    fn paraswap_response_handling() {
+        assert!(matches!(
+            parse_paraswap_response_text("hello", "there"),
+            Err(ParaswapResponseError::DeserializeError(_))
+        ));
+
+        assert!(matches!(
+            parse_paraswap_response_text("{\"error\": \"Never seen this before\"}", "there"),
+            Err(ParaswapResponseError::UnknownParaswapError(_))
+        ));
+
+        assert!(matches!(
+            parse_paraswap_response_text("{\"error\": \"It seems like the rate has changed, please re-query the latest Price\"}", "there"),
+            Err(ParaswapResponseError::PriceChange)
+        ));
+
+        assert!(matches!(
+            parse_paraswap_response_text("{\"error\": \"ERROR_BUILDING_TRANSACTION\"}", "there"),
+            Err(ParaswapResponseError::BuildingTransaction(_))
+        ));
     }
 }
