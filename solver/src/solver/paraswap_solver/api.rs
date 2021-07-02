@@ -594,6 +594,5 @@ mod tests {
         };
 
         assert!(api.transaction(good_query).await.is_ok());
-        // TODO - make bad query with Send and TextFetch error
     }
 }
