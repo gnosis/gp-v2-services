@@ -1,5 +1,5 @@
 use crate::solver::solver_utils::debug_bytes;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use derivative::Derivative;
 use ethcontract::{H160, U256};
 use reqwest::{Client, RequestBuilder, Url};
@@ -84,22 +84,18 @@ pub enum ParaswapResponseError {
     #[error(transparent)]
     TextFetch(reqwest::Error),
 
-    #[error("unknown paraswap error: {0}")]
-    UnknownParaswapError(String)
+    #[error("{0}")]
+    UnknownParaswapError(String),
 
     #[error(transparent)]
-   DeserializeError(#[from] serde_json::Error)
+    DeserializeError(#[from] serde_json::Error),
 }
 
 fn parse_paraswap_response_text(
     response_text: &str,
     query_str: &str,
 ) -> Result<TransactionBuilderResponse, ParaswapResponseError> {
-    let intermediary_response =
-        serde_json::from_str::<RawResponse>(response_text).context(format!(
-            "TransactionBuilderQuery response and known errors not parsable: {}",
-            response_text
-        ));
+    let intermediary_response = serde_json::from_str::<RawResponse>(response_text);
 
     match intermediary_response {
         Ok(RawResponse::ResponseOk(response)) => Ok(response),
@@ -110,15 +106,12 @@ fn parse_paraswap_response_text(
             "It seems like the rate has changed, please re-query the latest Price" => {
                 Err(ParaswapResponseError::PriceChange)
             }
-            _ => Err(ParaswapResponseError::Other(anyhow!(
-                "uncatalogued error parsed {}",
+            _ => Err(ParaswapResponseError::UnknownParaswapError(format!(
+                "uncatalogued error message {}",
                 message
             ))),
         },
-        Err(other) => Err(ParaswapResponseError::Other(anyhow!(
-            "parse failure {}",
-            other
-        ))),
+        Err(err) => Err(ParaswapResponseError::DeserializeError(err)),
     }
 }
 
