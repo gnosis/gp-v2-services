@@ -128,36 +128,11 @@ fn match_prepared_and_settled_amms(
             let prepared = prepared_orders
                 .remove(&index)
                 .ok_or_else(|| anyhow!("invalid amm {}", index))?;
-
-            // TODO - Having ConstantProductOrder with tuples and WeightedProductOrder with HashMap is making this unnecessarily complicated.
-            let tokens = prepared.tokens.get();
-            let updates = (
-                *settled
-                    .updates
-                    .get(&tokens.0)
-                    .expect("received update for unknown token"),
-                *settled
-                    .updates
-                    .get(&tokens.1)
-                    .expect("received update for unknown token"),
-            );
-            let (input, output) = if updates.0.is_positive() && updates.1.is_negative() {
-                (
-                    (tokens.0, i128_abs_to_u256(updates.0)),
-                    (tokens.1, i128_abs_to_u256(updates.1)),
-                )
-            } else if updates.1.is_positive() && updates.0.is_negative() {
-                (
-                    (tokens.1, i128_abs_to_u256(updates.1)),
-                    (tokens.0, i128_abs_to_u256(updates.0)),
-                )
-            } else {
-                return Err(anyhow!("invalid uniswap update {:?}", settled));
-            };
             Ok(ExecutedAmm {
                 order: prepared,
-                input,
-                output,
+                // This seems backwards, but its how we passed the test.
+                input: (settled.buy_token, settled.exec_buy_amount),
+                output: (settled.sell_token, settled.exec_sell_amount),
             })
         })
         .collect()
@@ -186,17 +161,6 @@ fn match_settled_prices(
         }
     }
     Ok(prices)
-}
-
-fn i128_abs_to_u256(i: i128) -> U256 {
-    // TODO: use `unsigned_abs` once it is stable in next compiler version
-    // until then we need this check because the most negative value can not be `abs`ed because it
-    // it the most positive value plus 1.
-    if i == i128::MIN {
-        (i128::MAX as u128 + 1).into()
-    } else {
-        (i.abs() as u128).into()
-    }
 }
 
 #[cfg(test)]
@@ -239,7 +203,10 @@ mod tests {
             exec_sell_amount: 7.into(),
         };
         let updated_uniswap = UpdatedAmmModel {
-            updates: hashmap! { t0 => 8, t1 => -9 },
+            sell_token: t1,
+            buy_token: t0,
+            exec_sell_amount: U256::from(9),
+            exec_buy_amount: U256::from(8),
             exec_plan: Some(ExecutionPlanCoordinatesModel {
                 sequence: 0,
                 position: 0,

@@ -106,18 +106,19 @@ pub struct ExecutedOrderModel {
 
 #[derive(Debug, Deserialize)]
 pub struct UpdatedAmmModel {
-    pub updates: HashMap<H160, i128>,
+    pub sell_token: H160,
+    pub buy_token: H160,
+    pub exec_sell_amount: U256,
+    pub exec_buy_amount: U256,
     pub exec_plan: Option<ExecutionPlanCoordinatesModel>,
 }
 
 impl UpdatedAmmModel {
     /// Returns true there is at least one non-zero update.
     pub fn is_non_trivial(&self) -> bool {
-        // Check with the largest update by absolute value.
-        match self.updates.values().into_iter().map(|v| v.abs()).max() {
-            Some(value) => value > 0,
-            None => false,
-        }
+        self.exec_buy_amount
+            .max(self.exec_sell_amount)
+            .gt(&U256::zero())
     }
 }
 
@@ -135,41 +136,32 @@ mod tests {
 
     #[test]
     fn updated_amm_model_is_non_trivial() {
-        assert_eq!(
-            UpdatedAmmModel {
-                updates: hashmap! { H160::zero() => 0, H160::from_low_u64_be(1) => 0 },
-                exec_plan: None
-            }
-            .is_non_trivial(),
-            false
-        );
+        assert!(!UpdatedAmmModel {
+            sell_token: H160::zero(),
+            buy_token: H160::from_low_u64_be(1),
+            exec_sell_amount: Default::default(),
+            exec_buy_amount: Default::default(),
+            exec_plan: None,
+        }
+        .is_non_trivial());
 
-        assert_eq!(
-            UpdatedAmmModel {
-                updates: HashMap::new(),
-                exec_plan: None
-            }
-            .is_non_trivial(),
-            false
-        );
+        assert!(UpdatedAmmModel {
+            sell_token: H160::zero(),
+            buy_token: H160::from_low_u64_be(1),
+            exec_sell_amount: U256::one(),
+            exec_buy_amount: Default::default(),
+            exec_plan: None
+        }
+        .is_non_trivial());
 
-        assert_eq!(
-            UpdatedAmmModel {
-                updates: hashmap! { H160::zero() => -1, H160::from_low_u64_be(1) => 0 },
-                exec_plan: None
-            }
-            .is_non_trivial(),
-            true
-        );
-
-        assert_eq!(
-            UpdatedAmmModel {
-                updates: hashmap! { H160::zero() => 1, H160::from_low_u64_be(1) => 0 },
-                exec_plan: None
-            }
-            .is_non_trivial(),
-            true
-        );
+        assert!(UpdatedAmmModel {
+            sell_token: H160::zero(),
+            buy_token: H160::from_low_u64_be(1),
+            exec_sell_amount: Default::default(),
+            exec_buy_amount: U256::one(),
+            exec_plan: None
+        }
+        .is_non_trivial());
     }
 
     #[test]
