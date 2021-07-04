@@ -11,8 +11,9 @@
 use super::pool_storage::RegisteredWeightedPool;
 use crate::{event_handling::MAX_REORG_BLOCK_COUNT, subgraph::SubgraphClient};
 use anyhow::{bail, Result};
-use ethcontract::{H160, H256};
-use serde_json::json;
+use ethcontract::H160;
+use serde::de::DeserializeOwned;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 
 /// The page size when querying pools.
@@ -40,46 +41,88 @@ impl BalancerSubgraphClient {
 
     /// Retrieves the list of registered pools from the subgraph.
     pub async fn get_weighted_pools(&self) -> Result<RegisteredWeightedPools> {
+        let (fetched_block_number, pages) = self
+            .get_paged_by_id::<weighted_pools_query::Data, _>(weighted_pools_query::QUERY, |page| {
+                page.pools.last().map(|pool| json!(pool.id))
+            })
+            .await?;
+
+        let mut pools_by_factory = HashMap::<_, Vec<_>>::new();
+        for pool in pages.into_iter().flat_map(|page| page.pools) {
+            pools_by_factory
+                .entry(pool.factory.unwrap_or_default())
+                .or_default()
+                .push(pool.into_registered(fetched_block_number)?);
+        }
+
+        Ok(RegisteredWeightedPools {
+            fetched_block_number,
+            pools_by_factory,
+        })
+    }
+
+    /// Retrieves the list of registered pools from the subgraph.
+    pub async fn get_created_pool_addresses(&self) -> Result<CreatedPools> {
+        let (fetched_block_number, pages) = self
+            .get_paged_by_id::<created_pools_query::Data, _>(created_pools_query::QUERY, |page| {
+                page.pools.last().map(|pool| json!(pool.id))
+            })
+            .await?;
+        dbg!(&pages);
+
+        let mut pools_by_factory = HashMap::<_, Vec<_>>::new();
+        for pool in pages.into_iter().flat_map(|page| page.pools) {
+            pools_by_factory
+                .entry(pool.factory.unwrap_or_default())
+                .or_default()
+                .push(pool.address)
+        }
+
+        Ok(CreatedPools {
+            fetched_block_number,
+            pools_by_factory,
+        })
+    }
+
+    /// Helper method to retrieve paged by ID data organized by factory address.
+    async fn get_paged_by_id<T, F>(&self, query: &str, id_selector: F) -> Result<(u64, Vec<T>)>
+    where
+        T: DeserializeOwned,
+        F: Fn(&T) -> Option<Value>,
+    {
         let block_number = self.get_safe_block().await?;
-        let mut pools_by_factory = HashMap::<H160, Vec<RegisteredWeightedPool>>::new();
+        let mut pages = Vec::<T>::new();
 
         // We do paging by last ID instead of using `skip`. This is the
         // suggested approach to paging best performance:
         // <https://thegraph.com/docs/graphql-api#pagination>
-        let mut last_id = H256::default();
+        let mut last_id = json!("");
         while {
             let page = self
                 .0
-                .query::<pools_query::Data>(
-                    pools_query::QUERY,
+                .query::<T>(
+                    query,
                     Some(json_map! {
                         "block" => block_number,
                         "pageSize" => QUERY_PAGE_SIZE,
-                        "lastId" => json!(last_id),
+                        "lastId" => last_id.clone(),
                     }),
                 )
-                .await?
-                .pools;
+                .await?;
 
-            let has_next_page = page.len() == QUERY_PAGE_SIZE;
-            if let Some(last_pool) = page.last() {
-                last_id = last_pool.id;
-            }
+            let has_next_page = if let Some(new_last_id) = id_selector(&page) {
+                last_id = new_last_id;
+                true
+            } else {
+                false
+            };
 
-            for pool in page {
-                pools_by_factory
-                    .entry(pool.factory.unwrap_or_default())
-                    .or_default()
-                    .push(pool.into_registered(block_number)?);
-            }
+            pages.push(page);
 
             has_next_page
         } {}
 
-        Ok(RegisteredWeightedPools {
-            fetched_block_number: block_number,
-            pools_by_factory,
-        })
+        Ok((block_number, pages))
     }
 
     /// Retrieves a recent block number for which it is safe to assume no
@@ -114,7 +157,18 @@ pub struct RegisteredWeightedPools {
     pub pools_by_factory: HashMap<H160, Vec<RegisteredWeightedPool>>,
 }
 
-mod pools_query {
+/// Result of the registered weighted pool query.
+pub struct CreatedPools {
+    /// The block number that the data was fetched, and for which the registered
+    /// weighted pools can be considered up to date.
+    pub fetched_block_number: u64,
+    /// The created pools organized by pool factory.
+    ///
+    /// The pools for address `0` indicate pools created without a factory.
+    pub pools_by_factory: HashMap<H160, Vec<H160>>,
+}
+
+mod weighted_pools_query {
     use crate::sources::balancer::{pool_storage::RegisteredWeightedPool, swap::fixed_point::Bfp};
     use anyhow::{anyhow, Result};
     use ethcontract::{H160, H256};
@@ -197,6 +251,38 @@ mod pools_query {
     }
 }
 
+mod created_pools_query {
+    use ethcontract::{H160, H256};
+    use serde::Deserialize;
+
+    pub const QUERY: &str = r#"
+        query Pools($block: Int, $pageSize: Int, $lastId: ID) {
+            pools(
+                block: { number: $block }
+                first: $pageSize
+                where: { id_gt: $lastId }
+            ) {
+                id
+                address
+                factory
+            }
+        }
+    "#;
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    pub struct Data {
+        pub pools: Vec<Pool>,
+    }
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Pool {
+        pub id: H256,
+        pub address: H160,
+        pub factory: Option<H160>,
+    }
+}
+
 mod block_number_query {
     use serde::Deserialize;
 
@@ -230,8 +316,8 @@ mod tests {
     use ethcontract::{H160, H256};
 
     #[test]
-    fn decode_pools_data() {
-        use pools_query::*;
+    fn decode_weighted_pool_data() {
+        use weighted_pools_query::*;
 
         assert_eq!(
             serde_json::from_value::<Data>(json!({
@@ -279,6 +365,31 @@ mod tests {
     }
 
     #[test]
+    fn decode_created_pool_data() {
+        use created_pools_query::*;
+
+        assert_eq!(
+            serde_json::from_value::<Data>(json!({
+                "pools": [
+                    {
+                        "id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+                        "address": "0x2222222222222222222222222222222222222222",
+                        "factory": "0x3333333333333333333333333333333333333333",
+                    },
+                ],
+            }))
+            .unwrap(),
+            Data {
+                pools: vec![Pool {
+                    id: H256([0x11; 32]),
+                    address: H160([0x22; 20]),
+                    factory: Some(H160([0x33; 20])),
+                }],
+            }
+        );
+    }
+
+    #[test]
     fn decode_block_number_data() {
         use block_number_query::*;
 
@@ -301,7 +412,7 @@ mod tests {
 
     #[test]
     fn convert_pool_to_registered_pool() {
-        use pools_query::*;
+        use weighted_pools_query::*;
 
         let pool = Pool {
             id: H256([2; 32]),
@@ -339,7 +450,7 @@ mod tests {
 
     #[test]
     fn pool_conversion_invalid_decimals() {
-        use pools_query::*;
+        use weighted_pools_query::*;
 
         let pool = Pool {
             id: H256([2; 32]),
