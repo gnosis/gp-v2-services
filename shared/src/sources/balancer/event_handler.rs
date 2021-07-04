@@ -17,10 +17,11 @@ use crate::{
     impl_event_retrieving,
     maintenance::Maintaining,
     sources::balancer::{
-        info_fetching::PoolInfoFetching,
+        info_fetching::PoolInfoFetcher,
         pool_init::PoolInitializing,
         pool_storage::{PoolCreated, PoolStorage, RegisteredWeightedPool},
     },
+    token_info::TokenInfoFetching,
     Web3,
 };
 use anyhow::{anyhow, Context, Result};
@@ -52,7 +53,7 @@ impl BalancerPoolRegistry {
     pub async fn new(
         web3: Web3,
         pool_initializer: impl PoolInitializing,
-        pool_info: Arc<dyn PoolInfoFetching>,
+        token_info_fetcher: Arc<dyn TokenInfoFetching>,
     ) -> Result<Self> {
         let weighted_pool_factory = BalancerV2WeightedPoolFactory::deployed(&web3).await?;
         let two_token_pool_factory = BalancerV2WeightedPool2TokensFactory::deployed(&web3).await?;
@@ -62,13 +63,25 @@ impl BalancerPoolRegistry {
         let weighted_pool_updater = Mutex::new(EventHandler::new(
             web3.clone(),
             BalancerV2WeightedPoolFactoryContract(weighted_pool_factory),
-            PoolStorage::new(initial_pools.weighted_pools, pool_info.clone()),
+            PoolStorage::new(
+                initial_pools.weighted_pools,
+                Box::new(PoolInfoFetcher {
+                    web3: web3.clone(),
+                    token_info_fetcher: token_info_fetcher.clone(),
+                }),
+            ),
             Some(initial_pools.fetched_block_number),
         ));
         let two_token_pool_updater = Mutex::new(EventHandler::new(
             web3.clone(),
             BalancerV2WeightedPool2TokensFactoryContract(two_token_pool_factory),
-            PoolStorage::new(initial_pools.weighted_2token_pools, pool_info),
+            PoolStorage::new(
+                initial_pools.weighted_2token_pools,
+                Box::new(PoolInfoFetcher {
+                    web3: web3.clone(),
+                    token_info_fetcher: token_info_fetcher.clone(),
+                }),
+            ),
             Some(initial_pools.fetched_block_number),
         ));
 

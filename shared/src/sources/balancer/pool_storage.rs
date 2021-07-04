@@ -36,10 +36,7 @@ use anyhow::Result;
 use derivative::Derivative;
 use ethcontract::{H160, H256};
 use model::TokenPair;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RegisteredWeightedPool {
@@ -57,11 +54,13 @@ pub struct PoolCreated {
 }
 
 impl RegisteredWeightedPool {
-    pub async fn new(
+    /// Errors expected here are propagated from `get_pool_data`.
+    pub async fn from_event(
         block_created: u64,
-        pool_address: H160,
+        creation: PoolCreated,
         data_fetcher: &dyn PoolInfoFetching,
     ) -> Result<RegisteredWeightedPool> {
+        let pool_address = creation.pool_address;
         let pool_data = data_fetcher.get_pool_data(pool_address).await?;
         Ok(RegisteredWeightedPool {
             pool_id: pool_data.pool_id,
@@ -71,15 +70,6 @@ impl RegisteredWeightedPool {
             scaling_exponents: pool_data.scaling_exponents,
             block_created,
         })
-    }
-
-    /// Errors expected here are propagated from `get_pool_data`.
-    pub async fn from_event(
-        block_created: u64,
-        creation: PoolCreated,
-        data_fetcher: &dyn PoolInfoFetching,
-    ) -> Result<RegisteredWeightedPool> {
-        Self::new(block_created, creation.pool_address, data_fetcher).await
     }
 }
 
@@ -92,13 +82,13 @@ pub struct PoolStorage {
     /// WeightedPool data for a given PoolId
     pools: HashMap<H256, RegisteredWeightedPool>,
     #[derivative(Debug = "ignore")]
-    data_fetcher: Arc<dyn PoolInfoFetching>,
+    data_fetcher: Box<dyn PoolInfoFetching>,
 }
 
 impl PoolStorage {
     pub fn new(
         initial_pools: Vec<RegisteredWeightedPool>,
-        data_fetcher: Arc<dyn PoolInfoFetching>,
+        data_fetcher: Box<dyn PoolInfoFetching>,
     ) -> Self {
         let mut pools_by_token = HashMap::<_, HashSet<_>>::new();
         let mut pools = HashMap::new();
@@ -111,7 +101,6 @@ impl PoolStorage {
             }
             pools.insert(pool.pool_id, pool);
         }
-        dbg!(&pools_by_token);
 
         PoolStorage {
             pools_by_token,
@@ -121,7 +110,7 @@ impl PoolStorage {
     }
 
     #[cfg(test)]
-    fn empty(data_fetcher: Arc<dyn PoolInfoFetching>) -> Self {
+    fn empty(data_fetcher: Box<dyn PoolInfoFetching>) -> Self {
         Self::new(vec![], data_fetcher)
     }
 
@@ -278,7 +267,7 @@ mod tests {
                     block_created: 0,
                 },
             ],
-            Arc::new(MockPoolInfoFetching::new()),
+            Box::new(MockPoolInfoFetching::new()),
         );
 
         assert_eq!(
@@ -317,7 +306,7 @@ mod tests {
                 .returning(move |_| Ok(expected_pool_data.clone()));
         }
 
-        let mut pool_store = PoolStorage::empty(Arc::new(dummy_data_fetcher));
+        let mut pool_store = PoolStorage::empty(Box::new(dummy_data_fetcher));
         pool_store.insert_events(events).await.unwrap();
         // Note that it is never expected that blocks for events will differ,
         // but in this test block_created for the pool is the first block it receives.
@@ -402,7 +391,7 @@ mod tests {
                 })
             });
 
-        let mut pool_store = PoolStorage::empty(Arc::new(dummy_data_fetcher));
+        let mut pool_store = PoolStorage::empty(Box::new(dummy_data_fetcher));
         pool_store.insert_events(converted_events).await.unwrap();
         // Let the tests begin!
         assert_eq!(pool_store.last_event_block(), end_block as u64);
@@ -492,7 +481,7 @@ mod tests {
                 .with(eq(pool_addresses[i]))
                 .returning(move |_| Ok(expected_pool_data.clone()));
         }
-        let mut registry = PoolStorage::empty(Arc::new(dummy_data_fetcher));
+        let mut registry = PoolStorage::empty(Box::new(dummy_data_fetcher));
         // Test the empty registry.
         for token_pair in token_pairs.iter().take(n) {
             assert!(registry
