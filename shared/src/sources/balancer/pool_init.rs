@@ -203,7 +203,7 @@ mod tests {
         let initializer = EmptyPoolInitializer(4);
         assert_eq!(
             initializer.initialize_pools().await.unwrap(),
-            BalancerRegisteredPools{
+            BalancerRegisteredPools {
                 fetched_block_number: 8441702,
                 ..Default::default()
             }

@@ -93,8 +93,9 @@ impl BalancerPoolFetcher {
         metrics: Arc<dyn WeightedPoolCacheMetrics>,
     ) -> Result<Self> {
         let pool_initializer = DefaultPoolInitializer::new(chain_id)?;
-        let pool_registry =
-            Arc::new(BalancerPoolRegistry::new(web3.clone(), pool_initializer, token_info_fetcher).await?);
+        let pool_registry = Arc::new(
+            BalancerPoolRegistry::new(web3.clone(), pool_initializer, token_info_fetcher).await?,
+        );
         let reserve_fetcher = PoolReserveFetcher::new(pool_registry.clone(), web3).await?;
         let pool_reserve_cache =
             RecentBlockCache::new(config, reserve_fetcher, block_stream, metrics)?;
