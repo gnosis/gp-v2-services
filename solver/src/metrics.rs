@@ -10,8 +10,7 @@ use prometheus::{
 };
 use shared::{
     sources::{
-        balancer::pool_cache::WeightedPoolCacheMetrics,
-        uniswap::pool_cache::PoolCacheMetrics,
+        balancer::pool_cache::WeightedPoolCacheMetrics, uniswap::pool_cache::PoolCacheMetrics,
     },
     transport::instrumented::TransportMetrics,
 };
