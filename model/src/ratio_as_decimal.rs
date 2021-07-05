@@ -110,7 +110,7 @@ mod tests {
                 Serializer
             )
             .unwrap(),
-            Value::String("-1ca".to_string())
+            Value::String("-1".to_string())
         );
     }
 
