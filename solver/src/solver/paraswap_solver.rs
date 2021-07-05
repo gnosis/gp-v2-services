@@ -5,6 +5,7 @@ use self::api::{
     TransactionBuilderResponse,
 };
 use super::single_order_solver::SingleOrderSolving;
+use crate::solver::paraswap_solver::api::ParaswapResponseError;
 use crate::{
     encoding::EncodedInteraction,
     interactions::allowances::{AllowanceManager, AllowanceManaging},
@@ -14,10 +15,12 @@ use crate::{
 use anyhow::{anyhow, Result};
 use contracts::GPv2Settlement;
 use derivative::Derivative;
-use ethcontract::{Bytes, H160};
+use ethcontract::{Bytes, H160, U256};
 use maplit::hashmap;
 use shared::{conversions::U256Ext, token_info::TokenInfoFetching, Web3};
 use std::sync::Arc;
+use shared::token_info::TokenInfo;
+use std::collections::HashMap;
 
 const REFERRER: &str = "GPv2";
 const APPROVAL_RECEIVER: H160 = shared::addr!("b70bc06d2c9bf03b3373799606dc7d39346c06b3");
@@ -60,69 +63,25 @@ impl ParaswapSolver {
 #[async_trait::async_trait]
 impl SingleOrderSolving for ParaswapSolver {
     async fn settle_order(&self, order: LimitOrder) -> Result<Option<Settlement>> {
-        let (amount, side) = match order.kind {
-            model::order::OrderKind::Buy => (order.buy_amount, Side::Buy),
-            model::order::OrderKind::Sell => (order.sell_amount, Side::Sell),
-        };
-        let token_infos = self
-            .token_info
-            .get_token_infos(&[order.sell_token, order.buy_token])
-            .await;
-        let decimals = |token: &H160| {
-            token_infos
-                .get(token)
-                .and_then(|info| info.decimals.map(usize::from))
-                .ok_or_else(|| anyhow!("decimals for token {:?} not found", token))
-        };
-
-        let price_query = PriceQuery {
-            from: order.sell_token,
-            to: order.buy_token,
-            from_decimals: decimals(&order.sell_token)?,
-            to_decimals: decimals(&order.buy_token)?,
-            amount,
-            side,
-        };
-
-        let price_response = self.client.price(price_query).await?;
-
-        if !satisfies_limit_price(&order, &price_response) {
-            tracing::debug!("Order limit price not respected");
-            return Ok(None);
+        let transaction: TransactionBuilderResponse;
+        let price_response: PriceResponse;
+        let amount: U256;
+        loop {
+            let (transaction_result, inner_price_response, inner_amount) = self.paraswap_transaction_from_order(&order).await?;
+            if !satisfies_limit_price(&order, &inner_price_response) {
+                tracing::debug!("Order limit price not respected");
+                return Ok(None);
+            }
+            match transaction_result {
+                Err(ParaswapResponseError::PriceChange) => continue,
+                _ => {
+                    price_response = inner_price_response;
+                    amount = inner_amount;
+                    transaction = transaction_result?;
+                    break
+                }
+            }
         }
-
-        let (src_amount, dest_amount) = match order.kind {
-            // Buy orders apply slippage to src amount, dest amount unchanged
-            model::order::OrderKind::Buy => (
-                price_response
-                    .src_amount
-                    .checked_mul((10000 + self.slippage_bps).into())
-                    .ok_or_else(|| anyhow!("Overflow during slippage computation"))?
-                    / 10000,
-                price_response.dest_amount,
-            ),
-            // Sell orders apply slippage to dest amount, src amount unchanged
-            model::order::OrderKind::Sell => (
-                price_response.src_amount,
-                price_response
-                    .dest_amount
-                    .checked_mul((10000 - self.slippage_bps).into())
-                    .ok_or_else(|| anyhow!("Overflow during slippage computation"))?
-                    / 10000,
-            ),
-        };
-        let transaction_query = TransactionBuilderQuery {
-            src_token: order.sell_token,
-            dest_token: order.buy_token,
-            src_amount,
-            dest_amount,
-            from_decimals: decimals(&order.sell_token)?,
-            to_decimals: decimals(&order.buy_token)?,
-            price_route: price_response.price_route_raw,
-            user_address: self.solver_address,
-            referrer: REFERRER.to_string(),
-        };
-        let transaction = self.client.transaction(transaction_query).await?;
 
         let mut settlement = Settlement::new(hashmap! {
             order.sell_token => price_response.dest_amount,
@@ -146,6 +105,83 @@ impl SingleOrderSolving for ParaswapSolver {
     fn name(&self) -> &'static str {
         "ParaSwap"
     }
+}
+
+impl ParaswapSolver {
+    pub async fn get_price_for_order(&self, order: &LimitOrder, token_info: &HashMap<H160, TokenInfo>) -> Result<(PriceResponse, U256)> {
+        let (amount, side) = match order.kind {
+            model::order::OrderKind::Buy => (order.buy_amount, Side::Buy),
+            model::order::OrderKind::Sell => (order.sell_amount, Side::Sell),
+        };
+
+        let price_query = PriceQuery {
+            from: order.sell_token,
+            to: order.buy_token,
+            from_decimals: decimals(token_info, &order.sell_token)?,
+            to_decimals: decimals(token_info, &order.buy_token)?,
+            amount,
+            side,
+        };
+        let price_response = self.client.price(price_query).await?;
+        Ok((price_response, amount))
+    }
+
+    pub async fn transaction_query_from(
+        &self,
+        order: &LimitOrder,
+        price_response: &PriceResponse,
+        token_info: &HashMap<H160, TokenInfo>,
+    ) -> Result<TransactionBuilderQuery> {
+        let (src_amount, dest_amount) = match order.kind {
+            // Buy orders apply slippage to src amount, dest amount unchanged
+            model::order::OrderKind::Buy => (
+                price_response
+                    .src_amount
+                    .checked_mul((10000 + self.slippage_bps).into())
+                    .ok_or_else(|| anyhow!("Overflow during slippage computation"))?
+                    / 10000,
+                price_response.dest_amount,
+            ),
+            // Sell orders apply slippage to dest amount, src amount unchanged
+            model::order::OrderKind::Sell => (
+                price_response.src_amount,
+                price_response
+                    .dest_amount
+                    .checked_mul((10000 - self.slippage_bps).into())
+                    .ok_or_else(|| anyhow!("Overflow during slippage computation"))?
+                    / 10000,
+            ),
+        };
+        let query = TransactionBuilderQuery {
+            src_token: order.sell_token,
+            dest_token: order.buy_token,
+            src_amount,
+            dest_amount,
+            from_decimals: decimals(token_info,&order.sell_token)?,
+            to_decimals: decimals(token_info, &order.buy_token)?,
+            price_route: price_response.clone().price_route_raw,
+            user_address: self.solver_address,
+            referrer: REFERRER.to_string(),
+        };
+        Ok(query)
+    }
+
+    pub async fn paraswap_transaction_from_order(&self, order: &LimitOrder) -> Result<(Result<TransactionBuilderResponse, ParaswapResponseError>, PriceResponse, U256)> {
+        let token_info = self
+            .token_info
+            .get_token_infos(&[order.sell_token, order.buy_token])
+            .await;
+        let (price_response, amount) = self.get_price_for_order(&order, &token_info).await?;
+        let transaction_query = self.transaction_query_from(&order, &price_response, &token_info).await?;
+        Ok((self.client.transaction(transaction_query).await, price_response, amount))
+    }
+}
+
+pub fn decimals(token_info: &HashMap<H160, TokenInfo>, token: &H160) -> Result<usize> {
+    token_info
+        .get(token)
+        .and_then(|info| info.decimals.map(usize::from))
+        .ok_or_else(|| anyhow!("decimals for token {:?} not found", token))
 }
 
 impl Interaction for TransactionBuilderResponse {
