@@ -1,9 +1,7 @@
 use bigdecimal::{BigDecimal, One};
-use num::bigint::Sign as Sign04;
-use num::BigRational;
+use num::{bigint::Sign as Sign04, BigRational};
 use num_bigint::{BigInt, Sign as Sign03};
-use serde::Deserialize;
-use serde::{de, Deserializer, Serializer};
+use serde::{de, Deserialize, Deserializer, Serializer};
 use serde_with::{DeserializeAs, SerializeAs};
 use std::borrow::Cow;
 use std::str::FromStr;
