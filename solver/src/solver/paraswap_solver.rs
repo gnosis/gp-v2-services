@@ -17,10 +17,10 @@ use contracts::GPv2Settlement;
 use derivative::Derivative;
 use ethcontract::{Bytes, H160, U256};
 use maplit::hashmap;
-use shared::{conversions::U256Ext, token_info::TokenInfoFetching, Web3};
-use std::sync::Arc;
 use shared::token_info::TokenInfo;
+use shared::{conversions::U256Ext, token_info::TokenInfoFetching, Web3};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 const REFERRER: &str = "GPv2";
 const APPROVAL_RECEIVER: H160 = shared::addr!("b70bc06d2c9bf03b3373799606dc7d39346c06b3");
@@ -67,7 +67,8 @@ impl SingleOrderSolving for ParaswapSolver {
         let price_response: PriceResponse;
         let amount: U256;
         loop {
-            let (transaction_result, inner_price_response, inner_amount) = self.paraswap_transaction_from_order(&order).await?;
+            let (transaction_result, inner_price_response, inner_amount) =
+                self.paraswap_transaction_from_order(&order).await?;
             if !satisfies_limit_price(&order, &inner_price_response) {
                 tracing::debug!("Order limit price not respected");
                 return Ok(None);
@@ -78,7 +79,7 @@ impl SingleOrderSolving for ParaswapSolver {
                     price_response = inner_price_response;
                     amount = inner_amount;
                     transaction = transaction_result?;
-                    break
+                    break;
                 }
             }
         }
@@ -108,7 +109,11 @@ impl SingleOrderSolving for ParaswapSolver {
 }
 
 impl ParaswapSolver {
-    pub async fn get_price_for_order(&self, order: &LimitOrder, token_info: &HashMap<H160, TokenInfo>) -> Result<(PriceResponse, U256)> {
+    pub async fn get_price_for_order(
+        &self,
+        order: &LimitOrder,
+        token_info: &HashMap<H160, TokenInfo>,
+    ) -> Result<(PriceResponse, U256)> {
         let (amount, side) = match order.kind {
             model::order::OrderKind::Buy => (order.buy_amount, Side::Buy),
             model::order::OrderKind::Sell => (order.sell_amount, Side::Sell),
@@ -157,7 +162,7 @@ impl ParaswapSolver {
             dest_token: order.buy_token,
             src_amount,
             dest_amount,
-            from_decimals: decimals(token_info,&order.sell_token)?,
+            from_decimals: decimals(token_info, &order.sell_token)?,
             to_decimals: decimals(token_info, &order.buy_token)?,
             price_route: price_response.clone().price_route_raw,
             user_address: self.solver_address,
@@ -166,14 +171,27 @@ impl ParaswapSolver {
         Ok(query)
     }
 
-    pub async fn paraswap_transaction_from_order(&self, order: &LimitOrder) -> Result<(Result<TransactionBuilderResponse, ParaswapResponseError>, PriceResponse, U256)> {
+    pub async fn paraswap_transaction_from_order(
+        &self,
+        order: &LimitOrder,
+    ) -> Result<(
+        Result<TransactionBuilderResponse, ParaswapResponseError>,
+        PriceResponse,
+        U256,
+    )> {
         let token_info = self
             .token_info
             .get_token_infos(&[order.sell_token, order.buy_token])
             .await;
         let (price_response, amount) = self.get_price_for_order(&order, &token_info).await?;
-        let transaction_query = self.transaction_query_from(&order, &price_response, &token_info).await?;
-        Ok((self.client.transaction(transaction_query).await, price_response, amount))
+        let transaction_query = self
+            .transaction_query_from(&order, &price_response, &token_info)
+            .await?;
+        Ok((
+            self.client.transaction(transaction_query).await,
+            price_response,
+            amount,
+        ))
     }
 }
 
