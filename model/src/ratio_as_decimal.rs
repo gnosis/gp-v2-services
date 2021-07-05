@@ -55,7 +55,7 @@ where
                 sign_03_to_04(numerator_bytes.0),
                 &numerator_bytes.1,
             );
-            let ten = BigRational::new(num::bigint::BigInt::from(10), num::bigint::BigInt::from(1));
+            let ten = BigRational::new(10.into(), 1.into());
             let numerator = BigRational::new(base, num::bigint::BigInt::one());
             Ok(numerator / ten.pow(exp as i32))
         }
