@@ -1,4 +1,7 @@
-use num::{BigRational, ToPrimitive};
+use bigdecimal::BigDecimal;
+use num::bigint::Sign as Sign04;
+use num::BigRational;
+use num_bigint::{BigInt, Sign as Sign03};
 use serde::{de, Deserializer, Serializer};
 use serde_with::{DeserializeAs, SerializeAs};
 use std::fmt;
@@ -28,8 +31,12 @@ pub fn serialize<S>(value: &BigRational, serializer: S) -> Result<S::Ok, S::Erro
 where
     S: Serializer,
 {
-    let float_rep = value.numer().to_f64().unwrap() / value.denom().to_f64().unwrap();
-    serializer.serialize_str(&float_rep.to_string())
+    let top_bytes = value.numer().to_bytes_le();
+    let top = BigInt::from_bytes_le(sign_04_to_03(top_bytes.0), &top_bytes.1);
+    let bottom_bytes = value.denom().to_bytes_le();
+    let bottom = BigInt::from_bytes_le(sign_04_to_03(bottom_bytes.0), &bottom_bytes.1);
+    let decimal = BigDecimal::from(top) / BigDecimal::from(bottom);
+    serializer.serialize_str(&decimal.to_string())
 }
 
 pub fn deserialize<'de, D>(deserializer: D) -> Result<BigRational, D::Error>
@@ -63,6 +70,15 @@ where
     deserializer.deserialize_str(Visitor {})
 }
 
+/// Simple one-to-one conversion of the Sign enum from num-bigint crates v0.3 and v0.4
+fn sign_04_to_03(sign_04: Sign04) -> Sign03 {
+    match sign_04 {
+        Sign04::Minus => Sign03::Minus,
+        Sign04::NoSign => Sign03::NoSign,
+        Sign04::Plus => Sign03::Plus,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::ratio_as_decimal::{deserialize, serialize};
@@ -74,7 +90,7 @@ mod tests {
     fn serializer() {
         assert_eq!(
             serialize(&BigRational::from_float(1.2).unwrap(), Serializer).unwrap(),
-            Value::String("1.2".to_string())
+            Value::String("1.1999999999999999555910790149937383830547332763671875".to_string())
         );
         assert_eq!(
             serialize(
@@ -82,7 +98,7 @@ mod tests {
                 Serializer
             )
             .unwrap(),
-            Value::String("0.3333333333333333".to_string())
+            Value::String("0.3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333".to_string())
         );
     }
 
