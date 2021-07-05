@@ -82,7 +82,7 @@ fn sign_04_to_03(sign_04: Sign04) -> Sign03 {
 #[cfg(test)]
 mod tests {
     use crate::ratio_as_decimal::{deserialize, serialize};
-    use num::{BigInt, BigRational};
+    use num::{BigInt, BigRational, Zero};
     use serde_json::value::Serializer;
     use serde_json::Value;
 
@@ -100,6 +100,10 @@ mod tests {
             .unwrap(),
             Value::String("0.3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333".to_string())
         );
+        assert_eq!(
+            serialize(&BigRational::zero(), Serializer).unwrap(),
+            Value::String("0".to_string())
+        );
     }
 
     #[test]
@@ -113,6 +117,11 @@ mod tests {
         assert_eq!(
             deserialize(Value::String("1/2".to_string())).unwrap(),
             BigRational::from_float(0.5).unwrap()
+        );
+
+        assert_eq!(
+            deserialize(Value::String("0/1".to_string())).unwrap(),
+            BigRational::zero()
         );
     }
 }
