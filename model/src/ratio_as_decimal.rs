@@ -104,6 +104,14 @@ mod tests {
             serialize(&BigRational::zero(), Serializer).unwrap(),
             Value::String("0".to_string())
         );
+        assert_eq!(
+            serialize(
+                &BigRational::new(BigInt::from(-1), BigInt::from(1)),
+                Serializer
+            )
+            .unwrap(),
+            Value::String("-1ca".to_string())
+        );
     }
 
     #[test]
@@ -122,6 +130,10 @@ mod tests {
         assert_eq!(
             deserialize(Value::String("0/1".to_string())).unwrap(),
             BigRational::zero()
+        );
+        assert_eq!(
+            deserialize(Value::String("-1/1".to_string())).unwrap(),
+            BigRational::new(BigInt::from(-1), BigInt::from(1))
         );
     }
 }
