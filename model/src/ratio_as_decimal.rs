@@ -4,6 +4,7 @@ use num_bigint::{BigInt, Sign as Sign03};
 use serde::{de, Deserialize, Deserializer, Serializer};
 use serde_with::{DeserializeAs, SerializeAs};
 use std::borrow::Cow;
+use std::convert::TryInto;
 use std::str::FromStr;
 
 pub struct DecimalBigRational;
@@ -53,7 +54,11 @@ where
         num::bigint::BigInt::from_bytes_le(sign_03_to_04(numerator_bytes.0), &numerator_bytes.1);
     let ten = BigRational::new(10.into(), 1.into());
     let numerator = BigRational::new(base, 1.into());
-    Ok(numerator / ten.pow(exp as i32))
+    Ok(numerator
+        / ten.pow(
+            exp.try_into()
+                .map_err(|err| de::Error::custom(format!("decimal exponent overflow: {}", err)))?,
+        ))
 }
 
 /// Simple one-to-one conversion of the Sign enum from num-bigint crates v0.3 and v0.4
