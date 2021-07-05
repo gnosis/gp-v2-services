@@ -1,10 +1,11 @@
-use bigdecimal::BigDecimal;
+use bigdecimal::{BigDecimal, One};
 use num::bigint::Sign as Sign04;
 use num::BigRational;
 use num_bigint::{BigInt, Sign as Sign03};
+use serde::Deserialize;
 use serde::{de, Deserializer, Serializer};
 use serde_with::{DeserializeAs, SerializeAs};
-use std::fmt;
+use std::borrow::Cow;
 use std::str::FromStr;
 
 pub struct DecimalBigRational;
@@ -43,31 +44,25 @@ pub fn deserialize<'de, D>(deserializer: D) -> Result<BigRational, D::Error>
 where
     D: Deserializer<'de>,
 {
-    struct Visitor {}
-    impl<'de> de::Visitor<'de> for Visitor {
-        type Value = BigRational;
+    let value_decimal: Result<BigDecimal, D::Error> =
+        BigDecimal::from_str(&*Cow::<str>::deserialize(deserializer)?).map_err(|err| {
+            de::Error::custom(format!("failed to decode decimal BigDecimal: {}", err))
+        });
 
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            write!(
-                formatter,
-                "a BigRational encoded as a decimal encoded string"
-            )
+    match value_decimal {
+        Ok(big_decimal) => {
+            let (x, exp) = big_decimal.into_bigint_and_exponent();
+            let numerator_bytes = x.to_bytes_le();
+            let base = num::bigint::BigInt::from_bytes_le(
+                sign_03_to_04(numerator_bytes.0),
+                &numerator_bytes.1,
+            );
+            let ten = BigRational::new(num::bigint::BigInt::from(10), num::bigint::BigInt::from(1));
+            let numerator = BigRational::new(base, num::bigint::BigInt::one());
+            Ok(numerator / ten.pow(exp as i32))
         }
-
-        fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
-        where
-            E: de::Error,
-        {
-            BigRational::from_str(&s).map_err(|err| {
-                de::Error::custom(format!(
-                    "failed to decode {:?} as decimal BigRational: {}",
-                    s, err
-                ))
-            })
-        }
+        Err(err) => Err(err),
     }
-
-    deserializer.deserialize_str(Visitor {})
 }
 
 /// Simple one-to-one conversion of the Sign enum from num-bigint crates v0.3 and v0.4
@@ -79,18 +74,26 @@ fn sign_04_to_03(sign_04: Sign04) -> Sign03 {
     }
 }
 
+fn sign_03_to_04(sign_03: Sign03) -> Sign04 {
+    match sign_03 {
+        Sign03::Minus => Sign04::Minus,
+        Sign03::NoSign => Sign04::NoSign,
+        Sign03::Plus => Sign04::Plus,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::ratio_as_decimal::{deserialize, serialize};
     use num::{BigInt, BigRational, Zero};
+    use serde_json::json;
     use serde_json::value::Serializer;
-    use serde_json::Value;
 
     #[test]
     fn serializer() {
         assert_eq!(
             serialize(&BigRational::from_float(1.2).unwrap(), Serializer).unwrap(),
-            Value::String("1.1999999999999999555910790149937383830547332763671875".to_string())
+            json!("1.1999999999999999555910790149937383830547332763671875")
         );
         assert_eq!(
             serialize(
@@ -98,11 +101,11 @@ mod tests {
                 Serializer
             )
             .unwrap(),
-            Value::String("0.3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333".to_string())
+            json!("0.3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333")
         );
         assert_eq!(
             serialize(&BigRational::zero(), Serializer).unwrap(),
-            Value::String("0".to_string())
+            json!("0")
         );
         assert_eq!(
             serialize(
@@ -110,29 +113,24 @@ mod tests {
                 Serializer
             )
             .unwrap(),
-            Value::String("-1".to_string())
+            json!("-1")
         );
     }
 
     #[test]
     fn deserialize_err() {
-        let value = Value::String("hello".to_string());
-        assert!(deserialize(value).is_err());
+        assert!(deserialize(json!("hello")).is_err());
     }
 
     #[test]
     fn deserialize_ok() {
         assert_eq!(
-            deserialize(Value::String("1/2".to_string())).unwrap(),
-            BigRational::from_float(0.5).unwrap()
+            deserialize(json!("1.2")).unwrap(),
+            BigRational::new(BigInt::from(12), BigInt::from(10))
         );
-
+        assert_eq!(deserialize(json!("0")).unwrap(), BigRational::zero());
         assert_eq!(
-            deserialize(Value::String("0/1".to_string())).unwrap(),
-            BigRational::zero()
-        );
-        assert_eq!(
-            deserialize(Value::String("-1/1".to_string())).unwrap(),
+            deserialize(json!("-1")).unwrap(),
             BigRational::new(BigInt::from(-1), BigInt::from(1))
         );
     }
