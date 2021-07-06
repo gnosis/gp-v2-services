@@ -122,20 +122,21 @@ pub struct ExecutedOrderModel {
     pub exec_buy_amount: U256,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct UpdatedAmmModel {
-    pub updates: HashMap<H160, i128>,
+    pub sell_token: H160,
+    pub buy_token: H160,
+    pub exec_sell_amount: U256,
+    pub exec_buy_amount: U256,
     pub exec_plan: Option<ExecutionPlanCoordinatesModel>,
 }
 
 impl UpdatedAmmModel {
     /// Returns true there is at least one non-zero update.
     pub fn is_non_trivial(&self) -> bool {
-        // Check with the largest update by absolute value.
-        match self.updates.values().into_iter().map(|v| v.abs()).max() {
-            Some(value) => value > 0,
-            None => false,
-        }
+        self.exec_buy_amount
+            .max(self.exec_sell_amount)
+            .gt(&U256::zero())
     }
 }
 
@@ -154,26 +155,19 @@ mod tests {
     #[test]
     fn updated_amm_model_is_non_trivial() {
         assert!(!UpdatedAmmModel {
-            updates: hashmap! { H160::zero() => 0, H160::from_low_u64_be(1) => 0 },
-            exec_plan: None
-        }
-        .is_non_trivial());
-
-        assert!(!UpdatedAmmModel {
-            updates: HashMap::new(),
-            exec_plan: None
+            ..Default::default()
         }
         .is_non_trivial());
 
         assert!(UpdatedAmmModel {
-            updates: hashmap! { H160::zero() => -1, H160::from_low_u64_be(1) => 0 },
-            exec_plan: None
+            exec_sell_amount: U256::one(),
+            ..Default::default()
         }
         .is_non_trivial());
 
         assert!(UpdatedAmmModel {
-            updates: hashmap! { H160::zero() => 1, H160::from_low_u64_be(1) => 0 },
-            exec_plan: None
+            exec_buy_amount: U256::one(),
+            ..Default::default()
         }
         .is_non_trivial());
     }

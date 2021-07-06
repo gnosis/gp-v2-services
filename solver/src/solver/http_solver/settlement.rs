@@ -152,31 +152,10 @@ fn match_prepared_and_settled_amms(
         .filter(|(_, settled)| settled.is_non_trivial())
         .sorted_by(|a, b| a.1.exec_plan.cmp(&b.1.exec_plan))
     {
-        let tokens = settled.updates.keys().cloned().collect::<Vec<H160>>();
-        let updates = (
-            *settled
-                .updates
-                .get(&tokens[0])
-                .expect("received update for unknown token"),
-            *settled
-                .updates
-                .get(&tokens[1])
-                .expect("received update for unknown token"),
+        let (input, output) = (
+            (settled.buy_token, settled.exec_buy_amount),
+            (settled.sell_token, settled.exec_sell_amount),
         );
-        let (input, output) = if updates.0.is_positive() && updates.1.is_negative() {
-            (
-                (tokens[0], i128_abs_to_u256(updates.0)),
-                (tokens[1], i128_abs_to_u256(updates.1)),
-            )
-        } else if updates.1.is_positive() && updates.0.is_negative() {
-            (
-                (tokens[1], i128_abs_to_u256(updates.1)),
-                (tokens[0], i128_abs_to_u256(updates.0)),
-            )
-        } else {
-            return Err(anyhow!("invalid update {:?}", settled));
-        };
-
         if prepared_constant_product_orders.contains_key(&index) {
             constant_product_executions.push(ExecutedConstantProductAmms {
                 order: prepared_constant_product_orders.remove(&index).unwrap(),
@@ -228,17 +207,6 @@ fn match_settled_prices(
         }
     }
     Ok(prices)
-}
-
-fn i128_abs_to_u256(i: i128) -> U256 {
-    // TODO: use `unsigned_abs` once it is stable in next compiler version
-    // until then we need this check because the most negative value can not be `abs`ed because it
-    // it the most positive value plus 1.
-    if i == i128::MIN {
-        (i128::MAX as u128 + 1).into()
-    } else {
-        (i.abs() as u128).into()
-    }
 }
 
 #[cfg(test)]
@@ -301,7 +269,10 @@ mod tests {
             exec_sell_amount: 7.into(),
         };
         let updated_uniswap = UpdatedAmmModel {
-            updates: hashmap! { t0 => 8, t1 => -9 },
+            sell_token: t1,
+            buy_token: t0,
+            exec_sell_amount: U256::from(9),
+            exec_buy_amount: U256::from(8),
             exec_plan: Some(ExecutionPlanCoordinatesModel {
                 sequence: 0,
                 position: 0,
@@ -309,7 +280,10 @@ mod tests {
         };
 
         let updated_balancer = UpdatedAmmModel {
-            updates: hashmap! { t0 => 1, t1 => -2 },
+            sell_token: t1,
+            buy_token: t0,
+            exec_sell_amount: U256::from(2),
+            exec_buy_amount: U256::from(1),
             exec_plan: Some(ExecutionPlanCoordinatesModel {
                 sequence: 1,
                 position: 0,
