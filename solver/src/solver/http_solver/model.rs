@@ -141,7 +141,7 @@ mod tests {
         }
         .is_non_trivial());
 
-        assert!(!UpdatedAmmModel {
+        assert!(UpdatedAmmModel {
             exec_sell_amount: U256::one(),
             ..Default::default()
         }
