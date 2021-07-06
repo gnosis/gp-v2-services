@@ -5,6 +5,9 @@ use model::TokenPair;
 use num::BigRational;
 use std::collections::{HashMap, HashSet};
 
+/// The maximum number of hops to use when trading with AMMs along a path.
+pub const DEFAULT_MAX_HOPS: usize = 2;
+
 type PathCandidate = Vec<H160>;
 
 pub trait BaselineSolvable {
@@ -186,11 +189,22 @@ pub fn token_path_to_pair_path(token_list: &[H160]) -> Vec<TokenPair> {
         .collect()
 }
 
+pub fn relevant_token_pairs(
+    sell_token: H160,
+    buy_token: H160,
+    base_tokens: &HashSet<H160>,
+    max_hops: usize,
+) -> impl Iterator<Item = TokenPair> {
+    path_candidates(sell_token, buy_token, base_tokens, max_hops)
+        .into_iter()
+        .flat_map(|path| token_path_to_pair_path(&path))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::conversions::big_rational_to_float;
-    use crate::pool_fetching::Pool;
+    use crate::sources::uniswap::pool_fetching::Pool;
     use ethcontract::H160;
     use maplit::{hashmap, hashset};
     use model::TokenPair;
