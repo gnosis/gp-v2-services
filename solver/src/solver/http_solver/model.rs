@@ -104,7 +104,7 @@ pub struct ExecutedOrderModel {
     pub exec_buy_amount: U256,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct UpdatedAmmModel {
     pub sell_token: H160,
     pub buy_token: H160,
@@ -137,29 +137,19 @@ mod tests {
     #[test]
     fn updated_amm_model_is_non_trivial() {
         assert!(!UpdatedAmmModel {
-            sell_token: H160::zero(),
-            buy_token: H160::from_low_u64_be(1),
-            exec_sell_amount: Default::default(),
-            exec_buy_amount: Default::default(),
-            exec_plan: None,
+            ..Default::default()
         }
         .is_non_trivial());
 
-        assert!(UpdatedAmmModel {
-            sell_token: H160::zero(),
-            buy_token: H160::from_low_u64_be(1),
+        assert!(!UpdatedAmmModel {
             exec_sell_amount: U256::one(),
-            exec_buy_amount: Default::default(),
-            exec_plan: None
+            ..Default::default()
         }
         .is_non_trivial());
 
         assert!(UpdatedAmmModel {
-            sell_token: H160::zero(),
-            buy_token: H160::from_low_u64_be(1),
-            exec_sell_amount: Default::default(),
             exec_buy_amount: U256::one(),
-            exec_plan: None
+            ..Default::default()
         }
         .is_non_trivial());
     }
