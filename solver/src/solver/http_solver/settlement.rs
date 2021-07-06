@@ -130,7 +130,6 @@ fn match_prepared_and_settled_amms(
                 .ok_or_else(|| anyhow!("invalid amm {}", index))?;
             Ok(ExecutedAmm {
                 order: prepared,
-                // This seems backwards, but its how we passed the test.
                 input: (settled.buy_token, settled.exec_buy_amount),
                 output: (settled.sell_token, settled.exec_sell_amount),
             })
