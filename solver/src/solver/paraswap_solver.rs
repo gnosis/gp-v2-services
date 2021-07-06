@@ -166,17 +166,17 @@ mod tests {
     use crate::interactions::allowances::{Approval, MockAllowanceManaging};
     use contracts::WETH9;
     use ethcontract::U256;
+    use hex_literal::hex;
     use mockall::predicate::*;
     use mockall::Sequence;
     use model::order::{Order, OrderCreation, OrderKind};
+    use serde_json::json;
     use shared::{
         dummy_contract,
         token_info::{MockTokenInfoFetching, TokenInfo, TokenInfoFetcher},
         transport::create_env_test_transport,
     };
     use std::collections::HashMap;
-    use hex_literal::hex;
-    use serde_json::json;
 
     #[test]
     fn parse_test() {
@@ -310,7 +310,7 @@ mod tests {
             }
             ),
             user_address: H160::from_slice(&hex!("a6ddbd0de6b310819b49f680f65871bee85f517e")),
-            referrer: "GPv2".parse().unwrap()
+            referrer: "GPv2".parse().unwrap(),
         };
         let log_string = "TransactionBuilderQuery { src_token: 0xa47c8bf37f92abed4a126bda807a7b7498661acd, dest_token: 0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2, src_amount: 1994169551053737031680, dest_amount: 897298442321218920, from_decimals: 18, to_decimals: 18, price_route: Object({\"adapterVersion\": String(\"4.0.0\"), \"bestRoute\": Array([Object({\"destAmount\": String(\"898196638960179100\"), \"destAmountFeeDeducted\": String(\"898196638960179100\"), \"exchange\": String(\"MultiPath\"), \"percent\": String(\"100\"), \"srcAmount\": String(\"1994169551053737031680\")})]), \"bestRouteGas\": String(\"296300\"), \"bestRouteGasCostUSD\": String(\"3.966378\"), \"blockNumber\": Number(12771136), \"contractMethod\": String(\"multiSwap\"), \"destAmount\": String(\"898196638960179100\"), \"destAmountFeeDeducted\": String(\"898196638960179100\"), \"details\": Object({\"destAmount\": String(\"898196638960179100\"), \"srcAmount\": String(\"1994169551053737031680\"), \"tokenFrom\": String(\"0xa47c8bf37f92abed4a126bda807a7b7498661acd\"), \"tokenTo\": String(\"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2\")}), \"fromUSD\": String(\"1994.1695510537\"), \"hmac\": String(\"a232c77298f8a6de61820243fc5875d37ab7a2c7\"), \"maxImpactReached\": Bool(false), \"multiPath\": Bool(true), \"multiRoute\": Array([Array([Object({\"data\": Object({\"factory\": String(\"0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f\"), \"gasUSD\": String(\"1.070908\"), \"initCode\": String(\"0x96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f\"), \"path\": Array([String(\"0xa47c8bf37f92abed4a126bda807a7b7498661acd\"), String(\"0xdac17f958d2ee523a2206206994597c13d831ec7\")]), \"router\": String(\"0x86d3579b043585A97532514016dCF0C2d6C4b6a1\"), \"tokenFrom\": String(\"0xa47c8bf37f92abed4a126bda807a7b7498661acd\"), \"tokenTo\": String(\"0xdac17f958d2ee523a2206206994597c13d831ec7\")}), \"destAmount\": String(\"1995508094\"), \"destAmountFeeDeducted\": String(\"1995508094\"), \"exchange\": String(\"UniswapV2\"), \"percent\": String(\"100\"), \"srcAmount\": String(\"1994169551053737031680\")})]), Array([Object({\"data\": Object({\"gasUSD\": String(\"1.338636\"), \"tokenFrom\": String(\"0xdac17f958d2ee523a2206206994597c13d831ec7\"), \"tokenTo\": String(\"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2\"), \"version\": Number(4)}), \"destAmount\": String(\"898196638960179100\"), \"destAmountFeeDeducted\": String(\"898196638960179100\"), \"exchange\": String(\"ParaSwapPool3\"), \"percent\": String(\"100\"), \"srcAmount\": String(\"1995508094\")})])]), \"others\": Array([Object({\"data\": Object({\"factory\": String(\"0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f\"), \"gasUSD\": String(\"1.070908\"), \"initCode\": String(\"0x96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f\"), \"path\": Array([String(\"0xa47c8bf37f92abed4a126bda807a7b7498661acd\"), String(\"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2\")]), \"router\": String(\"0x86d3579b043585A97532514016dCF0C2d6C4b6a1\"), \"tokenFrom\": String(\"0xa47c8bf37f92abed4a126bda807a7b7498661acd\"), \"tokenTo\": String(\"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2\")}), \"exchange\": String(\"UniswapV2\"), \"rate\": String(\"258687941544023809\"), \"rateFeeDeducted\": String(\"258687941544023809\"), \"unit\": String(\"476946191867525\"), \"unitFeeDeducted\": String(\"476946191867525\")}), Object({\"data\": Object({\"factory\": String(\"0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac\"), \"gasUSD\": String(\"1.204772\"), \"initCode\": String(\"0xe18a34eb0e04b04f7a0ac29a6e80748dca96319b42c54d679cb821dca90c6303\"), \"path\": Array([String(\"0xa47c8bf37f92abed4a126bda807a7b7498661acd\"), String(\"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2\")]), \"router\": String(\"0xBc1315CD2671BC498fDAb42aE1214068003DC51e\"), \"tokenFrom\": String(\"0xa47c8bf37f92abed4a126bda807a7b7498661acd\"), \"tokenTo\": String(\"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2\")}), \"exchange\": String(\"SushiSwap\"), \"rate\": String(\"889178407612251070\"), \"rateFeeDeducted\": String(\"889178407612251070\"), \"unit\": String(\"447094570010879\"), \"unitFeeDeducted\": String(\"447094570010879\")}), Object({\"exchange\": String(\"MultiPath\"), \"rate\": String(\"898196638960179100\"), \"rateFeeDeducted\": String(\"898196638960179100\"), \"unit\": String(\"-\"), \"unitFeeDeducted\": String(\"-\")})]), \"priceID\": String(\"7fab2c88-cff9-4507-bb79-1278770c589a\"), \"priceWithSlippage\": String(\"889214672570577309\"), \"side\": String(\"SELL\"), \"spender\": String(\"0xb70Bc06D2c9Bf03b3373799606dc7d39346c06B3\"), \"srcAmount\": String(\"1994169551053737031680\"), \"toUSD\": String(\"2007.3527225129\"), \"toUSDFeeDeducted\": String(\"2007.3527225129\")}), user_address: 0xa6ddbd0de6b310819b49f680f65871bee85f517e, referrer: \"GPv2\" }";
         assert_eq!(format!("{:?}", s), log_string);
