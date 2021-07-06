@@ -1,4 +1,5 @@
 use super::model::*;
+use crate::liquidity::WeightedProductOrder;
 use crate::{
     liquidity::{AmmOrderExecution, ConstantProductOrder, LimitOrder},
     settlement::Settlement,
@@ -14,9 +15,11 @@ use std::{
 
 // To send an instance to the solver we need to identify tokens and orders through strings. This
 // struct combines the created model and a mapping of those identifiers to their original value.
+#[derive(Debug)]
 pub struct SettlementContext {
     pub limit_orders: HashMap<usize, LimitOrder>,
     pub constant_product_orders: HashMap<usize, ConstantProductOrder>,
+    pub weighted_product_orders: HashMap<usize, WeightedProductOrder>,
 }
 
 pub fn convert_settlement(
@@ -31,7 +34,8 @@ pub fn convert_settlement(
 // the error checking up front and then working with a more convenient representation.
 struct IntermediateSettlement {
     executed_limit_orders: Vec<ExecutedLimitOrder>,
-    executed_amms: Vec<ExecutedAmm>,
+    executed_constant_product_amms: Vec<ExecutedConstantProductAmms>,
+    executed_weighted_product_amms: Vec<ExecutedWeightedProductAmms>,
     prices: HashMap<H160, U256>,
 }
 
@@ -50,8 +54,14 @@ impl ExecutedLimitOrder {
     }
 }
 
-struct ExecutedAmm {
+struct ExecutedConstantProductAmms {
     order: ConstantProductOrder,
+    input: (H160, U256),
+    output: (H160, U256),
+}
+
+struct ExecutedWeightedProductAmms {
+    order: WeightedProductOrder,
     input: (H160, U256),
     output: (H160, U256),
 }
@@ -60,16 +70,20 @@ impl IntermediateSettlement {
     fn new(settled: SettledBatchAuctionModel, context: SettlementContext) -> Result<Self> {
         let executed_limit_orders =
             match_prepared_and_settled_orders(context.limit_orders, settled.orders)?;
-        let executed_amms =
-            match_prepared_and_settled_amms(context.constant_product_orders, settled.amms)?;
+        let executed_amms = match_prepared_and_settled_amms(
+            context.constant_product_orders,
+            context.weighted_product_orders,
+            settled.amms,
+        )?;
         let prices = match_settled_prices(
             executed_limit_orders.as_slice(),
-            executed_amms.as_slice(),
+            (executed_amms.0.as_slice(), executed_amms.1.as_slice()),
             settled.prices,
         )?;
         Ok(Self {
             executed_limit_orders,
-            executed_amms,
+            executed_constant_product_amms: executed_amms.0,
+            executed_weighted_product_amms: executed_amms.1,
             prices,
         })
     }
@@ -79,7 +93,7 @@ impl IntermediateSettlement {
         for order in self.executed_limit_orders.iter() {
             settlement.with_liquidity(&order.order, order.executed_amount())?;
         }
-        for amm in self.executed_amms.iter() {
+        for amm in self.executed_constant_product_amms.iter() {
             settlement.with_liquidity(
                 &amm.order,
                 AmmOrderExecution {
@@ -88,7 +102,15 @@ impl IntermediateSettlement {
                 },
             )?;
         }
-
+        for amm in self.executed_weighted_product_amms.iter() {
+            settlement.with_liquidity(
+                &amm.order,
+                AmmOrderExecution {
+                    input: amm.input,
+                    output: amm.output,
+                },
+            )?;
+        }
         Ok(settlement)
     }
 }
@@ -116,43 +138,68 @@ fn match_prepared_and_settled_orders(
 }
 
 fn match_prepared_and_settled_amms(
-    // TODO - this is going to have to operate on Weighted Product Orders too...
-    mut prepared_orders: HashMap<usize, ConstantProductOrder>,
+    mut prepared_constant_product_orders: HashMap<usize, ConstantProductOrder>,
+    mut prepared_weighted_product_orders: HashMap<usize, WeightedProductOrder>,
     settled_orders: HashMap<usize, UpdatedAmmModel>,
-) -> Result<Vec<ExecutedAmm>> {
-    settled_orders
+) -> Result<(
+    Vec<ExecutedConstantProductAmms>,
+    Vec<ExecutedWeightedProductAmms>,
+)> {
+    let mut constant_product_executions = vec![];
+    let mut weighted_product_executions = vec![];
+    for (index, settled) in settled_orders
         .into_iter()
         .filter(|(_, settled)| settled.is_non_trivial())
         .sorted_by(|a, b| a.1.exec_plan.cmp(&b.1.exec_plan))
-        .map(|(index, settled)| {
-            let prepared = prepared_orders
-                .remove(&index)
-                .ok_or_else(|| anyhow!("invalid amm {}", index))?;
-            Ok(ExecutedAmm {
-                order: prepared,
-                input: (settled.buy_token, settled.exec_buy_amount),
-                output: (settled.sell_token, settled.exec_sell_amount),
-            })
-        })
-        .collect()
+    {
+        let (input, output) = (
+            (settled.buy_token, settled.exec_buy_amount),
+            (settled.sell_token, settled.exec_sell_amount),
+        );
+        if prepared_constant_product_orders.contains_key(&index) {
+            constant_product_executions.push(ExecutedConstantProductAmms {
+                order: prepared_constant_product_orders.remove(&index).unwrap(),
+                input,
+                output,
+            });
+        } else if prepared_weighted_product_orders.contains_key(&index) {
+            weighted_product_executions.push(ExecutedWeightedProductAmms {
+                order: prepared_weighted_product_orders.remove(&index).unwrap(),
+                input,
+                output,
+            });
+        } else {
+            return Err(anyhow!("Invalid AMM {}", index));
+        }
+    }
+    Ok((constant_product_executions, weighted_product_executions))
 }
 
 fn match_settled_prices(
     executed_limit_orders: &[ExecutedLimitOrder],
-    executed_amms: &[ExecutedAmm],
+    executed_amms: (
+        &[ExecutedConstantProductAmms],
+        &[ExecutedWeightedProductAmms],
+    ),
     solver_prices: HashMap<H160, Price>,
 ) -> Result<HashMap<H160, U256>> {
     let mut prices = HashMap::new();
     let executed_tokens = executed_limit_orders
         .iter()
         .flat_map(|order| {
-            iter::once(&order.order.buy_token).chain(iter::once(&order.order.sell_token))
+            iter::once(order.order.buy_token).chain(iter::once(order.order.sell_token))
         })
-        .chain(executed_amms.iter().flat_map(|amm| &amm.order.tokens));
+        .chain(executed_amms.0.iter().flat_map(|amm| amm.order.tokens))
+        .chain(
+            executed_amms
+                .1
+                .iter()
+                .flat_map(|amm| amm.order.reserves.keys().copied().collect::<Vec<H160>>()),
+        );
     for token in executed_tokens {
-        if let Entry::Vacant(entry) = prices.entry(*token) {
+        if let Entry::Vacant(entry) = prices.entry(token) {
             let price = solver_prices
-                .get(token)
+                .get(&token)
                 .ok_or_else(|| anyhow!("invalid token {}", token))?
                 .0;
             ensure!(price.is_finite() && price > 0.0, "invalid price {}", price);
@@ -168,6 +215,8 @@ mod tests {
     use crate::liquidity::tests::CapturingSettlementHandler;
     use maplit::hashmap;
     use model::TokenPair;
+    use num::BigRational;
+    use shared::sources::balancer::{pool_fetching::PoolTokenState, swap::fixed_point::Bfp};
 
     #[test]
     fn convert_settlement_() {
@@ -188,14 +237,32 @@ mod tests {
         };
         let orders = hashmap! { 0 => limit_order };
 
-        let amm_handler = CapturingSettlementHandler::arc();
+        let cp_amm_handler = CapturingSettlementHandler::arc();
         let constant_product_order = ConstantProductOrder {
             tokens: TokenPair::new(t0, t1).unwrap(),
             reserves: (3, 4),
             fee: 5.into(),
-            settlement_handling: amm_handler.clone(),
+            settlement_handling: cp_amm_handler.clone(),
         };
         let constant_product_orders = hashmap! { 0 => constant_product_order };
+        let wp_amm_handler = CapturingSettlementHandler::arc();
+        let weighted_product_order = WeightedProductOrder {
+            reserves: hashmap! {
+                t0 => PoolTokenState {
+                    balance: U256::from(200),
+                    weight: Bfp::from(200_000_000_000_000_000),
+                    scaling_exponent: 4,
+                },
+                t1 => PoolTokenState {
+                    balance: U256::from(800),
+                    weight: Bfp::from(800_000_000_000_000_000),
+                    scaling_exponent: 6,
+                }
+            },
+            fee: BigRational::new(3.into(), 1.into()),
+            settlement_handling: wp_amm_handler.clone(),
+        };
+        let weighted_product_orders = hashmap! { 1 => weighted_product_order };
 
         let executed_order = ExecutedOrderModel {
             exec_buy_amount: 6.into(),
@@ -211,9 +278,20 @@ mod tests {
                 position: 0,
             }),
         };
+
+        let updated_balancer = UpdatedAmmModel {
+            sell_token: t1,
+            buy_token: t0,
+            exec_sell_amount: U256::from(2),
+            exec_buy_amount: U256::from(1),
+            exec_plan: Some(ExecutionPlanCoordinatesModel {
+                sequence: 1,
+                position: 0,
+            }),
+        };
         let settled = SettledBatchAuctionModel {
             orders: hashmap! { 0 => executed_order },
-            amms: hashmap! { 0 => updated_uniswap },
+            amms: hashmap! { 0 => updated_uniswap, 1 => updated_balancer },
             ref_token: t0,
             prices: hashmap! { t0 => Price(10.0), t1 => Price(11.0) },
         };
@@ -221,7 +299,9 @@ mod tests {
         let prepared = SettlementContext {
             limit_orders: orders,
             constant_product_orders,
+            weighted_product_orders,
         };
+
         let settlement = convert_settlement(settled, prepared).unwrap();
         assert_eq!(
             settlement.clearing_prices(),
@@ -230,10 +310,17 @@ mod tests {
 
         assert_eq!(limit_handler.calls(), vec![7.into()]);
         assert_eq!(
-            amm_handler.calls(),
+            cp_amm_handler.calls(),
             vec![AmmOrderExecution {
                 input: (t0, 8.into()),
                 output: (t1, 9.into()),
+            }]
+        );
+        assert_eq!(
+            wp_amm_handler.calls(),
+            vec![AmmOrderExecution {
+                input: (t0, 1.into()),
+                output: (t1, 2.into()),
             }]
         );
     }
