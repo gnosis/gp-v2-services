@@ -1,6 +1,9 @@
-use bigdecimal::BigDecimal;
 use ethcontract::H160;
-use model::u256_decimal::{self, DecimalU256};
+use model::{
+    ratio_as_decimal,
+    u256_decimal::{self, DecimalU256},
+};
+use num::BigRational;
 use primitive_types::U256;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -32,7 +35,8 @@ pub struct OrderModel {
 pub struct AmmModel {
     #[serde(flatten)]
     pub parameters: AmmParameters,
-    pub fee: BigDecimal,
+    #[serde(with = "ratio_as_decimal")]
+    pub fee: BigRational,
     pub cost: CostModel,
     pub mandatory: bool,
 }
@@ -41,6 +45,7 @@ pub struct AmmModel {
 #[serde(tag = "kind")]
 pub enum AmmParameters {
     ConstantProduct(ConstantProductPoolParameters),
+    WeightedProduct(WeightedProductPoolParameters),
 }
 
 #[serde_as]
@@ -48,6 +53,19 @@ pub enum AmmParameters {
 pub struct ConstantProductPoolParameters {
     #[serde_as(as = "HashMap<_, DecimalU256>")]
     pub reserves: HashMap<H160, U256>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PoolTokenData {
+    #[serde(with = "u256_decimal")]
+    pub balance: U256,
+    #[serde(with = "ratio_as_decimal")]
+    pub weight: BigRational,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WeightedProductPoolParameters {
+    pub reserves: HashMap<H160, PoolTokenData>,
 }
 
 #[derive(Debug, Serialize)]
@@ -135,41 +153,29 @@ mod tests {
 
     #[test]
     fn updated_amm_model_is_non_trivial() {
-        assert_eq!(
-            UpdatedAmmModel {
-                updates: hashmap! { H160::zero() => 0, H160::from_low_u64_be(1) => 0 },
-                exec_plan: None
-            }
-            .is_non_trivial(),
-            false
-        );
+        assert!(!UpdatedAmmModel {
+            updates: hashmap! { H160::zero() => 0, H160::from_low_u64_be(1) => 0 },
+            exec_plan: None
+        }
+        .is_non_trivial());
 
-        assert_eq!(
-            UpdatedAmmModel {
-                updates: HashMap::new(),
-                exec_plan: None
-            }
-            .is_non_trivial(),
-            false
-        );
+        assert!(!UpdatedAmmModel {
+            updates: HashMap::new(),
+            exec_plan: None
+        }
+        .is_non_trivial());
 
-        assert_eq!(
-            UpdatedAmmModel {
-                updates: hashmap! { H160::zero() => -1, H160::from_low_u64_be(1) => 0 },
-                exec_plan: None
-            }
-            .is_non_trivial(),
-            true
-        );
+        assert!(UpdatedAmmModel {
+            updates: hashmap! { H160::zero() => -1, H160::from_low_u64_be(1) => 0 },
+            exec_plan: None
+        }
+        .is_non_trivial());
 
-        assert_eq!(
-            UpdatedAmmModel {
-                updates: hashmap! { H160::zero() => 1, H160::from_low_u64_be(1) => 0 },
-                exec_plan: None
-            }
-            .is_non_trivial(),
-            true
-        );
+        assert!(UpdatedAmmModel {
+            updates: hashmap! { H160::zero() => 1, H160::from_low_u64_be(1) => 0 },
+            exec_plan: None
+        }
+        .is_non_trivial());
     }
 
     #[test]
@@ -192,19 +198,39 @@ mod tests {
                 token: buy_token,
             },
         };
-        let pool_model = AmmModel {
+        let constant_product_pool_model = AmmModel {
             parameters: AmmParameters::ConstantProduct(ConstantProductPoolParameters {
                 reserves: hashmap! {
                     buy_token => U256::from(100),
                     sell_token => U256::from(200),
                 },
             }),
-            fee: BigDecimal::from(3) / BigDecimal::from(1000),
+            fee: BigRational::new(3.into(), 1000.into()),
             cost: CostModel {
                 amount: U256::from(3),
                 token: buy_token,
             },
             mandatory: false,
+        };
+        let weighted_product_pool_model = AmmModel {
+            parameters: AmmParameters::WeightedProduct(WeightedProductPoolParameters {
+                reserves: hashmap! {
+                    sell_token => PoolTokenData {
+                        balance: U256::from(808),
+                        weight: BigRational::new(2.into(), 10.into()),
+                    },
+                    buy_token => PoolTokenData {
+                        balance: U256::from(64),
+                        weight: BigRational::new(8.into(), 10.into()),
+                    }
+                },
+            }),
+            fee: BigRational::new(2.into(), 1000.into()),
+            cost: CostModel {
+                amount: U256::from(2),
+                token: buy_token,
+            },
+            mandatory: true,
         };
         let model = BatchAuctionModel {
             tokens: hashmap! {
@@ -220,7 +246,7 @@ mod tests {
                 }
             },
             orders: hashmap! { 0 => order_model },
-            amms: hashmap! { 0 => pool_model },
+            amms: hashmap! { 0 => constant_product_pool_model, 1 => weighted_product_pool_model },
             metadata: Some(MetadataModel {
                 environment: Some(String::from("Such Meta")),
             }),
@@ -272,6 +298,25 @@ mod tests {
                 "token": "0x0000000000000000000000000000000000000539"
               },
               "mandatory": false
+            },
+            "1": {
+              "kind": "WeightedProduct",
+              "reserves": {
+                "0x000000000000000000000000000000000000a866": {
+                    "balance": "808",
+                    "weight": "0.2"
+                },
+                "0x0000000000000000000000000000000000000539": {
+                    "balance": "64",
+                    "weight": "0.8"
+                },
+              },
+              "fee": "0.002",
+              "cost": {
+                "amount": "2",
+                "token": "0x0000000000000000000000000000000000000539"
+              },
+              "mandatory": true
             }
           },
           "metadata": {

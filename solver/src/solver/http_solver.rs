@@ -1,19 +1,18 @@
-mod model;
+pub mod model;
 mod settlement;
 
 use self::{model::*, settlement::SettlementContext};
 use crate::{
-    liquidity::{ConstantProductOrder, LimitOrder, Liquidity},
+    liquidity::{ConstantProductOrder, LimitOrder, Liquidity, WeightedProductOrder},
     settlement::Settlement,
     solver::Solver,
 };
 use ::model::order::OrderKind;
 use anyhow::{ensure, Context, Result};
-use bigdecimal::BigDecimal;
 use ethcontract::U256;
 use futures::join;
 use lazy_static::lazy_static;
-use num::{BigRational, ToPrimitive};
+use num::{BigInt, BigRational, ToPrimitive};
 use primitive_types::H160;
 use reqwest::{header::HeaderValue, Client, Url};
 use shared::{
@@ -28,8 +27,12 @@ use std::{
 // Estimates from multivariate linear regression here:
 // https://docs.google.com/spreadsheets/d/13UeUQ9DA4bHlcy9-i8d4nSLlCxSfjcXpTelvXYzyJzQ/edit?usp=sharing
 lazy_static! {
-    static ref GAS_PER_ORDER: U256 = U256::from(66315);
-    static ref GAS_PER_UNISWAP: U256 = U256::from(94696);
+    static ref GAS_PER_ORDER: U256 = U256::from(66_315);
+    static ref GAS_PER_UNISWAP: U256 = U256::from(94_696);
+    // Taken from a sample of two swaps
+    // https://etherscan.io/tx/0x72d234d35fd169ef497ba0a1dc23258c96f278fb688d375d135eb012e5311009
+    // https://etherscan.io/tx/0x1c345a6da1edb2bba953685a4cf85f6a0d967ac751f8c5b518578c5fd20a7c96
+    static ref GAS_PER_BALANCER_SWAP: U256 = U256::from(120_000);
 }
 
 // TODO: exclude partially fillable orders
@@ -107,7 +110,7 @@ impl HttpSolver {
                 Liquidity::ConstantProduct(amm) => {
                     vec![amm.tokens.get().0, amm.tokens.get().1]
                 }
-                _ => vec![],
+                Liquidity::WeightedProduct(amm) => amm.reserves.keys().cloned().collect(),
             })
             .collect::<HashSet<_>>()
             .into_iter()
@@ -172,39 +175,75 @@ impl HttpSolver {
         result
     }
 
-    fn map_constant_product_orders_for_solver(
-        &self,
-        orders: Vec<ConstantProductOrder>,
-    ) -> HashMap<usize, ConstantProductOrder> {
+    fn map_amm_orders_for_solver<T>(&self, orders: Vec<T>) -> HashMap<usize, T> {
         orders.into_iter().enumerate().collect()
     }
 
     fn amm_models(
         &self,
-        amms: &HashMap<usize, ConstantProductOrder>,
+        constant_product_orders: &HashMap<usize, ConstantProductOrder>,
+        weighted_product_orders: &HashMap<usize, WeightedProductOrder>,
         gas_price: f64,
     ) -> HashMap<usize, AmmModel> {
         let uniswap_cost = self.uniswap_cost(gas_price);
-        amms.iter()
+        let mut pool_model_map = HashMap::new();
+        let constant_product_models: HashMap<_, AmmModel> = constant_product_orders
+            .iter()
             .map(|(index, amm)| {
                 let mut reserves = HashMap::new();
                 reserves.insert(amm.tokens.get().0, U256::from(amm.reserves.0));
                 reserves.insert(amm.tokens.get().1, U256::from(amm.reserves.1));
-
-                let uniswap = AmmModel {
+                let pool_model = AmmModel {
                     parameters: AmmParameters::ConstantProduct(ConstantProductPoolParameters {
                         reserves,
                     }),
-                    fee: BigDecimal::from(*amm.fee.numer()) / BigDecimal::from(*amm.fee.denom()),
+                    fee: BigRational::new(
+                        BigInt::from(*amm.fee.numer()),
+                        BigInt::from(*amm.fee.denom()),
+                    ),
                     cost: CostModel {
                         amount: uniswap_cost,
                         token: self.native_token,
                     },
                     mandatory: false,
                 };
-                (*index, uniswap)
+                (*index, pool_model)
             })
-            .collect()
+            .collect();
+        let balancer_cost = self.balancer_cost(gas_price);
+        let weighted_product_models: HashMap<_, AmmModel> = weighted_product_orders
+            .iter()
+            .map(|(index, amm)| {
+                let reserves = amm
+                    .reserves
+                    .iter()
+                    .map(|(token, state)| {
+                        (
+                            *token,
+                            PoolTokenData {
+                                balance: state.balance,
+                                weight: BigRational::from(state.weight),
+                            },
+                        )
+                    })
+                    .collect();
+                let pool_model = AmmModel {
+                    parameters: AmmParameters::WeightedProduct(WeightedProductPoolParameters {
+                        reserves,
+                    }),
+                    fee: amm.fee.clone(),
+                    cost: CostModel {
+                        amount: balancer_cost,
+                        token: self.native_token,
+                    },
+                    mandatory: false,
+                };
+                (*index + constant_product_models.len(), pool_model)
+            })
+            .collect();
+        pool_model_map.extend(constant_product_models);
+        pool_model_map.extend(weighted_product_models);
+        pool_model_map
     }
 
     async fn prepare_model(
@@ -233,10 +272,15 @@ impl HttpSolver {
             &self.native_token,
         );
         let limit_orders = self.map_orders_for_solver(orders.0);
-        let constant_product_orders = self.map_constant_product_orders_for_solver(orders.1);
+        let constant_product_orders = self.map_amm_orders_for_solver(orders.1);
+        let weighted_product_orders = self.map_amm_orders_for_solver(orders.2);
         let token_models = self.token_models(&token_infos, &price_estimates);
         let order_models = self.order_models(&limit_orders, gas_price);
-        let amm_models = self.amm_models(&constant_product_orders, gas_price);
+        let amm_models = self.amm_models(
+            &constant_product_orders,
+            &weighted_product_orders,
+            gas_price,
+        );
         let model = BatchAuctionModel {
             tokens: token_models,
             orders: order_models,
@@ -248,6 +292,7 @@ impl HttpSolver {
         let context = SettlementContext {
             limit_orders,
             constant_product_orders,
+            weighted_product_orders,
         };
         Ok((model, context))
     }
@@ -303,6 +348,10 @@ impl HttpSolver {
         U256::from_f64_lossy(gas_price) * *GAS_PER_UNISWAP
     }
 
+    fn balancer_cost(&self, gas_price: f64) -> U256 {
+        U256::from_f64_lossy(gas_price) * *GAS_PER_BALANCER_SWAP
+    }
+
     fn order_fee(&self, order: &LimitOrder) -> U256 {
         let ceiled_div = (order.fee_amount.to_f64_lossy() / self.fee_discount_factor).ceil();
         U256::from_f64_lossy(ceiled_div)
@@ -319,17 +368,28 @@ impl HttpSolver {
     }
 }
 
-fn split_liquidity(liquidity: Vec<Liquidity>) -> (Vec<LimitOrder>, Vec<ConstantProductOrder>) {
+fn split_liquidity(
+    liquidity: Vec<Liquidity>,
+) -> (
+    Vec<LimitOrder>,
+    Vec<ConstantProductOrder>,
+    Vec<WeightedProductOrder>,
+) {
     let mut limit_orders = Vec::new();
     let mut constant_product_orders = Vec::new();
+    let mut weighted_product_orders = Vec::new();
     for order in liquidity {
         match order {
             Liquidity::Limit(order) => limit_orders.push(order),
             Liquidity::ConstantProduct(order) => constant_product_orders.push(order),
-            Liquidity::WeightedProduct(_) => (), // TODO - include something here.
+            Liquidity::WeightedProduct(order) => weighted_product_orders.push(order),
         }
     }
-    (limit_orders, constant_product_orders)
+    (
+        limit_orders,
+        constant_product_orders,
+        weighted_product_orders,
+    )
 }
 
 fn remove_orders_without_native_connection(
