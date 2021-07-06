@@ -60,25 +60,37 @@ impl ParaswapSolver {
     }
 }
 
+pub struct ParaswapCompleteResponse {
+    transaction_result: Result<TransactionBuilderResponse, ParaswapResponseError>,
+    price_response: PriceResponse,
+    amount: U256,
+}
+
 #[async_trait::async_trait]
 impl SingleOrderSolving for ParaswapSolver {
     async fn settle_order(&self, order: LimitOrder) -> Result<Option<Settlement>> {
         let transaction: TransactionBuilderResponse;
         let price_response: PriceResponse;
         let amount: U256;
+        let mut num_retries = 0;
         loop {
-            let (transaction_result, inner_price_response, inner_amount) =
-                self.paraswap_transaction_from_order(&order).await?;
-            if !satisfies_limit_price(&order, &inner_price_response) {
+            let complete_response = self.paraswap_transaction_from_order(&order).await?;
+            if !satisfies_limit_price(&order, &complete_response.price_response) {
                 tracing::debug!("Order limit price not respected");
                 return Ok(None);
             }
-            match transaction_result {
-                Err(ParaswapResponseError::PriceChange) => continue,
+            match complete_response.transaction_result {
+                Err(ParaswapResponseError::PriceChange) => {
+                    if num_retries >= 2 {
+                        return Err(anyhow!("Price change error after {} retries", num_retries));
+                    }
+                    num_retries += 1;
+                    continue;
+                }
                 _ => {
-                    price_response = inner_price_response;
-                    amount = inner_amount;
-                    transaction = transaction_result?;
+                    price_response = complete_response.price_response;
+                    amount = complete_response.amount;
+                    transaction = complete_response.transaction_result?;
                     break;
                 }
             }
@@ -174,11 +186,7 @@ impl ParaswapSolver {
     pub async fn paraswap_transaction_from_order(
         &self,
         order: &LimitOrder,
-    ) -> Result<(
-        Result<TransactionBuilderResponse, ParaswapResponseError>,
-        PriceResponse,
-        U256,
-    )> {
+    ) -> Result<ParaswapCompleteResponse> {
         let token_info = self
             .token_info
             .get_token_infos(&[order.sell_token, order.buy_token])
@@ -187,11 +195,11 @@ impl ParaswapSolver {
         let transaction_query = self
             .transaction_query_from(&order, &price_response, &token_info)
             .await?;
-        Ok((
-            self.client.transaction(transaction_query).await,
+        Ok(ParaswapCompleteResponse {
+            transaction_result: self.client.transaction(transaction_query).await,
             price_response,
             amount,
-        ))
+        })
     }
 }
 
