@@ -238,6 +238,8 @@ impl HttpSolver {
                     },
                     mandatory: false,
                 };
+                // Note that in order to preserve unique keys of this hashmap, we use
+                // the current index + the length of the previous map.
                 (*index + constant_product_models.len(), pool_model)
             })
             .collect();
