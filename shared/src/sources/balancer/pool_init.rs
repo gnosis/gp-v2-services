@@ -55,15 +55,15 @@ impl DefaultPoolInitializer {
     pub fn new(chain_id: u64) -> Result<Self> {
         const MAINNET_CHAIN_ID: u64 = 1;
 
-        Ok(match chain_id {
+        Ok(if chain_id == MAINNET_CHAIN_ID {
+            DefaultPoolInitializer::Subgraph(SubgraphPoolInitializer::new(chain_id)?)
+        } else {
             // Balancer subgraph seems to only correctly index pool info on
             // chains where it supports archive nodes (because of the required
             // `eth_call`s). This means we can only use the pure Subgraph
-            // initializer on Mainnet.
-            MAINNET_CHAIN_ID => {
-                DefaultPoolInitializer::Subgraph(SubgraphPoolInitializer::new(chain_id)?)
-            }
-            _ => DefaultPoolInitializer::Empty(EmptyPoolInitializer(chain_id)),
+            // initializer on Mainnet - the only network with archive node
+            // support at the moment.
+            DefaultPoolInitializer::Empty(EmptyPoolInitializer(chain_id))
         })
     }
 }
@@ -71,10 +71,13 @@ impl DefaultPoolInitializer {
 #[async_trait::async_trait]
 impl PoolInitializing for DefaultPoolInitializer {
     async fn initialize_pools(&self) -> Result<BalancerRegisteredPools> {
-        match self {
+        let registered_pools = match self {
             DefaultPoolInitializer::Subgraph(inner) => inner.initialize_pools().await,
             DefaultPoolInitializer::Empty(inner) => inner.initialize_pools().await,
-        }
+        }?;
+
+        tracing::debug!("initialized registered pools {:?}", registered_pools);
+        Ok(registered_pools)
     }
 }
 
