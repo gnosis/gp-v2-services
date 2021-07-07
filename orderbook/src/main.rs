@@ -293,7 +293,7 @@ async fn main() {
             }))),
             cache_config,
             current_block_stream.clone(),
-            (),
+            metrics.clone(),
         )
         .await
         .unwrap(),

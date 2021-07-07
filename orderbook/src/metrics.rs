@@ -1,5 +1,6 @@
 use anyhow::Result;
 use prometheus::{Histogram, HistogramOpts, HistogramVec, IntCounter, IntGaugeVec, Opts, Registry};
+use shared::sources::balancer::pool_cache::WeightedPoolCacheMetrics;
 use shared::{
     sources::uniswap::pool_cache::PoolCacheMetrics, transport::instrumented::TransportMetrics,
 };
@@ -88,6 +89,13 @@ impl TransportMetrics for Metrics {
 }
 
 impl PoolCacheMetrics for Metrics {
+    fn pools_fetched(&self, cache_hits: usize, cache_misses: usize) {
+        self.pool_cache_hits.inc_by(cache_hits as u64);
+        self.pool_cache_misses.inc_by(cache_misses as u64);
+    }
+}
+
+impl WeightedPoolCacheMetrics for Metrics {
     fn pools_fetched(&self, cache_hits: usize, cache_misses: usize) {
         self.pool_cache_hits.inc_by(cache_hits as u64);
         self.pool_cache_misses.inc_by(cache_misses as u64);
