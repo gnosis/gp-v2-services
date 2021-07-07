@@ -9,7 +9,7 @@ use crate::sources::balancer::{
 };
 use anyhow::{anyhow, Result};
 use contracts::{BalancerV2WeightedPool2TokensFactory, BalancerV2WeightedPoolFactory};
-use ethcontract::{Artifact, H160};
+use ethcontract::{Contract, H160};
 
 #[derive(Debug, Default, PartialEq)]
 pub struct BalancerRegisteredPools {
@@ -101,20 +101,14 @@ where
     }
 }
 
-fn deployment_address(artifact: &Artifact, chain_id: u64) -> Result<H160> {
+fn deployment_address(artifact: &Contract, chain_id: u64) -> Result<H160> {
     Ok(artifact
         .networks
         .get(&chain_id.to_string())
         // Note that we are conflating network IDs with chain IDs. In general
         // they cannot be considered the same, but for the networks that we
         // support (xDAI, Rinkeby and Mainnet) they are.
-        .ok_or_else(|| {
-            anyhow!(
-                "missing {} deployment for {}",
-                artifact.contract_name,
-                chain_id,
-            )
-        })?
+        .ok_or_else(|| anyhow!("missing {} deployment for {}", artifact.name, chain_id,))?
         .address)
 }
 

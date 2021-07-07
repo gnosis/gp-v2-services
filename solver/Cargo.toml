@@ -19,7 +19,8 @@ async-trait = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 contracts = { path = "../contracts" }
 derivative = "2.2"
-ethcontract = { version = "0.12.2", default-features = false }
+# ethcontract = { version = "0.12.2", default-features = false }
+ethcontract = { git = "https://github.com/gnosis/ethcontract-rs.git", rev = "443da9f9ea65b218cfc7b429b7b8f9b4a358f834" }
 futures = "0.3"
 gas-estimation = { git = "https://github.com/gnosis/gp-gas-estimation.git", tag = "v0.2.0", features = ["web3_"] }
 hex = "0.4"
