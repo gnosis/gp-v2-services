@@ -15,6 +15,9 @@ use orderbook::{
 };
 use primitive_types::H160;
 use prometheus::Registry;
+use shared::sources::balancer::pool_fetching::BalancerPoolFetcher;
+use shared::sources::balancer::pool_init::SubgraphPoolInitializer;
+use shared::token_info::{CachedTokenInfoFetcher, TokenInfoFetcher};
 use shared::{
     bad_token::{
         cache::CachingDetector,
@@ -238,15 +241,16 @@ async fn main() {
             })
             .collect(),
     };
+    let cache_config = CacheConfig {
+        number_of_blocks_to_cache: args.shared.pool_cache_blocks,
+        number_of_entries_to_auto_update: args.pool_cache_lru_size,
+        maximum_recent_block_age: args.shared.pool_cache_maximum_recent_block_age,
+        max_retries: args.shared.pool_cache_maximum_retries,
+        delay_between_retries: args.shared.pool_cache_delay_between_retries_seconds,
+    };
     let pool_fetcher = Arc::new(
         PoolCache::new(
-            CacheConfig {
-                number_of_blocks_to_cache: args.shared.pool_cache_blocks,
-                number_of_entries_to_auto_update: args.pool_cache_lru_size,
-                maximum_recent_block_age: args.shared.pool_cache_maximum_recent_block_age,
-                max_retries: args.shared.pool_cache_maximum_retries,
-                delay_between_retries: args.shared.pool_cache_delay_between_retries_seconds,
-            },
+            cache_config,
             Box::new(pool_aggregator),
             current_block_stream.clone(),
             metrics.clone(),
@@ -279,14 +283,31 @@ async fn main() {
         bad_token_detector,
         Box::new(web3.clone()),
     ));
+
+    let balancer_pool_fetcher = Arc::new(
+        BalancerPoolFetcher::new(
+            web3.clone(),
+            SubgraphPoolInitializer::new(chain_id).unwrap(),
+            Arc::new(CachedTokenInfoFetcher::new(Box::new(TokenInfoFetcher {
+                web3: web3.clone(),
+            }))),
+            cache_config,
+            current_block_stream.clone(),
+            (),
+        )
+        .await
+        .unwrap(),
+    );
     let service_maintainer = ServiceMaintenance {
         maintainers: vec![
             orderbook.clone(),
             database.clone(),
             Arc::new(event_updater),
+            balancer_pool_fetcher.clone(),
             pool_fetcher,
         ],
     };
+
     check_database_connection(orderbook.as_ref()).await;
 
     let serve_task = serve_task(
