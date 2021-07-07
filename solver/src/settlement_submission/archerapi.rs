@@ -39,6 +39,10 @@ impl ArcherApi {
           "tx": tx,
           "deadline": deadline,
         });
+        tracing::debug!(
+            "archer submit_transaction body: {}",
+            serde_json::to_string(&body).unwrap_or_else(|err| format!("error: {:?}", err)),
+        );
         let response = self
             .client
             .post(URL)
