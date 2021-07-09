@@ -183,7 +183,7 @@ impl ParaswapSolver {
         Ok(query)
     }
 
-    pub async fn paraswap_transaction_from_order(
+    async fn paraswap_transaction_from_order(
         &self,
         order: &LimitOrder,
     ) -> Result<ParaswapCompleteResponse> {
