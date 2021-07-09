@@ -13,6 +13,13 @@ use std::{collections::HashSet, sync::Arc};
 pub const MAX_BATCH_SIZE: usize = 100;
 const POOL_SWAP_GAS_COST: usize = 60_000;
 
+lazy_static::lazy_static! {
+    static ref POOL_MAX_RESERVES: U256 = U256::from((1u128 << 96) - 1);
+    // Taken from
+    // <https://github.com/Uniswap/uniswap-v2-core/blob/4dd59067c76dea4a0e8e4bfdda41877a6b16dedc/contracts/UniswapV2Pair.sol#L15>
+    static ref POOL_MIN_RESERVES: U256 = U256::from(1_000);
+}
+
 /// This type denotes `(reserve_a, reserve_b, token_b)` where
 /// `reserve_a` refers to the reserve of the excluded token.
 type RelativeReserves = (U256, U256, H160);
@@ -117,7 +124,10 @@ impl Pool {
         let denominator = reserve_in
             .checked_mul(U256::from(*self.fee.denom()))?
             .checked_add(amount_in_with_fee)?;
-        numerator.checked_div(denominator)
+        let amount_out = numerator.checked_div(denominator)?;
+
+        check_final_reserves(amount_in, amount_out, reserve_in, reserve_out)?;
+        Some(amount_out)
     }
 
     fn amount_in(&self, amount_out: U256, reserve_in: U256, reserve_out: U256) -> Option<U256> {
@@ -131,7 +141,26 @@ impl Pool {
         let denominator = reserve_out
             .checked_sub(amount_out)?
             .checked_mul(U256::from(self.fee.denom().checked_sub(*self.fee.numer())?))?;
-        numerator.checked_div(denominator)?.checked_add(1.into())
+        let amount_in = numerator.checked_div(denominator)?.checked_add(1.into())?;
+
+        check_final_reserves(amount_in, amount_out, reserve_in, reserve_out)?;
+        Some(amount_in)
+    }
+}
+
+fn check_final_reserves(
+    amount_in: U256,
+    amount_out: U256,
+    reserve_in: U256,
+    reserve_out: U256,
+) -> Option<(U256, U256)> {
+    let final_reserve_in = reserve_in.checked_add(amount_in)?;
+    let final_reserve_out = reserve_out.checked_sub(amount_out)?;
+
+    if final_reserve_in > *POOL_MAX_RESERVES || final_reserve_out < *POOL_MIN_RESERVES {
+        None
+    } else {
+        Some((final_reserve_in, final_reserve_out))
     }
 }
 
@@ -278,43 +307,67 @@ mod tests {
         let buy_token = H160::from_low_u64_be(2);
 
         // Even Pool
-        let pool = Pool::uniswap(TokenPair::new(sell_token, buy_token).unwrap(), (100, 100));
+        let pool = Pool::uniswap(
+            TokenPair::new(sell_token, buy_token).unwrap(),
+            (10_000, 10_000),
+        );
         assert_eq!(
             pool.get_amount_out(sell_token, 10.into()),
             Some((9.into(), buy_token))
         );
         assert_eq!(
             pool.get_amount_out(sell_token, 100.into()),
-            Some((49.into(), buy_token))
+            Some((98.into(), buy_token))
         );
         assert_eq!(
             pool.get_amount_out(sell_token, 1000.into()),
-            Some((90.into(), buy_token))
+            Some((906.into(), buy_token))
         );
 
+        // Selling more than possible
+        let (max_amount_in, _) = pool.get_amount_in(buy_token, 9_000.into()).unwrap();
+        assert_eq!(
+            pool.get_amount_out(sell_token, max_amount_in + 10_000),
+            None
+        );
+        assert_eq!(pool.get_amount_out(sell_token, 10u128.pow(28).into()), None);
+        assert_eq!(pool.get_amount_out(sell_token, U256::max_value()), None);
+
         //Uneven Pool
-        let pool = Pool::uniswap(TokenPair::new(sell_token, buy_token).unwrap(), (200, 50));
+        let pool = Pool::uniswap(
+            TokenPair::new(sell_token, buy_token).unwrap(),
+            (20_000, 5_000),
+        );
         assert_eq!(
             pool.get_amount_out(sell_token, 10.into()),
             Some((2.into(), buy_token))
         );
         assert_eq!(
             pool.get_amount_out(sell_token, 100.into()),
-            Some((16.into(), buy_token))
+            Some((24.into(), buy_token))
         );
         assert_eq!(
             pool.get_amount_out(sell_token, 1000.into()),
-            Some((41.into(), buy_token))
+            Some((237.into(), buy_token))
         );
+
+        // Selling more than possible
+        let (max_amount_in, _) = pool.get_amount_in(buy_token, 4_000.into()).unwrap();
+        assert_eq!(
+            pool.get_amount_out(sell_token, max_amount_in + 20_000),
+            None
+        );
+        assert_eq!(pool.get_amount_out(sell_token, 10u128.pow(28).into()), None);
+        assert_eq!(pool.get_amount_out(sell_token, U256::max_value()), None);
 
         // Large Numbers
         let pool = Pool::uniswap(
             TokenPair::new(sell_token, buy_token).unwrap(),
-            (u128::max_value(), u128::max_value()),
+            (1u128 << 90, 1u128 << 90),
         );
         assert_eq!(
             pool.get_amount_out(sell_token, 10u128.pow(20).into()),
-            Some((99_699_999_999_999_999_970u128.into(), buy_token))
+            Some((99_699_991_970_459_889_807u128.into(), buy_token))
         );
 
         // Overflow
@@ -327,39 +380,45 @@ mod tests {
         let buy_token = H160::from_low_u64_be(2);
 
         // Even Pool
-        let pool = Pool::uniswap(TokenPair::new(sell_token, buy_token).unwrap(), (100, 100));
-        assert_eq!(
-            pool.get_amount_in(buy_token, 10.into()),
-            Some((12.into(), sell_token))
+        let pool = Pool::uniswap(
+            TokenPair::new(sell_token, buy_token).unwrap(),
+            (10_000, 10_000),
         );
         assert_eq!(
-            pool.get_amount_in(buy_token, 99.into()),
-            Some((9930.into(), sell_token))
+            pool.get_amount_in(buy_token, 10.into()),
+            Some((11.into(), sell_token))
+        );
+        assert_eq!(
+            pool.get_amount_in(buy_token, 9_000.into()),
+            Some((90271.into(), sell_token))
         );
 
         // Buying more than possible
-        assert_eq!(pool.get_amount_in(buy_token, 100.into()), None);
-        assert_eq!(pool.get_amount_in(buy_token, 1000.into()), None);
+        assert_eq!(pool.get_amount_in(buy_token, 9_001.into()), None);
+        assert_eq!(pool.get_amount_in(buy_token, 1_000_000.into()), None);
 
         //Uneven Pool
-        let pool = Pool::uniswap(TokenPair::new(sell_token, buy_token).unwrap(), (200, 50));
-        assert_eq!(
-            pool.get_amount_in(buy_token, 10.into()),
-            Some((51.into(), sell_token))
+        let pool = Pool::uniswap(
+            TokenPair::new(sell_token, buy_token).unwrap(),
+            (20_000, 5_000),
         );
         assert_eq!(
-            pool.get_amount_in(buy_token, 49.into()),
-            Some((9830.into(), sell_token))
+            pool.get_amount_in(buy_token, 10.into()),
+            Some((41.into(), sell_token))
+        );
+        assert_eq!(
+            pool.get_amount_in(buy_token, 4_000.into()),
+            Some((80241.into(), sell_token))
         );
 
         // Large Numbers
         let pool = Pool::uniswap(
             TokenPair::new(sell_token, buy_token).unwrap(),
-            (u128::max_value(), u128::max_value()),
+            (1u128 << 90, 1u128 << 90),
         );
         assert_eq!(
             pool.get_amount_in(buy_token, 10u128.pow(20).into()),
-            Some((100_300_902_708_124_373_149u128.into(), sell_token))
+            Some((100_300_910_810_367_424_267u128.into(), sell_token)),
         );
     }
 
@@ -384,6 +443,28 @@ mod tests {
 
         let pool = Pool::uniswap(TokenPair::new(token_a, token_b).unwrap(), (0, 0));
         assert_eq!(pool.get_spot_price(token_a), None);
+    }
+
+    #[test]
+    fn computes_final_reserves() {
+        assert_eq!(
+            check_final_reserves(1.into(), 2.into(), 1_000_000.into(), 2_000_000.into(),).unwrap(),
+            (1_000_001.into(), 1_999_998.into()),
+        );
+    }
+
+    #[test]
+    fn check_final_reserve_limits() {
+        // final in reserve too high
+        assert!(
+            check_final_reserves(1.into(), 0.into(), *POOL_MAX_RESERVES, 1_000_000.into())
+                .is_none()
+        );
+        // final out reserve too low
+        assert!(
+            check_final_reserves(0.into(), 1.into(), 1_000_000.into(), *POOL_MIN_RESERVES)
+                .is_none()
+        );
     }
 
     #[test]
