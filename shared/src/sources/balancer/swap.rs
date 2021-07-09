@@ -87,7 +87,7 @@ impl BaselineSolvable for WeightedPoolRef<'_> {
         .flatten()
     }
 
-    fn get_amount_in(&self, out_token: H160, out_amount: U256, in_token: H160) -> Option<U256> {
+    fn get_amount_in(&self, in_token: H160, out_amount: U256, out_token: H160) -> Option<U256> {
         // Note that the output of this function does not depend on the pool
         // specialization. All contract branches compute this amount with:
         // https://github.com/balancer-labs/balancer-v2-monorepo/blob/6c9e24e22d0c46cca6dd15861d3d33da61a60b98/pkg/core/contracts/pools/BaseMinimalSwapInfoPool.sol#L75-L88
@@ -243,7 +243,7 @@ mod tests {
         );
 
         assert_eq!(
-            b.get_amount_in(tusd, 5_000_000_i128.into(), weth).unwrap(),
+            b.get_amount_in(weth, 5_000_000_i128.into(), tusd).unwrap(),
             1_225_715_511_430_411_i128.into()
         );
     }
