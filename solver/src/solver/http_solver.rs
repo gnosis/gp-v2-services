@@ -285,7 +285,7 @@ impl HttpSolver {
                 gas_price,
             )
             .into_iter()
-            .filter(|(_, model)| !model.is_empty())
+            .filter(|(_, model)| !model.has_sufficient_reserves())
             .collect();
         let model = BatchAuctionModel {
             tokens: token_models,
