@@ -531,16 +531,6 @@ mod tests {
                 fee: Ratio::new(3, 1000),
                 settlement_handling: CapturingSettlementHandler::arc(),
             }),
-            Liquidity::ConstantProduct(ConstantProductOrder {
-                tokens: TokenPair::new(
-                    addr!("c778417e063141139fce010982780140aa0cd5ab"),
-                    addr!("e4b9895e638f54c3bee2a3a78d6a297cc03e0353"),
-                )
-                .unwrap(),
-                reserves: (8_488_677_530_563_931_705, 75_408_146_511_005_299_032),
-                fee: Ratio::new(3, 1000),
-                settlement_handling: CapturingSettlementHandler::arc(),
-            }),
             Liquidity::WeightedProduct(WeightedProductOrder {
                 reserves: hashmap! {
                     addr!("c778417e063141139fce010982780140aa0cd5ab") => PoolTokenState {
