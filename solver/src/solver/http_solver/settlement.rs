@@ -270,7 +270,6 @@ mod tests {
             exec_sell_amount: 7.into(),
         };
         let updated_uniswap = UpdatedAmmModel {
-            amm: None,
             execution: vec![ExecutedAmmModel {
                 sell_token: t1,
                 buy_token: t0,
@@ -284,7 +283,6 @@ mod tests {
         };
 
         let updated_balancer = UpdatedAmmModel {
-            amm: None,
             execution: vec![ExecutedAmmModel {
                 sell_token: t1,
                 buy_token: t0,

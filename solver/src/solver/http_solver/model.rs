@@ -126,8 +126,7 @@ pub struct ExecutedOrderModel {
 
 #[derive(Debug, Deserialize)]
 pub struct UpdatedAmmModel {
-    #[serde(flatten)]
-    pub amm: Option<AmmModel>,
+    /// We ignore additional incoming amm fields we don't need.
     pub execution: Vec<ExecutedAmmModel>,
 }
 
@@ -135,7 +134,9 @@ pub struct UpdatedAmmModel {
 pub struct ExecutedAmmModel {
     pub sell_token: H160,
     pub buy_token: H160,
+    #[serde(with = "u256_decimal")]
     pub exec_sell_amount: U256,
+    #[serde(with = "u256_decimal")]
     pub exec_buy_amount: U256,
     /// The exec plan is allowed to be optional because the http solver isn't always
     /// able to determine and order of execution. That is, solver may have a solution
@@ -151,7 +152,7 @@ impl UpdatedAmmModel {
             .execution
             .iter()
             .any(|exec| exec.exec_sell_amount.gt(zero) || exec.exec_buy_amount.gt(zero));
-        self.execution.len() > 0 && has_non_trivial_execution
+        !self.execution.is_empty() && has_non_trivial_execution
     }
 }
 
@@ -169,11 +170,7 @@ mod tests {
 
     #[test]
     fn updated_amm_model_is_non_trivial() {
-        assert!(!UpdatedAmmModel {
-            amm: None,
-            execution: vec![],
-        }
-        .is_non_trivial());
+        assert!(!UpdatedAmmModel { execution: vec![] }.is_non_trivial());
 
         let trivial_execution_without_plan = ExecutedAmmModel {
             exec_plan: None,
@@ -189,7 +186,6 @@ mod tests {
         };
 
         assert!(!UpdatedAmmModel {
-            amm: None,
             execution: vec![
                 trivial_execution_with_plan.clone(),
                 trivial_execution_without_plan
@@ -208,19 +204,16 @@ mod tests {
         };
 
         assert!(UpdatedAmmModel {
-            amm: None,
             execution: vec![execution_with_buy.clone()]
         }
         .is_non_trivial());
 
         assert!(UpdatedAmmModel {
-            amm: None,
             execution: vec![execution_with_sell]
         }
         .is_non_trivial());
 
         assert!(UpdatedAmmModel {
-            amm: None,
             // One trivial and one non-trivial -> non-trivial
             execution: vec![execution_with_buy, trivial_execution_with_plan]
         }
