@@ -537,11 +537,12 @@ mod tests {
         assert!(exec_order.exec_buy_amount.as_u128() > 0);
 
         let uniswap = settled.amms.values().next().unwrap();
-        assert!(uniswap.exec_buy_amount.gt(&U256::zero()));
-        assert_eq!(uniswap.exec_sell_amount, U256::from(base(2)));
-        assert!(uniswap.exec_plan.is_some());
-        assert_eq!(uniswap.exec_plan.as_ref().unwrap().sequence, 0);
-        assert_eq!(uniswap.exec_plan.as_ref().unwrap().position, 0);
+        let execution = &uniswap.execution[0];
+        assert!(execution.exec_buy_amount.gt(&U256::zero()));
+        assert_eq!(execution.exec_sell_amount, U256::from(base(2)));
+        assert!(execution.exec_plan.is_some());
+        assert_eq!(execution.exec_plan.as_ref().unwrap().sequence, 0);
+        assert_eq!(execution.exec_plan.as_ref().unwrap().position, 0);
 
         assert_eq!(settled.prices.len(), 2);
     }
