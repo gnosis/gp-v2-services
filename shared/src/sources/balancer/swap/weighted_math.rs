@@ -23,7 +23,8 @@ pub fn calc_out_given_in(
     amount_in: Bfp,
 ) -> Result<Bfp, Error> {
     if amount_in > balance_in.mul_down(*MAX_IN_RATIO)? {
-        return Err(Error::MaxInRatio);
+        todo!("THIS IS WHERE ITS ERRORING");
+        //return Err(Error::MaxInRatio);
     }
 
     let denominator = balance_in.add(amount_in)?;
