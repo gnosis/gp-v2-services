@@ -422,6 +422,8 @@ mod tests {
 
     #[test]
     fn check_final_reserve_limits() {
+        // final out reserve too low
+        assert!(check_final_reserves(0.into(), 1.into(), 1_000_000.into(), 0.into()).is_none());
         // final in reserve too high
         assert!(
             check_final_reserves(1.into(), 0.into(), *POOL_MAX_RESERVES, 1_000_000.into())
