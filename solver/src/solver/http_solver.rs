@@ -537,11 +537,12 @@ mod tests {
         assert!(exec_order.exec_buy_amount.as_u128() > 0);
 
         let uniswap = settled.amms.values().next().unwrap();
-        assert!(uniswap.exec_buy_amount.gt(&U256::zero()));
-        assert_eq!(uniswap.exec_sell_amount, U256::from(base(2)));
-        assert!(uniswap.exec_plan.is_some());
-        assert_eq!(uniswap.exec_plan.as_ref().unwrap().sequence, 0);
-        assert_eq!(uniswap.exec_plan.as_ref().unwrap().position, 0);
+        let execution = &uniswap.execution[0];
+        assert!(execution.exec_buy_amount.gt(&U256::zero()));
+        assert_eq!(execution.exec_sell_amount, U256::from(base(2)));
+        assert!(execution.exec_plan.is_some());
+        assert_eq!(execution.exec_plan.as_ref().unwrap().sequence, 0);
+        assert_eq!(execution.exec_plan.as_ref().unwrap().position, 0);
 
         assert_eq!(settled.prices.len(), 2);
     }
@@ -595,5 +596,91 @@ mod tests {
 
         remove_orders_without_native_connection(&mut orders, &amms, &native_token);
         assert_eq!(orders.len(), 6);
+    }
+
+    #[test]
+    fn decode_response() {
+        let example_response = r#"
+            {
+              "extra_crap": ["Hello"],
+              "orders": {
+                "0": {
+                  "sell_token": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+                  "buy_token": "0xba100000625a3754423978a60c9317c58a424e3d",
+                  "sell_amount": "195160000000000000",
+                  "buy_amount": "18529625032931383084",
+                  "allow_partial_fill": false,
+                  "is_sell_order": true,
+                  "fee": {
+                    "amount": "4840000000000000",
+                    "token": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+                  },
+                  "cost": {
+                    "amount": "1604823000000000",
+                    "token": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+                  },
+                  "exec_buy_amount": "18689825362370811941",
+                  "exec_sell_amount": "195160000000000000"
+                },
+                "1": {
+                  "sell_token": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+                  "buy_token": "0xba100000625a3754423978a60c9317c58a424e3d",
+                  "sell_amount": "395160000000000000",
+                  "buy_amount": "37314737669229514851",
+                  "allow_partial_fill": false,
+                  "is_sell_order": true,
+                  "fee": {
+                    "amount": "4840000000000000",
+                    "token": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+                  },
+                  "cost": {
+                    "amount": "1604823000000000",
+                    "token": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+                  },
+                  "exec_buy_amount": "37843161458262200293",
+                  "exec_sell_amount": "395160000000000000"
+                }
+              },
+              "ref_token": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+              "prices": {
+                "0xba100000625a3754423978a60c9317c58a424e3d": "10442045135045813",
+                "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": "1000000000000000000"
+              },
+              "amms": {
+                "9": {
+                  "kind": "WeightedProduct",
+                  "reserves": {
+                    "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": {
+                      "balance": "99572200495363891220",
+                      "weight": "0.5"
+                    },
+                    "0xba100000625a3754423978a60c9317c58a424e3d": {
+                      "balance": "9605600791222732320384",
+                      "weight": "0.5"
+                    }
+                  },
+                  "fee": "0.0014",
+                  "cost": {
+                    "amount": "2904000000000000",
+                    "token": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+                  },
+                  "execution": [
+                    {
+                      "sell_token": "0xba100000625a3754423978a60c9317c58a424e3d",
+                      "buy_token": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+                      "exec_sell_amount": "56532986820633012234",
+                      "exec_buy_amount": "590320000000000032",
+                      "exec_plan": {
+                        "sequence": 0,
+                        "position": 0
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+        "#;
+        let parsed_response = serde_json::from_str::<SettledBatchAuctionModel>(example_response);
+        assert!(parsed_response.is_ok());
     }
 }

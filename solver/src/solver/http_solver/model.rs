@@ -31,7 +31,7 @@ pub struct OrderModel {
     pub cost: CostModel,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AmmModel {
     #[serde(flatten)]
     pub parameters: AmmParameters,
@@ -41,7 +41,7 @@ pub struct AmmModel {
     pub mandatory: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum AmmParameters {
     ConstantProduct(ConstantProductPoolParameters),
@@ -49,13 +49,13 @@ pub enum AmmParameters {
 }
 
 #[serde_as]
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ConstantProductPoolParameters {
     #[serde_as(as = "HashMap<_, DecimalU256>")]
     pub reserves: HashMap<H160, U256>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PoolTokenData {
     #[serde(with = "u256_decimal")]
     pub balance: U256,
@@ -63,7 +63,7 @@ pub struct PoolTokenData {
     pub weight: BigRational,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct WeightedProductPoolParameters {
     pub reserves: HashMap<H160, PoolTokenData>,
 }
@@ -75,7 +75,7 @@ pub struct TokenInfoModel {
     pub normalize_priority: Option<u64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct CostModel {
     #[serde(with = "u256_decimal")]
     pub amount: U256,
@@ -99,9 +99,11 @@ pub struct SettledBatchAuctionModel {
 
 impl SettledBatchAuctionModel {
     pub fn has_execution_plan(&self) -> bool {
+        // Its a bit weird that we expect all entries to contain an execution plan. Could make
+        // exec_plan not optional and assert that the vector of execution updates is non-empty
         self.amms
             .values()
-            .into_iter()
+            .flat_map(|u| &u.execution)
             .all(|u| u.exec_plan.is_some())
     }
 }
@@ -122,25 +124,39 @@ pub struct ExecutedOrderModel {
     pub exec_buy_amount: U256,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct UpdatedAmmModel {
+    /// We ignore additional incoming amm fields we don't need.
+    pub execution: Vec<ExecutedAmmModel>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct ExecutedAmmModel {
     pub sell_token: H160,
     pub buy_token: H160,
+    #[serde(with = "u256_decimal")]
     pub exec_sell_amount: U256,
+    #[serde(with = "u256_decimal")]
     pub exec_buy_amount: U256,
+    /// The exec plan is allowed to be optional because the http solver isn't always
+    /// able to determine and order of execution. That is, solver may have a solution
+    /// which it wants to share with the driver even if it couldn't derive an execution plan.
     pub exec_plan: Option<ExecutionPlanCoordinatesModel>,
 }
 
 impl UpdatedAmmModel {
     /// Returns true there is at least one non-zero update.
     pub fn is_non_trivial(&self) -> bool {
-        self.exec_buy_amount
-            .max(self.exec_sell_amount)
-            .gt(&U256::zero())
+        let zero = &U256::zero();
+        let has_non_trivial_execution = self
+            .execution
+            .iter()
+            .any(|exec| exec.exec_sell_amount.gt(zero) || exec.exec_buy_amount.gt(zero));
+        !self.execution.is_empty() && has_non_trivial_execution
     }
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ExecutionPlanCoordinatesModel {
     pub sequence: u32,
     pub position: u32,
@@ -154,20 +170,52 @@ mod tests {
 
     #[test]
     fn updated_amm_model_is_non_trivial() {
-        assert!(!UpdatedAmmModel {
+        assert!(!UpdatedAmmModel { execution: vec![] }.is_non_trivial());
+
+        let trivial_execution_without_plan = ExecutedAmmModel {
+            exec_plan: None,
             ..Default::default()
+        };
+
+        let trivial_execution_with_plan = ExecutedAmmModel {
+            exec_plan: Some(ExecutionPlanCoordinatesModel {
+                sequence: 0,
+                position: 0,
+            }),
+            ..Default::default()
+        };
+
+        assert!(!UpdatedAmmModel {
+            execution: vec![
+                trivial_execution_with_plan.clone(),
+                trivial_execution_without_plan
+            ],
         }
         .is_non_trivial());
 
-        assert!(UpdatedAmmModel {
+        let execution_with_sell = ExecutedAmmModel {
             exec_sell_amount: U256::one(),
             ..Default::default()
+        };
+
+        let execution_with_buy = ExecutedAmmModel {
+            exec_buy_amount: U256::one(),
+            ..Default::default()
+        };
+
+        assert!(UpdatedAmmModel {
+            execution: vec![execution_with_buy.clone()]
         }
         .is_non_trivial());
 
         assert!(UpdatedAmmModel {
-            exec_buy_amount: U256::one(),
-            ..Default::default()
+            execution: vec![execution_with_sell]
+        }
+        .is_non_trivial());
+
+        assert!(UpdatedAmmModel {
+            // One trivial and one non-trivial -> non-trivial
+            execution: vec![execution_with_buy, trivial_execution_with_plan]
         }
         .is_non_trivial());
     }

@@ -150,6 +150,7 @@ fn match_prepared_and_settled_amms(
     for (index, settled) in settled_orders
         .into_iter()
         .filter(|(_, settled)| settled.is_non_trivial())
+        .flat_map(|(id, settled)| settled.execution.into_iter().map(move |exec| (id, exec)))
         .sorted_by(|a, b| a.1.exec_plan.cmp(&b.1.exec_plan))
     {
         let (input, output) = (
@@ -269,25 +270,29 @@ mod tests {
             exec_sell_amount: 7.into(),
         };
         let updated_uniswap = UpdatedAmmModel {
-            sell_token: t1,
-            buy_token: t0,
-            exec_sell_amount: U256::from(9),
-            exec_buy_amount: U256::from(8),
-            exec_plan: Some(ExecutionPlanCoordinatesModel {
-                sequence: 0,
-                position: 0,
-            }),
+            execution: vec![ExecutedAmmModel {
+                sell_token: t1,
+                buy_token: t0,
+                exec_sell_amount: U256::from(9),
+                exec_buy_amount: U256::from(8),
+                exec_plan: Some(ExecutionPlanCoordinatesModel {
+                    sequence: 0,
+                    position: 0,
+                }),
+            }],
         };
 
         let updated_balancer = UpdatedAmmModel {
-            sell_token: t1,
-            buy_token: t0,
-            exec_sell_amount: U256::from(2),
-            exec_buy_amount: U256::from(1),
-            exec_plan: Some(ExecutionPlanCoordinatesModel {
-                sequence: 1,
-                position: 0,
-            }),
+            execution: vec![ExecutedAmmModel {
+                sell_token: t1,
+                buy_token: t0,
+                exec_sell_amount: U256::from(2),
+                exec_buy_amount: U256::from(1),
+                exec_plan: Some(ExecutionPlanCoordinatesModel {
+                    sequence: 1,
+                    position: 0,
+                }),
+            }],
         };
         let settled = SettledBatchAuctionModel {
             orders: hashmap! { 0 => executed_order },
