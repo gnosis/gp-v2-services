@@ -304,8 +304,8 @@ mod tests {
 
         let path = vec![sell_token, intermediate, buy_token];
         let pools = [
-            Pool::uniswap(TokenPair::new(path[0], path[1]).unwrap(), (10_000, 10_000)),
-            Pool::uniswap(TokenPair::new(path[1], path[2]).unwrap(), (20_000, 5_000)),
+            Pool::uniswap(TokenPair::new(path[0], path[1]).unwrap(), (100, 100)),
+            Pool::uniswap(TokenPair::new(path[1], path[2]).unwrap(), (200, 50)),
         ];
         let pools = hashmap! {
             pools[0].tokens => vec![pools[0]],
@@ -321,7 +321,7 @@ mod tests {
             estimate_sell_amount(10.into(), &path, &pools)
                 .unwrap()
                 .value,
-            42.into()
+            105.into()
         );
     }
 

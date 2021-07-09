@@ -15,9 +15,6 @@ const POOL_SWAP_GAS_COST: usize = 60_000;
 
 lazy_static::lazy_static! {
     static ref POOL_MAX_RESERVES: U256 = U256::from((1u128 << 96) - 1);
-    // Taken from
-    // <https://github.com/Uniswap/uniswap-v2-core/blob/4dd59067c76dea4a0e8e4bfdda41877a6b16dedc/contracts/UniswapV2Pair.sol#L15>
-    static ref POOL_MIN_RESERVES: U256 = U256::from(1_000);
 }
 
 /// This type denotes `(reserve_a, reserve_b, token_b)` where
@@ -157,7 +154,7 @@ fn check_final_reserves(
     let final_reserve_in = reserve_in.checked_add(amount_in)?;
     let final_reserve_out = reserve_out.checked_sub(amount_out)?;
 
-    if final_reserve_in > *POOL_MAX_RESERVES || final_reserve_out < *POOL_MIN_RESERVES {
+    if final_reserve_in > *POOL_MAX_RESERVES {
         None
     } else {
         Some((final_reserve_in, final_reserve_out))
@@ -307,58 +304,34 @@ mod tests {
         let buy_token = H160::from_low_u64_be(2);
 
         // Even Pool
-        let pool = Pool::uniswap(
-            TokenPair::new(sell_token, buy_token).unwrap(),
-            (10_000, 10_000),
-        );
+        let pool = Pool::uniswap(TokenPair::new(sell_token, buy_token).unwrap(), (100, 100));
         assert_eq!(
             pool.get_amount_out(sell_token, 10.into()),
             Some((9.into(), buy_token))
         );
         assert_eq!(
             pool.get_amount_out(sell_token, 100.into()),
-            Some((98.into(), buy_token))
+            Some((49.into(), buy_token))
         );
         assert_eq!(
             pool.get_amount_out(sell_token, 1000.into()),
-            Some((906.into(), buy_token))
+            Some((90.into(), buy_token))
         );
-
-        // Selling more than possible
-        let (max_amount_in, _) = pool.get_amount_in(buy_token, 9_000.into()).unwrap();
-        assert_eq!(
-            pool.get_amount_out(sell_token, max_amount_in + 10_000),
-            None
-        );
-        assert_eq!(pool.get_amount_out(sell_token, 10u128.pow(28).into()), None);
-        assert_eq!(pool.get_amount_out(sell_token, U256::max_value()), None);
 
         //Uneven Pool
-        let pool = Pool::uniswap(
-            TokenPair::new(sell_token, buy_token).unwrap(),
-            (20_000, 5_000),
-        );
+        let pool = Pool::uniswap(TokenPair::new(sell_token, buy_token).unwrap(), (200, 50));
         assert_eq!(
             pool.get_amount_out(sell_token, 10.into()),
             Some((2.into(), buy_token))
         );
         assert_eq!(
             pool.get_amount_out(sell_token, 100.into()),
-            Some((24.into(), buy_token))
+            Some((16.into(), buy_token))
         );
         assert_eq!(
             pool.get_amount_out(sell_token, 1000.into()),
-            Some((237.into(), buy_token))
+            Some((41.into(), buy_token))
         );
-
-        // Selling more than possible
-        let (max_amount_in, _) = pool.get_amount_in(buy_token, 4_000.into()).unwrap();
-        assert_eq!(
-            pool.get_amount_out(sell_token, max_amount_in + 20_000),
-            None
-        );
-        assert_eq!(pool.get_amount_out(sell_token, 10u128.pow(28).into()), None);
-        assert_eq!(pool.get_amount_out(sell_token, U256::max_value()), None);
 
         // Large Numbers
         let pool = Pool::uniswap(
@@ -380,35 +353,29 @@ mod tests {
         let buy_token = H160::from_low_u64_be(2);
 
         // Even Pool
-        let pool = Pool::uniswap(
-            TokenPair::new(sell_token, buy_token).unwrap(),
-            (10_000, 10_000),
-        );
+        let pool = Pool::uniswap(TokenPair::new(sell_token, buy_token).unwrap(), (100, 100));
         assert_eq!(
             pool.get_amount_in(buy_token, 10.into()),
-            Some((11.into(), sell_token))
+            Some((12.into(), sell_token))
         );
         assert_eq!(
-            pool.get_amount_in(buy_token, 9_000.into()),
-            Some((90271.into(), sell_token))
+            pool.get_amount_in(buy_token, 99.into()),
+            Some((9930.into(), sell_token))
         );
 
         // Buying more than possible
-        assert_eq!(pool.get_amount_in(buy_token, 9_001.into()), None);
-        assert_eq!(pool.get_amount_in(buy_token, 1_000_000.into()), None);
+        assert_eq!(pool.get_amount_in(buy_token, 100.into()), None);
+        assert_eq!(pool.get_amount_in(buy_token, 1000.into()), None);
 
         //Uneven Pool
-        let pool = Pool::uniswap(
-            TokenPair::new(sell_token, buy_token).unwrap(),
-            (20_000, 5_000),
-        );
+        let pool = Pool::uniswap(TokenPair::new(sell_token, buy_token).unwrap(), (200, 50));
         assert_eq!(
             pool.get_amount_in(buy_token, 10.into()),
-            Some((41.into(), sell_token))
+            Some((51.into(), sell_token))
         );
         assert_eq!(
-            pool.get_amount_in(buy_token, 4_000.into()),
-            Some((80241.into(), sell_token))
+            pool.get_amount_in(buy_token, 49.into()),
+            Some((9830.into(), sell_token))
         );
 
         // Large Numbers
@@ -458,11 +425,6 @@ mod tests {
         // final in reserve too high
         assert!(
             check_final_reserves(1.into(), 0.into(), *POOL_MAX_RESERVES, 1_000_000.into())
-                .is_none()
-        );
-        // final out reserve too low
-        assert!(
-            check_final_reserves(0.into(), 1.into(), 1_000_000.into(), *POOL_MIN_RESERVES)
                 .is_none()
         );
     }

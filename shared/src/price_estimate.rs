@@ -731,15 +731,9 @@ mod tests {
 
         // Direct trade is better when selling token_b
         let pools = vec![
-            Pool::uniswap(TokenPair::new(token_a, token_b).unwrap(), (10_000, 10_000)),
-            Pool::uniswap(
-                TokenPair::new(token_a, intermediate).unwrap(),
-                (9_000, 10_000),
-            ),
-            Pool::uniswap(
-                TokenPair::new(intermediate, token_b).unwrap(),
-                (9_000, 10_000),
-            ),
+            Pool::uniswap(TokenPair::new(token_a, token_b).unwrap(), (1000, 1000)),
+            Pool::uniswap(TokenPair::new(token_a, intermediate).unwrap(), (900, 1000)),
+            Pool::uniswap(TokenPair::new(intermediate, token_b).unwrap(), (900, 1000)),
         ];
 
         let pool_fetcher = Arc::new(FakePoolFetcher(pools));
@@ -836,23 +830,17 @@ mod tests {
             // gas price.
             Pool::uniswap(
                 TokenPair::new(native, sell).unwrap(),
-                (100_000_000_000_000, 2_000_000),
+                (100_000_000_000, 2_000),
             ),
             Pool::uniswap(
                 TokenPair::new(native, buy).unwrap(),
-                (100_000_000_000_000, 1_000_000),
+                (100_000_000_000, 1_000),
             ),
             // Direct connection 1 to 3.
-            Pool::uniswap(TokenPair::new(sell, buy).unwrap(), (1_000_000, 800_000)),
+            Pool::uniswap(TokenPair::new(sell, buy).unwrap(), (1000, 800)),
             // Intermediate from 1 to 2 to 2, cheaper than direct.
-            Pool::uniswap(
-                TokenPair::new(sell, intermediate).unwrap(),
-                (1_000_000, 1_000_000),
-            ),
-            Pool::uniswap(
-                TokenPair::new(intermediate, buy).unwrap(),
-                (1_000_000, 1_000_000),
-            ),
+            Pool::uniswap(TokenPair::new(sell, intermediate).unwrap(), (1000, 1000)),
+            Pool::uniswap(TokenPair::new(intermediate, buy).unwrap(), (1000, 1000)),
         ];
 
         let pool_fetcher = Arc::new(FakePoolFetcher(pools.clone()));
