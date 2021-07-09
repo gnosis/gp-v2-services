@@ -121,7 +121,7 @@ impl SingleOrderSolving for ParaswapSolver {
 }
 
 impl ParaswapSolver {
-    pub async fn get_price_for_order(
+    async fn get_price_for_order(
         &self,
         order: &LimitOrder,
         token_info: &HashMap<H160, TokenInfo>,
