@@ -41,6 +41,23 @@ pub struct AmmModel {
     pub mandatory: bool,
 }
 
+impl AmmModel {
+    pub fn is_empty(&self) -> bool {
+        // Note that we consider a pool non-empty if any of the token balances is positive
+        // (while the http solver requires at least two)
+        match &self.parameters {
+            AmmParameters::ConstantProduct(parameters) => parameters
+                .reserves
+                .values()
+                .any(|balance| balance.gt(&U256::zero())),
+            AmmParameters::WeightedProduct(parameters) => parameters
+                .reserves
+                .values()
+                .any(|data| data.balance.gt(&U256::zero())),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum AmmParameters {
