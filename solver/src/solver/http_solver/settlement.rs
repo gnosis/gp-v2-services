@@ -54,12 +54,14 @@ impl ExecutedLimitOrder {
     }
 }
 
+#[derive(Debug)]
 struct ExecutedConstantProductAmms {
     order: ConstantProductOrder,
     input: (H160, U256),
     output: (H160, U256),
 }
 
+#[derive(Debug)]
 struct ExecutedWeightedProductAmms {
     order: WeightedProductOrder,
     input: (H160, U256),
@@ -150,27 +152,35 @@ fn match_prepared_and_settled_amms(
     for (index, settled) in settled_orders
         .into_iter()
         .filter(|(_, settled)| settled.is_non_trivial())
-        .flat_map(|(id, settled)| settled.execution.into_iter().map(move |exec| (id, exec)))
+        .flat_map(|(shifted_id, settled)| {
+            settled
+                .execution
+                .into_iter()
+                .map(move |exec| (shifted_id, exec))
+        })
         .sorted_by(|a, b| a.1.exec_plan.cmp(&b.1.exec_plan))
     {
+        // Recall, prepared amm for weighted products are shifted by the constant product amms
+        let map_key = index % prepared_constant_product_orders.len();
+        println!("Map Key {}", map_key);
         let (input, output) = (
             (settled.buy_token, settled.exec_buy_amount),
             (settled.sell_token, settled.exec_sell_amount),
         );
-        if prepared_constant_product_orders.contains_key(&index) {
+        if prepared_constant_product_orders.contains_key(&map_key) {
             constant_product_executions.push(ExecutedConstantProductAmms {
-                order: prepared_constant_product_orders.remove(&index).unwrap(),
+                order: prepared_constant_product_orders.remove(&map_key).unwrap(),
                 input,
                 output,
             });
-        } else if prepared_weighted_product_orders.contains_key(&index) {
+        } else if prepared_weighted_product_orders.contains_key(&map_key) {
             weighted_product_executions.push(ExecutedWeightedProductAmms {
-                order: prepared_weighted_product_orders.remove(&index).unwrap(),
+                order: prepared_weighted_product_orders.remove(&map_key).unwrap(),
                 input,
                 output,
             });
         } else {
-            return Err(anyhow!("Invalid AMM {}", index));
+            return Err(anyhow!("Invalid AMM {}", map_key));
         }
     }
     Ok((constant_product_executions, weighted_product_executions))
@@ -214,8 +224,10 @@ fn match_settled_prices(
 mod tests {
     use super::*;
     use crate::liquidity::tests::CapturingSettlementHandler;
+    use hex_literal::hex;
     use maplit::hashmap;
     use model::TokenPair;
+    use num::rational::Ratio;
     use num::BigRational;
     use shared::sources::balancer::{pool_fetching::PoolTokenState, swap::fixed_point::Bfp};
 
@@ -328,5 +340,179 @@ mod tests {
                 output: (t1, 2.into()),
             }]
         );
+    }
+
+    #[test]
+    fn match_prepared_and_settled_amms_() {
+        let cpo_0 = ConstantProductOrder {
+            tokens: TokenPair::new(
+                H160::from_slice(&hex!("a7d1c04faf998f9161fc9f800a99a809b84cfc9d")),
+                H160::from_slice(&hex!("c778417e063141139fce010982780140aa0cd5ab")),
+            )
+            .unwrap(),
+            reserves: (597249810824827988770940, 225724246562756585230),
+            fee: Ratio::new(3, 1000),
+            settlement_handling: CapturingSettlementHandler::arc(),
+        };
+        let cpo_1 = ConstantProductOrder {
+            tokens: TokenPair::new(
+                H160::from_slice(&hex!("c778417e063141139fce010982780140aa0cd5ab")),
+                H160::from_slice(&hex!("e4b9895e638f54c3bee2a3a78d6a297cc03e0353")),
+            )
+            .unwrap(),
+            reserves: (8488677530563931705, 75408146511005299032),
+            fee: Ratio::new(3, 1000),
+            settlement_handling: CapturingSettlementHandler::arc(),
+        };
+        let constant_product_orders = hashmap! { 0usize => cpo_0, 1usize => cpo_1 };
+        let weighted_product_order = WeightedProductOrder {
+            reserves: hashmap! {
+                H160::from_slice(&hex!("e4b9895e638f54c3bee2a3a78d6a297cc03e0353")) => PoolTokenState {
+                    balance: U256::from(1251682293173877359u128),
+                    weight: Bfp::from(500_000_000_000_000_000),
+                    scaling_exponent: 0,
+                },
+                H160::from_slice(&hex!("c778417e063141139fce010982780140aa0cd5ab")) => PoolTokenState {
+                    balance: U256::from(799086982149629058u128),
+                    weight: Bfp::from(500_000_000_000_000_000),
+                    scaling_exponent: 0,
+                }
+            },
+            fee: BigRational::new(1.into(), 1000.into()),
+            settlement_handling: CapturingSettlementHandler::arc(),
+        };
+        let weighted_product_orders = hashmap! { 0usize => weighted_product_order };
+
+        let solution_response = serde_json::from_str::<SettledBatchAuctionModel>(
+            r#"{
+            "ref_token": "0xc778417e063141139fce010982780140aa0cd5ab",
+            "tokens": {
+                "0xa7d1c04faf998f9161fc9f800a99a809b84cfc9d": {
+                    "decimals": 18,
+                    "estimated_price": "377939419103409",
+                    "normalize_priority": "0"
+                },
+                "0xc778417e063141139fce010982780140aa0cd5ab": {
+                    "decimals": 18,
+                    "estimated_price": "1000000000000000000",
+                    "normalize_priority": "1"
+                },
+                "0xe4b9895e638f54c3bee2a3a78d6a297cc03e0353": {
+                    "decimals": 18,
+                    "estimated_price": "112874952666826941",
+                    "normalize_priority": "0"
+                }
+            },
+            "prices": {
+                "0xa7d1c04faf998f9161fc9f800a99a809b84cfc9d": "379669381779741",
+                "0xc778417e063141139fce010982780140aa0cd5ab": "1000000000000000000",
+                "0xe4b9895e638f54c3bee2a3a78d6a297cc03e0353": "355227837551346618"
+            },
+            "orders": {
+                "0": {
+                    "sell_token": "0xe4b9895e638f54c3bee2a3a78d6a297cc03e0353",
+                    "buy_token": "0xa7d1c04faf998f9161fc9f800a99a809b84cfc9d",
+                    "sell_amount": "996570293625199060",
+                    "buy_amount": "289046068204476404625",
+                    "allow_partial_fill": false,
+                    "is_sell_order": true,
+                    "fee": {
+                        "token": "0xe4b9895e638f54c3bee2a3a78d6a297cc03e0353",
+                        "amount": "3429706374800940"
+                    },
+                    "cost": {
+                        "token": "0xc778417e063141139fce010982780140aa0cd5ab",
+                        "amount": "98173121900550"
+                    },
+                    "exec_sell_amount": "996570293625199060",
+                    "exec_buy_amount": "932415220613609833982"
+                }
+            },
+            "amms": {
+                "0": {
+                    "kind": "ConstantProduct",
+                    "reserves": {
+                        "0xa7d1c04faf998f9161fc9f800a99a809b84cfc9d": "597249810824827988770940",
+                        "0xc778417e063141139fce010982780140aa0cd5ab": "225724246562756585230"
+                    },
+                    "fee": "0.003",
+                    "cost": {
+                        "token": "0xc778417e063141139fce010982780140aa0cd5ab",
+                        "amount": "140188523735120"
+                    },
+                    "execution": [
+                        {
+                            "sell_token": "0xa7d1c04faf998f9161fc9f800a99a809b84cfc9d",
+                            "buy_token": "0xc778417e063141139fce010982780140aa0cd5ab",
+                            "exec_sell_amount": "932415220613609833982",
+                            "exec_buy_amount": "354009510372389956",
+                            "exec_plan": {
+                                "sequence": 0,
+                                "position": 1
+                            }
+                        }
+                    ]
+                },
+                "2": {
+                    "kind": "WeightedProduct",
+                    "reserves": {
+                        "0xe4b9895e638f54c3bee2a3a78d6a297cc03e0353": {
+                            "balance": "1251682293173877359",
+                            "weight": "0.5"
+                        },
+                        "0xc778417e063141139fce010982780140aa0cd5ab": {
+                            "balance": "799086982149629058",
+                            "weight": "0.5"
+                        }
+                    },
+                    "fee": "0.001",
+                    "cost": {
+                        "token": "0xc778417e063141139fce010982780140aa0cd5ab",
+                        "amount": "177648716400000"
+                    },
+                    "execution": [
+                        {
+                            "sell_token": "0xc778417e063141139fce010982780140aa0cd5ab",
+                            "buy_token": "0xe4b9895e638f54c3bee2a3a78d6a297cc03e0353",
+                            "exec_sell_amount": "354009510372384890",
+                            "exec_buy_amount": "996570293625184642",
+                            "exec_plan": {
+                                "sequence": 0,
+                                "position": 0
+                            }
+                        }
+                    ]
+                }
+            },
+            "solver": {
+                "name": "standard",
+                "args": [
+                    "--write_auxiliary_files",
+                    "--solver",
+                    "SCIP",
+                    "--output_dir",
+                    "/app/results"
+                ],
+                "runtime": 0.0,
+                "runtime_preprocessing": 17.097073793411255,
+                "runtime_solving": 123.31747031211853,
+                "runtime_ring_finding": 0.0,
+                "runtime_validation": 0.14400219917297363,
+                "nr_variables": 24,
+                "nr_bool_variables": 8,
+                "optimality_gap": null,
+                "solver_status": "ok",
+                "termination_condition": "optimal",
+                "exit_status": "completed"
+            }
+        }"#,
+        )
+        .unwrap();
+        assert!(match_prepared_and_settled_amms(
+            constant_product_orders,
+            weighted_product_orders,
+            solution_response.amms
+        )
+        .is_ok());
     }
 }
