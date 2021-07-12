@@ -35,6 +35,7 @@ pub enum AddOrderResult {
     InsufficientFee,
     UnsupportedToken(H160),
     TransferEthToContract,
+    SameBuyAndSellToken,
 }
 
 #[derive(Debug)]
@@ -81,6 +82,9 @@ impl Orderbook {
 
     pub async fn add_order(&self, payload: OrderCreationPayload) -> Result<AddOrderResult> {
         let order = payload.order_creation;
+        if order.sell_token == order.buy_token {
+            return Ok(AddOrderResult::SameBuyAndSellToken);
+        }
         if order.valid_to
             < shared::time::now_in_epoch_seconds() + self.min_order_validity_period.as_secs() as u32
         {
@@ -287,7 +291,7 @@ fn set_available_balances(orders: &mut [Order], balances: &HashMap<(H160, H160),
 // Assumes balance fetcher is already tracking all balances.
 fn solvable_orders(mut orders: Vec<Order>, balances: &HashMap<(H160, H160), U256>) -> Vec<Order> {
     let mut orders_map = HashMap::<(H160, H160), Vec<Order>>::new();
-    orders.sort_by_key(|order| order.order_meta_data.creation_date);
+    orders.sort_by_key(|order| std::cmp::Reverse(order.order_meta_data.creation_date));
     for order in orders {
         let key = (order.order_meta_data.owner, order.order_creation.sell_token);
         orders_map.entry(key).or_default().push(order);
@@ -448,12 +452,12 @@ mod tests {
 
         let balances = hashmap! {Default::default() => U256::from(9)};
         let orders_ = solvable_orders(orders.clone(), &balances);
-        // First order has higher timestamp so it isn't picked.
-        assert_eq!(orders_, orders[1..]);
+        // Second order has lower timestamp so it isn't picked.
+        assert_eq!(orders_, orders[..1]);
         orders[1].order_meta_data.creation_date =
             DateTime::from_utc(NaiveDateTime::from_timestamp(3, 0), Utc);
         let orders_ = solvable_orders(orders.clone(), &balances);
-        assert_eq!(orders_, orders[..1]);
+        assert_eq!(orders_, orders[1..]);
     }
 
     #[test]
