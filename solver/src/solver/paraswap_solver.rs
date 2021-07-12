@@ -60,7 +60,7 @@ impl ParaswapSolver {
     }
 }
 
-pub struct ParaswapCompleteResponse {
+struct ParaswapCompleteResponse {
     transaction_result: Result<TransactionBuilderResponse, ParaswapResponseError>,
     price_response: PriceResponse,
     amount: U256,
@@ -69,11 +69,8 @@ pub struct ParaswapCompleteResponse {
 #[async_trait::async_trait]
 impl SingleOrderSolving for ParaswapSolver {
     async fn settle_order(&self, order: LimitOrder) -> Result<Option<Settlement>> {
-        let transaction: TransactionBuilderResponse;
-        let price_response: PriceResponse;
-        let amount: U256;
         let mut num_retries = 0;
-        loop {
+        let (transaction, price_response, amount) = loop {
             let complete_response = self.paraswap_transaction_from_order(&order).await?;
             if !satisfies_limit_price(&order, &complete_response.price_response) {
                 tracing::debug!("Order limit price not respected");
@@ -88,13 +85,14 @@ impl SingleOrderSolving for ParaswapSolver {
                     continue;
                 }
                 _ => {
-                    price_response = complete_response.price_response;
-                    amount = complete_response.amount;
-                    transaction = complete_response.transaction_result?;
-                    break;
+                    break (
+                        complete_response.transaction_result?,
+                        complete_response.price_response,
+                        complete_response.amount,
+                    );
                 }
             }
-        }
+        };
 
         let mut settlement = Settlement::new(hashmap! {
             order.sell_token => price_response.dest_amount,
@@ -192,9 +190,8 @@ impl ParaswapSolver {
             .get_token_infos(&[order.sell_token, order.buy_token])
             .await;
         let (price_response, amount) = self.get_price_for_order(&order, &token_info).await?;
-        let transaction_query = self
-            .transaction_query_from(&order, &price_response, &token_info)
-            .await?;
+        let transaction_query =
+            self.transaction_query_from(&order, &price_response, &token_info)?;
         Ok(ParaswapCompleteResponse {
             transaction_result: self.client.transaction(transaction_query).await,
             price_response,
@@ -203,7 +200,7 @@ impl ParaswapSolver {
     }
 }
 
-pub fn decimals(token_info: &HashMap<H160, TokenInfo>, token: &H160) -> Result<usize> {
+fn decimals(token_info: &HashMap<H160, TokenInfo>, token: &H160) -> Result<usize> {
     token_info
         .get(token)
         .and_then(|info| info.decimals.map(usize::from))
