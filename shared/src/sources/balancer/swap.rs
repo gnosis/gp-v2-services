@@ -75,7 +75,7 @@ impl BaselineSolvable for WeightedPoolRef<'_> {
 
         let in_amount_minus_fees = self.subtract_swap_fee_amount(in_amount).ok()?;
 
-        calc_out_given_in(
+        let result = calc_out_given_in(
             in_reserves.upscaled_balance()?,
             in_reserves.weight,
             out_reserves.upscaled_balance()?,
@@ -84,7 +84,16 @@ impl BaselineSolvable for WeightedPoolRef<'_> {
         )
         .ok()
         .map(|bfp| out_reserves.downscale(bfp))
-        .flatten()
+        .flatten();
+
+        // We double check that resulting amount out can symmetrically provide an amount in.
+        if let Some(out_amount) = result {
+            return match self.get_amount_in(in_token, (out_amount, out_token)) {
+                Some(_) => result,
+                None => None,
+            };
+        };
+        None
     }
 
     fn get_amount_in(&self, in_token: H160, (out_amount, out_token): (U256, H160)) -> Option<U256> {
@@ -94,7 +103,7 @@ impl BaselineSolvable for WeightedPoolRef<'_> {
         let in_reserves = self.reserves.get(&in_token)?;
         let out_reserves = self.reserves.get(&out_token)?;
 
-        let amount_in = calc_in_given_out(
+        let amount_in_before_fee = calc_in_given_out(
             in_reserves.upscaled_balance()?,
             in_reserves.weight,
             out_reserves.upscaled_balance()?,
@@ -104,8 +113,16 @@ impl BaselineSolvable for WeightedPoolRef<'_> {
         .ok()
         .map(|bfp| in_reserves.downscale(bfp))
         .flatten()?;
+        let result = self.add_swap_fee_amount(amount_in_before_fee).ok();
 
-        self.add_swap_fee_amount(amount_in).ok()
+        // We double check that resulting amount in can symmetrically provide an amount out.
+        if let Some(in_amount) = result {
+            return match self.get_amount_out(out_token, (in_amount, in_token)) {
+                Some(_) => result,
+                None => None,
+            };
+        };
+        None
     }
 
     fn get_spot_price(&self, base_token: H160, quote_token: H160) -> Option<BigRational> {
