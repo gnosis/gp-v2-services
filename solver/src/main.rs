@@ -49,9 +49,13 @@ struct Arguments {
     mip_solver_url: Url,
 
     /// The API endpoint to call the mip v2 solver
-    #[structopt(long, env = "QUASIMODO_SOLVER_URL", default_value = "http://localhost:8000")]
+    #[structopt(
+        long,
+        env = "QUASIMODO_SOLVER_URL",
+        default_value = "http://localhost:8000"
+    )]
     quasimodo_solver_url: Url,
-    
+
     /// The timeout for the API endpoint to fetch the orderbook
     #[structopt(
         long,
