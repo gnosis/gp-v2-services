@@ -160,23 +160,23 @@ fn match_prepared_and_settled_amms(
         })
         .sorted_by(|a, b| a.1.exec_plan.cmp(&b.1.exec_plan))
     {
-        // Recall, prepared amm for weighted products are shifted by the constant product amms
-        let shift = prepared_constant_product_orders.len();
-        let shifted_index = index % shift;
         let (input, output) = (
             (settled.buy_token, settled.exec_buy_amount),
             (settled.sell_token, settled.exec_sell_amount),
         );
-        if prepared_constant_product_orders.contains_key(&index) {
+        // Recall, prepared amm for weighted products are shifted by the constant product amms
+        let shift = prepared_constant_product_orders.len();
+        if index < shift && prepared_constant_product_orders.contains_key(&index) {
             constant_product_executions.push(ExecutedConstantProductAmms {
                 order: prepared_constant_product_orders.remove(&index).unwrap(),
                 input,
                 output,
             });
-        } else if prepared_weighted_product_orders.contains_key(&shifted_index) {
+        } else if index >= shift && prepared_weighted_product_orders.contains_key(&(index - shift))
+        {
             weighted_product_executions.push(ExecutedWeightedProductAmms {
                 order: prepared_weighted_product_orders
-                    .remove(&shifted_index)
+                    .remove(&(index - shift))
                     .unwrap(),
                 input,
                 output,
