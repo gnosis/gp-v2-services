@@ -69,30 +69,12 @@ struct ParaswapCompleteResponse {
 #[async_trait::async_trait]
 impl SingleOrderSolving for ParaswapSolver {
     async fn settle_order(&self, order: LimitOrder) -> Result<Option<Settlement>> {
-        let mut num_retries = 0;
-        let (transaction, price_response, amount) = loop {
-            let complete_response = self.paraswap_transaction_from_order(&order).await?;
-            if !satisfies_limit_price(&order, &complete_response.price_response) {
-                tracing::debug!("Order limit price not respected");
-                return Ok(None);
-            }
-            match complete_response.transaction_result {
-                Err(ParaswapResponseError::PriceChange) => {
-                    if num_retries >= 2 {
-                        return Err(anyhow!("Price change error after {} retries", num_retries));
-                    }
-                    num_retries += 1;
-                    continue;
-                }
-                _ => {
-                    break (
-                        complete_response.transaction_result?,
-                        complete_response.price_response,
-                        complete_response.amount,
-                    );
-                }
-            }
-        };
+        let (transaction, price_response, amount) = self.build_or_retry(&order, 2).await?;
+
+        if !satisfies_limit_price(&order, &price_response) {
+            tracing::debug!("Order limit price not respected");
+            return Ok(None);
+        }
 
         let mut settlement = Settlement::new(hashmap! {
             order.sell_token => price_response.dest_amount,
@@ -119,6 +101,39 @@ impl SingleOrderSolving for ParaswapSolver {
 }
 
 impl ParaswapSolver {
+    async fn build_or_retry(
+        &self,
+        order: &LimitOrder,
+        max_retries: usize,
+    ) -> Result<(TransactionBuilderResponse, PriceResponse, U256)> {
+        for attempt_number in 1..=max_retries {
+            let complete_response = self.paraswap_transaction_from_order(&order).await?;
+            match complete_response.transaction_result {
+                Err(ParaswapResponseError::PriceChange) => {
+                    tracing::warn!("Paraswap Price Change on attempt {}", attempt_number);
+                }
+                Err(ParaswapResponseError::BuildingTransaction(query)) => {
+                    tracing::warn!(
+                        "Paraswap ERROR_BUILDING_TRANSACTION on attempt {}: from query\n{}",
+                        attempt_number,
+                        query
+                    );
+                }
+                _ => {
+                    return Ok((
+                        complete_response.transaction_result?,
+                        complete_response.price_response,
+                        complete_response.amount,
+                    ));
+                }
+            }
+        }
+        Err(anyhow!(
+            "failed to retrieve adequate response after {} retries.",
+            max_retries
+        ))
+    }
+
     async fn get_price_for_order(
         &self,
         order: &LimitOrder,
