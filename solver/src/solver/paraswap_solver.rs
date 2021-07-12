@@ -143,7 +143,7 @@ impl ParaswapSolver {
         Ok((price_response, amount))
     }
 
-    pub async fn transaction_query_from(
+    fn transaction_query_from(
         &self,
         order: &LimitOrder,
         price_response: &PriceResponse,
