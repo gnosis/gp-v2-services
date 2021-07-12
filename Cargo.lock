@@ -693,9 +693,9 @@ dependencies = [
 
 [[package]]
 name = "ethabi"
-version = "14.0.0"
+version = "14.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c52991643379afc90bfe2df3c64d53983e59c35a82ba6e75c997cfc2880d8524"
+checksum = "a01317735d563b3bad2d5f90d2e1799f414165408251abb762510f40e790e69a"
 dependencies = [
  "anyhow",
  "ethereum-types",
@@ -722,12 +722,12 @@ dependencies = [
 
 [[package]]
 name = "ethcontract"
-version = "0.12.2"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "afbc9a707b7c084ab9fa73658178a2f06882da913d8e7d6eb2e057f07885f435"
+checksum = "cf18c3b28b277b2d860cbc64621497813280c9bb943ba4af0663cd283b1f8bc4"
 dependencies = [
  "arrayvec 0.7.0",
- "ethcontract-common",
+ "ethcontract-common 0.13.0",
  "futures",
  "futures-timer",
  "hex",
@@ -760,6 +760,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ethcontract-common"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81d47b7d022d05fa04fec5aa6e4a8cfb1ebbed4c87edbc36de9c4a3fb88a4cac"
+dependencies = [
+ "ethabi",
+ "hex",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "thiserror",
+ "tiny-keccak",
+ "web3",
+]
+
+[[package]]
 name = "ethcontract-generate"
 version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -768,7 +784,7 @@ dependencies = [
  "Inflector",
  "anyhow",
  "curl",
- "ethcontract-common",
+ "ethcontract-common 0.12.2",
  "proc-macro2",
  "quote",
  "syn",
