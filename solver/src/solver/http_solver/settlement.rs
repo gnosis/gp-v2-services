@@ -54,14 +54,14 @@ impl ExecutedLimitOrder {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 struct ExecutedConstantProductAmms {
     order: ConstantProductOrder,
     input: (H160, U256),
     output: (H160, U256),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 struct ExecutedWeightedProductAmms {
     order: WeightedProductOrder,
     input: (H160, U256),
@@ -161,26 +161,28 @@ fn match_prepared_and_settled_amms(
         .sorted_by(|a, b| a.1.exec_plan.cmp(&b.1.exec_plan))
     {
         // Recall, prepared amm for weighted products are shifted by the constant product amms
-        let map_key = index % prepared_constant_product_orders.len();
-        println!("Map Key {}", map_key);
+        let shift = prepared_constant_product_orders.len();
+        let shifted_index = index % shift;
         let (input, output) = (
             (settled.buy_token, settled.exec_buy_amount),
             (settled.sell_token, settled.exec_sell_amount),
         );
-        if prepared_constant_product_orders.contains_key(&map_key) {
+        if prepared_constant_product_orders.contains_key(&index) {
             constant_product_executions.push(ExecutedConstantProductAmms {
-                order: prepared_constant_product_orders.remove(&map_key).unwrap(),
+                order: prepared_constant_product_orders.remove(&index).unwrap(),
                 input,
                 output,
             });
-        } else if prepared_weighted_product_orders.contains_key(&map_key) {
+        } else if prepared_weighted_product_orders.contains_key(&shifted_index) {
             weighted_product_executions.push(ExecutedWeightedProductAmms {
-                order: prepared_weighted_product_orders.remove(&map_key).unwrap(),
+                order: prepared_weighted_product_orders
+                    .remove(&shifted_index)
+                    .unwrap(),
                 input,
                 output,
             });
         } else {
-            return Err(anyhow!("Invalid AMM {}", map_key));
+            return Err(anyhow!("Invalid AMM {}", index));
         }
     }
     Ok((constant_product_executions, weighted_product_executions))
@@ -344,35 +346,30 @@ mod tests {
 
     #[test]
     fn match_prepared_and_settled_amms_() {
+        let token_a = H160::from_slice(&hex!("a7d1c04faf998f9161fc9f800a99a809b84cfc9d"));
+        let token_b = H160::from_slice(&hex!("c778417e063141139fce010982780140aa0cd5ab"));
+        let token_c = H160::from_slice(&hex!("e4b9895e638f54c3bee2a3a78d6a297cc03e0353"));
         let cpo_0 = ConstantProductOrder {
-            tokens: TokenPair::new(
-                H160::from_slice(&hex!("a7d1c04faf998f9161fc9f800a99a809b84cfc9d")),
-                H160::from_slice(&hex!("c778417e063141139fce010982780140aa0cd5ab")),
-            )
-            .unwrap(),
+            tokens: TokenPair::new(token_a, token_b).unwrap(),
             reserves: (597249810824827988770940, 225724246562756585230),
             fee: Ratio::new(3, 1000),
             settlement_handling: CapturingSettlementHandler::arc(),
         };
         let cpo_1 = ConstantProductOrder {
-            tokens: TokenPair::new(
-                H160::from_slice(&hex!("c778417e063141139fce010982780140aa0cd5ab")),
-                H160::from_slice(&hex!("e4b9895e638f54c3bee2a3a78d6a297cc03e0353")),
-            )
-            .unwrap(),
+            tokens: TokenPair::new(token_b, token_c).unwrap(),
             reserves: (8488677530563931705, 75408146511005299032),
             fee: Ratio::new(3, 1000),
             settlement_handling: CapturingSettlementHandler::arc(),
         };
-        let constant_product_orders = hashmap! { 0usize => cpo_0, 1usize => cpo_1 };
+        let constant_product_orders = hashmap! { 0usize => cpo_0.clone(), 1usize => cpo_1 };
         let weighted_product_order = WeightedProductOrder {
             reserves: hashmap! {
-                H160::from_slice(&hex!("e4b9895e638f54c3bee2a3a78d6a297cc03e0353")) => PoolTokenState {
+                token_c => PoolTokenState {
                     balance: U256::from(1251682293173877359u128),
                     weight: Bfp::from(500_000_000_000_000_000),
                     scaling_exponent: 0,
                 },
-                H160::from_slice(&hex!("c778417e063141139fce010982780140aa0cd5ab")) => PoolTokenState {
+                token_b => PoolTokenState {
                     balance: U256::from(799086982149629058u128),
                     weight: Bfp::from(500_000_000_000_000_000),
                     scaling_exponent: 0,
@@ -381,7 +378,7 @@ mod tests {
             fee: BigRational::new(1.into(), 1000.into()),
             settlement_handling: CapturingSettlementHandler::arc(),
         };
-        let weighted_product_orders = hashmap! { 0usize => weighted_product_order };
+        let weighted_product_orders = hashmap! { 0usize => weighted_product_order.clone() };
 
         let solution_response = serde_json::from_str::<SettledBatchAuctionModel>(
             r#"{
@@ -508,11 +505,28 @@ mod tests {
         }"#,
         )
         .unwrap();
-        assert!(match_prepared_and_settled_amms(
+        let matched_settlements = match_prepared_and_settled_amms(
             constant_product_orders,
             weighted_product_orders,
-            solution_response.amms
-        )
-        .is_ok());
+            solution_response.amms,
+        );
+        assert!(matched_settlements.is_ok());
+        let (prepared_cps, prepared_wps) = matched_settlements.unwrap();
+        assert_eq!(
+            prepared_cps[0],
+            ExecutedConstantProductAmms {
+                order: cpo_0,
+                input: (token_b, U256::from(354009510372389956u128)),
+                output: (token_a, U256::from(932415220613609833982u128))
+            }
+        );
+        assert_eq!(
+            prepared_wps[0],
+            ExecutedWeightedProductAmms {
+                order: weighted_product_order,
+                input: (token_c, U256::from(996570293625184642u128)),
+                output: (token_b, U256::from(354009510372384890u128))
+            }
+        );
     }
 }
