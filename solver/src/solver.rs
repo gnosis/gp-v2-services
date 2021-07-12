@@ -59,6 +59,7 @@ arg_enum! {
         OneInch,
         Paraswap,
         Matcha,
+        Quasimodo,
     }
 }
 
@@ -69,6 +70,7 @@ pub fn create(
     base_tokens: HashSet<H160>,
     native_token: H160,
     mip_solver_url: Url,
+    quasimodo_solver_url: Url,
     settlement_contract: &GPv2Settlement,
     token_info_fetcher: Arc<dyn TokenInfoFetching>,
     price_estimator: Arc<dyn PriceEstimating>,
@@ -99,6 +101,20 @@ pub fn create(
             SolverType::Baseline => boxed(BaselineSolver::new(base_tokens.clone())),
             SolverType::Mip => boxed(HttpSolver::new(
                 mip_solver_url.clone(),
+                None,
+                SolverConfig {
+                    max_nr_exec_orders: 100,
+                    time_limit: time_limit.as_secs() as u32,
+                },
+                native_token,
+                token_info_fetcher.clone(),
+                price_estimator.clone(),
+                network_id.clone(),
+                chain_id,
+                fee_discount_factor,
+            )),
+            SolverType::Quasimodo => boxed(HttpSolver::new(
+                quasimodo_solver_url.clone(),
                 None,
                 SolverConfig {
                     max_nr_exec_orders: 100,
