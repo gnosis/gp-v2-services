@@ -551,6 +551,6 @@ mod tests {
 
         let solver =
             BaselineSolver::new(hashset![addr!("c778417e063141139fce010982780140aa0cd5ab")]);
-        assert_eq!(solver.solve(liquidity).len(), 1);
+        assert_eq!(solver.solve(liquidity).len(), 0);
     }
 }

@@ -63,40 +63,13 @@ impl WeightedPoolRef<'_> {
             .sub(fee_amount)
             .map(|amount_without_fees| amount_without_fees.as_uint256())
     }
-}
 
-impl BaselineSolvable for WeightedPoolRef<'_> {
-    fn get_amount_out(&self, out_token: H160, (in_amount, in_token): (U256, H160)) -> Option<U256> {
-        // Note that the output of this function does not depend on the pool
-        // specialization. All contract branches compute this amount with:
-        // https://github.com/balancer-labs/balancer-v2-monorepo/blob/6c9e24e22d0c46cca6dd15861d3d33da61a60b98/pkg/core/contracts/pools/BaseMinimalSwapInfoPool.sol#L62-L75
-        let in_reserves = self.reserves.get(&in_token)?;
-        let out_reserves = self.reserves.get(&out_token)?;
-
-        let in_amount_minus_fees = self.subtract_swap_fee_amount(in_amount).ok()?;
-
-        let result = calc_out_given_in(
-            in_reserves.upscaled_balance()?,
-            in_reserves.weight,
-            out_reserves.upscaled_balance()?,
-            out_reserves.weight,
-            in_reserves.upscale(in_amount_minus_fees)?,
-        )
-        .ok()
-        .map(|bfp| out_reserves.downscale(bfp))
-        .flatten();
-
-        // We double check that resulting amount out can symmetrically provide an amount in.
-        if let Some(out_amount) = result {
-            return match self.get_amount_in(in_token, (out_amount, out_token)) {
-                Some(_) => result,
-                None => None,
-            };
-        };
-        None
-    }
-
-    fn get_amount_in(&self, in_token: H160, (out_amount, out_token): (U256, H160)) -> Option<U256> {
+    fn checked_get_amount_in(
+        &self,
+        in_token: H160,
+        (out_amount, out_token): (U256, H160),
+        check_reciprocal: bool,
+    ) -> Option<U256> {
         // Note that the output of this function does not depend on the pool
         // specialization. All contract branches compute this amount with:
         // https://github.com/balancer-labs/balancer-v2-monorepo/blob/6c9e24e22d0c46cca6dd15861d3d33da61a60b98/pkg/core/contracts/pools/BaseMinimalSwapInfoPool.sol#L75-L88
@@ -115,14 +88,64 @@ impl BaselineSolvable for WeightedPoolRef<'_> {
         .flatten()?;
         let result = self.add_swap_fee_amount(amount_in_before_fee).ok();
 
-        // We double check that resulting amount in can symmetrically provide an amount out.
-        if let Some(in_amount) = result {
-            return match self.get_amount_out(out_token, (in_amount, in_token)) {
-                Some(_) => result,
-                None => None,
+        if check_reciprocal {
+            // We double check that resulting amount in can symmetrically provide an amount out.
+            if let Some(in_amount) = result {
+                return match self.checked_get_amount_out(out_token, (in_amount, in_token), false) {
+                    Some(_) => result,
+                    None => None,
+                };
             };
-        };
-        None
+            return None;
+        }
+        result
+    }
+
+    fn checked_get_amount_out(
+        &self,
+        out_token: H160,
+        (in_amount, in_token): (U256, H160),
+        check_reciprocal: bool,
+    ) -> Option<U256> {
+        // Note that the output of this function does not depend on the pool
+        // specialization. All contract branches compute this amount with:
+        // https://github.com/balancer-labs/balancer-v2-monorepo/blob/6c9e24e22d0c46cca6dd15861d3d33da61a60b98/pkg/core/contracts/pools/BaseMinimalSwapInfoPool.sol#L62-L75
+        let in_reserves = self.reserves.get(&in_token)?;
+        let out_reserves = self.reserves.get(&out_token)?;
+
+        let in_amount_minus_fees = self.subtract_swap_fee_amount(in_amount).ok()?;
+
+        let result = calc_out_given_in(
+            in_reserves.upscaled_balance()?,
+            in_reserves.weight,
+            out_reserves.upscaled_balance()?,
+            out_reserves.weight,
+            in_reserves.upscale(in_amount_minus_fees)?,
+        )
+        .ok()
+        .map(|bfp| out_reserves.downscale(bfp))
+        .flatten();
+        if check_reciprocal {
+            // We double check that resulting amount out can symmetrically provide an amount in.
+            if let Some(out_amount) = result {
+                return match self.checked_get_amount_in(in_token, (out_amount, out_token), false) {
+                    Some(_) => result,
+                    None => None,
+                };
+            };
+            return None;
+        }
+        result
+    }
+}
+
+impl BaselineSolvable for WeightedPoolRef<'_> {
+    fn get_amount_out(&self, out_token: H160, (in_amount, in_token): (U256, H160)) -> Option<U256> {
+        self.checked_get_amount_out(out_token, (in_amount, in_token), true)
+    }
+
+    fn get_amount_in(&self, in_token: H160, (out_amount, out_token): (U256, H160)) -> Option<U256> {
+        self.checked_get_amount_in(in_token, (out_amount, out_token), true)
     }
 
     fn get_spot_price(&self, base_token: H160, quote_token: H160) -> Option<BigRational> {
