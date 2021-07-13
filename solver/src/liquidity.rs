@@ -117,14 +117,6 @@ pub struct ConstantProductOrder {
     pub settlement_handling: Arc<dyn SettlementHandling<Self>>,
 }
 
-impl PartialEq for ConstantProductOrder {
-    fn eq(&self, other: &Self) -> bool {
-        self.tokens.eq(&other.tokens)
-            && self.reserves.eq(&other.reserves)
-            && self.fee.eq(&other.fee)
-    }
-}
-
 impl std::fmt::Debug for ConstantProductOrder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Constant Product AMM {:?}", self.tokens)
@@ -137,12 +129,6 @@ pub struct WeightedProductOrder {
     pub reserves: HashMap<H160, PoolTokenState>,
     pub fee: BigRational,
     pub settlement_handling: Arc<dyn SettlementHandling<Self>>,
-}
-
-impl PartialEq for WeightedProductOrder {
-    fn eq(&self, other: &Self) -> bool {
-        self.reserves.eq(&other.reserves) && self.fee.eq(&other.fee)
-    }
 }
 
 impl WeightedProductOrder {

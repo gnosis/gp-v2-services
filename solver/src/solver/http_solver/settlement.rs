@@ -54,14 +54,14 @@ impl ExecutedLimitOrder {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 struct ExecutedConstantProductAmms {
     order: ConstantProductOrder,
     input: (H160, U256),
     output: (H160, U256),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 struct ExecutedWeightedProductAmms {
     order: WeightedProductOrder,
     input: (H160, U256),
@@ -512,21 +512,31 @@ mod tests {
         );
         assert!(matched_settlements.is_ok());
         let (prepared_cps, prepared_wps) = matched_settlements.unwrap();
+
+        assert_eq!(prepared_cps[0].order.tokens, cpo_0.tokens);
+        assert_eq!(prepared_cps[0].order.reserves, cpo_0.reserves);
+        assert_eq!(prepared_cps[0].order.fee, cpo_0.fee);
         assert_eq!(
-            prepared_cps[0],
-            ExecutedConstantProductAmms {
-                order: cpo_0,
-                input: (token_b, U256::from(354009510372389956u128)),
-                output: (token_a, U256::from(932415220613609833982u128))
-            }
+            prepared_cps[0].input,
+            (token_b, U256::from(354009510372389956u128))
         );
         assert_eq!(
-            prepared_wps[0],
-            ExecutedWeightedProductAmms {
-                order: weighted_product_order,
-                input: (token_c, U256::from(996570293625184642u128)),
-                output: (token_b, U256::from(354009510372384890u128))
-            }
+            prepared_cps[0].output,
+            (token_a, U256::from(932415220613609833982u128))
+        );
+
+        assert_eq!(
+            prepared_wps[0].order.reserves,
+            weighted_product_order.reserves
+        );
+        assert_eq!(prepared_wps[0].order.fee, weighted_product_order.fee);
+        assert_eq!(
+            prepared_wps[0].input,
+            (token_c, U256::from(996570293625184642u128))
+        );
+        assert_eq!(
+            prepared_wps[0].output,
+            (token_b, U256::from(354009510372384890u128))
         );
     }
 }
