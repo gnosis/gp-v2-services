@@ -595,4 +595,21 @@ mod tests {
 
         assert!(api.transaction(good_query).await.is_ok());
     }
+
+    // TODO - test this stuff!
+    // #[tokio::test]
+    // async fn settle_order_retries() {
+    //     let mut mock_paraswap_api = MockParaswapApi::new();
+    //     mock_paraswap_api.expect_price().returning(PriceResponse {
+    //         price_route_raw: Default::default(),
+    //         src_amount: Default::default(),
+    //         dest_amount: Default::default(),
+    //     });
+    //
+    //     // async fn price(&self, query: PriceQuery) -> Result<PriceResponse>;
+    //     // async fn transaction(
+    //     //     &self,
+    //     //     query: TransactionBuilderQuery,
+    //     // ) -> Result<TransactionBuilderResponse, ParaswapResponseError>;
+    // }
 }

@@ -60,40 +60,36 @@ impl ParaswapSolver {
     }
 }
 
-fn is_retryable_err(err: &SettlementError) -> bool {
-    matches!(
-        err,
-        SettlementError::TransactionCreation(ParaswapResponseError::PriceChange)
-            | SettlementError::TransactionCreation(ParaswapResponseError::BuildingTransaction(_))
-    )
-}
-
 #[derive(Debug)]
-enum SettlementError {
-    Other(anyhow::Error),
-    TransactionCreation(ParaswapResponseError),
+struct SettlementError {
+    inner: anyhow::Error,
+    retryable: bool,
 }
 
 impl From<anyhow::Error> for SettlementError {
     fn from(err: Error) -> Self {
-        SettlementError::Other(err)
+        SettlementError {
+            inner: err,
+            retryable: false,
+        }
     }
 }
 
 impl From<ParaswapResponseError> for SettlementError {
     fn from(err: ParaswapResponseError) -> Self {
-        SettlementError::TransactionCreation(err)
+        SettlementError {
+            inner: anyhow!("Paraswap Response Error {:?}", err),
+            retryable: matches!(
+                err,
+                ParaswapResponseError::PriceChange | ParaswapResponseError::BuildingTransaction(_)
+            ),
+        }
     }
 }
 
 impl From<SettlementError> for anyhow::Error {
     fn from(err: SettlementError) -> Self {
-        match err {
-            SettlementError::TransactionCreation(err) => {
-                anyhow!("Paraswap Response Error {:?}", err)
-            }
-            SettlementError::Other(err) => err,
-        }
+        err.inner
     }
 }
 
@@ -104,15 +100,15 @@ impl SingleOrderSolving for ParaswapSolver {
         for _ in 0..max_retries {
             match self.try_settle_order(order.clone()).await {
                 Ok(settlement) => return Ok(settlement),
-                Err(err) if is_retryable_err(&err) => {
+                Err(err) if err.retryable => {
                     tracing::debug!("Retrying Paraswap settlement due to: {:?}", &err);
                     continue;
                 }
-                Err(err) => return Err(err.into()),
+                Err(err) => return Err(err.inner),
             }
         }
         // One last attempt, else throw converted error
-        self.try_settle_order(order).await.map_err(|err| err.into())
+        self.try_settle_order(order).await.map_err(|err| err.inner)
     }
 
     fn name(&self) -> &'static str {
