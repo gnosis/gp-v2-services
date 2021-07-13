@@ -87,12 +87,6 @@ impl From<ParaswapResponseError> for SettlementError {
     }
 }
 
-impl From<SettlementError> for anyhow::Error {
-    fn from(err: SettlementError) -> Self {
-        err.inner
-    }
-}
-
 #[async_trait::async_trait]
 impl SingleOrderSolving for ParaswapSolver {
     async fn settle_order(&self, order: LimitOrder) -> Result<Option<Settlement>> {
