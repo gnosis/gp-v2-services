@@ -508,7 +508,7 @@ mod tests {
 
     #[test]
     fn does_not_panic_when_building_solution() {
-        // Regression test for https://github.com/gnosis/gp-v2-services/issues/
+        // Regression test for https://github.com/gnosis/gp-v2-services/issues/838
         let liquidity = vec![
             Liquidity::Limit(LimitOrder {
                 sell_token: addr!("e4b9895e638f54c3bee2a3a78d6a297cc03e0353"),
@@ -519,7 +519,7 @@ mod tests {
                 partially_fillable: false,
                 fee_amount: 3_429_706_374_800_940_u128.into(),
                 settlement_handling: CapturingSettlementHandler::arc(),
-                id: "Crash Bandicoop".to_string(),
+                id: "Crash Bandicoot".to_string(),
             }),
             Liquidity::ConstantProduct(ConstantProductOrder {
                 tokens: TokenPair::new(
