@@ -4,8 +4,8 @@ pub mod retry;
 
 use self::retry::{CancelSender, SettlementSender};
 use super::driver::solver_settlements::RatedSettlement;
-use crate::encoding::EncodedSettlement;
-use anyhow::{Context, Result};
+use crate::{encoding::EncodedSettlement, pending_transactions::Fee};
+use anyhow::{anyhow, Context, Result};
 use contracts::GPv2Settlement;
 use ethcontract::{dyns::DynTransport, errors::ExecutionError, Web3};
 use futures::stream::StreamExt;
@@ -114,8 +114,15 @@ async fn recover_gas_price_from_pending_transaction(
     let transactions = crate::pending_transactions::pending_transactions(web3.transport())
         .await
         .context("pending_transactions failed")?;
-    let transaction = transactions
+    let transaction = match transactions
         .iter()
-        .find(|transaction| transaction.from == Some(*address) && transaction.nonce == nonce);
-    Ok(transaction.map(|transaction| transaction.gas_price))
+        .find(|transaction| transaction.from == *address && transaction.nonce == nonce)
+    {
+        Some(transaction) => transaction,
+        None => return Ok(None),
+    };
+    match transaction.fee {
+        Fee::Legacy { gas_price } => Ok(Some(gas_price)),
+        Fee::Eip1559 { .. } => Err(anyhow!("cannot handle eip 1559 fee")),
+    }
 }
