@@ -61,41 +61,38 @@ impl ParaswapSolver {
 }
 
 fn is_retryable_err(err: &SettlementError) -> bool {
-    match err {
-        SettlementError::Paraswap(ParaswapResponseError::PriceChange) => {
-            tracing::warn!("Paraswap Price Change");
-            true
-        }
-        SettlementError::Paraswap(ParaswapResponseError::BuildingTransaction(query)) => {
-            tracing::warn!("Paraswap ERROR_BUILDING_TRANSACTION from query {}", query);
-            true
-        }
-        _ => false,
-    }
+    matches!(
+        err,
+        SettlementError::TransactionCreation(ParaswapResponseError::PriceChange)
+            | SettlementError::TransactionCreation(ParaswapResponseError::BuildingTransaction(_))
+    )
 }
 
+#[derive(Debug)]
 enum SettlementError {
-    Anyhow(anyhow::Error),
-    Paraswap(ParaswapResponseError),
+    Other(anyhow::Error),
+    TransactionCreation(ParaswapResponseError),
 }
 
 impl From<anyhow::Error> for SettlementError {
     fn from(err: Error) -> Self {
-        SettlementError::Anyhow(err)
+        SettlementError::Other(err)
     }
 }
 
 impl From<ParaswapResponseError> for SettlementError {
     fn from(err: ParaswapResponseError) -> Self {
-        SettlementError::Paraswap(err)
+        SettlementError::TransactionCreation(err)
     }
 }
 
 impl From<SettlementError> for anyhow::Error {
     fn from(err: SettlementError) -> Self {
         match err {
-            SettlementError::Paraswap(err) => anyhow!("Paraswap Response Error {:?}", err),
-            SettlementError::Anyhow(err) => err,
+            SettlementError::TransactionCreation(err) => {
+                anyhow!("Paraswap Response Error {:?}", err)
+            }
+            SettlementError::Other(err) => err,
         }
     }
 }
@@ -104,17 +101,18 @@ impl From<SettlementError> for anyhow::Error {
 impl SingleOrderSolving for ParaswapSolver {
     async fn settle_order(&self, order: LimitOrder) -> Result<Option<Settlement>> {
         let max_retries = 2;
-        for _ in 0..=max_retries {
+        for _ in 0..max_retries {
             match self.try_settle_order(order.clone()).await {
                 Ok(settlement) => return Ok(settlement),
-                Err(err) if is_retryable_err(&err) => continue,
+                Err(err) if is_retryable_err(&err) => {
+                    tracing::debug!("Retrying Paraswap settlement due to: {:?}", &err);
+                    continue;
+                }
                 Err(err) => return Err(err.into()),
             }
         }
-        Err(anyhow!(
-            "failed to retrieve adequate response after {} retries.",
-            max_retries
-        ))
+        // One last attempt, else throw converted error
+        self.try_settle_order(order).await.map_err(|err| err.into())
     }
 
     fn name(&self) -> &'static str {
