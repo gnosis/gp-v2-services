@@ -54,14 +54,12 @@ impl ExecutedLimitOrder {
     }
 }
 
-#[derive(Debug)]
 struct ExecutedConstantProductAmms {
     order: ConstantProductOrder,
     input: (H160, U256),
     output: (H160, U256),
 }
 
-#[derive(Debug)]
 struct ExecutedWeightedProductAmms {
     order: WeightedProductOrder,
     input: (H160, U256),
