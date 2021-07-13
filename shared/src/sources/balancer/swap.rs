@@ -94,13 +94,10 @@ impl WeightedPoolRef<'_> {
         in_token: H160,
         (out_amount, out_token): (U256, H160),
     ) -> Option<U256> {
+        let in_amount = self.unchecked_get_amount_in(in_token, (out_amount, out_token))?;
         // We double check that resulting amount in can symmetrically provide an amount out.
-        if let Some(in_amount) = self.unchecked_get_amount_in(in_token, (out_amount, out_token)) {
-            return self
-                .unchecked_get_amount_out(out_token, (in_amount, in_token))
-                .map(|_| in_amount);
-        };
-        None
+        self.unchecked_get_amount_out(out_token, (in_amount, in_token))?;
+        Some(in_amount)
     }
 
     fn unchecked_get_amount_out(
@@ -133,13 +130,10 @@ impl WeightedPoolRef<'_> {
         out_token: H160,
         (in_amount, in_token): (U256, H160),
     ) -> Option<U256> {
+        let out_amount = self.unchecked_get_amount_out(out_token, (in_amount, in_token))?;
         // We double check that resulting amount out can symmetrically provide an amount in.
-        if let Some(out_amount) = self.unchecked_get_amount_out(out_token, (in_amount, in_token)) {
-            return self
-                .unchecked_get_amount_in(in_token, (out_amount, out_token))
-                .map(|_| out_amount);
-        };
-        None
+        self.unchecked_get_amount_in(in_token, (out_amount, out_token))?;
+        Some(out_amount)
     }
 }
 
