@@ -12,7 +12,7 @@ use crate::{
     liquidity::LimitOrder,
     settlement::{Interaction, Settlement},
 };
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Error, Result};
 use contracts::GPv2Settlement;
 use derivative::Derivative;
 use ethcontract::{Bytes, H160, U256};
@@ -60,22 +60,85 @@ impl ParaswapSolver {
     }
 }
 
-struct ParaswapCompleteResponse {
-    transaction_result: Result<TransactionBuilderResponse, ParaswapResponseError>,
-    price_response: PriceResponse,
-    amount: U256,
+fn is_retryable_err(err: &SettlementError) -> bool {
+    match err {
+        SettlementError::Paraswap(ParaswapResponseError::PriceChange) => {
+            tracing::warn!("Paraswap Price Change");
+            true
+        }
+        SettlementError::Paraswap(ParaswapResponseError::BuildingTransaction(query)) => {
+            tracing::warn!("Paraswap ERROR_BUILDING_TRANSACTION from query {}", query);
+            true
+        }
+        _ => false,
+    }
+}
+
+enum SettlementError {
+    Anyhow(anyhow::Error),
+    Paraswap(ParaswapResponseError),
+}
+
+impl From<anyhow::Error> for SettlementError {
+    fn from(err: Error) -> Self {
+        SettlementError::Anyhow(err)
+    }
+}
+
+impl From<ParaswapResponseError> for SettlementError {
+    fn from(err: ParaswapResponseError) -> Self {
+        SettlementError::Paraswap(err)
+    }
+}
+
+impl From<SettlementError> for anyhow::Error {
+    fn from(err: SettlementError) -> Self {
+        match err {
+            SettlementError::Paraswap(err) => anyhow!("Paraswap Response Error {:?}", err),
+            SettlementError::Anyhow(err) => err,
+        }
+    }
 }
 
 #[async_trait::async_trait]
 impl SingleOrderSolving for ParaswapSolver {
     async fn settle_order(&self, order: LimitOrder) -> Result<Option<Settlement>> {
-        let (transaction, price_response, amount) = self.build_or_retry(&order, 2).await?;
+        let max_retries = 2;
+        for _ in 0..=max_retries {
+            match self.try_settle_order(order.clone()).await {
+                Ok(settlement) => return Ok(settlement),
+                Err(err) if is_retryable_err(&err) => continue,
+                Err(err) => return Err(err.into()),
+            }
+        }
+        Err(anyhow!(
+            "failed to retrieve adequate response after {} retries.",
+            max_retries
+        ))
+    }
 
+    fn name(&self) -> &'static str {
+        "ParaSwap"
+    }
+}
+
+impl ParaswapSolver {
+    async fn try_settle_order(
+        &self,
+        order: LimitOrder,
+    ) -> Result<Option<Settlement>, SettlementError> {
+        let token_info = self
+            .token_info
+            .get_token_infos(&[order.sell_token, order.buy_token])
+            .await;
+        let (price_response, amount) = self.get_price_for_order(&order, &token_info).await?;
         if !satisfies_limit_price(&order, &price_response) {
             tracing::debug!("Order limit price not respected");
             return Ok(None);
         }
-
+        let transaction_query =
+            self.transaction_query_from(&order, &price_response, &token_info)?;
+        let transaction = self.client.transaction(transaction_query).await?;
         let mut settlement = Settlement::new(hashmap! {
             order.sell_token => price_response.dest_amount,
             order.buy_token => price_response.src_amount,
@@ -93,45 +156,6 @@ impl SingleOrderSolving for ParaswapSolver {
         );
         settlement.encoder.append_to_execution_plan(transaction);
         Ok(Some(settlement))
-    }
-
-    fn name(&self) -> &'static str {
-        "ParaSwap"
-    }
-}
-
-impl ParaswapSolver {
-    async fn build_or_retry(
-        &self,
-        order: &LimitOrder,
-        max_retries: usize,
-    ) -> Result<(TransactionBuilderResponse, PriceResponse, U256)> {
-        for attempt_number in 1..=max_retries {
-            let complete_response = self.paraswap_transaction_from_order(&order).await?;
-            match complete_response.transaction_result {
-                Err(ParaswapResponseError::PriceChange) => {
-                    tracing::warn!("Paraswap Price Change on attempt {}", attempt_number);
-                }
-                Err(ParaswapResponseError::BuildingTransaction(query)) => {
-                    tracing::warn!(
-                        "Paraswap ERROR_BUILDING_TRANSACTION on attempt {}: from query\n{}",
-                        attempt_number,
-                        query
-                    );
-                }
-                _ => {
-                    return Ok((
-                        complete_response.transaction_result?,
-                        complete_response.price_response,
-                        complete_response.amount,
-                    ));
-                }
-            }
-        }
-        Err(anyhow!(
-            "failed to retrieve adequate response after {} retries.",
-            max_retries
-        ))
     }
 
     async fn get_price_for_order(
@@ -194,24 +218,6 @@ impl ParaswapSolver {
             referrer: REFERRER.to_string(),
         };
         Ok(query)
-    }
-
-    async fn paraswap_transaction_from_order(
-        &self,
-        order: &LimitOrder,
-    ) -> Result<ParaswapCompleteResponse> {
-        let token_info = self
-            .token_info
-            .get_token_infos(&[order.sell_token, order.buy_token])
-            .await;
-        let (price_response, amount) = self.get_price_for_order(&order, &token_info).await?;
-        let transaction_query =
-            self.transaction_query_from(&order, &price_response, &token_info)?;
-        Ok(ParaswapCompleteResponse {
-            transaction_result: self.client.transaction(transaction_query).await,
-            price_response,
-            amount,
-        })
     }
 }
 
