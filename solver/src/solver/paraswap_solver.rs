@@ -578,4 +578,94 @@ mod tests {
 
         println!("{:#?}", settlement);
     }
+
+    #[tokio::test]
+    async fn settle_order_retries() {
+        let mut client = Box::new(MockParaswapApi::new());
+        let mut allowance_fetcher = Box::new(MockAllowanceManaging::new());
+        let mut token_info = MockTokenInfoFetching::new();
+
+        let sell_token = H160::from_low_u64_be(1);
+        let buy_token = H160::from_low_u64_be(2);
+
+        client.expect_price().returning(|_| {
+            Ok(PriceResponse {
+                ..Default::default()
+            })
+        });
+        let mut seq = Sequence::new();
+        // Setup consists of 5 retryable errors, 1 Ok, and finally 1 non-retryable error
+        // We make 3 calls to settle_order so that
+        //  1. First call fails all retries, resulting in error,
+        //  2. Second call retries twice and results in ok,
+        //  3. Last call fails immediately without retry.
+        client
+            .expect_transaction()
+            .times(3)
+            .returning(|_| {
+                // Retryable error
+                Err(ParaswapResponseError::PriceChange)
+            })
+            .in_sequence(&mut seq);
+        client
+            .expect_transaction()
+            .times(2)
+            .returning(|_| {
+                // Retryable error
+                Err(ParaswapResponseError::BuildingTransaction(String::new()))
+            })
+            .in_sequence(&mut seq);
+        client
+            .expect_transaction()
+            .times(1)
+            .returning(|_| {
+                Ok(TransactionBuilderResponse {
+                    chain_id: 0,
+                    ..Default::default()
+                })
+            })
+            .in_sequence(&mut seq);
+        client
+            .expect_transaction()
+            .times(1)
+            .returning(|_| {
+                // Non-retryable error
+                Err(ParaswapResponseError::UnknownParaswapError(String::new()))
+            })
+            .in_sequence(&mut seq);
+
+        allowance_fetcher
+            .expect_get_approval()
+            .returning(|_, _, _| Ok(Approval::AllowanceSufficient));
+
+        token_info.expect_get_token_infos().returning(move |_| {
+            hashmap! {
+                sell_token => TokenInfo { decimals: Some(18)},
+                buy_token => TokenInfo { decimals: Some(18)},
+            }
+        });
+
+        let solver = ParaswapSolver {
+            client,
+            solver_address: Default::default(),
+            token_info: Arc::new(token_info),
+            allowance_fetcher,
+            settlement_contract: dummy_contract!(GPv2Settlement, H160::zero()),
+            slippage_bps: 1000, // 10%
+        };
+
+        let order = LimitOrder {
+            sell_token,
+            buy_token,
+            ..Default::default()
+        };
+        // Retry 3 times and fail
+        assert!(solver.settle_order(order.clone()).await.is_err());
+
+        // Next attempt retries twice and then still ok.
+        assert!(solver.settle_order(order.clone()).await.is_ok());
+
+        // Last attempt fails on first try with non-retryable error.
+        assert!(solver.settle_order(order).await.is_err());
+    }
 }
