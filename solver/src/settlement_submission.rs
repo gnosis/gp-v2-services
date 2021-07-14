@@ -7,13 +7,14 @@ use super::driver::solver_settlements::RatedSettlement;
 use crate::{encoding::EncodedSettlement, pending_transactions::Fee};
 use anyhow::{Context, Result};
 use contracts::GPv2Settlement;
-use ethcontract::{dyns::DynTransport, errors::ExecutionError, Web3};
+use ethcontract::{dyns::DynTransport, errors::ExecutionError, Web3, Account};
 use futures::stream::StreamExt;
 use gas_estimation::GasPriceEstimating;
 use gas_price_stream::gas_price_stream;
 use primitive_types::{H160, U256};
 use std::time::{Duration, Instant};
 use transaction_retry::RetryResult;
+use ethcontract::dyns::DynWeb3;
 
 const GAS_PRICE_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
 const ESTIMATE_GAS_LIMIT_FACTOR: f64 = 1.2;
@@ -31,11 +32,19 @@ pub async fn estimate_gas(
 // Submit a settlement to the contract, updating the transaction with gas prices if they increase.
 pub async fn submit(
     contract: &GPv2Settlement,
+    // account: &Account,
     gas: &dyn GasPriceEstimating,
     target_confirm_time: Duration,
     gas_price_cap: f64,
     settlement: RatedSettlement,
 ) -> Result<()> {
+    // let web3: DynWeb3 = contract.raw_instance().web3();
+    // let address = account.address();
+    //
+    // let nonce = web3.eth().transaction_count(address, None)
+    //     .await
+    //     .context("failed to get transaction_count")?;
+
     let gas_estimate = settlement.gas_estimate;
     let settlement: EncodedSettlement = settlement.into();
 
@@ -101,7 +110,7 @@ pub async fn submit(
 async fn transaction_count(contract: &GPv2Settlement) -> Result<U256> {
     let defaults = contract.defaults();
     let address = defaults.from.as_ref().unwrap().address();
-    let web3 = contract.raw_instance().web3();
+    let web3: DynWeb3 = contract.raw_instance().web3();
     let count = web3.eth().transaction_count(address, None).await?;
     Ok(count)
 }
