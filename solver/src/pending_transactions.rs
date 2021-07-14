@@ -51,10 +51,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    // cargo test -p solver pending_transactions::tests::mainnet -- --nocapture --ignored
+    // cargo test -p solver pending_transactions::tests::real_node -- --nocapture --ignored
     #[tokio::test]
     #[ignore]
-    async fn mainnet() {
+    async fn real_node() {
         let transport = DynTransport::new(
             web3::transports::Http::new(&std::env::var("NODE_URL").unwrap()).unwrap(),
         );

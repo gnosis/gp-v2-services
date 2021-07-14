@@ -5,7 +5,7 @@ pub mod retry;
 use self::retry::{CancelSender, SettlementSender};
 use super::driver::solver_settlements::RatedSettlement;
 use crate::{encoding::EncodedSettlement, pending_transactions::Fee};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use contracts::GPv2Settlement;
 use ethcontract::{dyns::DynTransport, errors::ExecutionError, Web3};
 use futures::stream::StreamExt;
@@ -123,6 +123,11 @@ async fn recover_gas_price_from_pending_transaction(
     };
     match transaction.fee {
         Fee::Legacy { gas_price } => Ok(Some(gas_price)),
-        Fee::Eip1559 { .. } => Err(anyhow!("cannot handle eip 1559 fee")),
+        // vk: At time of writing we never create eip1559 transactions so this branch should not be
+        // taken. Still, to be more future proof we return the priority fee.
+        Fee::Eip1559 {
+            max_priority_fee_per_gas,
+            ..
+        } => Ok(Some(max_priority_fee_per_gas)),
     }
 }
