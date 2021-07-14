@@ -38,6 +38,7 @@ pub struct WeightedPool {
     pub pool_address: H160,
     pub swap_fee_percentage: Bfp,
     pub reserves: HashMap<H160, PoolTokenState>,
+    pub paused: bool,
 }
 
 impl WeightedPool {
@@ -45,6 +46,7 @@ impl WeightedPool {
         pool_data: RegisteredWeightedPool,
         balances: Vec<U256>,
         swap_fee_percentage: Bfp,
+        paused: bool,
     ) -> Self {
         let mut reserves = HashMap::new();
         // We expect the weight and token indices are aligned with balances returned from EVM query.
@@ -65,6 +67,7 @@ impl WeightedPool {
             pool_address: pool_data.pool_address,
             swap_fee_percentage,
             reserves,
+            paused,
         }
     }
 }
@@ -121,7 +124,9 @@ impl WeightedPoolFetching for BalancerPoolFetcher {
             .pool_registry
             .get_pool_ids_containing_token_pairs(token_pairs)
             .await;
-        self.pool_reserve_cache.fetch(pool_ids, at_block).await
+        let fetched_pools = self.pool_reserve_cache.fetch(pool_ids, at_block).await?;
+        // We return only those pools which are not paused.
+        Ok(fetched_pools.into_iter().filter(|pool| !pool.paused).collect())
     }
 }
 
