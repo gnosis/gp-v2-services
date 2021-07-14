@@ -237,7 +237,7 @@ mod tests {
             pool_address: H160::zero(),
             reserves,
             swap_fee_percentage: Bfp::from_wei(swap_fee_percentage),
-            paused: false,
+            paused: true,
         }
     }
 
