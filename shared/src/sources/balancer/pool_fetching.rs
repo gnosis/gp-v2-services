@@ -125,12 +125,16 @@ impl WeightedPoolFetching for BalancerPoolFetcher {
             .get_pool_ids_containing_token_pairs(token_pairs)
             .await;
         let fetched_pools = self.pool_reserve_cache.fetch(pool_ids, at_block).await?;
-        // We return only those pools which are not paused.
-        Ok(fetched_pools
-            .into_iter()
-            .filter(|pool| !pool.paused)
-            .collect())
+        // Return only those pools which are not paused.
+        Ok(filter_paused(fetched_pools))
     }
+}
+
+fn filter_paused(weighted_pools: Vec<WeightedPool>) -> Vec<WeightedPool> {
+    weighted_pools
+        .into_iter()
+        .filter(|pool| !pool.paused)
+        .collect()
 }
 
 #[async_trait::async_trait]
@@ -141,5 +145,34 @@ impl Maintaining for BalancerPoolFetcher {
             self.pool_reserve_cache.update_cache(),
         )?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filters_paused_pools() {
+        let pools = vec![
+            WeightedPool {
+                pool_id: H256::from_low_u64_be(0),
+                pool_address: Default::default(),
+                swap_fee_percentage: Bfp::zero(),
+                reserves: Default::default(),
+                paused: true,
+            },
+            WeightedPool {
+                pool_id: H256::from_low_u64_be(1),
+                pool_address: Default::default(),
+                swap_fee_percentage: Bfp::zero(),
+                reserves: Default::default(),
+                paused: false,
+            },
+        ];
+
+        let filtered_pools = filter_paused(pools.clone());
+        assert_eq!(filtered_pools.len(), 1);
+        assert_eq!(filtered_pools[0].pool_id, pools[1].pool_id);
     }
 }
