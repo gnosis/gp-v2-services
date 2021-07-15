@@ -276,7 +276,7 @@ mod tests {
             fee: BigRational::new(3.into(), 1.into()),
             settlement_handling: wp_amm_handler.clone(),
         };
-        let weighted_product_orders = hashmap! { 1 => weighted_product_order };
+        let weighted_product_orders = hashmap! { 0 => weighted_product_order };
 
         let executed_order = ExecutedOrderModel {
             exec_buy_amount: 6.into(),
