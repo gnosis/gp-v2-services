@@ -126,7 +126,10 @@ impl WeightedPoolFetching for BalancerPoolFetcher {
             .await;
         let fetched_pools = self.pool_reserve_cache.fetch(pool_ids, at_block).await?;
         // We return only those pools which are not paused.
-        Ok(fetched_pools.into_iter().filter(|pool| !pool.paused).collect())
+        Ok(fetched_pools
+            .into_iter()
+            .filter(|pool| !pool.paused)
+            .collect())
     }
 }
 
