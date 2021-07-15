@@ -48,6 +48,14 @@ struct Arguments {
     #[structopt(long, env = "MIP_SOLVER_URL", default_value = "http://localhost:8000")]
     mip_solver_url: Url,
 
+    /// The API endpoint to call the mip v2 solver
+    #[structopt(
+        long,
+        env = "QUASIMODO_SOLVER_URL",
+        default_value = "http://localhost:8000"
+    )]
+    quasimodo_solver_url: Url,
+
     /// The timeout for the API endpoint to fetch the orderbook
     #[structopt(
         long,
@@ -302,11 +310,13 @@ async fn main() {
     )
     .await;
     let solver = solver::solver::create(
+        account,
         web3.clone(),
         args.solvers,
         base_tokens,
         native_token_contract.address(),
         args.mip_solver_url,
+        args.quasimodo_solver_url,
         &settlement_contract,
         token_info_fetcher,
         price_estimator.clone(),
@@ -316,7 +326,6 @@ async fn main() {
         args.solver_time_limit,
         args.min_order_size_one_inch,
         args.disabled_one_inch_protocols,
-        account.address(),
         args.paraswap_slippage_bps,
     )
     .expect("failure creating solvers");

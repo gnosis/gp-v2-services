@@ -4,9 +4,10 @@ pub mod retry;
 
 use self::retry::{CancelSender, SettlementSender};
 use super::driver::solver_settlements::RatedSettlement;
-use crate::encoding::EncodedSettlement;
+use crate::{encoding::EncodedSettlement, pending_transactions::Fee};
 use anyhow::{Context, Result};
 use contracts::GPv2Settlement;
+use ethcontract::dyns::DynWeb3;
 use ethcontract::{dyns::DynTransport, errors::ExecutionError, Web3};
 use futures::stream::StreamExt;
 use gas_estimation::GasPriceEstimating;
@@ -101,7 +102,7 @@ pub async fn submit(
 async fn transaction_count(contract: &GPv2Settlement) -> Result<U256> {
     let defaults = contract.defaults();
     let address = defaults.from.as_ref().unwrap().address();
-    let web3 = contract.raw_instance().web3();
+    let web3: DynWeb3 = contract.raw_instance().web3();
     let count = web3.eth().transaction_count(address, None).await?;
     Ok(count)
 }
@@ -114,8 +115,20 @@ async fn recover_gas_price_from_pending_transaction(
     let transactions = crate::pending_transactions::pending_transactions(web3.transport())
         .await
         .context("pending_transactions failed")?;
-    let transaction = transactions
+    let transaction = match transactions
         .iter()
-        .find(|transaction| transaction.from == Some(*address) && transaction.nonce == nonce);
-    Ok(transaction.map(|transaction| transaction.gas_price))
+        .find(|transaction| transaction.from == *address && transaction.nonce == nonce)
+    {
+        Some(transaction) => transaction,
+        None => return Ok(None),
+    };
+    match transaction.fee {
+        Fee::Legacy { gas_price } => Ok(Some(gas_price)),
+        // vk: At time of writing we never create eip1559 transactions so this branch should not be
+        // taken. Still, to be more future proof we return the priority fee.
+        Fee::Eip1559 {
+            max_priority_fee_per_gas,
+            ..
+        } => Ok(Some(max_priority_fee_per_gas)),
+    }
 }
