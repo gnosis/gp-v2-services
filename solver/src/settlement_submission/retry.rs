@@ -7,7 +7,7 @@ use ethcontract::{
     jsonrpc::types::Error as RpcError,
     transaction::{confirm::ConfirmParams, ResolveCondition},
     web3::error::Error as Web3Error,
-    GasPrice,
+    Account, GasPrice,
 };
 use primitive_types::U256;
 use transaction_retry::{TransactionResult, TransactionSending};
@@ -53,6 +53,7 @@ impl TransactionResult for SettleResult {
 }
 
 pub struct SettlementSender<'a> {
+    pub account: Account,
     pub contract: &'a GPv2Settlement,
     pub nonce: U256,
     pub gas_limit: f64,
@@ -64,6 +65,7 @@ impl<'a> TransactionSending for SettlementSender<'a> {
     async fn send(&self, gas_price: f64) -> Self::Output {
         tracing::info!("submitting solution transaction at gas price {}", gas_price);
         let mut method = settle_method_builder(self.contract, self.settlement.clone())
+            .from(self.account.clone())
             .nonce(self.nonce)
             .gas_price(GasPrice::Value(U256::from_f64_lossy(gas_price)))
             .gas(U256::from_f64_lossy(self.gas_limit));

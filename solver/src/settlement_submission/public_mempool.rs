@@ -9,7 +9,7 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use contracts::GPv2Settlement;
-use ethcontract::{dyns::DynTransport, Web3};
+use ethcontract::{dyns::DynTransport, Account, Web3};
 use futures::stream::StreamExt;
 use gas_estimation::GasPriceEstimating;
 use primitive_types::{H160, U256};
@@ -18,25 +18,23 @@ use transaction_retry::RetryResult;
 
 // Submit a settlement to the contract, updating the transaction with gas prices if they increase.
 pub async fn submit(
+    account: Account,
     contract: &GPv2Settlement,
     gas: &dyn GasPriceEstimating,
     target_confirm_time: Duration,
     gas_price_cap: f64,
     settlement: RatedSettlement,
 ) -> Result<()> {
+    let address = account.address();
     let gas_estimate = settlement.gas_estimate;
     let settlement: EncodedSettlement = settlement.into();
 
-    let nonce = transaction_count(contract)
+    let web3 = contract.raw_instance().web3();
+    let nonce = web3
+        .eth()
+        .transaction_count(address, None)
         .await
         .context("failed to get transaction_count")?;
-    let address = &contract
-        .defaults()
-        .from
-        .clone()
-        .expect("no default sender address")
-        .address();
-    let web3 = contract.raw_instance().web3();
     let pending_gas_price = recover_gas_price_from_pending_transaction(&web3, &address, nonce)
         .await
         .context("failed to get pending gas price")?;
@@ -45,6 +43,7 @@ pub async fn submit(
     let gas_limit = gas_estimate.to_f64_lossy() * ESTIMATE_GAS_LIMIT_FACTOR;
 
     let settlement_sender = SettlementSender {
+        account,
         contract,
         nonce,
         gas_limit,
@@ -84,14 +83,6 @@ pub async fn submit(
         }
         _ => unreachable!(),
     }
-}
-
-async fn transaction_count(contract: &GPv2Settlement) -> Result<U256> {
-    let defaults = contract.defaults();
-    let address = defaults.from.as_ref().unwrap().address();
-    let web3 = contract.raw_instance().web3();
-    let count = web3.eth().transaction_count(address, None).await?;
-    Ok(count)
 }
 
 async fn recover_gas_price_from_pending_transaction(

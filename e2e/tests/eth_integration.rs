@@ -13,7 +13,7 @@ use shared::{
 };
 use solver::{
     liquidity::uniswap::UniswapLikeLiquidity, liquidity_collector::LiquidityCollector,
-    metrics::NoopMetrics,
+    metrics::NoopMetrics, solver::Solvers,
 };
 use std::{collections::HashSet, sync::Arc, time::Duration};
 use web3::signing::SecretKeyRef;
@@ -213,7 +213,7 @@ async fn eth_integration(web3: Web3) {
         gpv2.settlement.clone(),
         liquidity_collector,
         price_estimator,
-        vec![solver],
+        Solvers::new(vec![solver]),
         Arc::new(web3.clone()),
         Duration::from_secs(1),
         Duration::from_secs(30),
