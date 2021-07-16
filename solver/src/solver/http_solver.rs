@@ -457,10 +457,6 @@ impl Solver for HttpSolver {
     fn account(&self) -> &Account {
         &self.account
     }
-
-    fn name(&self) -> &'static str {
-        "HTTPSolver"
-    }
 }
 
 #[cfg(test)]
