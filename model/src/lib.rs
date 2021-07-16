@@ -2,6 +2,7 @@
 
 pub mod appdata_hexadecimal;
 pub mod h160_hexadecimal;
+pub mod meta_data;
 pub mod order;
 pub mod ratio_as_decimal;
 pub mod trade;

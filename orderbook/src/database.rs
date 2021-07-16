@@ -1,3 +1,4 @@
+pub mod app_data;
 pub mod events;
 pub mod fees;
 pub mod instrumented;
@@ -14,12 +15,14 @@ use std::collections::HashMap;
 // enough anyway.
 
 // The names of all tables we use in the db.
-const ALL_TABLES: [&str; 5] = [
+const ALL_TABLES: [&str; 7] = [
     "orders",
     "trades",
     "invalidations",
     "min_fee_measurements",
     "settlements",
+    "app_data",
+    "meta_data",
 ];
 
 // The pool uses an Arc internally.
