@@ -53,24 +53,17 @@ impl ExecutedLimitOrder {
     }
 }
 
-#[derive(Clone, Debug)]
-struct ExecutedConstantProductAmm {
-    order: ConstantProductOrder,
+#[derive(Clone)]
+struct ExecutedAmm {
     input: (H160, U256),
     output: (H160, U256),
+    order: ExecutedOrder,
 }
 
-#[derive(Clone, Debug)]
-struct ExecutedWeightedProductAmm {
-    order: WeightedProductOrder,
-    input: (H160, U256),
-    output: (H160, U256),
-}
-
-#[derive(Clone, Debug)]
-enum ExecutedAmm {
-    CP(ExecutedConstantProductAmm),
-    WP(ExecutedWeightedProductAmm),
+#[derive(Clone)]
+enum ExecutedOrder {
+    ConstantProduct(ConstantProductOrder),
+    WeightedProduct(WeightedProductOrder),
 }
 
 impl IntermediateSettlement {
@@ -100,26 +93,16 @@ impl IntermediateSettlement {
             settlement.with_liquidity(&order.order, order.executed_amount())?;
         }
         for executed_amm in self.executed_amms.iter() {
-            // This match only serves the purpose of unwrapping two types with the same fields.
-            // Thus, we find identical code blocks in each arm.
-            match executed_amm {
-                ExecutedAmm::CP(amm) => {
-                    settlement.with_liquidity(
-                        &amm.order,
-                        AmmOrderExecution {
-                            input: amm.input,
-                            output: amm.output,
-                        },
-                    )?;
+            let execution = AmmOrderExecution {
+                input: executed_amm.input,
+                output: executed_amm.output,
+            };
+            match &executed_amm.order {
+                ExecutedOrder::ConstantProduct(liquidity) => {
+                    settlement.with_liquidity(liquidity, execution)?
                 }
-                ExecutedAmm::WP(amm) => {
-                    settlement.with_liquidity(
-                        &amm.order,
-                        AmmOrderExecution {
-                            input: amm.input,
-                            output: amm.output,
-                        },
-                    )?;
+                ExecutedOrder::WeightedProduct(liquidity) => {
+                    settlement.with_liquidity(liquidity, execution)?
                 }
             }
         }
@@ -174,20 +157,24 @@ fn match_prepared_and_settled_amms(
             (settled.sell_token, settled.exec_sell_amount),
         );
         if index < shift && prepared_constant_product_orders.contains_key(&index) {
-            amm_executions.push(ExecutedAmm::CP(ExecutedConstantProductAmm {
-                order: prepared_constant_product_orders.remove(&index).unwrap(),
+            amm_executions.push(ExecutedAmm {
+                order: ExecutedOrder::ConstantProduct(
+                    prepared_constant_product_orders.remove(&index).unwrap(),
+                ),
                 input,
                 output,
-            }));
+            });
         } else if index >= shift && prepared_weighted_product_orders.contains_key(&(index - shift))
         {
-            amm_executions.push(ExecutedAmm::WP(ExecutedWeightedProductAmm {
-                order: prepared_weighted_product_orders
-                    .remove(&(index - shift))
-                    .unwrap(),
+            amm_executions.push(ExecutedAmm {
+                order: ExecutedOrder::WeightedProduct(
+                    prepared_weighted_product_orders
+                        .remove(&(index - shift))
+                        .unwrap(),
+                ),
                 input,
                 output,
-            }));
+            });
         } else {
             return Err(anyhow!("Invalid AMM {}", index));
         }
@@ -209,13 +196,13 @@ fn match_settled_prices(
         .chain(
             executed_amms
                 .iter()
-                .flat_map(|executed_amm| match executed_amm {
-                    ExecutedAmm::CP(amm) => {
-                        let pair = amm.order.tokens;
+                .flat_map(|executed_amm| match &executed_amm.order {
+                    ExecutedOrder::ConstantProduct(cp_order) => {
+                        let pair = cp_order.tokens;
                         vec![pair.get().0, pair.get().1]
                     }
-                    ExecutedAmm::WP(amm) => {
-                        amm.order.reserves.keys().copied().collect::<Vec<H160>>()
+                    ExecutedOrder::WeightedProduct(wp_order) => {
+                        wp_order.reserves.keys().copied().collect::<Vec<H160>>()
                     }
                 }),
         );
@@ -536,44 +523,44 @@ mod tests {
         );
         assert!(matched_settlements.is_ok());
         let prepared_amms = matched_settlements.unwrap();
-        let executed_cp: ExecutedConstantProductAmm;
-        let executed_wp: ExecutedWeightedProductAmm;
-        match prepared_amms[0].clone() {
-            ExecutedAmm::CP(_) => {
-                panic!("Expected WeightedProduct!");
+        let executed_cp_order: ConstantProductOrder;
+        let executed_wp_order: WeightedProductOrder;
+        match prepared_amms[0].order.clone() {
+            ExecutedOrder::ConstantProduct(_) => {
+                panic!("Expected WeightedProductOrder!");
             }
-            ExecutedAmm::WP(amm) => {
-                executed_wp = amm;
-            }
-        }
-        match prepared_amms[1].clone() {
-            ExecutedAmm::CP(amm) => {
-                executed_cp = amm;
-            }
-            ExecutedAmm::WP(_) => {
-                panic!("Expected ConstantProduct!")
+            ExecutedOrder::WeightedProduct(order) => {
+                executed_wp_order = order;
             }
         }
-        assert_eq!(executed_cp.order.tokens, cpo_0.tokens);
-        assert_eq!(executed_cp.order.reserves, cpo_0.reserves);
-        assert_eq!(executed_cp.order.fee, cpo_0.fee);
+        match prepared_amms[1].order.clone() {
+            ExecutedOrder::ConstantProduct(order) => {
+                executed_cp_order = order;
+            }
+            ExecutedOrder::WeightedProduct(_) => {
+                panic!("Expected ConstantProductOrder!")
+            }
+        }
+        assert_eq!(executed_cp_order.tokens, cpo_0.tokens);
+        assert_eq!(executed_cp_order.reserves, cpo_0.reserves);
+        assert_eq!(executed_cp_order.fee, cpo_0.fee);
         assert_eq!(
-            executed_cp.input,
+            prepared_amms[1].input,
             (token_b, U256::from(354009510372389956u128))
         );
         assert_eq!(
-            executed_cp.output,
+            prepared_amms[1].output,
             (token_a, U256::from(932415220613609833982u128))
         );
 
-        assert_eq!(executed_wp.order.reserves, weighted_product_order.reserves);
-        assert_eq!(executed_wp.order.fee, weighted_product_order.fee);
+        assert_eq!(executed_wp_order.reserves, weighted_product_order.reserves);
+        assert_eq!(executed_wp_order.fee, weighted_product_order.fee);
         assert_eq!(
-            executed_wp.input,
+            prepared_amms[0].input,
             (token_c, U256::from(996570293625184642u128))
         );
         assert_eq!(
-            executed_wp.output,
+            prepared_amms[0].output,
             (token_b, U256::from(354009510372384890u128))
         );
     }
