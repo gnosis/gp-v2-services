@@ -10,12 +10,12 @@ ALTER TABLE orders
 
 
 UPDATE orders
-SET settlement_version = 1,
+SET version_id = 1,
     balance_from = 'owner',
     balance_to = 'owner'
-WHERE settlement_version IS NULL;
+WHERE version_id IS NULL;
 
 ALTER TABLE orders
-    ALTER COLUMN settlement_version SET NOT NULL,
+    ALTER COLUMN version_id SET NOT NULL,
     ALTER COLUMN balance_from SET NOT NULL,
     ALTER COLUMN balance_to SET NOT NULL;
