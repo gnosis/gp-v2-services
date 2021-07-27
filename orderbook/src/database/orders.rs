@@ -4,6 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use bigdecimal::{BigDecimal, Zero};
 use chrono::{DateTime, Utc};
 use futures::{stream::TryStreamExt, StreamExt};
+use hex_literal::hex;
 use model::{
     order::{Order, OrderCreation, OrderKind, OrderMetaData, OrderStatus, OrderUid},
     Signature, SigningScheme,
@@ -57,6 +58,15 @@ impl DbOrderKind {
 }
 
 #[derive(sqlx::Type)]
+#[sqlx(type_name = "FundLocation")]
+#[sqlx(rename_all = "lowercase")]
+pub enum DbFundLocation {
+    Owner,
+    VaultInternal,
+    VaultExternal,
+}
+
+#[derive(sqlx::Type)]
 #[sqlx(type_name = "SigningScheme")]
 #[sqlx(rename_all = "lowercase")]
 pub enum DbSigningScheme {
@@ -98,8 +108,8 @@ impl OrderStoring for Postgres {
         const QUERY: &str = "\
             INSERT INTO orders (
                 uid, owner, creation_timestamp, sell_token, buy_token, receiver, sell_amount, buy_amount, \
-                valid_to, app_data, fee_amount, kind, partially_fillable, signature, signing_scheme) \
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15);";
+                valid_to, app_data, fee_amount, kind, partially_fillable, signature, signing_scheme, settlement_version, balance_from, balance_to) \
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18);";
         let receiver = order
             .order_creation
             .receiver
@@ -120,6 +130,10 @@ impl OrderStoring for Postgres {
             .bind(order.order_creation.partially_fillable)
             .bind(order.order_creation.signature.to_bytes().as_ref())
             .bind(DbSigningScheme::from(order.order_creation.signing_scheme))
+            // TODO - remove this in https://github.com/gnosis/gp-v2-services/issues/901
+            .bind(H160::from_slice(&hex!("3328f5f2cEcAF00a2443082B657CedEAf70bfAEf")).as_bytes())
+            .bind(DbFundLocation::Owner)
+            .bind(DbFundLocation::Owner)
             .execute(&self.pool)
             .await
             .map(|_| ())
