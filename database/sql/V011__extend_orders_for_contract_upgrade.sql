@@ -1,4 +1,5 @@
-CREATE TYPE FundLocation AS ENUM ('owner', 'vault_internal', 'vault_external');
+CREATE TYPE BalanceFrom AS ENUM ('owner', 'vault_internal', 'vault_external');
+CREATE TYPE BalanceTo AS ENUM ('owner', 'vault_internal');
 
 -- While we could have simply added columns, set them to not null and made the update values defaults,
 -- This would mean that we will forever have to ensure we don't accidentally insert without specifying
@@ -10,8 +11,8 @@ CREATE TYPE FundLocation AS ENUM ('owner', 'vault_internal', 'vault_external');
 
 ALTER TABLE orders
     ADD COLUMN settlement_version CHAR(42),
-    ADD COLUMN balance_from FundLocation,
-    ADD COLUMN balance_to FundLocation;
+    ADD COLUMN balance_from BalanceFrom,
+    ADD COLUMN balance_to BalanceTo;
 
 UPDATE orders
 SET settlement_version = '0x3328f5f2cEcAF00a2443082B657CedEAf70bfAEf',

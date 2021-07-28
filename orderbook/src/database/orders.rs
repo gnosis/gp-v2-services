@@ -57,12 +57,20 @@ impl DbOrderKind {
 }
 
 #[derive(sqlx::Type)]
-#[sqlx(type_name = "FundLocation")]
-#[sqlx(rename_all = "lowercase")]
-pub enum DbFundLocation {
+#[sqlx(type_name = "BalanceFrom")]
+#[sqlx(rename_all = "snake_case")]
+pub enum BalanceFrom {
     Owner,
     VaultInternal,
     VaultExternal,
+}
+
+#[derive(sqlx::Type)]
+#[sqlx(type_name = "BalanceTo")]
+#[sqlx(rename_all = "snake_case")]
+pub enum BalanceTo {
+    Owner,
+    VaultInternal,
 }
 
 #[derive(sqlx::Type)]
@@ -131,8 +139,8 @@ impl OrderStoring for Postgres {
             .bind(DbSigningScheme::from(order.order_creation.signing_scheme))
             // TODO - remove these in https://github.com/gnosis/gp-v2-services/issues/900
             .bind("0x3328f5f2cEcAF00a2443082B657CedEAf70bfAEf")
-            .bind(DbFundLocation::Owner)
-            .bind(DbFundLocation::Owner)
+            .bind(BalanceFrom::Owner)
+            .bind(BalanceTo::Owner)
             // End above TODO
             .execute(&self.pool)
             .await
