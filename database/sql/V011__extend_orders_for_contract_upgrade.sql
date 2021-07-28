@@ -1,21 +1,17 @@
 CREATE TYPE FundLocation AS ENUM ('owner', 'vault_internal', 'vault_external');
 
 ALTER TABLE orders
-    ADD COLUMN version_id INT,
+    ADD COLUMN settlement_version CHAR(42),
     ADD COLUMN balance_from FundLocation,
-    ADD COLUMN balance_to FundLocation,
-    ADD CONSTRAINT fk_version
-        FOREIGN KEY (version_id)
-            REFERENCES settlement_version (version_id);
-
+    ADD COLUMN balance_to FundLocation;
 
 UPDATE orders
-SET version_id = 1,
+SET settlement_version = '0x3328f5f2cEcAF00a2443082B657CedEAf70bfAEf',
     balance_from = 'owner',
     balance_to = 'owner'
-WHERE version_id IS NULL;
+WHERE settlement_version IS NULL;
 
 ALTER TABLE orders
-    ALTER COLUMN version_id SET NOT NULL,
+    ALTER COLUMN settlement_version SET NOT NULL,
     ALTER COLUMN balance_from SET NOT NULL,
     ALTER COLUMN balance_to SET NOT NULL;

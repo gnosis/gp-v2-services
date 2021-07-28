@@ -107,7 +107,7 @@ impl OrderStoring for Postgres {
         const QUERY: &str = "\
             INSERT INTO orders (
                 uid, owner, creation_timestamp, sell_token, buy_token, receiver, sell_amount, buy_amount, \
-                valid_to, app_data, fee_amount, kind, partially_fillable, signature, signing_scheme, version_id, balance_from, balance_to) \
+                valid_to, app_data, fee_amount, kind, partially_fillable, signature, signing_scheme, settlement_version, balance_from, balance_to) \
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18);";
         let receiver = order
             .order_creation
@@ -129,8 +129,9 @@ impl OrderStoring for Postgres {
             .bind(order.order_creation.partially_fillable)
             .bind(order.order_creation.signature.to_bytes().as_ref())
             .bind(DbSigningScheme::from(order.order_creation.signing_scheme))
+            // TODO - find a non-blocking way of accessing this.
+            .bind("0x3328f5f2cEcAF00a2443082B657CedEAf70bfAEf")
             // TODO - remove this in https://github.com/gnosis/gp-v2-services/issues/901
-            .bind(1)
             .bind(DbFundLocation::Owner)
             .bind(DbFundLocation::Owner)
             .execute(&self.pool)
