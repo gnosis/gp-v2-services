@@ -5,10 +5,10 @@ pub mod orders;
 pub mod trades;
 
 use anyhow::Result;
+use ethcontract::H160;
 use futures::stream::BoxStream;
 use sqlx::{Executor, PgPool, Row};
 use std::collections::HashMap;
-use ethcontract::H160;
 
 // TODO: There is remaining optimization potential by implementing sqlx encoding and decoding for
 // U256 directly instead of going through BigDecimal. This is not very important as this is fast
