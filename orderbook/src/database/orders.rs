@@ -129,11 +129,11 @@ impl OrderStoring for Postgres {
             .bind(order.order_creation.partially_fillable)
             .bind(order.order_creation.signature.to_bytes().as_ref())
             .bind(DbSigningScheme::from(order.order_creation.signing_scheme))
-            // TODO - find a non-blocking way of accessing this.
+            // TODO - remove these in https://github.com/gnosis/gp-v2-services/issues/900
             .bind("0x3328f5f2cEcAF00a2443082B657CedEAf70bfAEf")
-            // TODO - remove this in https://github.com/gnosis/gp-v2-services/issues/901
             .bind(DbFundLocation::Owner)
             .bind(DbFundLocation::Owner)
+            // End above TODO
             .execute(&self.pool)
             .await
             .map(|_| ())
