@@ -135,7 +135,7 @@ impl OrderbookServices {
             .await
             .expect("Could not get chainId")
             .as_u64();
-        let db = Arc::new(Postgres::new("postgresql://").unwrap());
+        let db = Arc::new(Postgres::new("postgresql://", H160::zero()).unwrap());
         db.clear().await.unwrap();
         let event_updater = Arc::new(EventUpdater::new(
             gpv2.settlement.clone(),

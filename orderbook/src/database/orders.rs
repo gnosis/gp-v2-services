@@ -129,8 +129,7 @@ impl OrderStoring for Postgres {
             .bind(order.order_creation.partially_fillable)
             .bind(order.order_creation.signature.to_bytes().as_ref())
             .bind(DbSigningScheme::from(order.order_creation.signing_scheme))
-            // TODO - find a non-blocking way of accessing this.
-            .bind("0x3328f5f2cEcAF00a2443082B657CedEAf70bfAEf")
+            .bind(self.settlement_version.clone())
             // TODO - remove this in https://github.com/gnosis/gp-v2-services/issues/901
             .bind(DbFundLocation::Owner)
             .bind(DbFundLocation::Owner)
@@ -499,7 +498,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_insert_same_order_twice_fails() {
-        let db = Postgres::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://", H160::zero()).unwrap();
         db.clear().await.unwrap();
         let order = Order::default();
         db.insert_order(&order).await.unwrap();
@@ -512,7 +511,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_order_roundtrip() {
-        let db = Postgres::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://", H160::zero()).unwrap();
         for signing_scheme in &[SigningScheme::Eip712, SigningScheme::EthSign] {
             db.clear().await.unwrap();
             let filter = OrderFilter::default();
@@ -559,7 +558,7 @@ mod tests {
             cancellation_timestamp: DateTime<Utc>,
         }
 
-        let db = Postgres::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://", H160::zero()).unwrap();
         db.clear().await.unwrap();
         let filter = OrderFilter::default();
         assert!(db.orders(&filter).boxed().next().await.is_none());
@@ -612,7 +611,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_filter_orders_by_address() {
-        let db = Postgres::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://", H160::zero()).unwrap();
         db.clear().await.unwrap();
 
         let orders = vec![
@@ -740,7 +739,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_filter_orders_by_fully_executed() {
-        let db = Postgres::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://", H160::zero()).unwrap();
         db.clear().await.unwrap();
 
         let order = Order {
@@ -848,7 +847,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_summed_executed_amount_does_not_overflow() {
-        let db = Postgres::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://", H160::zero()).unwrap();
         db.clear().await.unwrap();
 
         let order = Order {
@@ -892,7 +891,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_filter_orders_by_invalidated() {
-        let db = Postgres::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://", H160::zero()).unwrap();
         db.clear().await.unwrap();
         let uid = OrderUid([0u8; 56]);
         let order = Order {

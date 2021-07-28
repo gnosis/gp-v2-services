@@ -288,7 +288,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_events() {
-        let db = Postgres::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://", H160::zero()).unwrap();
         db.clear().await.unwrap();
 
         assert_eq!(db.last_event_block().await.unwrap(), 0);
@@ -354,7 +354,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_repeated_event_insert_ignored() {
-        let db = Postgres::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://", H160::zero()).unwrap();
         db.clear().await.unwrap();
         for _ in 0..2 {
             db.append_events_(vec![(

@@ -8,6 +8,7 @@ use anyhow::Result;
 use futures::stream::BoxStream;
 use sqlx::{Executor, PgPool, Row};
 use std::collections::HashMap;
+use ethcontract::H160;
 
 // TODO: There is remaining optimization potential by implementing sqlx encoding and decoding for
 // U256 directly instead of going through BigDecimal. This is not very important as this is fast
@@ -26,14 +27,16 @@ const ALL_TABLES: [&str; 5] = [
 #[derive(Clone)]
 pub struct Postgres {
     pool: PgPool,
+    settlement_version: String,
 }
 
 // The implementation is split up into several modules which contain more public methods.
 
 impl Postgres {
-    pub fn new(uri: &str) -> Result<Self> {
+    pub fn new(uri: &str, settlement_address: H160) -> Result<Self> {
         Ok(Self {
             pool: PgPool::connect_lazy(uri)?,
+            settlement_version: settlement_address.to_string(),
         })
     }
 
@@ -70,7 +73,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_count_rows_in_tables_works() {
-        let db = Postgres::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://", H160::zero()).unwrap();
         db.clear().await.unwrap();
 
         let counts = db.count_rows_in_tables().await.unwrap();

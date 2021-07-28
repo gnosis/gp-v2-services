@@ -101,7 +101,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn save_and_load_fee_measurements() {
-        let db = Postgres::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://", H160::zero()).unwrap();
         db.clear().await.unwrap();
 
         let now = Utc::now();

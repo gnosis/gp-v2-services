@@ -196,7 +196,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_trades_without_filter() {
-        let db = Postgres::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://", H160::zero()).unwrap();
         db.clear().await.unwrap();
         let (owners, order_ids) = generate_owners_and_order_ids(2, 2).await;
         assert_trades(&db, &TradeFilter::default(), &[]).await;
@@ -218,7 +218,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_trades_with_owner_filter() {
-        let db = Postgres::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://", H160::zero()).unwrap();
         db.clear().await.unwrap();
         let (owners, order_ids) = generate_owners_and_order_ids(3, 2).await;
 
@@ -268,7 +268,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_trades_with_order_uid_filter() {
-        let db = Postgres::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://", H160::zero()).unwrap();
         db.clear().await.unwrap();
 
         let (owners, order_ids) = generate_owners_and_order_ids(2, 3).await;
@@ -319,7 +319,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_trade_without_matching_order() {
-        let db = Postgres::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://", H160::zero()).unwrap();
         db.clear().await.unwrap();
 
         let (owners, order_ids) = generate_owners_and_order_ids(1, 1).await;
@@ -376,7 +376,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_trades_having_same_settlement_with_and_without_orders() {
-        let db = Postgres::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://", H160::zero()).unwrap();
         db.clear().await.unwrap();
         let (owners, order_ids) = generate_owners_and_order_ids(2, 2).await;
         assert_trades(&db, &TradeFilter::default(), &[]).await;
@@ -422,7 +422,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_trades_with_same_settlement_no_orders() {
-        let db = Postgres::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://", H160::zero()).unwrap();
         db.clear().await.unwrap();
         let (owners, order_ids) = generate_owners_and_order_ids(2, 2).await;
         assert_trades(&db, &TradeFilter::default(), &[]).await;
@@ -468,7 +468,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn postgres_trades_with_two_settlements_in_same_block() {
-        let db = Postgres::new("postgresql://").unwrap();
+        let db = Postgres::new("postgresql://", H160::zero()).unwrap();
         db.clear().await.unwrap();
         let (owners, order_ids) = generate_owners_and_order_ids(2, 2).await;
         assert_trades(&db, &TradeFilter::default(), &[]).await;
