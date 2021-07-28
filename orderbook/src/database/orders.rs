@@ -115,7 +115,7 @@ impl OrderStoring for Postgres {
         const QUERY: &str = "\
             INSERT INTO orders (
                 uid, owner, creation_timestamp, sell_token, buy_token, receiver, sell_amount, buy_amount, \
-                valid_to, app_data, fee_amount, kind, partially_fillable, signature, signing_scheme, settlement_version, balance_from, balance_to) \
+                valid_to, app_data, fee_amount, kind, partially_fillable, signature, signing_scheme, settlement_contract, balance_from, balance_to) \
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18);";
         let receiver = order
             .order_creation
