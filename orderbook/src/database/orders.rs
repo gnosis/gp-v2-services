@@ -4,6 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use bigdecimal::{BigDecimal, Zero};
 use chrono::{DateTime, Utc};
 use futures::{stream::TryStreamExt, StreamExt};
+use hex_literal::hex;
 use model::{
     order::{Order, OrderCreation, OrderKind, OrderMetaData, OrderStatus, OrderUid},
     Signature, SigningScheme,
@@ -145,7 +146,7 @@ impl OrderStoring for Postgres {
             .bind(order.order_creation.signature.to_bytes().as_ref())
             .bind(DbSigningScheme::from(order.order_creation.signing_scheme))
             // TODO - remove these in https://github.com/gnosis/gp-v2-services/issues/900
-            .bind("0x3328f5f2cEcAF00a2443082B657CedEAf70bfAEf")
+            .bind(H160::from_slice(&hex!("3328f5f2cEcAF00a2443082B657CedEAf70bfAEf")).as_bytes())
             .bind(BalanceFrom::Owner)
             .bind(BalanceTo::Owner)
             // End above TODO
