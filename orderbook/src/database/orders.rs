@@ -56,20 +56,27 @@ impl DbOrderKind {
     }
 }
 
+/// Location for which the sellAmount should be drawn upon order fulfilment
 #[derive(sqlx::Type)]
 #[sqlx(type_name = "BalanceFrom")]
 #[sqlx(rename_all = "snake_case")]
 pub enum BalanceFrom {
+    /// Order owner's ethereum address
     Owner,
+    /// Order owner's BalancerV2 Internal Vault balance
     VaultInternal,
+    /// Order owner's BalancerV2 External Vault balance
     VaultExternal,
 }
 
+/// Location for which the buyAmount should be transferred to upon order fulfilment
 #[derive(sqlx::Type)]
 #[sqlx(type_name = "BalanceTo")]
 #[sqlx(rename_all = "snake_case")]
 pub enum BalanceTo {
+    /// Ethereum address of Order's receiver
     Owner,
+    /// Order receiver's BalancerV2 Internal Vault balance
     VaultInternal,
 }
 
