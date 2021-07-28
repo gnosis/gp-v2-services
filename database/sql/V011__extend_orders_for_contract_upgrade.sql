@@ -5,22 +5,14 @@ CREATE TYPE BalanceTo AS ENUM ('owner', 'vault_internal');
 -- This would mean that we will forever have to ensure we don't accidentally insert without specifying
 -- these values explicitly. This is especially awkward for the settlement_contract, since the default
 -- would be the old contract version. For this reason, we have chosen to go with the approach of
--- 1. Add columns,
--- 2. update old records with appropriate values,
--- 3. Set new columns to NOT NULL
-
+-- 1. Add columns, setting them not null with default values,
 ALTER TABLE orders
-    ADD COLUMN settlement_contract CHAR(42),
-    ADD COLUMN balance_from BalanceFrom,
-    ADD COLUMN balance_to BalanceTo;
+    ADD COLUMN settlement_contract CHAR(42) NOT NULL default '0x3328f5f2cEcAF00a2443082B657CedEAf70bfAEf',,
+    ADD COLUMN balance_from BalanceFrom NOT NULL default 'owner',
+    ADD COLUMN balance_to BalanceTo NOT NULL default 'owner';
 
-UPDATE orders
-SET settlement_contract = '0x3328f5f2cEcAF00a2443082B657CedEAf70bfAEf',
-    balance_from = 'owner',
-    balance_to = 'owner'
-WHERE settlement_contract IS NULL;
-
+-- 2. Drop defaults
 ALTER TABLE orders
-    ALTER COLUMN settlement_contract SET NOT NULL,
-    ALTER COLUMN balance_from SET NOT NULL,
-    ALTER COLUMN balance_to SET NOT NULL;
+    ALTER COLUMN settlement_contract DROP DEFAULT,
+    ALTER COLUMN balance_from DROP DEFAULT,
+    ALTER COLUMN balance_to DROP DEFAULT;
