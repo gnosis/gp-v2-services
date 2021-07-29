@@ -198,9 +198,9 @@ pub struct OrderCreation {
     pub signature: Signature,
     pub signing_scheme: SigningScheme,
     #[serde(default)]
-    pub sell_token_balance: BalanceFrom,
+    pub sell_token_balance: SellTokenBalance,
     #[serde(default)]
-    pub buy_token_balance: BalanceTo,
+    pub buy_token_balance: BuyTokenBalance,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -480,7 +480,7 @@ impl Default for OrderKind {
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Deserialize, Serialize, Hash, enum_utils::FromStr)]
 #[enumeration(case_insensitive)]
 #[serde(rename_all = "snake_case")]
-pub enum BalanceFrom {
+pub enum SellTokenBalance {
     /// Direct ERC20 allowances to the Vault relayer contract
     Erc20,
     /// ERC20 allowances to the Vault with GPv2 relayer approval
@@ -489,7 +489,7 @@ pub enum BalanceFrom {
     External,
 }
 
-impl Default for BalanceFrom {
+impl Default for SellTokenBalance {
     fn default() -> Self {
         Self::Erc20
     }
@@ -499,14 +499,14 @@ impl Default for BalanceFrom {
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Deserialize, Serialize, Hash, enum_utils::FromStr)]
 #[enumeration(case_insensitive)]
 #[serde(rename_all = "snake_case")]
-pub enum BalanceTo {
+pub enum BuyTokenBalance {
     /// Pay trade proceeds as an ERC20 token transfer
     Erc20,
     /// Pay trade proceeds as a Vault internal balance transfer
     Internal,
 }
 
-impl Default for BalanceTo {
+impl Default for BuyTokenBalance {
     fn default() -> Self {
         Self::Erc20
     }
@@ -604,8 +604,8 @@ mod tests {
                     .unwrap(),
                 },
                 signing_scheme: SigningScheme::Eip712,
-                sell_token_balance: BalanceFrom::External,
-                buy_token_balance: BalanceTo::Internal,
+                sell_token_balance: SellTokenBalance::External,
+                buy_token_balance: BuyTokenBalance::Internal,
             },
         };
         let deserialized: Order = serde_json::from_value(value.clone()).unwrap();

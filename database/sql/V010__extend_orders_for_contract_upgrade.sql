@@ -8,11 +8,11 @@ CREATE TYPE BalanceTo AS ENUM ('erc20', 'internal');
 -- 1. Add columns, setting them not null with default values,
 ALTER TABLE orders
     ADD COLUMN settlement_contract bytea NOT NULL default '\x3328f5f2cEcAF00a2443082B657CedEAf70bfAEf',
-    ADD COLUMN balance_from BalanceFrom NOT NULL default 'erc20',
-    ADD COLUMN balance_to BalanceTo NOT NULL default 'erc20';
+    ADD COLUMN sell_token_balance BalanceFrom NOT NULL default 'erc20',
+    ADD COLUMN buy_token_balance BalanceTo NOT NULL default 'erc20';
 
 -- 2. Drop defaults
 ALTER TABLE orders
     ALTER COLUMN settlement_contract DROP DEFAULT,
-    ALTER COLUMN balance_from DROP DEFAULT,
-    ALTER COLUMN balance_to DROP DEFAULT;
+    ALTER COLUMN sell_token_balance DROP DEFAULT,
+    ALTER COLUMN buy_token_balance DROP DEFAULT;
