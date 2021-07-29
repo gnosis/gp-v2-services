@@ -4,7 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use bigdecimal::{BigDecimal, Zero};
 use chrono::{DateTime, Utc};
 use futures::{stream::TryStreamExt, StreamExt};
-use model::order::{BuyTokenBalance, SellTokenBalance};
+use model::order::{BuyTokenDestination, SellTokenSource};
 use model::{
     order::{Order, OrderCreation, OrderKind, OrderMetaData, OrderStatus, OrderUid},
     Signature, SigningScheme,
@@ -57,11 +57,11 @@ impl DbOrderKind {
     }
 }
 
-/// Location for which the sellAmount should be drawn upon order fulfilment
+/// Source from which the sellAmount should be drawn upon order fulfilment
 #[derive(sqlx::Type)]
-#[sqlx(type_name = "BalanceFrom")]
+#[sqlx(type_name = "SellTokenSource")]
 #[sqlx(rename_all = "snake_case")]
-pub enum DbSellTokenBalance {
+pub enum DbSellTokenSource {
     /// Direct ERC20 allowances to the Vault relayer contract
     Erc20,
     /// ERC20 allowances to the Vault with GPv2 relayer approval
@@ -70,45 +70,45 @@ pub enum DbSellTokenBalance {
     External,
 }
 
-impl DbSellTokenBalance {
-    pub fn from(order_kind: SellTokenBalance) -> Self {
+impl DbSellTokenSource {
+    pub fn from(order_kind: SellTokenSource) -> Self {
         match order_kind {
-            SellTokenBalance::Erc20 => Self::Erc20,
-            SellTokenBalance::Internal => Self::Internal,
-            SellTokenBalance::External => Self::External,
+            SellTokenSource::Erc20 => Self::Erc20,
+            SellTokenSource::Internal => Self::Internal,
+            SellTokenSource::External => Self::External,
         }
     }
-    fn into(self) -> SellTokenBalance {
+    fn into(self) -> SellTokenSource {
         match self {
-            Self::Erc20 => SellTokenBalance::Erc20,
-            Self::Internal => SellTokenBalance::Internal,
-            Self::External => SellTokenBalance::External,
+            Self::Erc20 => SellTokenSource::Erc20,
+            Self::Internal => SellTokenSource::Internal,
+            Self::External => SellTokenSource::External,
         }
     }
 }
 
-/// Location for which the buyAmount should be transferred to order's receiver to upon fulfilment
+/// Destination for which the buyAmount should be transferred to order's receiver to upon fulfilment
 #[derive(sqlx::Type)]
-#[sqlx(type_name = "BalanceTo")]
+#[sqlx(type_name = "BuyTokenDestination")]
 #[sqlx(rename_all = "snake_case")]
-pub enum DbBuyTokenBalance {
+pub enum DbBuyTokenDestination {
     /// Pay trade proceeds as an ERC20 token transfer
     Erc20,
     /// Pay trade proceeds as a Vault internal balance transfer
     Internal,
 }
 
-impl DbBuyTokenBalance {
-    pub fn from(order_kind: BuyTokenBalance) -> Self {
+impl DbBuyTokenDestination {
+    pub fn from(order_kind: BuyTokenDestination) -> Self {
         match order_kind {
-            BuyTokenBalance::Erc20 => Self::Erc20,
-            BuyTokenBalance::Internal => Self::Internal,
+            BuyTokenDestination::Erc20 => Self::Erc20,
+            BuyTokenDestination::Internal => Self::Internal,
         }
     }
-    fn into(self) -> BuyTokenBalance {
+    fn into(self) -> BuyTokenDestination {
         match self {
-            Self::Erc20 => BuyTokenBalance::Erc20,
-            Self::Internal => BuyTokenBalance::Internal,
+            Self::Erc20 => BuyTokenDestination::Erc20,
+            Self::Internal => BuyTokenDestination::Internal,
         }
     }
 }
@@ -179,10 +179,10 @@ impl OrderStoring for Postgres {
             .bind(order.order_creation.signature.to_bytes().as_ref())
             .bind(DbSigningScheme::from(order.order_creation.signing_scheme))
             .bind(order.order_meta_data.settlement_contract.as_bytes())
-            .bind(DbSellTokenBalance::from(
+            .bind(DbSellTokenSource::from(
                 order.order_creation.sell_token_balance,
             ))
-            .bind(DbBuyTokenBalance::from(
+            .bind(DbBuyTokenDestination::from(
                 order.order_creation.buy_token_balance,
             ))
             .execute(&self.pool)
@@ -287,8 +287,8 @@ struct OrdersQueryRow {
     receiver: Option<Vec<u8>>,
     signing_scheme: DbSigningScheme,
     settlement_contract: Vec<u8>,
-    sell_token_balance: DbSellTokenBalance,
-    buy_token_balance: DbBuyTokenBalance,
+    sell_token_balance: DbSellTokenSource,
+    buy_token_balance: DbBuyTokenDestination,
 }
 
 impl OrdersQueryRow {
@@ -429,8 +429,8 @@ mod tests {
             invalidated: false,
             signing_scheme: DbSigningScheme::Eip712,
             settlement_contract: vec![0; 20],
-            sell_token_balance: DbSellTokenBalance::External,
-            buy_token_balance: DbBuyTokenBalance::Internal,
+            sell_token_balance: DbSellTokenSource::External,
+            buy_token_balance: DbBuyTokenDestination::Internal,
         };
 
         assert_eq!(order_row.calculate_status(), OrderStatus::Open);
@@ -599,8 +599,8 @@ mod tests {
                     partially_fillable: true,
                     signature: Default::default(),
                     signing_scheme: *signing_scheme,
-                    sell_token_balance: SellTokenBalance::Erc20,
-                    buy_token_balance: BuyTokenBalance::Internal,
+                    sell_token_balance: SellTokenSource::Erc20,
+                    buy_token_balance: BuyTokenDestination::Internal,
                 },
             };
             db.insert_order(&order).await.unwrap();
