@@ -221,12 +221,11 @@ impl OrderStoring for Postgres {
                 o.uid, o.owner, o.creation_timestamp, o.sell_token, o.buy_token, o.sell_amount, \
                 o.buy_amount, o.valid_to, o.app_data, o.fee_amount, o.kind, o.partially_fillable, \
                 o.signature, o.receiver, o.signing_scheme, o.settlement_contract, o.balance_from, \
-                o.balance_to \
+                o.balance_to, \
                 COALESCE(SUM(t.buy_amount), 0) AS sum_buy, \
                 COALESCE(SUM(t.sell_amount), 0) AS sum_sell, \
                 COALESCE(SUM(t.fee_amount), 0) AS sum_fee, \
-                (COUNT(invalidations.*) > 0 OR o.cancellation_timestamp IS NOT NULL) AS invalidated, \
-
+                (COUNT(invalidations.*) > 0 OR o.cancellation_timestamp IS NOT NULL) AS invalidated \
             FROM \
                 orders o \
                 LEFT OUTER JOIN trades t ON o.uid = t.order_uid \
