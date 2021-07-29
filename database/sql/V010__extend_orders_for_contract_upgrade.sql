@@ -16,3 +16,5 @@ ALTER TABLE orders
     ALTER COLUMN settlement_contract DROP DEFAULT,
     ALTER COLUMN sell_token_balance DROP DEFAULT,
     ALTER COLUMN buy_token_balance DROP DEFAULT;
+
+CREATE INDEX version_idx ON orders USING BTREE (settlement_contract);
