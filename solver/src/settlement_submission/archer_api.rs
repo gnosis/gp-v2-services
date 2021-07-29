@@ -13,9 +13,9 @@ pub struct ArcherApi {
 }
 
 impl ArcherApi {
-    pub fn new(authorization: String) -> Self {
+    pub fn new(authorization: String, client: Client) -> Self {
         Self {
-            client: Client::new(),
+            client,
             authorization,
         }
     }
@@ -65,6 +65,10 @@ impl ArcherApi {
             "method": "archer_cancelTx",
             "tx": tx,
         });
+        tracing::debug!(
+            "archer_cancelTx body: {}",
+            serde_json::to_string(&body).unwrap_or_else(|err| format!("error: {:?}", err)),
+        );
         let response = self
             .client
             .post(URL)

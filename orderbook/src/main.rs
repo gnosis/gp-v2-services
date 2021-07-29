@@ -18,7 +18,9 @@ use shared::{
     bad_token::{
         cache::CachingDetector,
         list_based::{ListBasedDetector, UnknownTokenStrategy},
-        trace_call::TraceCallDetector,
+        trace_call::{
+            AmmPairProviderFinder, BalancerVaultFinder, TokenOwnerFinding, TraceCallDetector,
+        },
     },
     current_block::current_block_stream,
     maintenance::ServiceMaintenance,
@@ -124,8 +126,12 @@ async fn main() {
     let registry = Registry::default();
     let metrics = Arc::new(Metrics::new(&registry).unwrap());
 
-    let transport =
-        create_instrumented_transport(HttpTransport::new(args.shared.node_url), metrics.clone());
+    let client = shared::http_client(args.shared.http_timeout);
+
+    let transport = create_instrumented_transport(
+        HttpTransport::new(client.clone(), args.shared.node_url),
+        metrics.clone(),
+    );
     let web3 = web3::Web3::new(transport);
     let settlement_contract = GPv2Settlement::deployed(&web3)
         .await
@@ -176,7 +182,7 @@ async fn main() {
 
     let gas_price_estimator = Arc::new(
         shared::gas_price_estimation::create_priority_estimator(
-            &reqwest::Client::new(),
+            client.clone(),
             &web3,
             args.shared.gas_estimators.as_slice(),
         )
@@ -198,9 +204,21 @@ async fn main() {
     allowed_tokens.push(BUY_ETH_ADDRESS);
     let unsupported_tokens = args.unsupported_tokens;
 
+    let mut finders: Vec<Arc<dyn TokenOwnerFinding>> = pair_providers
+        .iter()
+        .map(|provider| -> Arc<dyn TokenOwnerFinding> {
+            Arc::new(AmmPairProviderFinder {
+                inner: provider.clone(),
+                base_tokens: base_tokens.iter().copied().collect(),
+            })
+        })
+        .collect();
+    if let Some(finder) = BalancerVaultFinder::new(&web3).await.unwrap() {
+        finders.push(Arc::new(finder));
+    }
     let trace_call_detector = TraceCallDetector {
         web3: web3.clone(),
-        pools: pair_providers.clone(),
+        finders,
         base_tokens: base_tokens.clone(),
         settlement_contract: settlement_contract.address(),
     };
@@ -268,6 +286,7 @@ async fn main() {
 
     let orderbook = Arc::new(Orderbook::new(
         domain_separator,
+        settlement_contract.address(),
         database.clone(),
         Box::new(balance_fetcher),
         fee_calculator.clone(),

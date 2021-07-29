@@ -1,22 +1,26 @@
-pub mod archerapi;
+pub mod archer_api;
+pub mod archer_settlement;
 mod gas_price_stream;
+pub mod public_mempool;
 pub mod retry;
 
-use self::retry::{CancelSender, SettlementSender};
-use super::driver::solver_settlements::RatedSettlement;
-use crate::encoding::EncodedSettlement;
-use anyhow::{Context, Result};
+use crate::{encoding::EncodedSettlement, settlement::Settlement};
+use anyhow::{anyhow, Result};
+use archer_api::ArcherApi;
 use contracts::GPv2Settlement;
-use ethcontract::{dyns::DynTransport, errors::ExecutionError, Web3};
-use futures::stream::StreamExt;
+use ethcontract::{errors::ExecutionError, Account};
 use gas_estimation::GasPriceEstimating;
-use gas_price_stream::gas_price_stream;
-use primitive_types::{H160, U256};
-use std::time::{Duration, Instant};
-use transaction_retry::RetryResult;
+use primitive_types::U256;
+use shared::Web3;
+use std::{
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 
-const GAS_PRICE_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
+use self::archer_settlement::ArcherSolutionSubmitter;
+
 const ESTIMATE_GAS_LIMIT_FACTOR: f64 = 1.2;
+const GAS_PRICE_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
 
 pub async fn estimate_gas(
     contract: &GPv2Settlement,
@@ -28,94 +32,68 @@ pub async fn estimate_gas(
         .await
 }
 
-// Submit a settlement to the contract, updating the transaction with gas prices if they increase.
-pub async fn submit(
-    contract: &GPv2Settlement,
-    gas: &dyn GasPriceEstimating,
-    target_confirm_time: Duration,
-    gas_price_cap: f64,
-    settlement: RatedSettlement,
-) -> Result<()> {
-    let gas_estimate = settlement.gas_estimate;
-    let settlement: EncodedSettlement = settlement.into();
+pub struct SolutionSubmitter {
+    pub web3: Web3,
+    pub contract: GPv2Settlement,
+    pub account: Account,
+    pub gas_price_estimator: Arc<dyn GasPriceEstimating>,
+    // for gas price estimation
+    pub target_confirm_time: Duration,
+    pub gas_price_cap: f64,
+    pub transaction_strategy: TransactionStrategy,
+}
 
-    let nonce = transaction_count(contract)
-        .await
-        .context("failed to get transaction_count")?;
-    let address = &contract
-        .defaults()
-        .from
-        .clone()
-        .expect("no default sender address")
-        .address();
-    let web3 = contract.raw_instance().web3();
-    let pending_gas_price = recover_gas_price_from_pending_transaction(&web3, &address, nonce)
-        .await
-        .context("failed to get pending gas price")?;
+pub enum TransactionStrategy {
+    PublicMempool,
+    ArcherNetwork {
+        archer_api: ArcherApi,
+        max_confirm_time: Duration,
+    },
+}
 
-    // Account for some buffer in the gas limit in case racing state changes result in slightly more heavy computation at execution time
-    let gas_limit = gas_estimate.to_f64_lossy() * ESTIMATE_GAS_LIMIT_FACTOR;
-
-    let settlement_sender = SettlementSender {
-        contract,
-        nonce,
-        gas_limit,
-        settlement,
-    };
-    // We never cancel.
-    let cancel_future = std::future::pending::<CancelSender>();
-    if let Some(gas_price) = pending_gas_price {
-        tracing::info!(
-            "detected existing pending transaction with gas price {}",
-            gas_price
-        );
-    }
-
-    // It is possible that there is a pending transaction we don't know about because the driver
-    // got restarted while it was in progress. Sending a new transaction could fail in that case
-    // because the gas price has not increased. So we make sure that the starting gas price is at
-    // least high enough to accommodate. This isn't perfect because it's still possible that that
-    // transaction gets mined first in which case our new transaction would fail with "nonce already
-    // used".
-    let pending_gas_price = pending_gas_price.map(|gas_price| {
-        transaction_retry::gas_price_increase::minimum_increase(gas_price.to_f64_lossy())
-    });
-    let stream = gas_price_stream(
-        Instant::now() + target_confirm_time,
-        gas_price_cap,
-        gas_limit,
-        gas,
-        pending_gas_price,
-    )
-    .boxed();
-
-    match transaction_retry::retry(settlement_sender, cancel_future, stream).await {
-        Some(RetryResult::Submitted(result)) => {
-            tracing::info!("completed settlement submission");
-            result.0.context("settlement transaction failed")
+impl SolutionSubmitter {
+    /// Ok if transaction got mined in time.
+    /// Err if took too long or other inner errors.
+    pub async fn settle(&self, settlement: Settlement, gas_estimate: U256) -> Result<()> {
+        match &self.transaction_strategy {
+            TransactionStrategy::PublicMempool => {
+                public_mempool::submit(
+                    self.account.clone(),
+                    &self.contract,
+                    self.gas_price_estimator.as_ref(),
+                    self.target_confirm_time,
+                    self.gas_price_cap,
+                    settlement,
+                    gas_estimate,
+                )
+                .await
+            }
+            TransactionStrategy::ArcherNetwork {
+                archer_api,
+                max_confirm_time,
+            } => {
+                let submitter = ArcherSolutionSubmitter {
+                    web3: &self.web3,
+                    contract: &self.contract,
+                    account: &self.account,
+                    archer_api,
+                    gas_price_estimator: self.gas_price_estimator.as_ref(),
+                    gas_price_cap: self.gas_price_cap,
+                };
+                let result = submitter
+                    .submit(
+                        self.target_confirm_time,
+                        SystemTime::now() + *max_confirm_time,
+                        settlement,
+                        gas_estimate,
+                    )
+                    .await;
+                match result {
+                    Ok(Some(_)) => Ok(()),
+                    Ok(None) => Err(anyhow!("transaction did not get mined in time")),
+                    Err(err) => Err(err),
+                }
+            }
         }
-        _ => unreachable!(),
     }
-}
-
-async fn transaction_count(contract: &GPv2Settlement) -> Result<U256> {
-    let defaults = contract.defaults();
-    let address = defaults.from.as_ref().unwrap().address();
-    let web3 = contract.raw_instance().web3();
-    let count = web3.eth().transaction_count(address, None).await?;
-    Ok(count)
-}
-
-async fn recover_gas_price_from_pending_transaction(
-    web3: &Web3<DynTransport>,
-    address: &H160,
-    nonce: U256,
-) -> Result<Option<U256>> {
-    let transactions = crate::pending_transactions::pending_transactions(web3.transport())
-        .await
-        .context("pending_transactions failed")?;
-    let transaction = transactions
-        .iter()
-        .find(|transaction| transaction.from == Some(*address) && transaction.nonce == nonce);
-    Ok(transaction.map(|transaction| transaction.gas_price))
 }

@@ -9,7 +9,7 @@ use crate::{
 };
 use ::model::order::OrderKind;
 use anyhow::{ensure, Context, Result};
-use ethcontract::U256;
+use ethcontract::{Account, U256};
 use futures::join;
 use lazy_static::lazy_static;
 use num::{BigInt, BigRational, ToPrimitive};
@@ -22,6 +22,7 @@ use shared::{
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
+    time::Duration,
 };
 
 // Estimates from multivariate linear regression here:
@@ -59,6 +60,8 @@ impl SolverConfig {
 }
 
 pub struct HttpSolver {
+    name: &'static str,
+    account: Account,
     base: Url,
     client: Client,
     api_key: Option<String>,
@@ -69,11 +72,14 @@ pub struct HttpSolver {
     network_id: String,
     chain_id: u64,
     fee_discount_factor: f64,
+    timeout: Duration,
 }
 
 impl HttpSolver {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        name: &'static str,
+        account: Account,
         base: Url,
         api_key: Option<String>,
         config: SolverConfig,
@@ -83,10 +89,12 @@ impl HttpSolver {
         network_id: String,
         chain_id: u64,
         fee_discount_factor: f64,
+        client: Client,
+        timeout: Duration,
     ) -> Self {
-        // Unwrap because we cannot handle client creation failing.
-        let client = Client::builder().build().unwrap();
         Self {
+            name,
+            account,
             base,
             client,
             api_key,
@@ -97,6 +105,7 @@ impl HttpSolver {
             network_id,
             chain_id,
             fee_discount_factor,
+            timeout,
         }
     }
 
@@ -258,7 +267,7 @@ impl HttpSolver {
         let (token_infos, price_estimates) = join!(
             self.token_info_fetcher.get_token_infos(tokens.as_slice()),
             self.price_estimator
-                .estimate_prices(tokens.as_slice(), tokens[0])
+                .estimate_prices(tokens.as_slice(), self.native_token)
         );
 
         let price_estimates: HashMap<H160, Result<BigRational, _>> =
@@ -314,7 +323,7 @@ impl HttpSolver {
 
         self.config.add_to_query(&mut url);
         let query = url.query().map(ToString::to_string).unwrap_or_default();
-        let mut request = self.client.post(url);
+        let mut request = self.client.post(url).timeout(self.timeout);
         if let Some(api_key) = &self.api_key {
             let mut header = HeaderValue::from_str(api_key.as_str()).unwrap();
             header.set_sensitive(true);
@@ -451,8 +460,12 @@ impl Solver for HttpSolver {
         settlement::convert_settlement(settled, context).map(|settlement| vec![settlement])
     }
 
+    fn account(&self) -> &Account {
+        &self.account
+    }
+
     fn name(&self) -> &'static str {
-        "HTTPSolver"
+        &self.name
     }
 }
 
@@ -461,6 +474,7 @@ mod tests {
     use super::*;
     use crate::liquidity::{tests::CapturingSettlementHandler, ConstantProductOrder, LimitOrder};
     use ::model::TokenPair;
+    use ethcontract::Address;
     use maplit::hashmap;
     use num::rational::Ratio;
     use shared::price_estimate::mocks::FakePriceEstimator;
@@ -499,6 +513,8 @@ mod tests {
         let gas_price = 100.;
 
         let solver = HttpSolver::new(
+            &"Test Solver",
+            Account::Local(Address::default(), None),
             url.parse().unwrap(),
             None,
             SolverConfig {
@@ -511,6 +527,8 @@ mod tests {
             "mock_network_id".to_string(),
             0,
             1.,
+            Client::new(),
+            Duration::MAX,
         );
         let base = |x: u128| x * 10u128.pow(18);
         let orders = vec![

@@ -20,6 +20,7 @@ use crate::{
 use anyhow::Result;
 use ethcontract::{H160, H256, U256};
 use model::TokenPair;
+use reqwest::Client;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -38,6 +39,7 @@ pub struct WeightedPool {
     pub pool_address: H160,
     pub swap_fee_percentage: Bfp,
     pub reserves: HashMap<H160, PoolTokenState>,
+    pub paused: bool,
 }
 
 impl WeightedPool {
@@ -45,6 +47,7 @@ impl WeightedPool {
         pool_data: RegisteredWeightedPool,
         balances: Vec<U256>,
         swap_fee_percentage: Bfp,
+        paused: bool,
     ) -> Self {
         let mut reserves = HashMap::new();
         // We expect the weight and token indices are aligned with balances returned from EVM query.
@@ -65,6 +68,7 @@ impl WeightedPool {
             pool_address: pool_data.pool_address,
             swap_fee_percentage,
             reserves,
+            paused,
         }
     }
 }
@@ -92,12 +96,13 @@ impl BalancerPoolFetcher {
         config: CacheConfig,
         block_stream: CurrentBlockStream,
         metrics: Arc<dyn WeightedPoolCacheMetrics>,
+        client: Client,
     ) -> Result<Self> {
         let pool_info = Arc::new(PoolInfoFetcher {
             web3: web3.clone(),
             token_info_fetcher: token_info_fetcher.clone(),
         });
-        let pool_initializer = DefaultPoolInitializer::new(chain_id, pool_info.clone())?;
+        let pool_initializer = DefaultPoolInitializer::new(chain_id, pool_info.clone(), client)?;
         let pool_registry =
             Arc::new(BalancerPoolRegistry::new(web3.clone(), pool_initializer, pool_info).await?);
         let reserve_fetcher = PoolReserveFetcher::new(pool_registry.clone(), web3).await?;
@@ -121,8 +126,17 @@ impl WeightedPoolFetching for BalancerPoolFetcher {
             .pool_registry
             .get_pool_ids_containing_token_pairs(token_pairs)
             .await;
-        self.pool_reserve_cache.fetch(pool_ids, at_block).await
+        let fetched_pools = self.pool_reserve_cache.fetch(pool_ids, at_block).await?;
+        // Return only those pools which are not paused.
+        Ok(filter_paused(fetched_pools))
     }
+}
+
+fn filter_paused(weighted_pools: Vec<WeightedPool>) -> Vec<WeightedPool> {
+    weighted_pools
+        .into_iter()
+        .filter(|pool| !pool.paused)
+        .collect()
 }
 
 #[async_trait::async_trait]
@@ -133,5 +147,34 @@ impl Maintaining for BalancerPoolFetcher {
             self.pool_reserve_cache.update_cache(),
         )?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filters_paused_pools() {
+        let pools = vec![
+            WeightedPool {
+                pool_id: H256::from_low_u64_be(0),
+                pool_address: Default::default(),
+                swap_fee_percentage: Bfp::zero(),
+                reserves: Default::default(),
+                paused: true,
+            },
+            WeightedPool {
+                pool_id: H256::from_low_u64_be(1),
+                pool_address: Default::default(),
+                swap_fee_percentage: Bfp::zero(),
+                reserves: Default::default(),
+                paused: false,
+            },
+        ];
+
+        let filtered_pools = filter_paused(pools.clone());
+        assert_eq!(filtered_pools.len(), 1);
+        assert_eq!(filtered_pools[0].pool_id, pools[1].pool_id);
     }
 }

@@ -13,8 +13,8 @@ use model::{
 };
 use primitive_types::{H160, U256};
 use shared::{
-    bad_token::BadTokenDetecting, maintenance::Maintaining, time::now_in_epoch_seconds,
-    web3_traits::CodeFetching,
+    bad_token::BadTokenDetecting, maintenance::Maintaining, metrics::LivenessChecking,
+    time::now_in_epoch_seconds, web3_traits::CodeFetching,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -51,6 +51,7 @@ pub enum OrderCancellationResult {
 
 pub struct Orderbook {
     domain_separator: DomainSeparator,
+    settlement_contract: H160,
     database: Arc<dyn OrderStoring>,
     balance_fetcher: Box<dyn BalanceFetching>,
     fee_validator: Arc<EthAwareMinFeeCalculator>,
@@ -60,8 +61,10 @@ pub struct Orderbook {
 }
 
 impl Orderbook {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         domain_separator: DomainSeparator,
+        settlement_contract: H160,
         database: Arc<dyn OrderStoring>,
         balance_fetcher: Box<dyn BalanceFetching>,
         fee_validator: Arc<EthAwareMinFeeCalculator>,
@@ -71,6 +74,7 @@ impl Orderbook {
     ) -> Self {
         Self {
             domain_separator,
+            settlement_contract,
             database,
             balance_fetcher,
             fee_validator,
@@ -97,7 +101,11 @@ impl Orderbook {
         {
             return Ok(AddOrderResult::InsufficientFee);
         }
-        let order = match Order::from_order_creation(order, &self.domain_separator) {
+        let order = match Order::from_order_creation(
+            order,
+            &self.domain_separator,
+            self.settlement_contract,
+        ) {
             Some(order) => order,
             None => return Ok(AddOrderResult::InvalidSignature),
         };
@@ -227,6 +235,13 @@ impl Maintaining for Orderbook {
     async fn run_maintenance(&self) -> Result<()> {
         self.balance_fetcher.update().await;
         Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl LivenessChecking for Orderbook {
+    async fn is_alive(&self) -> bool {
+        self.get_solvable_orders().await.is_ok()
     }
 }
 

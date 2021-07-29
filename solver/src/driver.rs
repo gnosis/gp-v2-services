@@ -8,7 +8,7 @@ use crate::{
     metrics::SolverMetrics,
     settlement::Settlement,
     settlement_simulation,
-    settlement_submission::{self, retry::is_transaction_failure},
+    settlement_submission::{self, retry::is_transaction_failure, SolutionSubmitter},
     solver::Solver,
 };
 use anyhow::{anyhow, Context, Error, Result};
@@ -39,7 +39,6 @@ pub struct Driver {
     price_estimator: Arc<dyn PriceEstimating>,
     solver: Vec<Box<dyn Solver>>,
     gas_price_estimator: Arc<dyn GasPriceEstimating>,
-    target_confirm_time: Duration,
     settle_interval: Duration,
     native_token: H160,
     min_order_age: Duration,
@@ -48,11 +47,11 @@ pub struct Driver {
     network_id: String,
     max_merged_settlements: usize,
     solver_time_limit: Duration,
-    gas_price_cap: f64,
     market_makable_token_list: Option<TokenList>,
     inflight_trades: HashSet<OrderUid>,
     block_stream: CurrentBlockStream,
     fee_discount_factor: f64,
+    solution_submitter: SolutionSubmitter,
 }
 impl Driver {
     #[allow(clippy::too_many_arguments)]
@@ -62,7 +61,6 @@ impl Driver {
         price_estimator: Arc<dyn PriceEstimating>,
         solver: Vec<Box<dyn Solver>>,
         gas_price_estimator: Arc<dyn GasPriceEstimating>,
-        target_confirm_time: Duration,
         settle_interval: Duration,
         native_token: H160,
         min_order_age: Duration,
@@ -71,10 +69,10 @@ impl Driver {
         network_id: String,
         max_merged_settlements: usize,
         solver_time_limit: Duration,
-        gas_price_cap: f64,
         market_makable_token_list: Option<TokenList>,
         block_stream: CurrentBlockStream,
         fee_discount_factor: f64,
+        solution_submitter: SolutionSubmitter,
     ) -> Self {
         Self {
             settlement_contract,
@@ -82,7 +80,6 @@ impl Driver {
             price_estimator,
             solver,
             gas_price_estimator,
-            target_confirm_time,
             settle_interval,
             native_token,
             min_order_age,
@@ -91,11 +88,11 @@ impl Driver {
             network_id,
             max_merged_settlements,
             solver_time_limit,
-            gas_price_cap,
             market_makable_token_list,
             inflight_trades: HashSet::new(),
             block_stream,
             fee_discount_factor,
+            solution_submitter,
         }
     }
 
@@ -105,6 +102,7 @@ impl Driver {
                 Ok(()) => tracing::debug!("single run finished ok"),
                 Err(err) => tracing::error!("single run errored: {:?}", err),
             }
+            self.metrics.runloop_completed();
             tokio::time::sleep(self.settle_interval).await;
         }
     }
@@ -140,14 +138,10 @@ impl Driver {
     async fn submit_settlement(&self, rated_settlement: RatedSettlement) -> Result<()> {
         let SettlementWithSolver { name, settlement } = rated_settlement.clone().settlement;
         let trades = settlement.trades().to_vec();
-        match settlement_submission::submit(
-            &self.settlement_contract,
-            self.gas_price_estimator.as_ref(),
-            self.target_confirm_time,
-            self.gas_price_cap,
-            rated_settlement,
-        )
-        .await
+        match self
+            .solution_submitter
+            .settle(settlement, rated_settlement.gas_estimate)
+            .await
         {
             Ok(_) => {
                 trades
@@ -174,7 +168,11 @@ impl Driver {
         }
     }
 
-    async fn can_settle_without_liquidity(&self, settlement: &RatedSettlement) -> Result<bool> {
+    async fn can_settle_without_liquidity(
+        &self,
+        settlement: &RatedSettlement,
+        gas_price_wei: f64,
+    ) -> Result<bool> {
         // We don't want to buy tokens that we don't trust. If no list is set, we settle with external liquidity.
         if !self
             .market_makable_token_list
@@ -191,6 +189,7 @@ impl Driver {
             &self.web3,
             &self.network_id,
             settlement_simulation::Block::LatestWithoutTenderly,
+            gas_price_wei,
         )
         .await
         .context("failed to simulate settlement")?;
@@ -201,6 +200,7 @@ impl Driver {
     async fn simulate_settlements(
         &self,
         settlements: Vec<SettlementWithSolver>,
+        gas_price_wei: f64,
     ) -> Result<(
         Vec<SettlementWithSolver>,
         Vec<(SettlementWithSolver, Error)>,
@@ -213,6 +213,7 @@ impl Driver {
             &self.web3,
             &self.network_id,
             settlement_simulation::Block::LatestWithoutTenderly,
+            gas_price_wei,
         )
         .await
         .context("failed to simulate settlements")?;
@@ -235,6 +236,7 @@ impl Driver {
         &self,
         errors: Vec<(SettlementWithSolver, Error)>,
         current_block_during_liquidity_fetch: u64,
+        gas_price_wei: f64,
     ) {
         let simulations = match settlement_simulation::simulate_settlements(
             errors
@@ -244,6 +246,7 @@ impl Driver {
             &self.web3,
             &self.network_id,
             settlement_simulation::Block::FixedWithTenderly(current_block_during_liquidity_fetch),
+            gas_price_wei,
         )
         .await
         {
@@ -400,7 +403,9 @@ impl Driver {
             &mut settlements,
         );
 
-        let (settlements, errors) = self.simulate_settlements(settlements).await?;
+        let (settlements, errors) = self
+            .simulate_settlements(settlements, gas_price_wei)
+            .await?;
         tracing::info!(
             "{} settlements passed simulation and {} failed",
             settlements.len(),
@@ -426,7 +431,7 @@ impl Driver {
         {
             // If we have enough buffer in the settlement contract to not use on-chain interactions, remove those
             if self
-                .can_settle_without_liquidity(&settlement)
+                .can_settle_without_liquidity(&settlement, gas_price_wei)
                 .await
                 .unwrap_or(false)
             {
@@ -452,7 +457,7 @@ impl Driver {
         }
 
         // Happens after settlement submission so that we do not delay it.
-        self.report_simulation_errors(errors, current_block_during_liquidity_fetch)
+        self.report_simulation_errors(errors, current_block_during_liquidity_fetch, gas_price_wei)
             .await;
 
         Ok(())

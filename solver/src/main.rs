@@ -29,11 +29,12 @@ use solver::{
     liquidity::{balancer::BalancerV2Liquidity, uniswap::UniswapLikeLiquidity},
     liquidity_collector::LiquidityCollector,
     metrics::Metrics,
+    settlement_submission::{archer_api::ArcherApi, SolutionSubmitter, TransactionStrategy},
     solver::SolverType,
 };
 use std::{collections::HashMap, iter::FromIterator as _};
 use std::{collections::HashSet, sync::Arc, time::Duration};
-use structopt::StructOpt;
+use structopt::{clap::arg_enum, StructOpt};
 
 #[derive(Debug, StructOpt)]
 struct Arguments {
@@ -48,14 +49,13 @@ struct Arguments {
     #[structopt(long, env = "MIP_SOLVER_URL", default_value = "http://localhost:8000")]
     mip_solver_url: Url,
 
-    /// The timeout for the API endpoint to fetch the orderbook
+    /// The API endpoint to call the mip v2 solver
     #[structopt(
         long,
-        env = "ORDERBOOK_TIMEOUT",
-        default_value = "10",
-        parse(try_from_str = shared::arguments::duration_from_seconds),
+        env = "QUASIMODO_SOLVER_URL",
+        default_value = "http://localhost:8000"
     )]
-    orderbook_timeout: Duration,
+    quasimodo_solver_url: Url,
 
     /// The private key used by the driver to sign transactions.
     #[structopt(short = "k", long, env = "PRIVATE_KEY", hide_env_values = true)]
@@ -160,6 +160,37 @@ struct Arguments {
     /// The slippage tolerance we apply to the price quoted by Paraswap
     #[structopt(long, env, default_value = "10")]
     paraswap_slippage_bps: usize,
+
+    /// The list of disabled ParaSwap DEXs. By default, the `ParaSwapPool4`
+    /// DEX (representing a private market maker) is disabled as it increases
+    /// price by 1% if built transactions don't actually get executed.
+    #[structopt(long, env, default_value = "ParaSwapPool4", use_delimiter = true)]
+    disabled_paraswap_dexs: Vec<String>,
+
+    /// The authorization for the archer api.
+    #[structopt(long, env)]
+    archer_authorization: Option<String>,
+
+    /// How to to submit settlement transactions.
+    #[structopt(long, env, default_value = "PublicMempool")]
+    transaction_strategy: TransactionStrategyArg,
+
+    /// The maximum time we spend trying to settle a transaction through the archer network before
+    /// going to back to solving.
+    #[structopt(
+        long,
+        default_value = "60",
+        parse(try_from_str = shared::arguments::duration_from_seconds),
+    )]
+    max_archer_submission_seconds: Duration,
+}
+
+arg_enum! {
+    #[derive(Debug)]
+    pub enum TransactionStrategyArg {
+        PublicMempool,
+        ArcherNetwork,
+    }
 }
 
 #[tokio::main]
@@ -171,9 +202,12 @@ async fn main() {
     let registry = Registry::default();
     let metrics = Arc::new(Metrics::new(&registry).expect("Couldn't register metrics"));
 
-    // TODO: custom transport that allows setting timeout
-    let transport =
-        create_instrumented_transport(HttpTransport::new(args.shared.node_url), metrics.clone());
+    let client = shared::http_client(args.shared.http_timeout);
+
+    let transport = create_instrumented_transport(
+        HttpTransport::new(client.clone(), args.shared.node_url),
+        metrics.clone(),
+    );
     let web3 = web3::Web3::new(transport);
     let chain_id = web3
         .eth()
@@ -196,8 +230,8 @@ async fn main() {
         .expect("couldn't load deployed native token");
     let orderbook_api = solver::orderbook::OrderBookApi::new(
         args.orderbook_url,
-        args.orderbook_timeout,
         native_token_contract.clone(),
+        client.clone(),
     );
     let mut base_tokens = HashSet::from_iter(args.shared.base_tokens);
     // We should always use the native token as a base token.
@@ -208,7 +242,7 @@ async fn main() {
     })));
     let gas_price_estimator = Arc::new(
         shared::gas_price_estimation::create_priority_estimator(
-            &reqwest::Client::new(),
+            client.clone(),
             &web3,
             args.shared.gas_estimators.as_slice(),
         )
@@ -270,6 +304,7 @@ async fn main() {
                 cache_config,
                 current_block_stream.clone(),
                 metrics.clone(),
+                client.clone(),
             )
             .await
             .expect("failed to create Balancer pool fetcher"),
@@ -302,11 +337,13 @@ async fn main() {
     )
     .await;
     let solver = solver::solver::create(
+        account.clone(),
         web3.clone(),
         args.solvers,
         base_tokens,
         native_token_contract.address(),
         args.mip_solver_url,
+        args.quasimodo_solver_url,
         &settlement_contract,
         token_info_fetcher,
         price_estimator.clone(),
@@ -316,8 +353,9 @@ async fn main() {
         args.solver_time_limit,
         args.min_order_size_one_inch,
         args.disabled_one_inch_protocols,
-        account.address(),
         args.paraswap_slippage_bps,
+        args.disabled_paraswap_dexs,
+        client.clone(),
     )
     .expect("failure creating solvers");
     let liquidity_collector = LiquidityCollector {
@@ -325,29 +363,48 @@ async fn main() {
         orderbook_api,
         balancer_v2_liquidity,
     };
-    let market_makable_token_list = TokenList::from_url(&args.market_makable_token_list, chain_id)
-        .await
-        .map_err(|err| tracing::error!("Couldn't fetch market makable token list: {}", err))
-        .ok();
+    let market_makable_token_list =
+        TokenList::from_url(&args.market_makable_token_list, chain_id, client.clone())
+            .await
+            .map_err(|err| tracing::error!("Couldn't fetch market makable token list: {}", err))
+            .ok();
+    let solution_submitter = SolutionSubmitter {
+        web3: web3.clone(),
+        contract: settlement_contract.clone(),
+        account,
+        gas_price_estimator: gas_price_estimator.clone(),
+        target_confirm_time: args.target_confirm_time,
+        gas_price_cap: args.gas_price_cap,
+        transaction_strategy: match args.transaction_strategy {
+            TransactionStrategyArg::PublicMempool => TransactionStrategy::PublicMempool,
+            TransactionStrategyArg::ArcherNetwork => TransactionStrategy::ArcherNetwork {
+                archer_api: ArcherApi::new(
+                    args.archer_authorization
+                        .expect("missing archer authorization"),
+                    client.clone(),
+                ),
+                max_confirm_time: args.max_archer_submission_seconds,
+            },
+        },
+    };
     let mut driver = Driver::new(
         settlement_contract,
         liquidity_collector,
         price_estimator,
         solver,
         gas_price_estimator,
-        args.target_confirm_time,
         args.settle_interval,
         native_token_contract.address(),
         args.min_order_age,
-        metrics,
+        metrics.clone(),
         web3,
         network_id,
         args.max_merged_settlements,
         args.solver_time_limit,
-        args.gas_price_cap,
         market_makable_token_list,
         current_block_stream.clone(),
         args.shared.fee_discount_factor,
+        solution_submitter,
     );
 
     let maintainer = ServiceMaintenance {
@@ -359,7 +416,7 @@ async fn main() {
     };
     tokio::task::spawn(maintainer.run_maintenance_on_new_block(current_block_stream));
 
-    serve_metrics(registry, ([0, 0, 0, 0], args.metrics_port).into());
+    serve_metrics(registry, metrics, ([0, 0, 0, 0], args.metrics_port).into());
     driver.run_forever().await;
 }
 
