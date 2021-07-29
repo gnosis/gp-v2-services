@@ -62,23 +62,23 @@ impl DbOrderKind {
 #[sqlx(type_name = "BalanceFrom")]
 #[sqlx(rename_all = "snake_case")]
 pub enum BalanceFrom {
-    /// Order owner's ethereum address
-    Owner,
-    /// Order owner's BalancerV2 Internal Vault balance
-    VaultInternal,
-    /// Order owner's BalancerV2 External Vault balance
-    VaultExternal,
+    /// Direct ERC20 allowances to the Vault relayer contract
+    Erc20,
+    /// ERC20 allowances to the Vault with GPv2 relayer approval
+    Internal,
+    /// Internal balances to the Vault with GPv2 relayer approval
+    External,
 }
 
-/// Location for which the buyAmount should be transferred to upon order fulfilment
+/// Location for which the buyAmount should be transferred to order's receiver to upon fulfilment
 #[derive(sqlx::Type)]
 #[sqlx(type_name = "BalanceTo")]
 #[sqlx(rename_all = "snake_case")]
 pub enum BalanceTo {
-    /// Ethereum address of Order's receiver
-    Owner,
-    /// Order receiver's BalancerV2 Internal Vault balance
-    VaultInternal,
+    /// TransferAs: ERC20 token transfer
+    Erc20,
+    /// TransferAs: Vault internal balance transfer.
+    Internal,
 }
 
 #[derive(sqlx::Type)]
@@ -147,8 +147,8 @@ impl OrderStoring for Postgres {
             .bind(DbSigningScheme::from(order.order_creation.signing_scheme))
             // TODO - remove these in https://github.com/gnosis/gp-v2-services/issues/900
             .bind(H160::from_slice(&hex!("3328f5f2cEcAF00a2443082B657CedEAf70bfAEf")).as_bytes())
-            .bind(BalanceFrom::Owner)
-            .bind(BalanceTo::Owner)
+            .bind(BalanceFrom::Erc20)
+            .bind(BalanceTo::Erc20)
             // End above TODO
             .execute(&self.pool)
             .await

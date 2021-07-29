@@ -1,5 +1,5 @@
-CREATE TYPE BalanceFrom AS ENUM ('owner', 'vault_internal', 'vault_external');
-CREATE TYPE BalanceTo AS ENUM ('owner', 'vault_internal');
+CREATE TYPE BalanceFrom AS ENUM ('erc20', 'internal', 'external');
+CREATE TYPE BalanceTo AS ENUM ('erc20', 'internal');
 
 -- While we could have simply added columns, set them to not null and made the update values defaults,
 -- This would mean that we will forever have to ensure we don't accidentally insert without specifying
@@ -8,8 +8,8 @@ CREATE TYPE BalanceTo AS ENUM ('owner', 'vault_internal');
 -- 1. Add columns, setting them not null with default values,
 ALTER TABLE orders
     ADD COLUMN settlement_contract bytea NOT NULL default '\x3328f5f2cEcAF00a2443082B657CedEAf70bfAEf',
-    ADD COLUMN balance_from BalanceFrom NOT NULL default 'owner',
-    ADD COLUMN balance_to BalanceTo NOT NULL default 'owner';
+    ADD COLUMN balance_from BalanceFrom NOT NULL default 'erc20',
+    ADD COLUMN balance_to BalanceTo NOT NULL default 'erc20';
 
 -- 2. Drop defaults
 ALTER TABLE orders
