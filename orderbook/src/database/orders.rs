@@ -59,7 +59,7 @@ impl DbOrderKind {
 
 /// Location for which the sellAmount should be drawn upon order fulfilment
 #[derive(sqlx::Type)]
-#[sqlx(type_name = "DbBalanceFrom")]
+#[sqlx(type_name = "BalanceFrom")]
 #[sqlx(rename_all = "snake_case")]
 pub enum DbBalanceFrom {
     /// Direct ERC20 allowances to the Vault relayer contract
@@ -72,7 +72,7 @@ pub enum DbBalanceFrom {
 
 /// Location for which the buyAmount should be transferred to order's receiver to upon fulfilment
 #[derive(sqlx::Type)]
-#[sqlx(type_name = "DbBalanceTo")]
+#[sqlx(type_name = "BalanceTo")]
 #[sqlx(rename_all = "snake_case")]
 pub enum DbBalanceTo {
     /// Pay trade proceeds as an ERC20 token transfer
