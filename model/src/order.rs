@@ -500,9 +500,9 @@ impl Default for BalanceFrom {
 #[enumeration(case_insensitive)]
 #[serde(rename_all = "snake_case")]
 pub enum BalanceTo {
-    /// TransferAs: ERC20 token transfer
+    /// Pay trade proceeds as an ERC20 token transfer
     Erc20,
-    /// TransferAs: Vault internal balance transfer.
+    /// Pay trade proceeds as a Vault internal balance transfer
     Internal,
 }
 
