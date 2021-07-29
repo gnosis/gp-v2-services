@@ -24,7 +24,7 @@ pub struct AppDataFilter {
 pub enum InsertionError {
     #[error("Parsing the string was not successful:")]
     ParsingStringError(#[from] serde_json::Error),
-    #[error("Duplicated Record error:")]
+    #[error("Duplicated record for `{0}`:")]
     DuplicatedRecord(H256),
     #[error("Anyhow error:")]
     AnyhowError(#[from] anyhow::Error),
@@ -187,7 +187,7 @@ mod tests {
         );
         let json = json!(
         {
-            "appCode": serde_json::value::Value::Null,
+            "appCode": null,
             "version": "1.0.0",
             "metadata": {
               "referrer": {

@@ -94,9 +94,9 @@ mod tests {
     fn deserialization_and_back_for_nearly_empty_data() {
         let value = json!(
         {
-            "appCode": serde_json::value::Value::Null,
+            "appCode": null,
             "version": "0.1",
-            "metadata": serde_json::value::Value::Null
+            "metadata": null
         }
         );
         let expected = AppData {
