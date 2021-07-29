@@ -12,7 +12,7 @@ use std::convert::TryInto;
 #[derive(Eq, PartialEq, Clone, Debug, Deserialize, Serialize, Hash, Default)]
 pub struct Referrer {
     #[serde(with = "h160_hexadecimal")]
-    pub referrer: H160,
+    pub address: H160,
     pub version: String,
 }
 
@@ -66,7 +66,7 @@ mod tests {
             "version": "1.0.0",
             "metadata": {
               "referrer": {
-                "referrer":  "0x424a46612794dbb8000194937834250dc723ffa5",
+                "address":  "0x424a46612794dbb8000194937834250dc723ffa5",
                 "version": "0.3.4",
               }
             }
@@ -77,7 +77,7 @@ mod tests {
             app_code: Some(String::from("CowSwap")),
             metadata: Some(Metadata {
                 referrer: Some(Referrer {
-                    referrer: "0x424a46612794dbb8000194937834250dc723ffa5"
+                    address: "0x424a46612794dbb8000194937834250dc723ffa5"
                         .parse()
                         .unwrap(),
                     version: String::from("0.3.4"),
@@ -117,14 +117,14 @@ mod tests {
             "version": "1.0.0",
             "metadata": {
               "referrer": {
-                "referrer":  "0x424a46612794dbb8000194937834250dc723ffa5",
+                "address":  "0x424a46612794dbb8000194937834250dc723ffa5",
                 "version": "0.3.4",
               }
             }
         }
         );
         let app_data_blob = AppDataBlob(serde_json::to_string(&json).unwrap());
-        let expected: H256 = "0x71b4723aecd9c98b339fba8d9e951534605d43ea43be12f43e068c3d11007af8"
+        let expected: H256 = "0xd0b33abbeb0349c0b9d8d1a9e1c38b28efbc9c48842c26697a41a463d019cb16"
             .parse()
             .unwrap();
         assert_eq!(app_data_blob.sha_hash().unwrap(), expected);

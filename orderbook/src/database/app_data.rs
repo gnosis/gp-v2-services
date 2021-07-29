@@ -5,6 +5,7 @@ use futures::StreamExt;
 use model::app_data::AppDataBlob;
 use primitive_types::{H160, H256};
 use std::borrow::Cow;
+use thiserror::Error;
 
 #[async_trait::async_trait]
 pub trait AppDataStoring: Send + Sync {
@@ -19,30 +20,16 @@ pub struct AppDataFilter {
     pub referrer: Option<H160>,
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum InsertionError {
-    ParsingStringError(serde_json::Error),
+    #[error("Parsing the string was not successful:")]
+    ParsingStringError(#[from] serde_json::Error),
+    #[error("Duplicated Record error:")]
     DuplicatedRecord(H256),
-    AnyhowError(anyhow::Error),
-    DbError(sqlx::Error),
-}
-
-impl From<sqlx::Error> for InsertionError {
-    fn from(err: sqlx::Error) -> Self {
-        Self::DbError(err)
-    }
-}
-
-impl From<serde_json::Error> for InsertionError {
-    fn from(err: serde_json::Error) -> Self {
-        Self::ParsingStringError(err)
-    }
-}
-
-impl From<anyhow::Error> for InsertionError {
-    fn from(err: anyhow::Error) -> Self {
-        Self::AnyhowError(err)
-    }
+    #[error("Anyhow error:")]
+    AnyhowError(#[from] anyhow::Error),
+    #[error("Database error:")]
+    DbError(#[from] sqlx::Error),
 }
 
 #[async_trait::async_trait]
@@ -68,7 +55,7 @@ impl AppDataStoring for Postgres {
                     .unwrap_or_default()
                     .referrer
                     .unwrap_or_default()
-                    .referrer
+                    .address
                     .as_ref(),
             )
             .bind(app_data_str.0.as_bytes())
@@ -150,7 +137,7 @@ mod tests {
             "version": "1.0.0",
             "metadata": {
               "referrer": {
-                "referrer":  "0x424a46612794dbb8000194937834250dc723ffa5",
+                "address":  "0x424a46612794dbb8000194937834250dc723ffa5",
                 "version": "0.3.4",
               }
             }
@@ -177,7 +164,7 @@ mod tests {
             "version": "1.0.0",
             "metadata": {
               "referrer": {
-                "referrer":  "0x424a46612794dbb8000194937834250dc723ffa5",
+                "address":  "0x424a46612794dbb8000194937834250dc723ffa5",
                 "version": "0.3.4",
               }
             }
@@ -204,7 +191,7 @@ mod tests {
             "version": "1.0.0",
             "metadata": {
               "referrer": {
-                "referrer":  "0x224a46612794dbb8000194937834250dc723ffa5",
+                "address":  "0x224a46612794dbb8000194937834250dc723ffa5",
                 "version": "0.3.4",
               }
             }
@@ -221,7 +208,7 @@ mod tests {
                     .unwrap()
                     .referrer
                     .unwrap()
-                    .referrer,
+                    .address,
             ),
         };
         db.insert_app_data(&app_data_blob).await.unwrap();
