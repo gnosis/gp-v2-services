@@ -728,7 +728,7 @@ mod tests {
 
         async fn assert_orders(db: &Postgres, filter: &OrderFilter, expected: &[Order]) {
             let filtered = db
-                .orders(&filter)
+                .orders(filter)
                 .try_collect::<HashSet<Order>>()
                 .await
                 .unwrap();
