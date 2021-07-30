@@ -5,7 +5,7 @@ CREATE TABLE app_data (
     file_blob jsonb NOT NULL
 );
 -- Get a specific referral.
-CREATE INDEX referrer ON app_data USING BTREE (referrer);
+CREATE INDEX referrer_index ON app_data USING BTREE (referrer);
 
 -- Get a specific app_code.
-CREATE INDEX app_code ON app_data USING BTREE (app_code);
+CREATE INDEX app_code_index ON app_data USING BTREE (app_code);

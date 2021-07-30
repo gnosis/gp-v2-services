@@ -1,7 +1,7 @@
 //! Contains the app_data file structures to define additional data about tx origin
 
 use crate::h160_hexadecimal::{self};
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use cid::multihash::{Code, MultihashDigest};
 use primitive_types::{H160, H256};
 use serde::{Deserialize, Serialize};
@@ -46,9 +46,10 @@ impl AppDataBlob {
         // let cid = Cid::new_v1(RAW, hash);
         // In order to avoid json duplication, we are deriving the hash from the json object
         let hash = Code::Sha2_256.digest(serde_json::ser::to_string(&self.0.clone())?.as_bytes());
-        let array: [u8; 32] = hash.to_bytes()[2..]
+        let array: [u8; 32] = hash
+            .digest()
             .try_into()
-            .map_err(|_| anyhow!("h256 has wrong length"))?;
+            .expect("sha256 hash unexpected length");
         Ok(H256::from(array))
     }
     pub fn get_app_data(&self) -> Result<AppData, serde_json::Error> {
