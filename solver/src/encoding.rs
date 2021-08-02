@@ -43,20 +43,25 @@ pub fn encode_trade(
 
 fn order_flags(order: &OrderCreation) -> U256 {
     let mut result = 0u8;
+    // The kind is encoded as 1 bit in position 0.
     result |= match order.kind {
         OrderKind::Sell => 0b0,
         OrderKind::Buy => 0b1,
     };
+    // The order fill kind is encoded as 1 bit in position 1.
     result |= (order.partially_fillable as u8) << 1;
+    // The order sell token balance is encoded as 2 bits in position 2.
     result |= match order.sell_token_balance {
         BalanceFrom::Erc20 => 0b00,
         BalanceFrom::External => 0b10,
         BalanceFrom::Internal => 0b11,
     } << 2;
+    // The order buy token balance is encoded as 1 bit in position 4.
     result |= match order.buy_token_balance {
         BalanceTo::Erc20 => 0b0,
         BalanceTo::Internal => 0b1,
     } << 4;
+    // The signing scheme is encoded as a 2 bits in position 5.
     result |= match order.signing_scheme {
         SigningScheme::Eip712 => 0b00,
         SigningScheme::EthSign => 0b01,
@@ -94,6 +99,11 @@ mod tests {
                     signing_scheme: SigningScheme::Eip712,
                     ..Default::default()
                 },
+                // ......0 - sell order
+                // .....0. - fill-or-kill order
+                // ...00.. - ERC20 sell token balance
+                // ..0.... - ERC20 buy token balance
+                // 00..... - EIP-712 signing scheme
                 0b0000000,
             ),
             (
@@ -105,6 +115,11 @@ mod tests {
                     signing_scheme: SigningScheme::Eip712,
                     ..Default::default()
                 },
+                // ......0 - sell order
+                // .....1. - partially fillable order
+                // ...00.. - ERC20 sell token balance
+                // ..1.... - Vault-internal buy token balance
+                // 00..... - EIP-712 signing scheme
                 0b0010010,
             ),
             (
@@ -116,6 +131,11 @@ mod tests {
                     signing_scheme: SigningScheme::Eip712,
                     ..Default::default()
                 },
+                // ......1 - buy order
+                // .....0. - fill-or-kill order
+                // ...10.. - Vault-external sell token balance
+                // ..0.... - ERC20 buy token balance
+                // 00..... - EIP-712 signing scheme
                 0b0001001,
             ),
             (
@@ -127,6 +147,11 @@ mod tests {
                     signing_scheme: SigningScheme::EthSign,
                     ..Default::default()
                 },
+                // ......0 - sell order
+                // .....0. - fill-or-kill order
+                // ...11.. - Vault-internal sell token balance
+                // ..0.... - ERC20 buy token balance
+                // 01..... - Eth-sign signing scheme
                 0b0101100,
             ),
             (
@@ -138,6 +163,11 @@ mod tests {
                     signing_scheme: SigningScheme::EthSign,
                     ..Default::default()
                 },
+                // ......1 - buy order
+                // .....1. - partially fillable order
+                // ...11.. - Vault-internal sell token balance
+                // ..1.... - Vault-internal buy token balance
+                // 01..... - Eth-sign signing scheme
                 0b0111111,
             ),
         ] {
