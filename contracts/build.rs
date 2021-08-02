@@ -18,6 +18,9 @@ fn main() {
     // - https://doc.rust-lang.org/cargo/reference/build-scripts.html#cargorerun-if-changedpath
     println!("cargo:rerun-if-changed=build.rs");
 
+    generate_contract_with_config("BalancerV2Authorizer", |builder| {
+        builder.contract_mod_override("balancer_v2_authorizer")
+    });
     generate_contract_with_config("BalancerV2Vault", |builder| {
         builder
             .contract_mod_override("balancer_v2_vault")
@@ -93,7 +96,7 @@ fn main() {
             .add_network(
                 "1",
                 Network {
-                    address: addr("0x3328f5f2cEcAF00a2443082B657CedEAf70bfAEf"),
+                    address: addr("0x9008D19f58AAbD9eD0D60971565AA8510560ab41"),
                     deployment_information: Some(tx(
                         "34b7f9a340e663df934fcc662b3ec5fcd7cd0c93d3c46f8ce612e94fff803909",
                     )),
@@ -102,7 +105,7 @@ fn main() {
             .add_network(
                 "4",
                 Network {
-                    address: addr("0x3328f5f2cEcAF00a2443082B657CedEAf70bfAEf"),
+                    address: addr("0x9008D19f58AAbD9eD0D60971565AA8510560ab41"),
                     deployment_information: Some(tx(
                         "52badda922fd91052e6682d125daa59dea3ce5c57add5a9d362bec2d6ccfd2b1",
                     )),
@@ -111,7 +114,7 @@ fn main() {
             .add_network(
                 "100",
                 Network {
-                    address: addr("0x3328f5f2cEcAF00a2443082B657CedEAf70bfAEf"),
+                    address: addr("0x9008D19f58AAbD9eD0D60971565AA8510560ab41"),
                     deployment_information: Some(tx(
                         "95bbefbca7162435eeb71bac6960aae4d7112abce87a51ad3952d7b7af0279e3",
                     )),
