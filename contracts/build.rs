@@ -98,7 +98,7 @@ fn main() {
                 Network {
                     address: addr("0x9008D19f58AAbD9eD0D60971565AA8510560ab41"),
                     deployment_information: Some(tx(
-                        "34b7f9a340e663df934fcc662b3ec5fcd7cd0c93d3c46f8ce612e94fff803909",
+                        "f49f90aa5a268c40001d1227b76bb4dd8247f18361fcad9fffd4a7a44f1320d3",
                     )),
                 },
             )
@@ -107,7 +107,7 @@ fn main() {
                 Network {
                     address: addr("0x9008D19f58AAbD9eD0D60971565AA8510560ab41"),
                     deployment_information: Some(tx(
-                        "52badda922fd91052e6682d125daa59dea3ce5c57add5a9d362bec2d6ccfd2b1",
+                        "609fa2e8f32c73c1f5dc21ff60a26238dacb50d4674d336c90d6950bdda17a21",
                     )),
                 },
             )
@@ -116,7 +116,7 @@ fn main() {
                 Network {
                     address: addr("0x9008D19f58AAbD9eD0D60971565AA8510560ab41"),
                     deployment_information: Some(tx(
-                        "95bbefbca7162435eeb71bac6960aae4d7112abce87a51ad3952d7b7af0279e3",
+                        "9ddc538f89cd8433f4a19bc4de0de27e7c68a1d04a14b327185e4bba9af87133",
                     )),
                 },
             )
