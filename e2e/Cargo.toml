@@ -26,4 +26,4 @@ serde_json = "1.0"
 shared = { path = "../shared" }
 solver = { path = "../solver" }
 tokio = { version = "1.9", features = ["macros"] }
-web3 = { version = "0.16", default-features = false }
+web3 = { version = "0.17", default-features = false }

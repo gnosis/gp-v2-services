@@ -631,7 +631,7 @@ dependencies = [
  "shared",
  "solver",
  "tokio",
- "web3",
+ "web3 0.17.0",
 ]
 
 [[package]]
@@ -726,7 +726,7 @@ dependencies = [
  "futures",
  "futures-timer",
  "hex",
- "jsonrpc-core",
+ "jsonrpc-core 17.1.0",
  "lazy_static",
  "primitive-types",
  "secp256k1",
@@ -734,7 +734,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "uint",
- "web3",
+ "web3 0.16.0",
  "zeroize",
 ]
 
@@ -751,7 +751,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tiny-keccak",
- "web3",
+ "web3 0.16.0",
 ]
 
 [[package]]
@@ -981,7 +981,7 @@ dependencies = [
  "primitive-types",
  "serde",
  "serde_with",
- "web3",
+ "web3 0.16.0",
 ]
 
 [[package]]
@@ -1325,6 +1325,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonrpc-core"
+version = "18.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14f7f76aef2d054868398427f6c54943cf3d1caa9a7ec7d0c38d69df97a965eb"
+dependencies = [
+ "futures",
+ "futures-executor",
+ "futures-util",
+ "log",
+ "serde",
+ "serde_derive",
+ "serde_json",
+]
+
+[[package]]
 name = "keccak"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1536,7 +1551,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "web3",
+ "web3 0.17.0",
 ]
 
 [[package]]
@@ -1796,7 +1811,7 @@ dependencies = [
  "tracing",
  "url",
  "warp",
- "web3",
+ "web3 0.17.0",
 ]
 
 [[package]]
@@ -2562,7 +2577,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "warp",
- "web3",
+ "web3 0.17.0",
 ]
 
 [[package]]
@@ -2603,7 +2618,7 @@ dependencies = [
  "hex",
  "hex-literal",
  "itertools",
- "jsonrpc-core",
+ "jsonrpc-core 17.1.0",
  "lazy_static",
  "maplit",
  "mockall",
@@ -2626,7 +2641,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "transaction-retry",
- "web3",
+ "web3 0.17.0",
 ]
 
 [[package]]
@@ -3408,7 +3423,7 @@ dependencies = [
  "futures-timer",
  "headers",
  "hex",
- "jsonrpc-core",
+ "jsonrpc-core 17.1.0",
  "log",
  "parking_lot",
  "pin-project",
@@ -3419,6 +3434,30 @@ dependencies = [
  "serde_json",
  "tiny-keccak",
  "url",
+]
+
+[[package]]
+name = "web3"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd24abe6f2b68e0677f843059faea87bcbd4892e39f02886f366d8222c3c540d"
+dependencies = [
+ "arrayvec 0.5.2",
+ "derive_more",
+ "ethabi",
+ "ethereum-types",
+ "futures",
+ "futures-timer",
+ "hex",
+ "jsonrpc-core 18.0.0",
+ "log",
+ "parking_lot",
+ "pin-project",
+ "rlp",
+ "secp256k1",
+ "serde",
+ "serde_json",
+ "tiny-keccak",
 ]
 
 [[package]]
