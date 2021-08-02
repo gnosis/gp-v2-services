@@ -255,7 +255,7 @@ impl OrderCreation {
 
 // EIP-712
 impl OrderCreation {
-    // See <https://github.com/gnosis/gp-v2-contracts/blob/v1.0.0/src/contracts/libraries/GPv2Order.sol>
+    // See <https://github.com/gnosis/gp-v2-contracts/blob/v1.0.1/src/contracts/libraries/GPv2Order.sol>
     pub const TYPE_HASH: [u8; 32] =
         hex!("d5a25ba2e97094ad7d83dc28a6572da797d6b3e7fc6663bd93efb789fc17e489");
 
@@ -635,7 +635,7 @@ mod tests {
     }
 
     // from the test `should recover signing address for all supported ECDSA-based schemes` in
-    // <https://github.com/gnosis/gp-v2-contracts/blob/v1.0.0/test/GPv2Signing.test.ts#L280>.
+    // <https://github.com/gnosis/gp-v2-contracts/blob/v1.0.1/test/GPv2Signing.test.ts#L280>.
     #[test]
     fn order_creation_signature() {
         let domain_separator = DomainSeparator(hex!(
@@ -687,7 +687,7 @@ mod tests {
     }
 
     // from the test `should compute order unique identifier` in
-    // <https://github.com/gnosis/gp-v2-contracts/blob/v1.0.0/test/GPv2Signing.test.ts#L143>
+    // <https://github.com/gnosis/gp-v2-contracts/blob/v1.0.1/test/GPv2Signing.test.ts#L143>
     #[test]
     fn compute_order_uid() {
         let domain_separator = DomainSeparator(hex!(
