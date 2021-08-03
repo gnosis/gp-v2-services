@@ -84,10 +84,7 @@ impl BufferRetrieving for BufferRetriever {
                     .into_iter()
                     .zip(join_all(futures).await.into_iter())
                     .map(|(&address, balance)| {
-                        (
-                            address,
-                            balance.map_err(BufferRetrievalError::Erc20),
-                        )
+                        (address, balance.map_err(BufferRetrievalError::Erc20))
                     }),
             )
             .collect()
