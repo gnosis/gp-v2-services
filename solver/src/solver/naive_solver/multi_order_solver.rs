@@ -157,6 +157,15 @@ fn solve_with_uniswap(
     ))
     .ok()?;
 
+    // In theory, not all limit orders are GPv2 trades (although in practice
+    // they are). Since those orders don't generate trades, they aren't
+    // considered in the `uniswap_out_with_rounding` computation. Luckily, they
+    // don't get any surplus anyway, so we can just use the original output
+    // amount since the rounding error will come from the surplus that those
+    // orders would have otherwise received.
+    // This only really matters for unit tests ¯\_(ツ)_/¯.
+    let uniswap_out_with_rounding = uniswap_out_with_rounding.max(uniswap_out);
+
     settlement
         .with_liquidity(
             pool,
@@ -291,11 +300,13 @@ fn is_valid_solution(solution: &Settlement) -> bool {
 #[cfg(test)]
 mod tests {
     use liquidity::tests::CapturingSettlementHandler;
+    use maplit::hashmap;
     use model::{
         order::{Order, OrderCreation},
         TokenPair,
     };
     use num::rational::Ratio;
+    use shared::{baseline_solver::BaselineSolvable, sources::uniswap::pool_fetching::Pool};
 
     use super::*;
 
@@ -346,6 +357,8 @@ mod tests {
         assert_eq!(interaction.input.0, token_b);
         assert_eq!(interaction.output.0, token_a);
 
+        dbg!(&orders, &interaction);
+
         // Make sure the sell amounts +/- uniswap interaction satisfy min_buy amounts
         assert!(orders[0].sell_amount + interaction.output.1 >= orders[1].buy_amount);
         assert!(orders[1].sell_amount - interaction.input.1 > orders[0].buy_amount);
@@ -356,10 +369,10 @@ mod tests {
 
         // Multiplying sellAmount with priceA, gives us sell value in "$", divided by priceB gives us value in buy token
         // We should have at least as much to give (sell amount +/- uniswap) as is expected by the buyer
-        let expected_buy = orders[0].sell_amount * price_a / price_b;
+        let expected_buy = (orders[0].sell_amount * price_a).ceil_div(&price_b);
         assert!(orders[1].sell_amount - interaction.input.1 >= expected_buy);
 
-        let expected_buy = orders[1].sell_amount * price_b / price_a;
+        let expected_buy = (orders[1].sell_amount * price_b).ceil_div(&price_a);
         assert!(orders[0].sell_amount + interaction.input.1 >= expected_buy);
     }
 
@@ -882,5 +895,77 @@ mod tests {
         // Only the second order should match
         let result = solve(orders, &pool).unwrap();
         assert_eq!(result.trades().len(), 1);
+    }
+
+    #[test]
+    fn rounds_prices_in_favour_of_traders() {
+        let token_a = Address::from_low_u64_be(0);
+        let token_b = Address::from_low_u64_be(1);
+        let orders = vec![
+            Order {
+                order_creation: OrderCreation {
+                    sell_token: token_a,
+                    buy_token: token_b,
+                    sell_amount: 9_000_000.into(),
+                    buy_amount: 8_500_000.into(),
+                    kind: OrderKind::Sell,
+                    partially_fillable: false,
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+            .into(),
+            Order {
+                order_creation: OrderCreation {
+                    buy_token: token_a,
+                    sell_token: token_b,
+                    buy_amount: 8_000_001.into(),
+                    sell_amount: 8_500_000.into(),
+                    kind: OrderKind::Buy,
+                    partially_fillable: false,
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+            .into(),
+        ];
+
+        let pool = Pool::uniswap(
+            TokenPair::new(token_a, token_b).unwrap(),
+            (1_000_000_000_000_000_000, 1_000_000_000_000_000_000),
+        );
+
+        // Note that these orders have an excess of ~1e6 T_a because the first
+        // order is a sell order selling 9e6 T_a and the second order is buying
+        // 8e6 T_a. Use this to compute the exact amount that will get swapped
+        // with the pool. This will define our prices.
+        let excess_amount_a = 999_999.into();
+        let swapped_amount_b = pool
+            .get_amount_out(token_b, (excess_amount_a, token_a))
+            .unwrap();
+
+        // The naive solver sets the prices to the the swapped amounts, so:
+        let expected_prices = hashmap! {
+            token_a => swapped_amount_b,
+            token_b => excess_amount_a,
+        };
+
+        let settlement = solve(orders, &pool.into()).unwrap();
+        let trades = settlement.executed_trades().collect::<Vec<_>>();
+
+        // Check the prices are set according to the expected pool swap:
+        assert_eq!(settlement.clearing_prices(), &expected_prices);
+
+        // Check the executed buy amount gets rounded up for the sell order:
+        assert_eq!(
+            trades[0].buy_amount,
+            U256::from(9_000_000) * expected_prices[&token_a] / expected_prices[&token_b] + 1,
+        );
+
+        // Check the executed sell amount gets rounded down for the buy order:
+        assert_eq!(
+            trades[1].sell_amount,
+            U256::from(8_000_001) * expected_prices[&token_a] / expected_prices[&token_b],
+        );
     }
 }

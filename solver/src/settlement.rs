@@ -76,7 +76,7 @@ impl Trade {
         let order = &self.order.order_creation;
         let (sell_amount, buy_amount) = match order.kind {
             OrderKind::Sell => {
-                let sell_amount = dbg!(self.executed_amount);
+                let sell_amount = self.executed_amount;
                 let buy_amount = sell_amount
                     .checked_mul(sell_price)?
                     .checked_ceil_div(&buy_price)?;
@@ -194,9 +194,10 @@ impl Settlement {
             .iter()
             .map(move |trade| {
                 let order = &trade.order.order_creation;
-                let sell_price = self.clearing_price(order.sell_token)?;
-                let buy_price = self.clearing_price(order.buy_token)?;
-                trade.executed_amounts(sell_price, buy_price)
+                trade.executed_amounts(
+                    self.clearing_price(order.sell_token)?,
+                    self.clearing_price(order.buy_token)?,
+                )
             })
             .map(|execution| execution.expect("invalid trade was added to encoder"))
     }

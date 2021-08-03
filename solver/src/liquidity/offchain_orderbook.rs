@@ -145,15 +145,17 @@ pub mod tests {
         let native_token = dummy_contract!(WETH9, native_token_address);
 
         let executed_amount = U256::from(1337);
+        let executed_buy_amount = U256::from(2 * 1337);
+
         let prices = hashmap! {
             native_token.address() => U256::from(100),
             sell_token => U256::from(200),
         };
-        let executed_buy_amount = U256::from(2 * 1337);
         let order = Order {
             order_creation: OrderCreation {
                 buy_token: BUY_ETH_ADDRESS,
                 sell_token,
+                sell_amount: 1337.into(),
                 kind: OrderKind::Sell,
                 ..Default::default()
             },
@@ -196,6 +198,7 @@ pub mod tests {
         let order = Order {
             order_creation: OrderCreation {
                 buy_token: BUY_ETH_ADDRESS,
+                buy_amount: 1337.into(),
                 sell_token,
                 kind: OrderKind::Buy,
                 ..Default::default()
@@ -242,7 +245,9 @@ pub mod tests {
         let order = Order {
             order_creation: OrderCreation {
                 buy_token: not_buy_eth_address,
+                buy_amount: 1337.into(),
                 sell_token,
+                sell_amount: 1337.into(),
                 ..Default::default()
             },
             ..Default::default()

@@ -62,7 +62,10 @@ pub async fn create_priority_estimator(
             GasEstimatorType::GnosisSafe => estimators.push(Box::new(
                 GnosisSafeGasStation::with_network_id(&network_id, client.clone())?,
             )),
-            GasEstimatorType::Web3 => estimators.push(Box::new(web3.clone())),
+            //GasEstimatorType::Web3 => estimators.push(Box::new(web3.clone())),
+            GasEstimatorType::Web3 => {
+                estimators.push(Box::new(FakeGasPriceEstimator(Arc::new(Mutex::new(0.0)))))
+            }
         }
     }
     Ok(PriorityGasPriceEstimating::new(estimators))

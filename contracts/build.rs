@@ -178,6 +178,7 @@ fn generate_contract_with_config(
 
     if let Ok(address) = fs::read_to_string(&address_file) {
         println!("cargo:rerun-if-changed={}", address_file.display());
+        builder = builder.add_network_str("1337", address.trim());
         builder = builder.add_network_str("5777", address.trim());
     }
 
