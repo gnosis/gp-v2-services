@@ -11,7 +11,7 @@ use crate::{
 };
 use ::model::order::OrderKind;
 use anyhow::{ensure, Context, Result};
-use buffers::BufferRetrieving;
+use buffers::{BufferRetrievalError, BufferRetrieving};
 use ethcontract::{Account, U256};
 use futures::join;
 use lazy_static::lazy_static;
@@ -280,20 +280,20 @@ impl HttpSolver {
         let _buffers: HashMap<_, _> = buffers_result
             .drain()
             .filter_map(|(token, buffer)| match buffer {
+                Err(BufferRetrievalError::Erc20(err)) if is_transaction_failure(&err.inner) => {
+                    tracing::debug!(
+                        "Failed to fetch buffers for token {} with transaction failure {}",
+                        token,
+                        err
+                    );
+                    None
+                }
                 Err(err) => {
-                    if is_transaction_failure(&err.inner) {
-                        tracing::debug!(
-                            "Failed to fetch buffers for token {} with transaction failure {}",
-                            token,
-                            err
-                        );
-                    } else {
-                        tracing::error!(
-                            "Failed to fetch buffers contract balance for token {} with error {}",
-                            token,
-                            err
-                        );
-                    }
+                    tracing::error!(
+                        "Failed to fetch buffers contract balance for token {} with error {:?}",
+                        token,
+                        err
+                    );
                     None
                 }
                 Ok(b) => Some((token, b)),
