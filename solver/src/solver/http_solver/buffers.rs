@@ -32,13 +32,12 @@ pub trait BufferRetrieving: Send + Sync {
 #[async_trait::async_trait]
 impl BufferRetrieving for BufferRetriever {
     async fn get_buffers(&self, tokens: &[H160]) -> HashMap<H160, U256> {
-        let web3 = Web3::new(self.web3.transport().clone());
         let mut batch = CallBatch::new(self.web3.transport());
 
         let futures = tokens
             .iter()
             .map(|address| {
-                let erc20 = ERC20::at(&web3, *address);
+                let erc20 = ERC20::at(&self.web3, *address);
                 erc20
                     .methods()
                     .balance_of(self.settlement_contract)
