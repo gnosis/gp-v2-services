@@ -114,8 +114,7 @@ impl Orderbook {
             .is_valid_fee(order.sell_token, order.fee_amount)
             .await
         {
-            println!("INSUFFICIENT FEE");
-            //return Ok(AddOrderResult::InsufficientFee);
+            return Ok(AddOrderResult::InsufficientFee);
         }
         let order = match Order::from_order_creation(
             order,

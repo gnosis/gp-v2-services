@@ -33,7 +33,6 @@ macro_rules! tx_value {
         $call
             .from($acc.clone())
             .value($value)
-            .gas_price(0.into())
             .send()
             .await
             .expect(&format!("{} failed", NAME))
@@ -136,7 +135,7 @@ impl OrderbookServices {
             .await
             .expect("Could not get chainId")
             .as_u64();
-        let db = Arc::new(Postgres::new("postgresql://localhost/?user=me&password=").unwrap());
+        let db = Arc::new(Postgres::new("postgresql://").unwrap());
         db.clear().await.unwrap();
         let event_updater = Arc::new(EventUpdater::new(
             gpv2.settlement.clone(),

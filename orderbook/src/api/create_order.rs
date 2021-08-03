@@ -13,7 +13,6 @@ pub fn create_order_request(
 }
 
 pub fn create_order_response(result: Result<AddOrderResult>) -> impl Reply {
-    println!("{:?}", result);
     let (body, status_code) = match result {
         Ok(AddOrderResult::Added(uid)) => (warp::reply::json(&uid), StatusCode::CREATED),
         Ok(AddOrderResult::UnsupportedBuyTokenDestination(dest)) => (

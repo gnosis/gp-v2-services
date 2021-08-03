@@ -161,9 +161,9 @@ fn solve_with_uniswap(
     // they are). Since those orders don't generate trades, they aren't
     // considered in the `uniswap_out_with_rounding` computation. Luckily, they
     // don't get any surplus anyway, so we can just use the original output
-    // amount since the rounding error will come from the surplus that those
-    // orders would have otherwise received.
-    // This only really matters for unit tests ¯\_(ツ)_/¯.
+    // amount as the rounding error will come from the surplus that those orders
+    // would have otherwise received.
+    // This only really matters for unit tests anyway ¯\_(ツ)_/¯.
     let uniswap_out_with_rounding = uniswap_out_with_rounding.max(uniswap_out);
 
     settlement
@@ -356,8 +356,6 @@ mod tests {
         let interaction = amm_handler.calls()[0].clone();
         assert_eq!(interaction.input.0, token_b);
         assert_eq!(interaction.output.0, token_a);
-
-        dbg!(&orders, &interaction);
 
         // Make sure the sell amounts +/- uniswap interaction satisfy min_buy amounts
         assert!(orders[0].sell_amount + interaction.output.1 >= orders[1].buy_amount);
