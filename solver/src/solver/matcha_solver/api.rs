@@ -170,7 +170,7 @@ fn parse_matcha_response_text(
     match serde_json::from_str::<RawResponse>(response_text) {
         Ok(RawResponse::ResponseOk(response)) => Ok(response),
         Ok(RawResponse::ResponseErr { error: message }) => match &message[..] {
-            "ServerError" => Err(MatchaResponseError::ServerError(format!("{:?}", query))),
+            "Server Error" => Err(MatchaResponseError::ServerError(format!("{:?}", query))),
             _ => Err(MatchaResponseError::UnknownMatchaError(message)),
         },
         Err(err) => Err(MatchaResponseError::DeserializeError(err)),
