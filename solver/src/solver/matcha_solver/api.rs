@@ -76,7 +76,7 @@ impl SwapQuery {
 }
 
 /// A Matcha API swap response.
-#[derive(Clone, Derivative, Deserialize, PartialEq)]
+#[derive(Clone, Default, Derivative, Deserialize, PartialEq)]
 #[derivative(Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SwapResponse {

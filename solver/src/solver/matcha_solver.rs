@@ -508,4 +508,101 @@ mod tests {
             .unwrap();
         assert_eq!(handler.calls(), vec![4321.into()]);
     }
+
+    #[tokio::test]
+    async fn settle_order_retry_until_succeeds() {
+        let mut allowance_fetcher = Box::new(MockAllowanceManaging::new());
+        allowance_fetcher
+            .expect_get_approval()
+            .returning(|_, _, _| Ok(Approval::AllowanceSufficient));
+
+        let mut client = Box::new(MockMatchaApi::new());
+        let mut seq = Sequence::new();
+        client
+            .expect_get_swap()
+            .times(2)
+            .returning(|_| {
+                // Retryable error
+                Err(MatchaResponseError::ServerError(String::new()))
+            })
+            .in_sequence(&mut seq);
+        client
+            .expect_get_swap()
+            .times(1)
+            .returning(|_| {
+                Ok(SwapResponse {
+                    ..Default::default()
+                })
+            })
+            .in_sequence(&mut seq);
+
+        let solver = MatchaSolver {
+            account: account(),
+            client,
+            allowance_fetcher,
+        };
+
+        let order = LimitOrder {
+            ..Default::default()
+        };
+        assert!(solver.settle_order(order).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn settle_order_retry_until_exceeds() {
+        let mut allowance_fetcher = Box::new(MockAllowanceManaging::new());
+        allowance_fetcher
+            .expect_get_approval()
+            .returning(|_, _, _| Ok(Approval::AllowanceSufficient));
+
+        let mut client = Box::new(MockMatchaApi::new());
+        let mut seq = Sequence::new();
+        client
+            .expect_get_swap()
+            .times(3)
+            .returning(|_| {
+                // Retryable error
+                Err(MatchaResponseError::ServerError(String::new()))
+            })
+            .in_sequence(&mut seq);
+        let solver = MatchaSolver {
+            account: account(),
+            client,
+            allowance_fetcher,
+        };
+        let order = LimitOrder {
+            ..Default::default()
+        };
+        assert!(solver.settle_order(order).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn settle_order_unretryable_error() {
+        let mut allowance_fetcher = Box::new(MockAllowanceManaging::new());
+        allowance_fetcher
+            .expect_get_approval()
+            .returning(|_, _, _| Ok(Approval::AllowanceSufficient));
+
+        let mut client = Box::new(MockMatchaApi::new());
+        let mut seq = Sequence::new();
+        client
+            .expect_get_swap()
+            .times(1)
+            .returning(|_| {
+                // Non-Retryable error
+                Err(MatchaResponseError::UnknownMatchaError(String::new()))
+            })
+            .in_sequence(&mut seq);
+
+        let solver = MatchaSolver {
+            account: account(),
+            client,
+            allowance_fetcher,
+        };
+
+        let order = LimitOrder {
+            ..Default::default()
+        };
+        assert!(solver.settle_order(order).await.is_err());
+    }
 }
