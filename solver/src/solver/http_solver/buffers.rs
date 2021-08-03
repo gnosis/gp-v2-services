@@ -54,3 +54,34 @@ impl BufferRetrieving for BufferRetriever {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use contracts::GPv2Settlement;
+    use hex_literal::hex;
+    use model::order::BUY_ETH_ADDRESS;
+    use shared::transport::create_test_transport;
+
+    #[tokio::test]
+    #[ignore]
+    async fn retrieves_buffers_on_rinkeby() {
+        let web3 = Web3::new(create_test_transport(
+            &std::env::var("NODE_URL_RINKEBY").unwrap(),
+        ));
+        let settlement_contract = GPv2Settlement::deployed(&web3).await.unwrap();
+        let weth = H160(hex!("c778417E063141139Fce010982780140Aa0cD5Ab"));
+        let dai = H160(hex!("c7ad46e0b8a400bb3c915120d284aafba8fc4735"));
+        let not_a_token = H160(hex!("badbadbadbadbadbadbadbadbadbadbadbadbadb"));
+
+        let buffer_retriever = BufferRetriever::new(web3, settlement_contract.address());
+        let buffers = buffer_retriever
+            .get_buffers(&[weth, dai, BUY_ETH_ADDRESS, not_a_token])
+            .await;
+        println!("Buffers: {:#?}", buffers);
+        assert!(buffers.get(&weth).unwrap().is_ok());
+        assert!(buffers.get(&dai).unwrap().is_ok());
+        assert!(buffers.get(&BUY_ETH_ADDRESS).unwrap().is_err());
+        assert!(buffers.get(&not_a_token).unwrap().is_err());
+    }
+}
