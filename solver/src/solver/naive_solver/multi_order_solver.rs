@@ -1,10 +1,13 @@
 use crate::{liquidity, settlement::Settlement};
 use anyhow::Result;
-use liquidity::{AmmOrderExecution, ConstantProductOrder, LimitOrder};
+use liquidity::{AmmOrderExecution, ConstantProductOrder, LimitOrder, Price};
 use model::order::OrderKind;
 use num::{rational::Ratio, BigInt, BigRational};
 use primitive_types::U256;
-use shared::conversions::{big_rational_to_u256, u256_to_big_int, RatioExt, U256Ext};
+use shared::{
+    baseline_solver::BaselineSolvable,
+    conversions::{big_int_to_u256, big_rational_to_u256, u256_to_big_int, RatioExt, U256Ext},
+};
 use std::collections::HashMap;
 use web3::types::Address;
 
@@ -35,15 +38,14 @@ impl TokenContext {
 }
 
 pub fn solve(
-    orders: impl Iterator<Item = LimitOrder> + Clone,
+    orders: impl IntoIterator<Item = LimitOrder>,
     pool: &ConstantProductOrder,
 ) -> Option<Settlement> {
-    let mut orders: Vec<LimitOrder> = orders.collect();
+    let mut orders: Vec<LimitOrder> = orders.into_iter().collect();
     while !orders.is_empty() {
-        let (context_a, context_b) = split_into_contexts(orders.clone().into_iter(), pool);
+        let (context_a, context_b) = split_into_contexts(&orders, pool);
         if let Some(valid_solution) =
-            solve_orders(orders.clone().into_iter(), pool, &context_a, &context_b)
-                .filter(is_valid_solution)
+            solve_orders(&orders, pool, &context_a, &context_b).filter(is_valid_solution)
         {
             return Some(valid_solution);
         } else {
@@ -77,7 +79,7 @@ pub fn solve(
 /// for that pair is not available.
 ///
 fn solve_orders(
-    orders: impl Iterator<Item = LimitOrder> + Clone,
+    orders: &[LimitOrder],
     pool: &ConstantProductOrder,
     context_a: &TokenContext,
     context_b: &TokenContext,
@@ -95,7 +97,7 @@ fn solve_orders(
 /// Creates a solution using the current AMM spot price, without using any of its liquidity
 ///
 fn solve_without_uniswap(
-    orders: impl Iterator<Item = LimitOrder> + Clone,
+    orders: &[LimitOrder],
     context_a: &TokenContext,
     context_b: &TokenContext,
 ) -> Result<Settlement> {
@@ -104,7 +106,7 @@ fn solve_without_uniswap(
         context_b.address => context_a.reserve,
     });
     for order in orders {
-        settlement.with_liquidity(&order, order.full_execution_amount())?;
+        settlement.with_liquidity(order, order.full_execution_amount())?;
     }
 
     Ok(settlement)
@@ -115,33 +117,80 @@ fn solve_without_uniswap(
 /// The clearing price is the effective exchange rate used by the AMM interaction.
 ///
 fn solve_with_uniswap(
-    orders: impl Iterator<Item = LimitOrder> + Clone,
+    orders: &[LimitOrder],
     pool: &ConstantProductOrder,
     shortage: &TokenContext,
     excess: &TokenContext,
 ) -> Option<Settlement> {
+    let uniswap_in_token = excess.address;
+    let uniswap_out_token = shortage.address;
+
     let uniswap_out = compute_uniswap_out(shortage, excess, pool.fee)?;
     let uniswap_in = compute_uniswap_in(uniswap_out.clone(), shortage, excess, pool.fee);
 
     let uniswap_out = big_rational_to_u256(&uniswap_out).ok()?;
     let uniswap_in = big_rational_to_u256(&uniswap_in).ok()?;
 
+    // Because the smart contracts round in the favour of the traders, it could
+    // be that we actually require a bit more from the Uniswap pool in order to
+    // pay out all proceeds. Compute that amount:
+    let uniswap_out_with_rounding = big_int_to_u256(
+        &orders
+            .iter()
+            .try_fold(BigInt::default(), |total, order| -> Result<BigInt> {
+                let delta = if order.sell_token == uniswap_out_token {
+                    -order
+                        .executed_sell_amount(
+                            Price {
+                                sell_price: uniswap_in,
+                                buy_price: uniswap_out,
+                            },
+                            None,
+                        )?
+                        .to_big_int()
+                } else {
+                    order
+                        .executed_buy_amount(
+                            Price {
+                                sell_price: uniswap_out,
+                                buy_price: uniswap_in,
+                            },
+                            None,
+                        )?
+                        .to_big_int()
+                };
+                dbg!(&delta);
+                Ok(total + delta)
+            })
+            .ok()?,
+    )
+    .ok()?;
+    let uniswap_in_with_rounding = pool.get_amount_in(
+        uniswap_in_token,
+        (uniswap_out_with_rounding, uniswap_out_token),
+    )?;
+
     let mut settlement = Settlement::new(maplit::hashmap! {
-        shortage.address => uniswap_in,
-        excess.address => uniswap_out,
+        uniswap_in_token => uniswap_in_with_rounding,
+        uniswap_out_token => uniswap_out_with_rounding,
     });
     for order in orders {
         settlement
-            .with_liquidity(&order, order.full_execution_amount())
+            .with_liquidity(order, order.full_execution_amount())
             .ok()?;
     }
+
+    let trades = settlement.trades();
+    dbg!(&trades);
+    dbg!(&uniswap_in, &uniswap_in_with_rounding);
+    dbg!(&uniswap_out, &uniswap_out_with_rounding);
 
     settlement
         .with_liquidity(
             pool,
             AmmOrderExecution {
-                input: (excess.address, uniswap_in),
-                output: (shortage.address, uniswap_out),
+                input: (uniswap_in_token, uniswap_in_with_rounding),
+                output: (uniswap_out_token, uniswap_out_with_rounding),
             },
         )
         .ok()?;
@@ -162,7 +211,7 @@ impl ConstantProductOrder {
 }
 
 fn split_into_contexts(
-    orders: impl Iterator<Item = LimitOrder>,
+    orders: &[LimitOrder],
     pool: &ConstantProductOrder,
 ) -> (TokenContext, TokenContext) {
     let mut contexts = HashMap::new();
@@ -318,7 +367,7 @@ mod tests {
             fee: Ratio::new(3, 1000),
             settlement_handling: amm_handler.clone(),
         };
-        let result = solve(orders.clone().into_iter(), &pool).unwrap();
+        let result = solve(orders.clone(), &pool).unwrap();
 
         // Make sure the uniswap interaction is using the correct direction
         let interaction = amm_handler.calls()[0].clone();
@@ -378,7 +427,7 @@ mod tests {
             fee: Ratio::new(3, 1000),
             settlement_handling: amm_handler.clone(),
         };
-        let result = solve(orders.clone().into_iter(), &pool).unwrap();
+        let result = solve(orders.clone(), &pool).unwrap();
 
         // Make sure the uniswap interaction is using the correct direction
         let interaction = amm_handler.calls()[0].clone();
@@ -434,7 +483,7 @@ mod tests {
             fee: Ratio::new(3, 1000),
             settlement_handling: amm_handler.clone(),
         };
-        let result = solve(orders.clone().into_iter(), &pool).unwrap();
+        let result = solve(orders.clone(), &pool).unwrap();
 
         // Make sure the uniswap interaction is using the correct direction
         let interaction = amm_handler.calls()[0].clone();
@@ -494,7 +543,7 @@ mod tests {
             fee: Ratio::new(3, 1000),
             settlement_handling: amm_handler.clone(),
         };
-        let result = solve(orders.clone().into_iter(), &pool).unwrap();
+        let result = solve(orders.clone(), &pool).unwrap();
 
         // Make sure the uniswap interaction is using the correct direction
         let interaction = amm_handler.calls()[0].clone();
@@ -558,7 +607,7 @@ mod tests {
             fee: Ratio::new(3, 1000),
             settlement_handling: amm_handler.clone(),
         };
-        let result = solve(orders.into_iter(), &pool).unwrap();
+        let result = solve(orders, &pool).unwrap();
         assert!(amm_handler.calls().is_empty());
         assert_eq!(
             result.clearing_prices(),
@@ -639,7 +688,7 @@ mod tests {
             fee: Ratio::new(3, 1000),
             settlement_handling: amm_handler,
         };
-        let result = solve(orders.into_iter(), &pool).unwrap();
+        let result = solve(orders, &pool).unwrap();
 
         assert_eq!(result.trades().len(), 2);
         assert!(is_valid_solution(&result));
@@ -685,7 +734,7 @@ mod tests {
             fee: Ratio::new(3, 1000),
             settlement_handling: amm_handler,
         };
-        assert!(solve(orders.into_iter(), &pool).is_none());
+        assert!(solve(orders, &pool).is_none());
     }
 
     #[test]
@@ -812,7 +861,7 @@ mod tests {
             settlement_handling: amm_handler,
         };
         // This line should not panic.
-        solve(orders.into_iter(), &pool);
+        solve(orders, &pool);
     }
 
     #[test]
@@ -856,10 +905,10 @@ mod tests {
         };
 
         // The first order by itself should not be matchable.
-        assert!(solve(orders[0..1].to_vec().into_iter(), &pool).is_none());
+        assert!(solve(orders[0..1].to_vec(), &pool).is_none());
 
         // Only the second order should match
-        let result = solve(orders.into_iter(), &pool).unwrap();
+        let result = solve(orders, &pool).unwrap();
         assert_eq!(result.trades().len(), 1);
     }
 }

@@ -1,3 +1,4 @@
+use super::{LimitOrder, SettlementHandling};
 use crate::interactions::UnwrapWethInteraction;
 use crate::orderbook::OrderBookApi;
 use crate::settlement::SettlementEncoder;
@@ -6,10 +7,9 @@ use contracts::WETH9;
 use ethcontract::H160;
 use model::order::{Order, OrderKind, OrderUid, BUY_ETH_ADDRESS};
 use primitive_types::U256;
-use std::{collections::HashMap, sync::Arc};
-
-use super::{LimitOrder, SettlementHandling};
+use shared::conversions::U256Ext as _;
 use std::collections::HashSet;
+use std::{collections::HashMap, sync::Arc};
 
 impl OrderBookApi {
     /// Returns a list of limit orders coming from the offchain orderbook API
@@ -125,7 +125,7 @@ fn executed_buy_amount(order: &Order, executed_amount: U256, price: Price) -> Op
     Some(match order.order_creation.kind {
         OrderKind::Sell => executed_amount
             .checked_mul(price.sell_price)?
-            .checked_div(price.buy_price)?,
+            .checked_ceil_div(&price.buy_price)?,
         OrderKind::Buy => executed_amount,
     })
 }

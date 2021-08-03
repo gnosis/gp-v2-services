@@ -8,7 +8,7 @@ use anyhow::Result;
 use model::order::Order;
 use num::{BigRational, Signed, Zero};
 use primitive_types::{H160, U256};
-use shared::conversions::U256Ext;
+use shared::conversions::U256Ext as _;
 use std::collections::HashMap;
 
 pub use settlement_encoder::SettlementEncoder;
