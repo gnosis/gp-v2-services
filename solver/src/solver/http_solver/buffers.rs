@@ -1,5 +1,5 @@
 use contracts::ERC20;
-use ethcontract::{batch::CallBatch, H160, U256};
+use ethcontract::{batch::CallBatch, errors::MethodError, H160, U256};
 use futures::future::join_all;
 use shared::Web3;
 use std::collections::HashMap;
@@ -26,12 +26,12 @@ impl BufferRetriever {
 #[cfg_attr(test, mockall::automock)]
 #[async_trait::async_trait]
 pub trait BufferRetrieving: Send + Sync {
-    async fn get_buffers(&self, tokens: &[H160]) -> HashMap<H160, U256>;
+    async fn get_buffers(&self, tokens: &[H160]) -> HashMap<H160, Result<U256, MethodError>>;
 }
 
 #[async_trait::async_trait]
 impl BufferRetrieving for BufferRetriever {
-    async fn get_buffers(&self, tokens: &[H160]) -> HashMap<H160, U256> {
+    async fn get_buffers(&self, tokens: &[H160]) -> HashMap<H160, Result<U256, MethodError>> {
         let mut batch = CallBatch::new(self.web3.transport());
 
         let futures = tokens
@@ -50,16 +50,7 @@ impl BufferRetrieving for BufferRetriever {
         tokens
             .iter()
             .zip(join_all(futures).await.into_iter())
-            .filter_map(|(address, balance)| {
-                if balance.is_err() {
-                    tracing::debug!(
-                        "Failed to fetch settlement contract balance for token {} with error {}",
-                        address,
-                        balance.as_ref().unwrap_err()
-                    );
-                }
-                Some((*address, balance.ok()?))
-            })
+            .map(|(&address, balance)| (address, balance))
             .collect()
     }
 }

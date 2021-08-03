@@ -6,6 +6,7 @@ use self::{model::*, settlement::SettlementContext};
 use crate::{
     liquidity::{ConstantProductOrder, LimitOrder, Liquidity, WeightedProductOrder},
     settlement::Settlement,
+    settlement_submission::retry::is_transaction_failure,
     solver::Solver,
 };
 use ::model::order::OrderKind;
@@ -269,12 +270,35 @@ impl HttpSolver {
     ) -> Result<(BatchAuctionModel, SettlementContext)> {
         let tokens = self.map_tokens_for_solver(liquidity.as_slice());
 
-        let (token_infos, price_estimates, _buffers) = join!(
+        let (token_infos, price_estimates, mut buffers_result) = join!(
             self.token_info_fetcher.get_token_infos(tokens.as_slice()),
             self.price_estimator
                 .estimate_prices(tokens.as_slice(), self.native_token),
             self.buffer_retriever.get_buffers(tokens.as_slice())
         );
+
+        let _buffers: HashMap<_, _> = buffers_result
+            .drain()
+            .filter_map(|(token, buffer)| match buffer {
+                Err(err) => {
+                    if is_transaction_failure(&err.inner) {
+                        tracing::debug!(
+                            "Failed to fetch buffers for token {} with transaction failure {}",
+                            token,
+                            err
+                        );
+                    } else {
+                        tracing::error!(
+                            "Failed to fetch buffers contract balance for token {} with error {}",
+                            token,
+                            err
+                        );
+                    }
+                    None
+                }
+                Ok(b) => Some((token, b)),
+            })
+            .collect();
 
         let price_estimates: HashMap<H160, Result<BigRational, _>> =
             tokens.iter().cloned().zip(price_estimates).collect();
@@ -519,8 +543,8 @@ mod tests {
             .expect_get_buffers()
             .return_once(move |_| {
                 hashmap! {
-                    buy_token => U256::from(42),
-                    sell_token => U256::from(1337),
+                    buy_token => Ok(U256::from(42)),
+                    sell_token => Ok(U256::from(1337)),
                 }
             });
         let mock_buffer_retriever: Arc<dyn BufferRetrieving> = Arc::new(mock_buffer_retriever);
