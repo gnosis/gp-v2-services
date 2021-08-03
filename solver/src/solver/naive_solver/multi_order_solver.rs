@@ -1,12 +1,11 @@
 use crate::{liquidity, settlement::Settlement};
 use anyhow::Result;
-use liquidity::{AmmOrderExecution, ConstantProductOrder, LimitOrder, Price};
+use liquidity::{AmmOrderExecution, ConstantProductOrder, LimitOrder};
 use model::order::OrderKind;
 use num::{rational::Ratio, BigInt, BigRational};
 use primitive_types::U256;
-use shared::{
-    baseline_solver::BaselineSolvable,
-    conversions::{big_int_to_u256, big_rational_to_u256, u256_to_big_int, RatioExt, U256Ext},
+use shared::conversions::{
+    big_int_to_u256, big_rational_to_u256, u256_to_big_int, RatioExt, U256Ext,
 };
 use std::collections::HashMap;
 use web3::types::Address;
@@ -131,48 +130,9 @@ fn solve_with_uniswap(
     let uniswap_out = big_rational_to_u256(&uniswap_out).ok()?;
     let uniswap_in = big_rational_to_u256(&uniswap_in).ok()?;
 
-    // Because the smart contracts round in the favour of the traders, it could
-    // be that we actually require a bit more from the Uniswap pool in order to
-    // pay out all proceeds. Compute that amount:
-    let uniswap_out_with_rounding = big_int_to_u256(
-        &orders
-            .iter()
-            .try_fold(BigInt::default(), |total, order| -> Result<BigInt> {
-                let delta = if order.sell_token == uniswap_out_token {
-                    -order
-                        .executed_sell_amount(
-                            Price {
-                                sell_price: uniswap_in,
-                                buy_price: uniswap_out,
-                            },
-                            None,
-                        )?
-                        .to_big_int()
-                } else {
-                    order
-                        .executed_buy_amount(
-                            Price {
-                                sell_price: uniswap_out,
-                                buy_price: uniswap_in,
-                            },
-                            None,
-                        )?
-                        .to_big_int()
-                };
-                dbg!(&delta);
-                Ok(total + delta)
-            })
-            .ok()?,
-    )
-    .ok()?;
-    let uniswap_in_with_rounding = pool.get_amount_in(
-        uniswap_in_token,
-        (uniswap_out_with_rounding, uniswap_out_token),
-    )?;
-
     let mut settlement = Settlement::new(maplit::hashmap! {
-        uniswap_in_token => uniswap_in_with_rounding,
-        uniswap_out_token => uniswap_out_with_rounding,
+        uniswap_in_token => uniswap_out,
+        uniswap_out_token => uniswap_in,
     });
     for order in orders {
         settlement
@@ -180,16 +140,28 @@ fn solve_with_uniswap(
             .ok()?;
     }
 
-    let trades = settlement.trades();
-    dbg!(&trades);
-    dbg!(&uniswap_in, &uniswap_in_with_rounding);
-    dbg!(&uniswap_out, &uniswap_out_with_rounding);
+    // Because the smart contracts round in the favour of the traders, it could
+    // be that we actually require a bit more from the Uniswap pool in order to
+    // pay out all proceeds. We move the rounding error to the sell token so that
+    // it either comes out of the fees or existing buffers. Compute that amount:
+    let uniswap_out_with_rounding = big_int_to_u256(&settlement.executed_trades().fold(
+        BigInt::default(),
+        |mut total, trade| {
+            if trade.sell_token == uniswap_out_token {
+                total -= trade.sell_amount.to_big_int();
+            } else {
+                total += trade.buy_amount.to_big_int();
+            };
+            total
+        },
+    ))
+    .ok()?;
 
     settlement
         .with_liquidity(
             pool,
             AmmOrderExecution {
-                input: (uniswap_in_token, uniswap_in_with_rounding),
+                input: (uniswap_in_token, uniswap_in),
                 output: (uniswap_out_token, uniswap_out_with_rounding),
             },
         )

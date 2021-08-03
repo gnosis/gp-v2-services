@@ -1,6 +1,6 @@
-use super::{Interaction, Trade};
+use super::{Interaction, Trade, TradeExecution};
 use crate::{encoding::EncodedSettlement, interactions::UnwrapWethInteraction};
-use anyhow::{anyhow, bail, ensure, Result};
+use anyhow::{bail, ensure, Context as _, Result};
 use model::order::{Order, OrderKind};
 use num::{BigRational, Zero};
 use primitive_types::{H160, U256};
@@ -88,21 +88,35 @@ impl SettlementEncoder {
     }
 
     // Fails if any used token doesn't have a price.
-    pub fn add_trade(&mut self, order: Order, executed_amount: U256) -> Result<()> {
+    pub fn add_trade(&mut self, order: Order, executed_amount: U256) -> Result<TradeExecution> {
+        let sell_price = self
+            .clearing_prices
+            .get(&order.order_creation.sell_token)
+            .context("settlement missing sell token")?;
         let sell_token_index = self
             .token_index(order.order_creation.sell_token)
-            .ok_or_else(|| anyhow!("settlement missing sell token"))?;
+            .expect("missing sell token with price");
+
+        let buy_price = self
+            .clearing_prices
+            .get(&order.order_creation.buy_token)
+            .context("settlement missing buy token")?;
         let buy_token_index = self
             .token_index(order.order_creation.buy_token)
-            .ok_or_else(|| anyhow!("settlement missing buy token"))?;
-        self.trades.push(Trade {
+            .expect("missing buy token with price");
+
+        let trade = Trade {
             order,
             sell_token_index,
             buy_token_index,
             executed_amount,
-        });
+        };
+        let execution = trade
+            .executed_amounts(*sell_price, *buy_price)
+            .context("impossible trade execution")?;
 
-        Ok(())
+        self.trades.push(trade);
+        Ok(execution)
     }
 
     pub fn append_to_execution_plan(&mut self, interaction: impl Interaction + 'static) {

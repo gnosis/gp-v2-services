@@ -4,13 +4,13 @@ pub mod slippage;
 pub mod uniswap;
 
 use crate::settlement::SettlementEncoder;
-use anyhow::{ensure, Context as _, Result};
+use anyhow::Result;
 #[cfg(test)]
 use model::order::Order;
 use model::{order::OrderKind, TokenPair};
 use num::{rational::Ratio, BigRational};
 use primitive_types::{H160, U256};
-use shared::{conversions::U256Ext, sources::balancer::pool_fetching::PoolTokenState};
+use shared::sources::balancer::pool_fetching::PoolTokenState;
 use std::collections::HashMap;
 use std::sync::Arc;
 use strum_macros::{AsStaticStr, EnumVariantNames};
@@ -61,11 +61,6 @@ impl std::fmt::Debug for LimitOrder {
     }
 }
 
-pub struct Price {
-    pub sell_price: U256,
-    pub buy_price: U256,
-}
-
 impl LimitOrder {
     /// Returns the full execution amount for the specified limit order.
     pub fn full_execution_amount(&self) -> U256 {
@@ -73,45 +68,6 @@ impl LimitOrder {
             OrderKind::Sell => self.sell_amount,
             OrderKind::Buy => self.buy_amount,
         }
-    }
-
-    /// Compute the actual execution amount for an order, returning an error
-    /// if its a fill-or-kill order and the execution amount does not match the
-    /// full execution.
-    pub fn actual_execution_amount(&self, execution_amount: Option<U256>) -> Result<U256> {
-        match execution_amount {
-            Some(amount) => {
-                ensure!(self.partially_fillable || self.full_execution_amount() == amount);
-                Ok(amount)
-            }
-            None => Ok(self.full_execution_amount()),
-        }
-    }
-
-    /// Returns the executed buy amount for the specified order and execution.
-    pub fn executed_buy_amount(&self, price: Price, execution_amount: Option<U256>) -> Result<U256> {
-        let execution_amount = self.actual_execution_amount(execution_amount)?;
-        Ok(match self.kind {
-            OrderKind::Sell => execution_amount
-                .checked_mul(price.sell_price)
-                .context("overflow sell value")?
-                .checked_ceil_div(&price.buy_price)
-                .context("overflow or zero buy price")?,
-            OrderKind::Buy => execution_amount,
-        })
-    }
-
-    /// Returns the executed sell amount for the specified order and execution.
-    pub fn executed_sell_amount(&self, price: Price, execution_amount: Option<U256>) -> Result<U256> {
-        let execution_amount = self.actual_execution_amount(execution_amount)?;
-        Ok(match self.kind {
-            OrderKind::Sell => execution_amount,
-            OrderKind::Buy => execution_amount
-                .checked_mul(price.buy_price)
-                .context("overflow buy value")?
-                .checked_div(price.sell_price)
-                .context("zero sell price")?,
-        })
     }
 }
 

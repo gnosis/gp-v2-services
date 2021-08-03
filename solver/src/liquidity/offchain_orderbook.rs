@@ -1,15 +1,12 @@
 use super::{LimitOrder, SettlementHandling};
-use crate::interactions::UnwrapWethInteraction;
-use crate::orderbook::OrderBookApi;
-use crate::settlement::SettlementEncoder;
-use anyhow::{anyhow, Context, Result};
+use crate::{
+    interactions::UnwrapWethInteraction, orderbook::OrderBookApi, settlement::SettlementEncoder,
+};
+use anyhow::{Context as _, Result};
 use contracts::WETH9;
-use ethcontract::H160;
-use model::order::{Order, OrderKind, OrderUid, BUY_ETH_ADDRESS};
-use primitive_types::U256;
-use shared::conversions::U256Ext as _;
-use std::collections::HashSet;
-use std::{collections::HashMap, sync::Arc};
+use ethcontract::U256;
+use model::order::{Order, OrderUid, BUY_ETH_ADDRESS};
+use std::{collections::HashSet, sync::Arc};
 
 impl OrderBookApi {
     /// Returns a list of limit orders coming from the offchain orderbook API
@@ -77,66 +74,32 @@ pub fn normalize_limit_order(order: Order, native_token: WETH9) -> LimitOrder {
 
 impl SettlementHandling<LimitOrder> for OrderSettlementHandler {
     fn encode(&self, executed_amount: U256, encoder: &mut SettlementEncoder) -> Result<()> {
-        if self.order.order_creation.buy_token == BUY_ETH_ADDRESS {
-            let interaction = compute_unwrap_interaction(
-                encoder.clearing_prices(),
-                &self.order,
-                executed_amount,
-                self.native_token.clone(),
-            )?;
+        let is_native_token_buy_order = self.order.order_creation.buy_token == BUY_ETH_ADDRESS;
 
+        if is_native_token_buy_order {
             encoder.add_token_equivalency(self.native_token.address(), BUY_ETH_ADDRESS)?;
-            encoder.add_unwrap(interaction);
         }
-        encoder.add_trade(self.order.clone(), executed_amount)
+
+        let trade = encoder.add_trade(self.order.clone(), executed_amount)?;
+
+        if is_native_token_buy_order {
+            encoder.add_unwrap(UnwrapWethInteraction {
+                weth: self.native_token.clone(),
+                amount: trade.buy_amount,
+            });
+        }
+
+        Ok(())
     }
-}
-
-fn compute_unwrap_interaction(
-    clearing_prices: &HashMap<H160, U256>,
-    order: &Order,
-    executed_amount: U256,
-    weth: WETH9,
-) -> Result<UnwrapWethInteraction> {
-    let sell_price = *clearing_prices
-        .get(&order.order_creation.sell_token)
-        .ok_or_else(|| anyhow!("sell price not available"))?;
-    let buy_price = *clearing_prices
-        .get(&weth.address())
-        .ok_or_else(|| anyhow!("buy price not available"))?;
-    let amount = executed_buy_amount(
-        order,
-        executed_amount,
-        Price {
-            sell_price,
-            buy_price,
-        },
-    )
-    .ok_or_else(|| anyhow!("cannot compute executed buy amount"))?;
-    Ok(UnwrapWethInteraction { weth, amount })
-}
-
-struct Price {
-    sell_price: U256,
-    buy_price: U256,
-}
-
-fn executed_buy_amount(order: &Order, executed_amount: U256, price: Price) -> Option<U256> {
-    Some(match order.order_creation.kind {
-        OrderKind::Sell => executed_amount
-            .checked_mul(price.sell_price)?
-            .checked_ceil_div(&price.buy_price)?,
-        OrderKind::Buy => executed_amount,
-    })
 }
 
 #[cfg(test)]
 pub mod tests {
     use super::*;
     use crate::settlement::tests::assert_settlement_encoded_with;
+    use ethcontract::H160;
     use maplit::{hashmap, hashset};
-    use model::order::OrderCreation;
-    use model::DomainSeparator;
+    use model::{order::{OrderKind, OrderCreation}, DomainSeparator};
     use shared::dummy_contract;
 
     #[test]
@@ -173,45 +136,6 @@ pub mod tests {
             normalize_limit_order(order, native_token).buy_token,
             buy_token
         );
-    }
-
-    #[test]
-    fn executed_buy_amount_returns_err_on_overflows() {
-        let order = Order {
-            order_creation: OrderCreation {
-                kind: OrderKind::Sell,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        // mul
-        let executed_amount = U256::MAX;
-        let sell_price = U256::from(2);
-        let buy_price = U256::one();
-        assert!(executed_buy_amount(
-            &order,
-            executed_amount,
-            Price {
-                sell_price,
-                buy_price
-            }
-        )
-        .is_none());
-
-        // div
-        let executed_amount = U256::one();
-        let sell_price = U256::one();
-        let buy_price = U256::zero();
-        assert!(executed_buy_amount(
-            &order,
-            executed_amount,
-            Price {
-                sell_price,
-                buy_price
-            }
-        )
-        .is_none());
     }
 
     #[test]
