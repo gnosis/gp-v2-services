@@ -1,3 +1,4 @@
+pub mod buffers;
 pub mod model;
 mod settlement;
 
@@ -9,6 +10,7 @@ use crate::{
 };
 use ::model::order::OrderKind;
 use anyhow::{ensure, Context, Result};
+use buffers::BufferRetrieving;
 use ethcontract::{Account, U256};
 use futures::join;
 use lazy_static::lazy_static;
@@ -69,6 +71,7 @@ pub struct HttpSolver {
     native_token: H160,
     token_info_fetcher: Arc<dyn TokenInfoFetching>,
     price_estimator: Arc<dyn PriceEstimating>,
+    buffer_retriever: Arc<dyn BufferRetrieving>,
     network_id: String,
     chain_id: u64,
     fee_discount_factor: f64,
@@ -86,6 +89,7 @@ impl HttpSolver {
         native_token: H160,
         token_info_fetcher: Arc<dyn TokenInfoFetching>,
         price_estimator: Arc<dyn PriceEstimating>,
+        buffer_retriever: Arc<dyn BufferRetrieving>,
         network_id: String,
         chain_id: u64,
         fee_discount_factor: f64,
@@ -102,6 +106,7 @@ impl HttpSolver {
             native_token,
             token_info_fetcher,
             price_estimator,
+            buffer_retriever,
             network_id,
             chain_id,
             fee_discount_factor,
@@ -264,10 +269,11 @@ impl HttpSolver {
     ) -> Result<(BatchAuctionModel, SettlementContext)> {
         let tokens = self.map_tokens_for_solver(liquidity.as_slice());
 
-        let (token_infos, price_estimates) = join!(
+        let (token_infos, price_estimates, _buffers) = join!(
             self.token_info_fetcher.get_token_infos(tokens.as_slice()),
             self.price_estimator
-                .estimate_prices(tokens.as_slice(), self.native_token)
+                .estimate_prices(tokens.as_slice(), self.native_token),
+            self.buffer_retriever.get_buffers(tokens.as_slice())
         );
 
         let price_estimates: HashMap<H160, Result<BigRational, _>> =
@@ -473,6 +479,7 @@ impl Solver for HttpSolver {
 mod tests {
     use super::*;
     use crate::liquidity::{tests::CapturingSettlementHandler, ConstantProductOrder, LimitOrder};
+    use crate::solver::http_solver::buffers::MockBufferRetrieving;
     use ::model::TokenPair;
     use ethcontract::Address;
     use maplit::hashmap;
@@ -507,6 +514,17 @@ mod tests {
             });
         let mock_token_info_fetcher: Arc<dyn TokenInfoFetching> = Arc::new(mock_token_info_fetcher);
 
+        let mut mock_buffer_retriever = MockBufferRetrieving::new();
+        mock_buffer_retriever
+            .expect_get_buffers()
+            .return_once(move |_| {
+                hashmap! {
+                    buy_token => U256::from(42),
+                    sell_token => U256::from(1337),
+                }
+            });
+        let mock_buffer_retriever: Arc<dyn BufferRetrieving> = Arc::new(mock_buffer_retriever);
+
         let mock_price_estimation: Arc<dyn PriceEstimating> =
             Arc::new(FakePriceEstimator(num::one()));
 
@@ -524,6 +542,7 @@ mod tests {
             H160::zero(),
             mock_token_info_fetcher,
             mock_price_estimation,
+            mock_buffer_retriever,
             "mock_network_id".to_string(),
             0,
             1.,
