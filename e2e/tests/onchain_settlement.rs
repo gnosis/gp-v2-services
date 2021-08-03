@@ -75,10 +75,7 @@ async fn onchain_settlement(web3: Web3) {
         solver_account,
         token_b.mint(solver_account.address(), to_wei(100_000))
     );
-    tx!(
-        solver_account,
-        token_b.mint(trader_b.address(), to_wei(51))
-    );
+    tx!(solver_account, token_b.mint(trader_b.address(), to_wei(51)));
 
     // Create and fund Uniswap pool
     tx!(

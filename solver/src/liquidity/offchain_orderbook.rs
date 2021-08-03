@@ -99,7 +99,10 @@ pub mod tests {
     use crate::settlement::tests::assert_settlement_encoded_with;
     use ethcontract::H160;
     use maplit::{hashmap, hashset};
-    use model::{order::{OrderKind, OrderCreation}, DomainSeparator};
+    use model::{
+        order::{OrderCreation, OrderKind},
+        DomainSeparator,
+    };
     use shared::dummy_contract;
 
     #[test]
