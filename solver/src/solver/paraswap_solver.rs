@@ -90,7 +90,10 @@ impl From<ParaswapResponseError> for SettlementError {
             inner: anyhow!("Paraswap Response Error {:?}", err),
             retryable: matches!(
                 err,
-                ParaswapResponseError::PriceChange | ParaswapResponseError::BuildingTransaction(_)
+                ParaswapResponseError::PriceChange
+                    | ParaswapResponseError::BuildingTransaction(_)
+                    | ParaswapResponseError::TooMuchSlippageOnQuote
+                    | ParaswapResponseError::GetParaswapPool(_),
             ),
         }
     }

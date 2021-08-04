@@ -75,6 +75,12 @@ pub enum ParaswapResponseError {
     #[error("Suspected Rate Change - Please Retry!")]
     PriceChange,
 
+    #[error("Too much slippage on quote - Please Retry!")]
+    TooMuchSlippageOnQuote,
+
+    #[error("Error getParaSwapPool - From Price Route {0}")]
+    GetParaswapPool(String),
+
     // Connectivity or non-response error
     #[error("Failed on send")]
     Send(reqwest::Error),
@@ -103,6 +109,12 @@ fn parse_paraswap_response_text(
             "It seems like the rate has changed, please re-query the latest Price" => {
                 Err(ParaswapResponseError::PriceChange)
             }
+            "Too much slippage on quote, please try again" => {
+                Err(ParaswapResponseError::TooMuchSlippageOnQuote)
+            }
+            "Error getParaSwapPool" => Err(ParaswapResponseError::GetParaswapPool(
+                query_str.parse().unwrap(),
+            )),
             _ => Err(ParaswapResponseError::UnknownParaswapError(format!(
                 "uncatalogued error message {}",
                 message
