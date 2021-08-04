@@ -100,7 +100,7 @@ impl Driver {
         loop {
             match self.single_run().await {
                 Ok(()) => tracing::debug!("single run finished ok"),
-                Err(err) => tracing::error!("single run errored: {:?}", err),
+                Err(err) => tracing::error!("single run errored: {:#}", err),
             }
             self.metrics.runloop_completed();
             tokio::time::sleep(self.settle_interval).await;
@@ -267,7 +267,7 @@ impl Driver {
                 Err(err) => err,
             };
             tracing::error!(
-                "{} settlement simulation failed at submission and block {}:\n{:?}",
+                "{} settlement simulation failed at submission and block {}:\n{:#}",
                 settlement.name,
                 current_block_during_liquidity_fetch,
                 error_at_earlier_block,
