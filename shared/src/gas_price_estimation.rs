@@ -60,7 +60,8 @@ pub async fn create_priority_estimator(
                 if !is_mainnet(&network_id) {
                     return Err(anyhow!("GasNow only supports mainnet"));
                 }
-                let mut estimator = GasNowWebSocketGasStation::new(Duration::from_secs(30));
+                let max_update_age = Duration::from_secs(30);
+                let mut estimator = GasNowWebSocketGasStation::new(max_update_age);
                 if tokio::time::timeout(Duration::from_secs(15), estimator.wait_for_first_update())
                     .await
                     .is_err()
