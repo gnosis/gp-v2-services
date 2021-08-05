@@ -33,31 +33,26 @@ impl ParaswapApi for DefaultParaswapApi {
         let query_str = format!("{:?}", &query);
         let url = query.into_url();
         tracing::debug!("Querying Paraswap API (price) for url {}", url);
-        let response_result = reqwest::get(url).await;
-        match response_result {
-            Ok(response) => match response.text().await {
-                Ok(response_text) => {
-                    tracing::debug!("Response from Paraswap API (price): {}", response_text);
-                    let raw_response = serde_json::from_str::<RawPriceResponse>(&response_text);
-                    match raw_response {
-                        Ok(RawPriceResponse::ResponseOk(response)) => Ok(response),
-                        Ok(RawPriceResponse::ResponseErr { error: message }) => {
-                            match &message[..] {
-                                "computePrice Error" => Err(ParaswapResponseError::ComputePrice(
-                                    query_str.parse().unwrap(),
-                                )),
-                                _ => Err(ParaswapResponseError::UnknownParaswapError(format!(
-                                    "uncatalogued Price Query error message {}",
-                                    message
-                                ))),
-                            }
-                        }
-                        Err(err) => Err(ParaswapResponseError::DeserializeError(err)),
-                    }
-                }
-                Err(text_fetch_err) => Err(ParaswapResponseError::TextFetch(text_fetch_err)),
+        let response_text = reqwest::get(url)
+            .await
+            .map_err(ParaswapResponseError::Send)?
+            .text()
+            .await
+            .map_err(ParaswapResponseError::TextFetch)?;
+        tracing::debug!("Response from Paraswap API (price): {}", response_text);
+        let raw_response = serde_json::from_str::<RawPriceResponse>(&response_text);
+        match raw_response {
+            Ok(RawPriceResponse::ResponseOk(response)) => Ok(response),
+            Ok(RawPriceResponse::ResponseErr { error: message }) => match &message[..] {
+                "computePrice Error" => Err(ParaswapResponseError::ComputePrice(
+                    query_str.parse().unwrap(),
+                )),
+                _ => Err(ParaswapResponseError::UnknownParaswapError(format!(
+                    "uncatalogued Price Query error message {}",
+                    message
+                ))),
             },
-            Err(send_err) => Err(ParaswapResponseError::Send(send_err)),
+            Err(err) => Err(ParaswapResponseError::DeserializeError(err)),
         }
     }
     async fn transaction(
@@ -65,14 +60,15 @@ impl ParaswapApi for DefaultParaswapApi {
         query: TransactionBuilderQuery,
     ) -> Result<TransactionBuilderResponse, ParaswapResponseError> {
         let query_str = serde_json::to_string(&query).unwrap();
-        let response_result = query.into_request(&self.client).send().await;
-        match response_result {
-            Ok(response) => match response.text().await {
-                Ok(response_text) => parse_paraswap_response_text(&response_text, &query_str),
-                Err(text_fetch_err) => Err(ParaswapResponseError::TextFetch(text_fetch_err)),
-            },
-            Err(send_err) => Err(ParaswapResponseError::Send(send_err)),
-        }
+        let response_text = query
+            .into_request(&self.client)
+            .send()
+            .await
+            .map_err(ParaswapResponseError::Send)?
+            .text()
+            .await
+            .map_err(ParaswapResponseError::TextFetch)?;
+        parse_paraswap_response_text(&response_text, &query_str)
     }
 }
 
