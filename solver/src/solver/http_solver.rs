@@ -9,7 +9,7 @@ use crate::{
     settlement_submission::retry::is_transaction_failure,
     solver::Solver,
 };
-use ::model::{order::OrderKind, u256_decimal::format_units};
+use ::model::order::OrderKind;
 use anyhow::{ensure, Context, Result};
 use buffers::{BufferRetrievalError, BufferRetrieving};
 use ethcontract::{Account, U256};
@@ -145,16 +145,13 @@ impl HttpSolver {
                     .as_ref()
                     .ok()
                     .and_then(|price| price.to_f64());
-                let internal_buffer = buffers
-                    .get(address)
-                    .map(|buffer| format_units(*buffer, token_info.decimals.unwrap_or(0) as usize));
                 (
                     *address,
                     TokenInfoModel {
                         decimals: token_info.decimals,
                         external_price,
                         normalize_priority: Some(if &self.native_token == address { 1 } else { 0 }),
-                        internal_buffer,
+                        internal_buffer: buffers.get(address).copied(),
                     },
                 )
             })
