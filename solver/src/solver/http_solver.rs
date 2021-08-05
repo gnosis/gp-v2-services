@@ -9,7 +9,7 @@ use crate::{
     settlement_submission::retry::is_transaction_failure,
     solver::Solver,
 };
-use ::model::order::OrderKind;
+use ::model::{order::OrderKind, u256_decimal::format_units};
 use anyhow::{ensure, Context, Result};
 use buffers::{BufferRetrievalError, BufferRetrieving};
 use ethcontract::{Account, U256};
@@ -136,6 +136,7 @@ impl HttpSolver {
         &self,
         token_infos: &HashMap<H160, TokenInfo>,
         price_estimates: &HashMap<H160, Result<BigRational, PriceEstimationError>>,
+        buffers: &HashMap<H160, U256>,
     ) -> HashMap<H160, TokenInfoModel> {
         token_infos
             .iter()
@@ -144,12 +145,16 @@ impl HttpSolver {
                     .as_ref()
                     .ok()
                     .and_then(|price| price.to_f64());
+                let internal_buffer = buffers
+                    .get(address)
+                    .map(|buffer| format_units(*buffer, token_info.decimals.unwrap_or(0) as usize));
                 (
                     *address,
                     TokenInfoModel {
                         decimals: token_info.decimals,
                         external_price,
                         normalize_priority: Some(if &self.native_token == address { 1 } else { 0 }),
+                        internal_buffer,
                     },
                 )
             })
@@ -277,7 +282,7 @@ impl HttpSolver {
             self.buffer_retriever.get_buffers(tokens.as_slice())
         );
 
-        let _buffers: HashMap<_, _> = buffers_result
+        let buffers: HashMap<_, _> = buffers_result
             .drain()
             .filter_map(|(token, buffer)| match buffer {
                 Err(BufferRetrievalError::Erc20(err)) if is_transaction_failure(&err.inner) => {
@@ -315,7 +320,7 @@ impl HttpSolver {
         let limit_orders = self.map_orders_for_solver(orders.0);
         let constant_product_orders = self.map_amm_orders_for_solver(orders.1);
         let weighted_product_orders = self.map_amm_orders_for_solver(orders.2);
-        let token_models = self.token_models(&token_infos, &price_estimates);
+        let token_models = self.token_models(&token_infos, &price_estimates, &buffers);
         let order_models = self.order_models(&limit_orders, gas_price);
         let amm_models = self
             .amm_models(
