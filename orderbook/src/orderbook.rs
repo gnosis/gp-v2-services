@@ -5,6 +5,7 @@ use crate::{
 };
 use anyhow::Result;
 use chrono::Utc;
+use contracts::WETH9;
 use futures::TryStreamExt;
 use model::order::{BuyTokenDestination, OrderCancellation, OrderCreationPayload, SellTokenSource};
 use model::{
@@ -60,6 +61,7 @@ pub struct Orderbook {
     min_order_validity_period: Duration,
     bad_token_detector: Arc<dyn BadTokenDetecting>,
     code_fetcher: Box<dyn CodeFetching>,
+    native_token: WETH9,
 }
 
 impl Orderbook {
@@ -73,6 +75,7 @@ impl Orderbook {
         min_order_validity_period: Duration,
         bad_token_detector: Arc<dyn BadTokenDetecting>,
         code_fetcher: Box<dyn CodeFetching>,
+        native_token: WETH9,
     ) -> Self {
         Self {
             domain_separator,
@@ -83,6 +86,7 @@ impl Orderbook {
             min_order_validity_period,
             bad_token_detector,
             code_fetcher,
+            native_token,
         }
     }
 
@@ -101,7 +105,9 @@ impl Orderbook {
             ));
         }
 
-        if order.sell_token == order.buy_token {
+        if order.sell_token == order.buy_token
+            || order.sell_token == self.native_token.address() && order.buy_token == BUY_ETH_ADDRESS
+        {
             return Ok(AddOrderResult::SameBuyAndSellToken);
         }
         if order.valid_to
