@@ -7,7 +7,9 @@ use anyhow::Result;
 use chrono::Utc;
 use contracts::WETH9;
 use futures::TryStreamExt;
-use model::order::{BuyTokenDestination, OrderCancellation, OrderCreationPayload, SellTokenSource};
+use model::order::{
+    BuyTokenDestination, OrderCancellation, OrderCreation, OrderCreationPayload, SellTokenSource,
+};
 use model::{
     order::{Order, OrderStatus, OrderUid, BUY_ETH_ADDRESS},
     DomainSeparator,
@@ -105,9 +107,7 @@ impl Orderbook {
             ));
         }
 
-        if order.sell_token == order.buy_token
-            || order.sell_token == self.native_token.address() && order.buy_token == BUY_ETH_ADDRESS
-        {
+        if has_same_buy_and_sell_token(&order, &self.native_token) {
             return Ok(AddOrderResult::SameBuyAndSellToken);
         }
         if order.valid_to
@@ -375,6 +375,14 @@ fn minimum_balance(order: &Order) -> Option<U256> {
     }
 }
 
+/// Returns true if the orders have same buy and sell tokens.
+///
+/// This also checks for orders selling wrapped native token for native token.
+fn has_same_buy_and_sell_token(order: &OrderCreation, native_token: &WETH9) -> bool {
+    order.sell_token == order.buy_token
+        || (order.sell_token == native_token.address() && order.buy_token == BUY_ETH_ADDRESS)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -385,7 +393,7 @@ mod tests {
     use maplit::hashmap;
     use mockall::{predicate::eq, Sequence};
     use model::order::{OrderBuilder, OrderCreation, OrderMetaData};
-    use shared::bad_token::list_based::ListBasedDetector;
+    use shared::{bad_token::list_based::ListBasedDetector, dummy_contract};
 
     #[tokio::test]
     async fn track_and_get_balances_() {
@@ -521,5 +529,45 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(result, &orders[1..2]);
+    }
+
+    #[test]
+    fn detects_orders_with_same_buy_and_sell_token() {
+        let native_token = dummy_contract!(WETH9, [0xef; 20]);
+        assert!(has_same_buy_and_sell_token(
+            &OrderCreation {
+                sell_token: H160([0x01; 20]),
+                buy_token: H160([0x01; 20]),
+                ..Default::default()
+            },
+            &native_token,
+        ));
+        assert!(has_same_buy_and_sell_token(
+            &OrderCreation {
+                sell_token: native_token.address(),
+                buy_token: BUY_ETH_ADDRESS,
+                ..Default::default()
+            },
+            &native_token,
+        ));
+
+        assert!(!has_same_buy_and_sell_token(
+            &OrderCreation {
+                sell_token: H160([0x01; 20]),
+                buy_token: H160([0x02; 20]),
+                ..Default::default()
+            },
+            &native_token,
+        ));
+        // Sell token set to 0xeee...eee has no special meaning, so it isn't
+        // considered buying and selling the same token.
+        assert!(!has_same_buy_and_sell_token(
+            &OrderCreation {
+                sell_token: BUY_ETH_ADDRESS,
+                buy_token: native_token.address(),
+                ..Default::default()
+            },
+            &native_token,
+        ));
     }
 }
