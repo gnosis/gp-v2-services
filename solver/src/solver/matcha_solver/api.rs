@@ -122,8 +122,8 @@ impl DefaultMatchaApi {
 
 #[derive(Deserialize)]
 #[serde(untagged)]
-enum RawResponse {
-    ResponseOk(SwapResponse),
+enum RawResponse<Ok> {
+    ResponseOk(Ok),
     ResponseErr { reason: String },
 }
 
@@ -169,7 +169,7 @@ fn parse_matcha_response_text(
     response_text: &str,
     query: &str,
 ) -> Result<SwapResponse, MatchaResponseError> {
-    match serde_json::from_str::<RawResponse>(response_text) {
+    match serde_json::from_str::<RawResponse<SwapResponse>>(response_text) {
         Ok(RawResponse::ResponseOk(response)) => Ok(response),
         Ok(RawResponse::ResponseErr { reason: message }) => match &message[..] {
             "Server Error" => Err(MatchaResponseError::ServerError(format!("{:?}", query))),
