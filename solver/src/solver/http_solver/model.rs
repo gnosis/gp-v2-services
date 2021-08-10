@@ -87,11 +87,14 @@ pub struct WeightedProductPoolParameters {
     pub reserves: HashMap<H160, PoolTokenData>,
 }
 
+#[serde_as]
 #[derive(Debug, Serialize)]
 pub struct TokenInfoModel {
     pub decimals: Option<u8>,
     pub external_price: Option<f64>,
     pub normalize_priority: Option<u64>,
+    #[serde_as(as = "Option<DecimalU256>")]
+    pub internal_buffer: Option<U256>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -113,7 +116,7 @@ pub struct SettledBatchAuctionModel {
     pub orders: HashMap<usize, ExecutedOrderModel>,
     #[serde(default)]
     pub amms: HashMap<usize, UpdatedAmmModel>,
-    pub ref_token: H160,
+    pub ref_token: Option<H160>,
     pub prices: HashMap<H160, Price>,
 }
 
@@ -300,11 +303,13 @@ mod tests {
                     decimals: Some(6),
                     external_price: Some(1.2),
                     normalize_priority: Some(1),
+                    internal_buffer: Some(U256::from(1337)),
                 },
                 sell_token => TokenInfoModel {
                     decimals: Some(18),
                     external_price: Some(2345.0),
                     normalize_priority: Some(0),
+                    internal_buffer: Some(U256::from(42)),
                 }
             },
             orders: hashmap! { 0 => order_model },
@@ -321,12 +326,14 @@ mod tests {
             "0x0000000000000000000000000000000000000539": {
               "decimals": 6,
               "external_price": 1.2,
-              "normalize_priority": 1
+              "normalize_priority": 1,
+              "internal_buffer": "1337"
             },
             "0x000000000000000000000000000000000000a866": {
               "decimals": 18,
               "external_price": 2345.0,
-              "normalize_priority": 0
+              "normalize_priority": 0,
+              "internal_buffer": "42"
             }
           },
           "orders": {
@@ -414,5 +421,22 @@ mod tests {
             }
         "#;
         assert!(serde_json::from_str::<SettledBatchAuctionModel>(empty_solution).is_ok());
+    }
+
+    #[test]
+    fn decode_trivial_solution_without_ref_token() {
+        let x = r#"
+            {
+                "tokens": {},
+                "orders": {},
+                "metadata": {
+                    "environment": null
+                },
+                "ref_token": null,
+                "prices": {},
+                "uniswaps": {}
+            }
+        "#;
+        assert!(serde_json::from_str::<SettledBatchAuctionModel>(x).is_ok());
     }
 }
