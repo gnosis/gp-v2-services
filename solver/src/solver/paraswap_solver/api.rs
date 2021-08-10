@@ -40,10 +40,11 @@ impl ParaswapApi for DefaultParaswapApi {
             .await
             .map_err(ParaswapResponseError::TextFetch)?;
         tracing::debug!("Response from Paraswap API (price): {}", response_text);
-        let raw_response = serde_json::from_str::<RawResponse<PriceResponse>>(&response_text);
+        let raw_response = serde_json::from_str::<RawResponse<PriceResponse>>(&response_text)
+            .map_err(ParaswapResponseError::DeserializeError)?;
         match raw_response {
-            Ok(RawResponse::ResponseOk(response)) => Ok(response),
-            Ok(RawResponse::ResponseErr { error: message }) => match &message[..] {
+            RawResponse::ResponseOk(response) => Ok(response),
+            RawResponse::ResponseErr { error: message } => match &message[..] {
                 "computePrice Error" => Err(ParaswapResponseError::ComputePrice(
                     query_str.parse().unwrap(),
                 )),
@@ -55,7 +56,6 @@ impl ParaswapApi for DefaultParaswapApi {
                     message
                 ))),
             },
-            Err(err) => Err(ParaswapResponseError::DeserializeError(err)),
         }
     }
     async fn transaction(
