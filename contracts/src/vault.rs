@@ -1,17 +1,17 @@
 //! Module containing utilities for interfacing with the Balancer V2 Vault contract.
 
-use crate::BalancerV2Authorizer;
-use ethcontract::{errors::MethodError, web3::signing, Bytes, H160};
+use crate::{BalancerV2Authorizer, BalancerV2Vault};
+use ethcontract::{common::FunctionExt as _, errors::MethodError, web3::signing, Bytes, H160};
 
-mod sighash {
-    pub const MANAGE_USER_BALANCE: u32 = 0x0e8e3e84;
-    pub const BATCH_SWAP: u32 = 0x945bcec9;
-}
+fn role_id(target: H160, function_name: &str) -> Bytes<[u8; 32]> {
+    let function = match BalancerV2Vault::raw_contract().abi.function(function_name) {
+        Ok(function) => function,
+        Err(_) => return Bytes([0u8; 32]),
+    };
 
-fn role_id(target: H160, signature: u32) -> Bytes<[u8; 32]> {
     let mut data = [0u8; 36];
     data[12..32].copy_from_slice(&target.0);
-    data[32..36].copy_from_slice(&signature.to_be_bytes());
+    data[32..36].copy_from_slice(&function.selector());
     Bytes(signing::keccak256(&data))
 }
 
@@ -23,8 +23,8 @@ pub async fn grant_required_roles(
     authorizer
         .grant_roles(
             vec![
-                role_id(vault, sighash::MANAGE_USER_BALANCE),
-                role_id(vault, sighash::BATCH_SWAP),
+                role_id(vault, "manageUserBalance"),
+                role_id(vault, "batchSwap"),
             ],
             vault_relayer,
         )
@@ -44,12 +44,9 @@ mod tests {
         // `batchSwap` transactions in Tenderly and then inspecting the `role`
         // value that was passed to the authenticator contract.
 
-        let vault = "0xBA12222222228d8Ba445958a75a0704d566BF2C8"
-            .parse::<H160>()
-            .unwrap();
-
+        let vault = BalancerV2Vault::raw_contract().networks["1"].address;
         assert_eq!(
-            role_id(vault, sighash::MANAGE_USER_BALANCE),
+            role_id(vault, "manageUserBalance"),
             Bytes(
                 "0xeba777d811cd36c06d540d7ff2ed18ed042fd67bbf7c9afcf88c818c7ee6b498"
                     .parse::<H256>()
@@ -58,7 +55,7 @@ mod tests {
             )
         );
         assert_eq!(
-            role_id(vault, sighash::BATCH_SWAP),
+            role_id(vault, "batchSwap"),
             Bytes(
                 "0x1282ab709b2b70070f829c46bc36f76b32ad4989fecb2fcb09a1b3ce00bbfc30"
                     .parse::<H256>()
