@@ -22,7 +22,6 @@ pub mod token_list;
 pub mod trace_many;
 pub mod tracing;
 pub mod transport;
-pub mod vault;
 pub mod web3_traits;
 
 use ethcontract::H160;

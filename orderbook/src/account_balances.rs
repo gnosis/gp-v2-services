@@ -312,9 +312,9 @@ fn is_empty_or_truthy(bytes: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use contracts::{BalancerV2Authorizer, ERC20Mintable};
+    use contracts::{vault, BalancerV2Authorizer, ERC20Mintable};
     use hex_literal::hex;
-    use shared::{transport::create_env_test_transport, vault};
+    use shared::transport::create_env_test_transport;
 
     #[tokio::test]
     #[ignore]
