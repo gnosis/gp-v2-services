@@ -1,6 +1,6 @@
 use anyhow::{bail, Result};
 use contracts::{BalancerV2Vault, ERC20};
-use ethcontract::batch::CallBatch;
+use ethcontract::{batch::CallBatch, Account};
 use futures::{
     future::{self, join_all, BoxFuture},
     FutureExt as _,
@@ -59,7 +59,7 @@ struct SubscriptionKey {
     source: SellTokenSource,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 struct SubscriptionValue {
     balance: Option<U256>,
     allowance: Option<U256>,
@@ -81,22 +81,16 @@ impl Web3BalanceFetcher {
         }
     }
 
-    async fn _register_many(
-        &self,
-        subscriptions: impl Iterator<Item = SubscriptionKey>,
-    ) -> Result<()> {
+    async fn _register_many(&self, subscriptions: Vec<SubscriptionKey>) -> Result<()> {
         let mut batch = CallBatch::new(self.web3.transport());
 
         // Make sure subscriptions are registered for next update even if batch call fails
-        let subscriptions: Vec<SubscriptionKey> = {
+        {
             let mut guard = self.balances.lock().expect("thread holding mutex panicked");
-            subscriptions
-                .map(|subscription| {
-                    let _ = guard.entry(subscription).or_default();
-                    subscription
-                })
-                .collect()
-        };
+            for subscription in &subscriptions {
+                guard.insert(*subscription, Default::default());
+            }
+        }
 
         let calls = subscriptions
             .into_iter()
@@ -168,6 +162,7 @@ impl Web3BalanceFetcher {
                 from,
                 self.settlement_contract,
             )])
+            .from(Account::Local(from, None))
             .call()
             .await
             .is_ok()
@@ -249,11 +244,14 @@ impl BalanceFetching for Web3BalanceFetcher {
 
     async fn register_many(&self, owner_token_list: Vec<(H160, H160, SellTokenSource)>) {
         for chunk in owner_token_list.chunks(MAX_BATCH_SIZE) {
-            let subscriptions = chunk.iter().map(|(owner, token, source)| SubscriptionKey {
-                owner: *owner,
-                token: *token,
-                source: *source,
-            });
+            let subscriptions = chunk
+                .iter()
+                .map(|(owner, token, source)| SubscriptionKey {
+                    owner: *owner,
+                    token: *token,
+                    source: *source,
+                })
+                .collect();
             let _ = self._register_many(subscriptions).await;
         }
     }
@@ -279,7 +277,7 @@ impl BalanceFetching for Web3BalanceFetcher {
             let map = self.balances.lock().expect("mutex holding thread panicked");
             map.keys().cloned().collect()
         };
-        let _ = self._register_many(subscriptions.into_iter()).await;
+        let _ = self._register_many(subscriptions).await;
     }
 
     async fn can_transfer(
@@ -312,9 +310,10 @@ fn is_empty_or_truthy(bytes: &[u8]) -> bool {
 mod tests {
     use super::*;
     use contracts::{BalancerV2Authorizer, ERC20Mintable};
-    use ethcontract::prelude::Account;
+    use ethcontract::Bytes;
     use hex_literal::hex;
     use shared::transport::create_env_test_transport;
+    use web3::signing;
 
     #[tokio::test]
     #[ignore]
@@ -439,6 +438,112 @@ mod tests {
         );
     }
 
+    fn role_id(target: H160, signature: [u8; 4]) -> Bytes<[u8; 32]> {
+        let mut data = [0u8; 36];
+        data[12..32].copy_from_slice(&target.0);
+        data[32..36].copy_from_slice(&signature);
+        Bytes(signing::keccak256(&data))
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn can_transfer_testnet_vault_external_balance() {
+        let http = create_env_test_transport();
+        let web3 = Web3::new(http);
+
+        let accounts: Vec<H160> = web3.eth().accounts().await.expect("get accounts failed");
+        let admin = Account::Local(accounts[0], None);
+        let trader = Account::Local(accounts[1], None);
+        let allowance_target = Account::Local(accounts[2], None);
+
+        let authorizer = BalancerV2Authorizer::builder(&web3, admin.address())
+            .deploy()
+            .await
+            .expect("BalancerV2Authorizer deployment failed");
+        let vault = BalancerV2Vault::builder(
+            &web3,
+            authorizer.address(),
+            H160([0xef; 20]), // WETH address - not important for this test.
+            0.into(),
+            0.into(),
+        )
+        .deploy()
+        .await
+        .expect("BalancerV2Vault deployment failed");
+
+        let token = ERC20Mintable::builder(&web3)
+            .deploy()
+            .await
+            .expect("MintableERC20 deployment failed");
+
+        let fetcher = Web3BalanceFetcher::new(
+            web3,
+            Some(vault.clone()),
+            allowance_target.address(),
+            H160::from_low_u64_be(1),
+        );
+
+        assert!(!fetcher
+            .can_transfer(
+                token.address(),
+                trader.address(),
+                100.into(),
+                SellTokenSource::External
+            )
+            .await
+            .unwrap());
+
+        // Set authorization for allowance target to act as a Vault relayer
+        const MANAGE_USER_BALANCE: &[u8; 4] = b"\x0e\x8e\x3e\x84";
+        authorizer
+            .grant_role(
+                role_id(vault.address(), *MANAGE_USER_BALANCE),
+                allowance_target.address(),
+            )
+            .send()
+            .await
+            .expect("failed to add role for allowance target");
+        // Give the trader some balance
+        token
+            .mint(trader.address(), 100.into())
+            .send()
+            .await
+            .unwrap();
+        // Approve the Vault
+        token
+            .approve(vault.address(), 200.into())
+            .from(trader.clone())
+            .send()
+            .await
+            .unwrap();
+        // Set relayer approval for the allowance target
+        vault
+            .set_relayer_approval(trader.address(), allowance_target.address(), true)
+            .from(trader.clone())
+            .send()
+            .await
+            .unwrap();
+
+        assert!(fetcher
+            .can_transfer(
+                token.address(),
+                trader.address(),
+                100.into(),
+                SellTokenSource::External
+            )
+            .await
+            .unwrap());
+        assert!(!fetcher
+            .can_transfer(
+                token.address(),
+                trader.address(),
+                1_000_000.into(),
+                SellTokenSource::External
+            )
+            .await
+            .unwrap());
+    }
+
     #[tokio::test]
     #[ignore]
     async fn watch_testnet_vault_external_balance() {
@@ -472,7 +577,7 @@ mod tests {
 
         let fetcher = Web3BalanceFetcher::new(
             web3,
-            None,
+            Some(vault.clone()),
             allowance_target.address(),
             H160::from_low_u64_be(1),
         );
@@ -506,7 +611,7 @@ mod tests {
 
         // Balance without approval should not affect available balance
         token
-            .approve(allowance_target.address(), 200.into())
+            .approve(vault.address(), 200.into())
             .from(trader.clone())
             .send()
             .await
@@ -533,6 +638,7 @@ mod tests {
         // Spending balance should decrease available balance
         token
             .transfer(allowance_target.address(), 50.into())
+            .from(trader.clone())
             .send()
             .await
             .unwrap();
