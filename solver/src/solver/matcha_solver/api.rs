@@ -175,7 +175,10 @@ fn parse_matcha_response_text(
             "Server Error" => Err(MatchaResponseError::ServerError(format!("{:?}", query))),
             _ => Err(MatchaResponseError::UnknownMatchaError(message)),
         },
-        Err(err) => Err(MatchaResponseError::DeserializeError(err, response_text.parse().unwrap())),
+        Err(err) => Err(MatchaResponseError::DeserializeError(
+            err,
+            response_text.parse().unwrap(),
+        )),
     }
 }
 
