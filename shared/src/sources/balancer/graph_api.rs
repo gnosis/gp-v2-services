@@ -8,6 +8,7 @@
 //! - ensure that we are using the latest up-to-date pool data by using events
 //!   from the node
 
+use crate::sources::balancer::graph_api::pools_query::{StableToken, WeightedToken};
 use crate::{
     event_handling::MAX_REORG_BLOCK_COUNT, sources::balancer::pool_storage::RegisteredPool,
     subgraph::SubgraphClient,
@@ -57,8 +58,8 @@ impl BalancerSubgraphClient {
         while {
             let page = self
                 .0
-                .query::<pools_query::Data>(
-                    pools_query::QUERY,
+                .query::<pools_query::Data<WeightedToken>>(
+                    pools_query::WEIGHTED_POOL_QUERY,
                     Some(json_map! {
                         "block" => block_number,
                         "pageSize" => QUERY_PAGE_SIZE,
@@ -68,6 +69,35 @@ impl BalancerSubgraphClient {
                 .await?
                 .pools;
 
+            let has_next_page = page.len() == QUERY_PAGE_SIZE;
+            if let Some(last_pool) = page.last() {
+                last_id = last_pool.id;
+            }
+
+            for pool in page {
+                pools_by_factory
+                    .entry(pool.factory.unwrap_or_default())
+                    .or_default()
+                    .push(pool.into_registered_pool(block_number)?);
+            }
+
+            has_next_page
+        } {}
+
+        let mut last_id = H256::default();
+        while {
+            let page = self
+                .0
+                .query::<pools_query::Data<StableToken>>(
+                    pools_query::STABLE_POOL_QUERY,
+                    Some(json_map! {
+                        "block" => block_number,
+                        "pageSize" => QUERY_PAGE_SIZE,
+                        "lastId" => json!(last_id),
+                    }),
+                )
+                .await?
+                .pools;
             let has_next_page = page.len() == QUERY_PAGE_SIZE;
             if let Some(last_pool) = page.last() {
                 last_id = last_pool.id;
@@ -117,25 +147,27 @@ pub struct RegisteredPools {
 }
 
 mod pools_query {
-    use crate::sources::balancer::pool_storage::{PoolType, RegisteredPool, RegisteredStablePool};
-    use crate::sources::balancer::{pool_storage::RegisteredWeightedPool, swap::fixed_point::Bfp};
+    use crate::sources::balancer::{
+        pool_storage::{RegisteredPool, RegisteredStablePool, RegisteredWeightedPool},
+        swap::fixed_point::Bfp,
+    };
     use anyhow::{anyhow, Result};
     use ethcontract::{H160, H256};
     use serde::Deserialize;
 
-    pub const QUERY: &str = r#"
+    pub const WEIGHTED_POOL_QUERY: &str = r#"
         query Pools($block: Int, $pageSize: Int, $lastId: ID) {
             pools(
                 block: { number: $block }
                 first: $pageSize
                 where: {
                     id_gt: $lastId
+                    poolType: Weighted
                 }
             ) {
                 id
                 address
                 factory
-                poolType
                 tokens {
                     address
                     decimals
@@ -145,31 +177,65 @@ mod pools_query {
         }
     "#;
 
-    #[derive(Debug, Deserialize, PartialEq)]
-    pub struct Data {
-        pub pools: Vec<Pool>,
-    }
+    pub const STABLE_POOL_QUERY: &str = r#"
+        query Pools($block: Int, $pageSize: Int, $lastId: ID) {
+            pools(
+                block: { number: $block }
+                first: $pageSize
+                where: {
+                    id_gt: $lastId
+                    poolType: Stable
+                }
+            ) {
+                id
+                address
+                factory
+                tokens {
+                    address
+                    decimals
+                }
+            }
+        }
+    "#;
 
     #[derive(Debug, Deserialize, PartialEq)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Pool {
+    pub struct Data<T> {
+        pub pools: Vec<PoolData<T>>,
+    }
+
+    // #[derive(Debug, Deserialize, PartialEq)]
+    // #[serde(rename_all = "camelCase")]
+    // #[serde(tag = "poolType")]
+    // pub enum Pool {
+    //     Weighted(PoolData<WeightedToken>),
+    //     Stable(PoolData<Token>),
+    //     #[serde(other)]
+    //     Unknown,
+    // }
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    pub struct PoolData<T> {
         pub id: H256,
         pub address: H160,
         pub factory: Option<H160>,
-        pub pool_type: PoolType,
-        // TODO - make this optional using enum for Token (Weighted, not).
-        pub tokens: Vec<Token>,
+        pub tokens: Vec<T>,
     }
 
     #[derive(Debug, Deserialize, PartialEq)]
-    pub struct Token {
+    pub struct WeightedToken {
         pub address: H160,
         pub decimals: u8,
         #[serde(with = "serde_with::rust::display_fromstr")]
         pub weight: Bfp,
     }
 
-    impl Pool {
+    #[derive(Debug, Deserialize, PartialEq)]
+    pub struct StableToken {
+        pub address: H160,
+        pub decimals: u8,
+    }
+
+    impl PoolData<WeightedToken> {
         pub fn into_registered_pool(self, block_fetched: u64) -> Result<RegisteredPool> {
             // The Balancer subgraph does not contain information for the block
             // in which a pool was created. Instead, we just use the block that
@@ -178,56 +244,154 @@ mod pools_query {
             let block_created_upper_bound = block_fetched;
 
             let token_count = self.tokens.len();
-            match self.pool_type {
-                PoolType::Stable => self.tokens.iter().try_fold(
-                    RegisteredPool::Stable(RegisteredStablePool {
-                        pool_id: self.id,
-                        pool_address: self.address,
-                        tokens: Vec::with_capacity(token_count),
-                        scaling_exponents: Vec::with_capacity(token_count),
-                        block_created: block_created_upper_bound,
-                    }),
-                    |mut registered_pool, token| {
-                        if let RegisteredPool::Stable(ref mut pool) = registered_pool {
-                            pool.tokens.push(token.address);
-                            pool.scaling_exponents.push(
-                                18u8.checked_sub(token.decimals).ok_or_else(|| {
-                                    anyhow!("unsupported token with more than 18 decimals")
-                                })?,
-                            );
-                            Ok(registered_pool)
-                        } else {
-                            unreachable!("Not a stable pool!");
-                        }
-                    },
-                ),
-                PoolType::Weighted => self.tokens.iter().try_fold(
-                    RegisteredPool::Weighted(RegisteredWeightedPool {
-                        pool_id: self.id,
-                        pool_address: self.address,
-                        tokens: Vec::with_capacity(token_count),
-                        normalized_weights: Vec::with_capacity(token_count),
-                        scaling_exponents: Vec::with_capacity(token_count),
-                        block_created: block_created_upper_bound,
-                    }),
-                    |mut registered_pool, token| {
-                        if let RegisteredPool::Weighted(ref mut pool) = registered_pool {
-                            pool.tokens.push(token.address);
-                            pool.normalized_weights.push(token.weight);
-                            pool.scaling_exponents.push(
-                                18u8.checked_sub(token.decimals).ok_or_else(|| {
-                                    anyhow!("unsupported token with more than 18 decimals")
-                                })?,
-                            );
-                            Ok(registered_pool)
-                        } else {
-                            unreachable!("Not a weighted pool");
-                        }
-                    },
-                ),
-            }
+            self.tokens.iter().try_fold(
+                RegisteredPool::Weighted(RegisteredWeightedPool {
+                    pool_id: self.id,
+                    pool_address: self.address,
+                    tokens: Vec::with_capacity(token_count),
+                    normalized_weights: Vec::with_capacity(token_count),
+                    scaling_exponents: Vec::with_capacity(token_count),
+                    block_created: block_created_upper_bound,
+                }),
+                |mut registered_pool, token| {
+                    if let RegisteredPool::Weighted(ref mut pool) = registered_pool {
+                        pool.tokens.push(token.address);
+                        pool.normalized_weights.push(token.weight);
+                        pool.scaling_exponents
+                            .push(18u8.checked_sub(token.decimals).ok_or_else(|| {
+                                anyhow!("unsupported token with more than 18 decimals")
+                            })?);
+                        Ok(registered_pool)
+                    } else {
+                        unreachable!("Not a weighted pool");
+                    }
+                },
+            )
         }
     }
+
+    impl PoolData<StableToken> {
+        pub fn into_registered_pool(self, block_fetched: u64) -> Result<RegisteredPool> {
+            // The Balancer subgraph does not contain information for the block
+            // in which a pool was created. Instead, we just use the block that
+            // the data was fetched for, as the created block is guaranteed to
+            // be older than that.
+            let block_created_upper_bound = block_fetched;
+
+            let token_count = self.tokens.len();
+            self.tokens.iter().try_fold(
+                RegisteredPool::Stable(RegisteredStablePool {
+                    pool_id: self.id,
+                    pool_address: self.address,
+                    tokens: Vec::with_capacity(token_count),
+                    scaling_exponents: Vec::with_capacity(token_count),
+                    block_created: block_created_upper_bound,
+                }),
+                |mut registered_pool, token| {
+                    if let RegisteredPool::Stable(ref mut pool) = registered_pool {
+                        pool.tokens.push(token.address);
+                        pool.scaling_exponents
+                            .push(18u8.checked_sub(token.decimals).ok_or_else(|| {
+                                anyhow!("unsupported token with more than 18 decimals")
+                            })?);
+                        Ok(registered_pool)
+                    } else {
+                        unreachable!("Not a stable pool!");
+                    }
+                },
+            )
+        }
+    }
+
+    // impl Pool {
+    //     pub fn pool_type(&self) -> PoolType {
+    //         match self {
+    //             Pool::Weighted(_) => PoolType::Weighted,
+    //             Pool::Stable(_) => PoolType::Stable,
+    //             Pool::Unknown => PoolType::Other,
+    //         }
+    //     }
+    //     pub fn id(&self) -> H256 {
+    //         match self {
+    //             Pool::Weighted(data) => data.id,
+    //             Pool::Stable(data) => data.id,
+    //             // TODO - could probably do something better here.
+    //             Pool::Unknown => H256::default(),
+    //         }
+    //     }
+    //
+    //     pub fn factory(&self) -> Option<H160> {
+    //         match self {
+    //             Pool::Weighted(data) => data.factory,
+    //             Pool::Stable(data) => data.factory,
+    //             Pool::Unknown => None,
+    //         }
+    //     }
+    //
+    //     pub fn into_registered_pool(self, block_fetched: u64) -> Result<RegisteredPool> {
+    //         // The Balancer subgraph does not contain information for the block
+    //         // in which a pool was created. Instead, we just use the block that
+    //         // the data was fetched for, as the created block is guaranteed to
+    //         // be older than that.
+    //         let block_created_upper_bound = block_fetched;
+    //
+    //         match self {
+    //             Pool::Stable(data) => {
+    //                 let token_count = data.tokens.len();
+    //                 data.tokens.iter().try_fold(
+    //                     RegisteredPool::Stable(RegisteredStablePool {
+    //                         pool_id: data.id,
+    //                         pool_address: data.address,
+    //                         tokens: Vec::with_capacity(token_count),
+    //                         scaling_exponents: Vec::with_capacity(token_count),
+    //                         block_created: block_created_upper_bound,
+    //                     }),
+    //                     |mut registered_pool, token| {
+    //                         if let RegisteredPool::Stable(ref mut pool) = registered_pool {
+    //                             pool.tokens.push(token.address);
+    //                             pool.scaling_exponents.push(
+    //                                 18u8.checked_sub(token.decimals).ok_or_else(|| {
+    //                                     anyhow!("unsupported token with more than 18 decimals")
+    //                                 })?,
+    //                             );
+    //                             Ok(registered_pool)
+    //                         } else {
+    //                             unreachable!("Not a stable pool!");
+    //                         }
+    //                     },
+    //                 )
+    //             }
+    //             Pool::Weighted(data) => {
+    //                 let token_count = data.tokens.len();
+    //                 data.tokens.iter().try_fold(
+    //                     RegisteredPool::Weighted(RegisteredWeightedPool {
+    //                         pool_id: data.id,
+    //                         pool_address: data.address,
+    //                         tokens: Vec::with_capacity(token_count),
+    //                         normalized_weights: Vec::with_capacity(token_count),
+    //                         scaling_exponents: Vec::with_capacity(token_count),
+    //                         block_created: block_created_upper_bound,
+    //                     }),
+    //                     |mut registered_pool, token| {
+    //                         if let RegisteredPool::Weighted(ref mut pool) = registered_pool {
+    //                             pool.tokens.push(token.address);
+    //                             pool.normalized_weights.push(token.weight);
+    //                             pool.scaling_exponents.push(
+    //                                 18u8.checked_sub(token.decimals).ok_or_else(|| {
+    //                                     anyhow!("unsupported token with more than 18 decimals")
+    //                                 })?,
+    //                             );
+    //                             Ok(registered_pool)
+    //                         } else {
+    //                             unreachable!("Not a weighted pool");
+    //                         }
+    //                     },
+    //                 )
+    //             }
+    //             Pool::Unknown => unimplemented!()
+    //         }
+    //     }
+    // }
 }
 
 mod block_number_query {
@@ -259,7 +423,7 @@ mod block_number_query {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sources::balancer::pool_storage::{PoolType, RegisteredWeightedPool};
+    use crate::sources::balancer::pool_storage::RegisteredWeightedPool;
     use crate::sources::balancer::swap::fixed_point::Bfp;
     use ethcontract::{H160, H256};
 
@@ -268,10 +432,9 @@ mod tests {
         use pools_query::*;
 
         assert_eq!(
-            serde_json::from_value::<Data>(json!({
+            serde_json::from_value::<Data<WeightedToken>>(json!({
                 "pools": [
                     {
-                        "poolType": "Weighted",
                         "address": "0x2222222222222222222222222222222222222222",
                         "id": "0x1111111111111111111111111111111111111111111111111111111111111111",
                         "factory": "0x5555555555555555555555555555555555555555",
@@ -292,18 +455,17 @@ mod tests {
             }))
             .unwrap(),
             Data {
-                pools: vec![Pool {
-                    pool_type: Default::default(),
+                pools: vec![PoolData {
                     id: H256([0x11; 32]),
                     address: H160([0x22; 20]),
                     factory: Some(H160([0x55; 20])),
                     tokens: vec![
-                        Token {
+                        WeightedToken {
                             address: H160([0x33; 20]),
                             decimals: 3,
                             weight: Bfp::from_wei(500_000_000_000_000_000u128.into()),
                         },
-                        Token {
+                        WeightedToken {
                             address: H160([0x44; 20]),
                             decimals: 4,
                             weight: Bfp::from_wei(500_000_000_000_000_000u128.into()),
@@ -339,18 +501,17 @@ mod tests {
     fn convert_pool_to_registered_pool() {
         use pools_query::*;
 
-        let pool = Pool {
-            pool_type: PoolType::Weighted,
+        let pool = PoolData {
             id: H256([2; 32]),
             address: H160([1; 20]),
             factory: None,
             tokens: vec![
-                Token {
+                WeightedToken {
                     address: H160([2; 20]),
                     decimals: 1,
                     weight: "1.337".parse().unwrap(),
                 },
-                Token {
+                WeightedToken {
                     address: H160([3; 20]),
                     decimals: 2,
                     weight: "4.2".parse().unwrap(),
@@ -378,12 +539,11 @@ mod tests {
     fn pool_conversion_invalid_decimals() {
         use pools_query::*;
 
-        let pool = Pool {
-            pool_type: Default::default(),
+        let pool = PoolData {
             id: H256([2; 32]),
             address: H160([1; 20]),
             factory: None,
-            tokens: vec![Token {
+            tokens: vec![WeightedToken {
                 address: H160([2; 20]),
                 decimals: 19,
                 weight: "1.337".parse().unwrap(),

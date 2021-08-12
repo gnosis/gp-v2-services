@@ -37,7 +37,6 @@ use derivative::Derivative;
 use ethcontract::{H160, H256};
 use model::TokenPair;
 use serde::Deserialize;
-use std::str::FromStr;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -66,18 +65,7 @@ pub struct RegisteredStablePool {
 pub enum PoolType {
     Stable,
     Weighted,
-}
-
-impl FromStr for PoolType {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "Weighted" => Ok(Self::Weighted),
-            "Stable" => Ok(Self::Stable),
-            _ => Err(anyhow!("Invalid Pool Type")),
-        }
-    }
+    Other,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -356,6 +344,11 @@ impl PoolStorage {
                             .or_default()
                             .insert(pool_id);
                     }
+                }
+                PoolType::Other => {
+                    return Err(anyhow!(
+                        "event insertion not implemented for Other pool types"
+                    ))
                 }
             }
         }
