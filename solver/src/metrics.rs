@@ -12,7 +12,7 @@ use prometheus::{
 use shared::{
     metrics::LivenessChecking,
     sources::{
-        balancer::pool_cache::WeightedPoolCacheMetrics, uniswap::pool_cache::PoolCacheMetrics,
+        balancer::pool_cache::BalancerPoolCacheMetrics, uniswap::pool_cache::PoolCacheMetrics,
     },
     transport::instrumented::TransportMetrics,
 };
@@ -222,7 +222,7 @@ impl PoolCacheMetrics for Metrics {
     }
 }
 
-impl WeightedPoolCacheMetrics for Metrics {
+impl BalancerPoolCacheMetrics for Metrics {
     fn pools_fetched(&self, cache_hits: usize, cache_misses: usize) {
         // We may want to distinguish cache metrics between the different
         // liquidity sources in the future, for now just use the same counters.

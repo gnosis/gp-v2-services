@@ -36,6 +36,7 @@ use anyhow::Result;
 use derivative::Derivative;
 use ethcontract::{H160, H256};
 use model::TokenPair;
+use serde::Deserialize;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -51,8 +52,68 @@ pub struct RegisteredWeightedPool {
     pub block_created: u64,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RegisteredStablePool {
+    pub pool_id: H256,
+    pub pool_address: H160,
+    pub tokens: Vec<H160>,
+    pub scaling_exponents: Vec<u8>,
+    pub block_created: u64,
+}
+
+#[derive(Copy, Debug, Deserialize, Clone, Eq, PartialEq)]
+pub enum PoolType {
+    Stable,
+    Weighted,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RegisteredPool {
+    Weighted(RegisteredWeightedPool),
+    Stable(RegisteredStablePool),
+}
+
+impl RegisteredPool {
+    pub fn block_created(&self) -> u64 {
+        match self {
+            RegisteredPool::Weighted(pool) => pool.block_created,
+            RegisteredPool::Stable(pool) => pool.block_created,
+        }
+    }
+
+    pub fn into_weighted(self) -> RegisteredWeightedPool {
+        if let RegisteredPool::Weighted(pool) = self {
+            pool
+        } else {
+            panic!("Not a weighted pool!")
+        }
+    }
+
+    pub fn into_stable(self) -> RegisteredStablePool {
+        if let RegisteredPool::Stable(pool) = self {
+            pool
+        } else {
+            panic!("Not a stable pool!")
+        }
+    }
+}
+
+#[cfg(test)]
+impl Default for RegisteredPool {
+    fn default() -> Self {
+        Self::Weighted(RegisteredWeightedPool::default())
+    }
+}
+
+impl Default for PoolType {
+    fn default() -> Self {
+        PoolType::Weighted
+    }
+}
+
 #[derive(Copy, Debug, Default, Clone, Eq, PartialEq)]
 pub struct PoolCreated {
+    pub pool_type: PoolType,
     pub pool_address: H160,
 }
 
@@ -62,7 +123,7 @@ impl RegisteredWeightedPool {
         pool_address: H160,
         data_fetcher: &dyn PoolInfoFetching,
     ) -> Result<RegisteredWeightedPool> {
-        let pool_data = data_fetcher.get_pool_data(pool_address).await?;
+        let pool_data = data_fetcher.get_weighted_pool_data(pool_address).await?;
         Ok(RegisteredWeightedPool {
             pool_id: pool_data.pool_id,
             pool_address,
@@ -83,6 +144,32 @@ impl RegisteredWeightedPool {
     }
 }
 
+impl RegisteredStablePool {
+    pub async fn new(
+        block_created: u64,
+        pool_address: H160,
+        data_fetcher: &dyn PoolInfoFetching,
+    ) -> Result<RegisteredStablePool> {
+        let pool_data = data_fetcher.get_stable_pool_data(pool_address).await?;
+        Ok(RegisteredStablePool {
+            pool_id: pool_data.pool_id,
+            pool_address,
+            tokens: pool_data.tokens,
+            scaling_exponents: pool_data.scaling_exponents,
+            block_created,
+        })
+    }
+
+    /// Errors expected here are propagated from `get_pool_data`.
+    pub async fn from_event(
+        block_created: u64,
+        creation: PoolCreated,
+        data_fetcher: &dyn PoolInfoFetching,
+    ) -> Result<RegisteredStablePool> {
+        Self::new(block_created, creation.pool_address, data_fetcher).await
+    }
+}
+
 /// PoolStorage represents in-memory storage of all deployed Balancer Pools
 #[derive(Derivative)]
 #[derivative(Debug)]
@@ -90,38 +177,63 @@ pub struct PoolStorage {
     /// Used for O(1) access to all pool_ids for a given token
     pools_by_token: HashMap<H160, HashSet<H256>>,
     /// WeightedPool data for a given PoolId
-    pools: HashMap<H256, RegisteredWeightedPool>,
+    weighted_pools: HashMap<H256, RegisteredWeightedPool>,
+    /// StablePool data for a given PoolId
+    stable_pools: HashMap<H256, RegisteredStablePool>,
+    // TODO - either store weighted and stable in separate or together (but pick one!)
+    /// All static Balancer Pool details for a given PoolId
+    registered_pools: HashMap<H256, RegisteredPool>,
     #[derivative(Debug = "ignore")]
     data_fetcher: Arc<dyn PoolInfoFetching>,
 }
 
 impl PoolStorage {
     pub fn new(
-        initial_pools: Vec<RegisteredWeightedPool>,
+        initial_weighted_pools: Vec<RegisteredWeightedPool>,
+        initial_stable_pools: Vec<RegisteredStablePool>,
         data_fetcher: Arc<dyn PoolInfoFetching>,
     ) -> Self {
         let mut pools_by_token = HashMap::<_, HashSet<_>>::new();
-        let mut pools = HashMap::new();
-        for pool in initial_pools {
+        let mut registered_pools = HashMap::new();
+
+        let mut weighted_pools = HashMap::new();
+        for pool in initial_weighted_pools {
             for token in &pool.tokens {
                 pools_by_token
                     .entry(*token)
                     .or_default()
                     .insert(pool.pool_id);
             }
-            pools.insert(pool.pool_id, pool);
+            // TODO - pick one!
+            weighted_pools.insert(pool.pool_id, pool.clone());
+            registered_pools.insert(pool.pool_id, RegisteredPool::Weighted(pool));
+        }
+
+        let mut stable_pools = HashMap::new();
+        for pool in initial_stable_pools {
+            for token in &pool.tokens {
+                pools_by_token
+                    .entry(*token)
+                    .or_default()
+                    .insert(pool.pool_id);
+            }
+            // TODO - pick one!
+            stable_pools.insert(pool.pool_id, pool.clone());
+            registered_pools.insert(pool.pool_id, RegisteredPool::Stable(pool));
         }
 
         PoolStorage {
             pools_by_token,
-            pools,
+            weighted_pools,
+            stable_pools,
+            registered_pools,
             data_fetcher,
         }
     }
 
     #[cfg(test)]
     fn empty(data_fetcher: Arc<dyn PoolInfoFetching>) -> Self {
-        Self::new(vec![], data_fetcher)
+        Self::new(vec![], vec![], data_fetcher)
     }
 
     /// Returns all pools containing both tokens from `TokenPair`
@@ -149,8 +261,36 @@ impl PoolStorage {
             .collect()
     }
 
-    pub fn pools_for(&self, pool_ids: &HashSet<H256>) -> Vec<RegisteredWeightedPool> {
-        self.pools
+    pub fn weighted_pools_for(&self, pool_ids: &HashSet<H256>) -> Vec<RegisteredWeightedPool> {
+        self.weighted_pools
+            .iter()
+            .filter_map(|(pool_id, pool)| {
+                if pool_ids.contains(pool_id) {
+                    Some(pool)
+                } else {
+                    None
+                }
+            })
+            .cloned()
+            .collect()
+    }
+
+    pub fn stable_pools_for(&self, pool_ids: &HashSet<H256>) -> Vec<RegisteredStablePool> {
+        self.stable_pools
+            .iter()
+            .filter_map(|(pool_id, pool)| {
+                if pool_ids.contains(pool_id) {
+                    Some(pool)
+                } else {
+                    None
+                }
+            })
+            .cloned()
+            .collect()
+    }
+
+    pub fn pools_for(&self, pool_ids: &HashSet<H256>) -> Vec<RegisteredPool> {
+        self.registered_pools
             .iter()
             .filter_map(|(pool_id, pool)| {
                 if pool_ids.contains(pool_id) {
@@ -165,19 +305,45 @@ impl PoolStorage {
 
     pub async fn insert_events(&mut self, events: Vec<(EventIndex, PoolCreated)>) -> Result<()> {
         for (index, creation) in events {
-            let weighted_pool = RegisteredWeightedPool::from_event(
-                index.block_number,
-                creation,
-                &*self.data_fetcher,
-            )
-            .await?;
-            let pool_id = weighted_pool.pool_id;
-            self.pools.insert(pool_id, weighted_pool.clone());
-            for token in weighted_pool.tokens {
-                self.pools_by_token
-                    .entry(token)
-                    .or_default()
-                    .insert(pool_id);
+            match creation.pool_type {
+                PoolType::Stable => {
+                    let pool = RegisteredStablePool::from_event(
+                        index.block_number,
+                        creation,
+                        &*self.data_fetcher,
+                    )
+                    .await?;
+                    let pool_id = pool.pool_id;
+                    // TODO Remove one!
+                    self.stable_pools.insert(pool_id, pool.clone());
+                    self.registered_pools
+                        .insert(pool_id, RegisteredPool::Stable(pool.clone()));
+                    for token in pool.tokens {
+                        self.pools_by_token
+                            .entry(token)
+                            .or_default()
+                            .insert(pool_id);
+                    }
+                }
+                PoolType::Weighted => {
+                    let pool = RegisteredWeightedPool::from_event(
+                        index.block_number,
+                        creation,
+                        &*self.data_fetcher,
+                    )
+                    .await?;
+                    let pool_id = pool.pool_id;
+                    // TODO Remove one!
+                    self.weighted_pools.insert(pool_id, pool.clone());
+                    self.registered_pools
+                        .insert(pool_id, RegisteredPool::Weighted(pool.clone()));
+                    for token in pool.tokens {
+                        self.pools_by_token
+                            .entry(token)
+                            .or_default()
+                            .insert(pool_id);
+                    }
+                }
             }
         }
         Ok(())
@@ -199,10 +365,14 @@ impl PoolStorage {
     }
 
     fn delete_pools(&mut self, delete_from_block_number: u64) {
-        self.pools
+        self.weighted_pools
             .retain(|_, pool| pool.block_created < delete_from_block_number);
+        self.stable_pools
+            .retain(|_, pool| pool.block_created < delete_from_block_number);
+        self.registered_pools
+            .retain(|_, pool| pool.block_created() < delete_from_block_number);
         // Note that this could result in an empty set for some tokens.
-        let retained_pool_ids: HashSet<H256> = self.pools.keys().copied().collect();
+        let retained_pool_ids: HashSet<H256> = self.registered_pools.keys().copied().collect();
         for (_, pool_set) in self.pools_by_token.iter_mut() {
             *pool_set = pool_set
                 .intersection(&retained_pool_ids)
@@ -214,9 +384,9 @@ impl PoolStorage {
     pub fn last_event_block(&self) -> u64 {
         // Technically we could keep this updated more effectively in a field on balancer pools,
         // but the maintenance seems like more overhead that needs to be tested.
-        self.pools
+        self.registered_pools
             .iter()
-            .map(|(_, pool)| pool.block_created)
+            .map(|(_, pool)| pool.block_created())
             .max()
             .unwrap_or(0)
     }
@@ -225,7 +395,7 @@ impl PoolStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sources::balancer::info_fetching::{MockPoolInfoFetching, WeightedPoolInfo};
+    use crate::sources::balancer::info_fetching::{MockPoolInfoFetching, PoolInfo};
     use maplit::{hashmap, hashset};
     use mockall::predicate::eq;
 
@@ -243,6 +413,7 @@ mod tests {
         let weights: Vec<Bfp> = (start..end + 2).map(|i| Bfp::from_wei(i.into())).collect();
         let creation_events: Vec<PoolCreated> = (start..end + 1)
             .map(|i| PoolCreated {
+                pool_type: Default::default(),
                 pool_address: pool_addresses[i],
             })
             .collect();
@@ -277,16 +448,23 @@ mod tests {
                     block_created: 0,
                 },
             ],
+            vec![RegisteredStablePool {
+                pool_id: H256([3; 32]),
+                pool_address: H160([3; 20]),
+                tokens: vec![H160([0x11; 20]), H160([0x77; 20])],
+                scaling_exponents: vec![0, 0],
+                block_created: 0,
+            }],
             Arc::new(MockPoolInfoFetching::new()),
         );
 
         assert_eq!(
             storage.pools_by_token,
             hashmap! {
-                H160([0x11; 20]) => hashset![H256([1; 32]), H256([2; 32])],
+                H160([0x11; 20]) => hashset![H256([1; 32]), H256([2; 32]), H256([3; 32])],
                 H160([0x22; 20]) => hashset![H256([1; 32])],
                 H160([0x33; 20]) => hashset![H256([2; 32])],
-                H160([0x77; 20]) => hashset![H256([2; 32])],
+                H160([0x77; 20]) => hashset![H256([2; 32]), H256([3; 32])],
             }
         );
     }
@@ -304,14 +482,15 @@ mod tests {
 
         let mut dummy_data_fetcher = MockPoolInfoFetching::new();
         for i in 0..n {
-            let expected_pool_data = WeightedPoolInfo {
+            let expected_pool_data = PoolInfo {
                 pool_id: pool_ids[i],
                 tokens: vec![tokens[i], tokens[i + 1]],
                 weights: vec![weights[i], weights[i + 1]],
                 scaling_exponents: vec![0, 0],
+                amplification_parameter: Default::default(),
             };
             dummy_data_fetcher
-                .expect_get_pool_data()
+                .expect_get_weighted_pool_data()
                 .with(eq(pool_addresses[i]))
                 .returning(move |_| Ok(expected_pool_data.clone()));
         }
@@ -339,15 +518,15 @@ mod tests {
         );
         for i in 0..n {
             assert_eq!(
-                pool_store.pools.get(&pool_ids[i]).unwrap(),
-                &RegisteredWeightedPool {
+                pool_store.registered_pools.get(&pool_ids[i]).unwrap(),
+                &RegisteredPool::Weighted(RegisteredWeightedPool {
                     pool_id: pool_ids[i],
                     pool_address: pool_addresses[i],
                     tokens: vec![tokens[i], tokens[i + 1]],
                     normalized_weights: vec![weights[i], weights[i + 1]],
                     scaling_exponents: vec![0, 0],
                     block_created: i as u64 + 1
-                },
+                }),
                 "failed assertion at index {}",
                 i
             );
@@ -368,14 +547,15 @@ mod tests {
 
         let mut dummy_data_fetcher = MockPoolInfoFetching::new();
         for i in start_block..end_block + 1 {
-            let expected_pool_data = WeightedPoolInfo {
+            let expected_pool_data = PoolInfo {
                 pool_id: pool_ids[i],
                 tokens: vec![tokens[i], tokens[i + 1]],
                 weights: vec![weights[i], weights[i + 1]],
                 scaling_exponents: vec![0, 0],
+                amplification_parameter: Default::default(),
             };
             dummy_data_fetcher
-                .expect_get_pool_data()
+                .expect_get_weighted_pool_data()
                 .with(eq(pool_addresses[i]))
                 .returning(move |_| Ok(expected_pool_data.clone()));
         }
@@ -386,18 +566,20 @@ mod tests {
         let new_token = H160::from_low_u64_be(808);
         let new_weight = Bfp::from_wei(1337.into());
         let new_creation = PoolCreated {
+            pool_type: Default::default(),
             pool_address: new_pool_address,
         };
         let new_event = (EventIndex::new(3, 0), new_creation);
         dummy_data_fetcher
-            .expect_get_pool_data()
+            .expect_get_weighted_pool_data()
             .with(eq(new_pool_address))
             .returning(move |_| {
-                Ok(WeightedPoolInfo {
+                Ok(PoolInfo {
                     pool_id: new_pool_id,
                     tokens: vec![new_token],
                     weights: vec![new_weight],
                     scaling_exponents: vec![0],
+                    amplification_parameter: Default::default(),
                 })
             });
 
@@ -410,17 +592,18 @@ mod tests {
             .await
             .unwrap();
         // Everything until block 3 is unchanged.
+        // TODO - make sure to do some check for stable pools!
         for i in 0..3 {
             assert_eq!(
-                pool_store.pools.get(&pool_ids[i]).unwrap(),
-                &RegisteredWeightedPool {
+                pool_store.registered_pools.get(&pool_ids[i]).unwrap(),
+                &RegisteredPool::Weighted(RegisteredWeightedPool {
                     pool_id: pool_ids[i],
                     pool_address: pool_addresses[i],
                     tokens: vec![tokens[i], tokens[i + 1]],
                     normalized_weights: vec![weights[i], weights[i + 1]],
                     scaling_exponents: vec![0, 0],
                     block_created: i as u64
-                },
+                }),
                 "assertion failed at index {}",
                 i
             );
@@ -444,7 +627,7 @@ mod tests {
 
         // Everything old from block 3 on is gone.
         for pool_id in pool_ids.iter().take(6).skip(3) {
-            assert!(pool_store.pools.get(pool_id).is_none());
+            assert!(pool_store.registered_pools.get(pool_id).is_none());
         }
         for token in tokens.iter().take(7).skip(4) {
             assert!(pool_store.pools_by_token.get(token).unwrap().is_empty());
@@ -454,15 +637,15 @@ mod tests {
 
         // All new data is included.
         assert_eq!(
-            pool_store.pools.get(&new_pool_id).unwrap(),
-            &RegisteredWeightedPool {
+            pool_store.registered_pools.get(&new_pool_id).unwrap(),
+            &RegisteredPool::Weighted(RegisteredWeightedPool {
                 pool_id: new_pool_id,
                 pool_address: new_pool_address,
                 tokens: vec![new_token],
                 normalized_weights: vec![new_weight],
                 scaling_exponents: vec![0],
                 block_created: new_event_block
-            }
+            })
         );
 
         assert!(pool_store.pools_by_token.get(&new_token).is_some());
@@ -480,14 +663,15 @@ mod tests {
         let mut dummy_data_fetcher = MockPoolInfoFetching::new();
         // Have to load all expected data into fetcher before it is passed on.
         for i in 0..n {
-            let expected_pool_data = WeightedPoolInfo {
+            let expected_pool_data = PoolInfo {
                 pool_id: pool_ids[i],
                 tokens: tokens[i..n].to_owned(),
                 weights: vec![],
                 scaling_exponents: vec![],
+                amplification_parameter: Default::default(),
             };
             dummy_data_fetcher
-                .expect_get_pool_data()
+                .expect_get_weighted_pool_data()
                 .with(eq(pool_addresses[i]))
                 .returning(move |_| Ok(expected_pool_data.clone()));
         }
@@ -516,9 +700,10 @@ mod tests {
                 block_created: 0,
                 pool_address: pool_addresses[i],
             });
-            registry
-                .pools
-                .insert(pool_ids[i], weighted_pools[i].clone());
+            registry.registered_pools.insert(
+                pool_ids[i],
+                RegisteredPool::Weighted(weighted_pools[i].clone()),
+            );
         }
         // When n = 3, this above generates
         // pool_store.pools_by_token = hashmap! {
@@ -559,35 +744,35 @@ mod tests {
         assert!(registry.pools_for(&hashset! {}).is_empty());
         assert_eq!(
             registry.pools_for(&hashset! {pool_ids[0]}),
-            vec![weighted_pools[0].clone()]
+            vec![RegisteredPool::Weighted(weighted_pools[0].clone())]
         );
         assert_eq!(
             registry.pools_for(&hashset! {pool_ids[1]}),
-            vec![weighted_pools[1].clone()]
+            vec![RegisteredPool::Weighted(weighted_pools[1].clone())]
         );
         assert_eq!(
             registry.pools_for(&hashset! {pool_ids[2]}),
-            vec![weighted_pools[2].clone()]
+            vec![RegisteredPool::Weighted(weighted_pools[2].clone())]
         );
         let res_0_1 = registry.pools_for(&hashset! {pool_ids[0], pool_ids[1]});
         assert_eq!(res_0_1.len(), 2);
-        assert!(res_0_1.contains(&weighted_pools[0]));
-        assert!(res_0_1.contains(&weighted_pools[1]));
+        assert!(res_0_1.contains(&RegisteredPool::Weighted(weighted_pools[0].clone())));
+        assert!(res_0_1.contains(&RegisteredPool::Weighted(weighted_pools[1].clone())));
 
         let res_0_2 = registry.pools_for(&hashset! {pool_ids[0], pool_ids[2]});
         assert_eq!(res_0_2.len(), 2);
-        assert!(res_0_2.contains(&weighted_pools[0]));
-        assert!(res_0_2.contains(&weighted_pools[2]));
+        assert!(res_0_2.contains(&RegisteredPool::Weighted(weighted_pools[0].clone())));
+        assert!(res_0_2.contains(&RegisteredPool::Weighted(weighted_pools[2].clone())));
 
         let res_1_2 = registry.pools_for(&hashset! {pool_ids[1], pool_ids[2]});
         assert_eq!(res_1_2.len(), 2);
-        assert!(res_1_2.contains(&weighted_pools[1]));
-        assert!(res_1_2.contains(&weighted_pools[2]));
+        assert!(res_1_2.contains(&RegisteredPool::Weighted(weighted_pools[1].clone())));
+        assert!(res_1_2.contains(&RegisteredPool::Weighted(weighted_pools[2].clone())));
 
         let res_012 = registry.pools_for(&hashset! {pool_ids[0], pool_ids[1], pool_ids[2] });
         assert_eq!(res_012.len(), 3);
-        assert!(res_012.contains(&weighted_pools[0]));
-        assert!(res_012.contains(&weighted_pools[1]));
-        assert!(res_012.contains(&weighted_pools[2]));
+        assert!(res_012.contains(&RegisteredPool::Weighted(weighted_pools[0].clone())));
+        assert!(res_012.contains(&RegisteredPool::Weighted(weighted_pools[1].clone())));
+        assert!(res_012.contains(&RegisteredPool::Weighted(weighted_pools[2].clone())));
     }
 }

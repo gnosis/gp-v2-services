@@ -33,18 +33,20 @@ fn run() -> Result<()> {
         )?
         .github(
             "BalancerV2Vault",
-            "balancer-labs/balancer-v2-monorepo/a3b570a2aa655d4c4941a67e3db6a06fbd72ef09/\
-             pkg/deployments/deployed/mainnet/Vault.json",
+            "balancer-labs/balancer-subgraph-v2/master/abis/Vault.json",
         )?
         .github(
             "BalancerV2WeightedPoolFactory",
-            "balancer-labs/balancer-v2-monorepo/a3b570a2aa655d4c4941a67e3db6a06fbd72ef09/\
-             pkg/deployments/deployed/mainnet/WeightedPoolFactory.json",
+            "balancer-labs/balancer-subgraph-v2/master/abis/WeightedPoolFactory.json",
         )?
         .github(
             "BalancerV2WeightedPool2TokensFactory",
             "balancer-labs/balancer-v2-monorepo/a3b570a2aa655d4c4941a67e3db6a06fbd72ef09/\
              pkg/deployments/deployed/mainnet/WeightedPool2TokensFactory.json",
+        )?
+        .github(
+            "BalancerV2StablePoolFactory",
+            "balancer-labs/balancer-subgraph-v2/master/abis/StablePoolFactory.json",
         )?
         .npm(
             "ERC20Mintable",
@@ -77,6 +79,10 @@ fn run() -> Result<()> {
             "BalancerV2WeightedPool",
             "balancer-labs/balancer-v2-monorepo/a3b570a2aa655d4c4941a67e3db6a06fbd72ef09/\
              pkg/deployments/extra-abis/WeightedPool.json",
+        )?
+        .github(
+            "BalancerV2StablePool",
+            "balancer-labs/balancer-subgraph-v2/master/abis/StablePool.json",
         )?
         .npm(
             "ERC20",
