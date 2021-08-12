@@ -156,8 +156,8 @@ mod pools_query {
         pub id: H256,
         pub address: H160,
         pub factory: Option<H160>,
-        #[serde(with = "serde_with::rust::display_fromstr")]
         pub pool_type: PoolType,
+        // TODO - make this optional using enum for Token (Weighted, not).
         pub tokens: Vec<Token>,
     }
 
