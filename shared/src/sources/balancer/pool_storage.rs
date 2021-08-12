@@ -32,11 +32,12 @@ use crate::{
     event_handling::EventIndex,
     sources::balancer::{info_fetching::PoolInfoFetching, swap::fixed_point::Bfp},
 };
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use derivative::Derivative;
 use ethcontract::{H160, H256};
 use model::TokenPair;
 use serde::Deserialize;
+use std::str::FromStr;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -65,6 +66,18 @@ pub struct RegisteredStablePool {
 pub enum PoolType {
     Stable,
     Weighted,
+}
+
+impl FromStr for PoolType {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Weighted" => Ok(Self::Weighted),
+            "Stable" => Ok(Self::Stable),
+            _ => Err(anyhow!("Invalid Pool Type")),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

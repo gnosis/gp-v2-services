@@ -4,9 +4,7 @@
 //! with existing data in order to reduce the "cold start" time of the service.
 
 use crate::sources::balancer::{
-    graph_api::{
-        BalancerSubgraphClient, RegisteredPools, RegisteredStablePools, RegisteredWeightedPools,
-    },
+    graph_api::{BalancerSubgraphClient, RegisteredPools},
     info_fetching::PoolInfoFetching,
     pool_storage::{RegisteredStablePool, RegisteredWeightedPool},
 };
@@ -316,21 +314,11 @@ where
 #[cfg_attr(test, mockall::automock)]
 #[async_trait::async_trait]
 trait BalancerSubgraph: Send + Sync {
-    async fn weighted_pools(&self) -> Result<RegisteredWeightedPools>;
-    async fn stable_pools(&self) -> Result<RegisteredStablePools>;
     async fn registered_pools(&self) -> Result<RegisteredPools>;
 }
 
 #[async_trait::async_trait]
 impl BalancerSubgraph for BalancerSubgraphClient {
-    async fn weighted_pools(&self) -> Result<RegisteredWeightedPools> {
-        self.get_weighted_pools().await
-    }
-
-    async fn stable_pools(&self) -> Result<RegisteredStablePools> {
-        self.get_stable_pools().await
-    }
-
     async fn registered_pools(&self) -> Result<RegisteredPools> {
         self.get_registered_pools().await
     }
