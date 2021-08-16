@@ -7,6 +7,7 @@ pub mod api;
 use self::api::{Amount, OneInchClient, Swap, SwapQuery};
 use super::single_order_solver::SingleOrderSolving;
 use super::solver_utils::Slippage;
+use crate::solver::solver_utils::SettlementError;
 use crate::{
     encoding::EncodedInteraction,
     interactions::allowances::{AllowanceManager, AllowanceManaging},
@@ -96,7 +97,7 @@ impl OneInchSolver {
         &self,
         order: LimitOrder,
         protocols: Option<Vec<String>>,
-    ) -> Result<Option<Settlement>> {
+    ) -> Result<Option<Settlement>, SettlementError> {
         debug_assert_eq!(
             order.kind,
             OrderKind::Sell,
@@ -163,7 +164,10 @@ impl Interaction for Swap {
 
 #[async_trait::async_trait]
 impl SingleOrderSolving for OneInchSolver {
-    async fn settle_order(&self, order: LimitOrder) -> Result<Option<Settlement>> {
+    async fn try_settle_order(
+        &self,
+        order: LimitOrder,
+    ) -> Result<Option<Settlement>, SettlementError> {
         if order.kind != OrderKind::Sell {
             // 1Inch only supports sell orders
             return Ok(None);

@@ -117,16 +117,6 @@ impl SingleOrderSolving for ParaswapSolver {
         })
     }
 
-    fn account(&self) -> &Account {
-        &self.account
-    }
-
-    fn name(&self) -> &'static str {
-        "ParaSwap"
-    }
-}
-
-impl ParaswapSolver {
     async fn try_settle_order(
         &self,
         order: LimitOrder,
@@ -162,6 +152,16 @@ impl ParaswapSolver {
         Ok(Some(settlement))
     }
 
+    fn account(&self) -> &Account {
+        &self.account
+    }
+
+    fn name(&self) -> &'static str {
+        "ParaSwap"
+    }
+}
+
+impl ParaswapSolver {
     async fn get_price_for_order(
         &self,
         order: &LimitOrder,

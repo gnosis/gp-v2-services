@@ -80,41 +80,6 @@ impl MatchaSolver {
 
 #[async_trait::async_trait]
 impl SingleOrderSolving for MatchaSolver {
-    async fn settle_order(&self, order: LimitOrder) -> Result<Option<Settlement>> {
-        let max_retries = 2;
-        for _ in 0..max_retries {
-            match self.try_settle_order(order.clone()).await {
-                Ok(settlement) => return Ok(settlement),
-                Err(err) if err.retryable => {
-                    tracing::debug!("Retrying Matcha settlement due to: {:?}", &err);
-                    continue;
-                }
-                Err(err) => return Err(err.inner),
-            }
-        }
-        // One last attempt, else throw converted error
-        self.try_settle_order(order).await.map_err(|err| err.inner)
-    }
-
-    fn account(&self) -> &Account {
-        &self.account
-    }
-
-    fn name(&self) -> &'static str {
-        "Matcha"
-    }
-}
-
-impl From<MatchaResponseError> for SettlementError {
-    fn from(err: MatchaResponseError) -> Self {
-        SettlementError {
-            inner: anyhow!("Matcha Response Error {:?}", err),
-            retryable: matches!(err, MatchaResponseError::ServerError(_)),
-        }
-    }
-}
-
-impl MatchaSolver {
     async fn try_settle_order(
         &self,
         order: LimitOrder,
@@ -157,6 +122,23 @@ impl MatchaSolver {
         );
         settlement.encoder.append_to_execution_plan(swap);
         Ok(Some(settlement))
+    }
+
+    fn account(&self) -> &Account {
+        &self.account
+    }
+
+    fn name(&self) -> &'static str {
+        "Matcha"
+    }
+}
+
+impl From<MatchaResponseError> for SettlementError {
+    fn from(err: MatchaResponseError) -> Self {
+        SettlementError {
+            inner: anyhow!("Matcha Response Error {:?}", err),
+            retryable: matches!(err, MatchaResponseError::ServerError(_)),
+        }
     }
 }
 

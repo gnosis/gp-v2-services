@@ -1,21 +1,55 @@
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use futures::future;
 use rand::prelude::SliceRandom;
 
 use crate::{
     liquidity::{LimitOrder, Liquidity},
     settlement::Settlement,
-    solver::Solver,
+    solver::{solver_utils::SettlementError, Solver},
 };
 use ethcontract::Account;
+use itertools::Itertools;
 
 #[async_trait::async_trait]
 /// Implementations of this trait know how to settle a single limit order (not taking advantage of batching multiple orders together)
 pub trait SingleOrderSolving {
     /// Return a settlement for the given limit order (if possible)
-    async fn settle_order(&self, order: LimitOrder) -> Result<Option<Settlement>>;
+    async fn settle_order(&self, order: LimitOrder) -> Result<Option<Settlement>> {
+        let max_retries = 2;
+        let mut errors = vec![];
+        for _ in 0..max_retries {
+            match self.try_settle_order(order.clone()).await {
+                Ok(settlement) => return Ok(settlement),
+                Err(err) if err.retryable => {
+                    tracing::debug!("Retrying {} settlement due to: {:?}", self.name(), &err);
+                    errors.push(err.inner);
+                    continue;
+                }
+                Err(err) => return Err(err.inner),
+            }
+        }
+        // One last attempt, else throw converted error
+        self.try_settle_order(order).await.map_err(|err| {
+            errors.push(err.inner);
+            anyhow!(format!(
+                "{} Errored after {} attempts. Accumulated errors follow \n{}",
+                self.name(),
+                max_retries + 1,
+                errors
+                    .iter()
+                    .enumerate()
+                    .map(|(i, err)| format!("Attempt {}: {}", i + 1, err.to_string()))
+                    .join("\n")
+            ))
+        })
+    }
+
+    async fn try_settle_order(
+        &self,
+        order: LimitOrder,
+    ) -> Result<Option<Settlement>, SettlementError>;
 
     /// Solver's account that should be used to submit settlements.
     fn account(&self) -> &Account;
