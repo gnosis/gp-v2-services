@@ -156,17 +156,25 @@ async fn main() {
         .expect("Could not get chainId")
         .as_u64();
 
-    let vault = match chain_id {
-        1 | 4 => Some(
+    let network = web3
+        .net()
+        .version()
+        .await
+        .expect("Failed to retrieve network version ID");
+    let vault = if BalancerV2Vault::raw_contract()
+        .networks
+        .contains_key(&network)
+    {
+        Some(
             BalancerV2Vault::deployed(&web3)
                 .await
                 .expect("couldn't load deployed vault contract"),
-        ),
-        _ => {
-            // The Vault is not deployed on all networks we support, so allow it
-            // to be `None` for those networks.
-            None
-        }
+        )
+    } else {
+        // The Vault is not deployed on all networks we support, so allow it
+        // to be `None` for those networks.
+        tracing::warn!("No Balancer V2 Vault support for network {}", network);
+        None
     };
 
     verify_deployed_contract_constants(&settlement_contract, chain_id)

@@ -84,11 +84,14 @@ impl Web3BalanceFetcher {
     async fn _register_many(&self, subscriptions: Vec<SubscriptionKey>) -> Result<()> {
         let mut batch = CallBatch::new(self.web3.transport());
 
-        // Make sure subscriptions are registered for next update even if batch call fails
+        // Make sure subscriptions are registered for next update even if batch call fails.
+        // Note that we only add an entry if one does not already exist, this allows calls
+        // to `get_balance` to immediately return the previously cached value during the
+        // update.
         {
             let mut guard = self.balances.lock().expect("thread holding mutex panicked");
             for subscription in &subscriptions {
-                guard.insert(*subscription, Default::default());
+                guard.entry(*subscription).or_default();
             }
         }
 
