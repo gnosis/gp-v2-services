@@ -31,6 +31,8 @@ pub struct OrderFilter {
     pub exclude_insufficient_balance: bool,
     pub exclude_unsupported_tokens: bool,
     pub uid: Option<OrderUid>,
+    pub page_size: Option<u32>,
+    pub current_page: Option<u32>,
 }
 
 #[derive(sqlx::Type)]
