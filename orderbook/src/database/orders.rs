@@ -250,7 +250,16 @@ impl OrderStoring for Postgres {
                 WHEN 'sell' THEN sum_sell < sell_amount \
                 WHEN 'buy' THEN sum_buy < buy_amount \
             END) AND \
-            ($7 OR NOT invalidated);";
+            ($7 OR NOT invalidated) \
+        ORDER BY unfiltered.creation_timestamp \
+        LIMIT $8 \
+        OFFSET $9;";
+
+        let page_size: u32 = filter.page_size.unwrap_or(10);
+        let current_page: u32 = match filter.current_page {
+            Some(p) => page_size * p,
+            None => 0,
+        };
 
         sqlx::query_as(QUERY)
             .bind(filter.min_valid_to)
@@ -260,6 +269,8 @@ impl OrderStoring for Postgres {
             .bind(filter.uid.as_ref().map(|uid| uid.0.as_ref()))
             .bind(!filter.exclude_fully_executed)
             .bind(!filter.exclude_invalidated)
+            .bind(page_size)
+            .bind(current_page)
             .fetch(&self.pool)
             .err_into()
             .and_then(|row: OrdersQueryRow| async move { row.into_order() })
