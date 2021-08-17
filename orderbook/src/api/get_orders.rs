@@ -29,6 +29,8 @@ struct Query {
     include_insufficient_balance: bool,
     #[serde(default)]
     include_unsupported_tokens: bool,
+    page_size: Option<u32>,
+    page: Option<u32>,
 }
 
 impl Query {
@@ -36,18 +38,26 @@ impl Query {
         if self.owner.is_none() && self.sell_token.is_none() && self.buy_token.is_none() {
             return Err("need to set at least one of owner, sell_token, buy_token");
         }
-        let to_h160 = |option: Option<&H160Wrapper>| option.map(|wrapper| wrapper.0);
-        Ok(OrderFilter {
-            min_valid_to: self.min_valid_to,
-            owner: to_h160(self.owner.as_ref()),
-            sell_token: to_h160(self.sell_token.as_ref()),
-            buy_token: to_h160(self.buy_token.as_ref()),
-            exclude_fully_executed: !self.include_fully_executed,
-            exclude_invalidated: !self.include_invalidated,
-            exclude_insufficient_balance: !self.include_insufficient_balance,
-            exclude_unsupported_tokens: !self.include_unsupported_tokens,
-            uid: None,
-        })
+
+        return match self.page_size {
+            Some(i) if !(1..=100).contains(&i) => Err("page_size must be between 1 and 100"),
+            _ => {
+                let to_h160 = |option: Option<&H160Wrapper>| option.map(|wrapper| wrapper.0);
+                Ok(OrderFilter {
+                    min_valid_to: self.min_valid_to,
+                    owner: to_h160(self.owner.as_ref()),
+                    sell_token: to_h160(self.sell_token.as_ref()),
+                    buy_token: to_h160(self.buy_token.as_ref()),
+                    exclude_fully_executed: !self.include_fully_executed,
+                    exclude_invalidated: !self.include_invalidated,
+                    exclude_insufficient_balance: !self.include_insufficient_balance,
+                    exclude_unsupported_tokens: !self.include_unsupported_tokens,
+                    uid: None,
+                    page_size: self.page_size,
+                    current_page: self.page,
+                })
+            }
+        };
     }
 }
 
