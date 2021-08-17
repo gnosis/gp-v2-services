@@ -1,7 +1,9 @@
 use crate::encoding::EncodedSettlement;
 use anyhow::{Error, Result};
 use contracts::GPv2Settlement;
-use ethcontract::{batch::CallBatch, dyns::DynTransport, transaction::TransactionBuilder, GasPrice, Account};
+use ethcontract::{
+    batch::CallBatch, dyns::DynTransport, transaction::TransactionBuilder, Account, GasPrice,
+};
 use futures::FutureExt;
 use primitive_types::U256;
 use shared::Web3;
@@ -123,10 +125,7 @@ mod tests {
         let block = web3.eth().block_number().await.unwrap().as_u64();
         let network_id = web3.net().version().await.unwrap();
         let contract = GPv2Settlement::deployed(&web3).await.unwrap();
-        let account = Account::Offline(
-            PrivateKey::from_raw([1; 32]).unwrap(),
-            None,
-        );
+        let account = Account::Offline(PrivateKey::from_raw([1; 32]).unwrap(), None);
         let settlements = vec![
             EncodedSettlement {
                 tokens: Default::default(),
@@ -148,7 +147,7 @@ mod tests {
             network_id.as_str(),
             Block::FixedWithTenderly(block),
             0.0,
-            &account
+            &account,
         )
         .await;
         let _ = dbg!(result);
