@@ -1,5 +1,6 @@
 #[cfg(feature = "bin")]
 pub mod paths;
+pub mod vault;
 
 include!(concat!(env!("OUT_DIR"), "/BalancerV2Authorizer.rs"));
 include!(concat!(env!("OUT_DIR"), "/BalancerV2Vault.rs"));
@@ -33,7 +34,7 @@ mod tests {
         futures::future::{self, FutureExt as _, Ready},
         json::json,
         jsonrpc::{Call, Id, MethodCall, Params, Value},
-        web3::{error::Result as Web3Result, RequestId, Transport, Web3},
+        web3::{error::Result as Web3Result, BatchTransport, RequestId, Transport, Web3},
     };
 
     #[derive(Debug, Clone)]
@@ -59,6 +60,20 @@ mod tests {
 
         fn send(&self, _id: RequestId, _request: Call) -> Self::Out {
             future::ready(Ok(json!(format!("{}", self.0))))
+        }
+    }
+
+    impl BatchTransport for ChainIdTransport {
+        type Batch = Ready<Web3Result<Vec<Web3Result<Value>>>>;
+
+        fn send_batch<T>(&self, requests: T) -> Self::Batch
+        where
+            T: IntoIterator<Item = (RequestId, Call)>,
+        {
+            future::ready(Ok(requests
+                .into_iter()
+                .map(|_| Ok(json!(format!("{}", self.0))))
+                .collect()))
         }
     }
 
