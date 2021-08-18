@@ -53,6 +53,12 @@ jobs:
       - run: cargo run --bin deploy --features bin
         working-directory: contracts
       - run: cargo test --locked --package e2e
+  openapi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: npm install @apidevtools/swagger-cli
+      - run: node_modules/.bin/swagger-cli validate orderbook/openapi.yml
   coverage:
     runs-on: ubuntu-latest
     steps:
@@ -68,9 +74,3 @@ jobs:
         with:
           files: lcov.info
           fail_ci_if_error: true
-  openapi:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - run: npm install @apidevtools/swagger-cli
-      - run: node_modules/.bin/swagger-cli validate orderbook/openapi.yml
