@@ -135,7 +135,7 @@ where
                 )?)
                 .unwrap_or_default()
                 .into_iter()
-                .map(|pool| pool.into_weighted())
+                .filter_map(|pool| pool.try_into_weighted().ok())
                 .collect(),
             weighted_2token_pools: pools
                 .pools_by_factory
@@ -145,7 +145,7 @@ where
                 )?)
                 .unwrap_or_default()
                 .into_iter()
-                .map(|pool| pool.into_weighted())
+                .filter_map(|pool| pool.try_into_weighted().ok())
                 .collect(),
             stable_pools: pools
                 .pools_by_factory
@@ -155,7 +155,7 @@ where
                 )?)
                 .unwrap_or_default()
                 .into_iter()
-                .map(|pool| pool.into_stable())
+                .filter_map(|pool| pool.try_into_stable().ok())
                 .collect(),
             fetched_block_number: pools.fetched_block_number,
         };
@@ -230,7 +230,7 @@ where
                         )?)
                         .unwrap_or_default()
                         .into_iter()
-                        .map(|pool| pool.into_weighted())
+                        .filter_map(|pool| pool.try_into_weighted().ok())
                         .collect(),
                     registered_pools.fetched_block_number,
                 )
@@ -245,7 +245,7 @@ where
                         )?)
                         .unwrap_or_default()
                         .into_iter()
-                        .map(|pool| pool.into_weighted())
+                        .filter_map(|pool| pool.try_into_weighted().ok())
                         .collect(),
                     registered_pools.fetched_block_number,
                 )
@@ -260,7 +260,7 @@ where
                         )?)
                         .unwrap_or_default()
                         .into_iter()
-                        .map(|pool| pool.into_stable())
+                        .filter_map(|pool| pool.try_into_stable().ok())
                         .collect(),
                     registered_pools.fetched_block_number,
                 )

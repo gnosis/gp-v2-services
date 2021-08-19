@@ -82,19 +82,19 @@ impl RegisteredPool {
         }
     }
 
-    pub fn into_weighted(self) -> RegisteredWeightedPool {
+    pub fn try_into_weighted(self) -> Result<RegisteredWeightedPool> {
         if let RegisteredPool::Weighted(pool) = self {
-            pool
+            Ok(pool)
         } else {
-            panic!("Not a weighted pool!")
+            Err(anyhow!("Not a weighted pool!"))
         }
     }
 
-    pub fn into_stable(self) -> RegisteredStablePool {
+    pub fn try_into_stable(self) -> Result<RegisteredStablePool> {
         if let RegisteredPool::Stable(pool) = self {
-            pool
+            Ok(pool)
         } else {
-            panic!("Not a stable pool!")
+            Err(anyhow!("Not a stable pool!"))
         }
     }
 }
@@ -106,13 +106,14 @@ impl Default for RegisteredPool {
     }
 }
 
+#[cfg(test)]
 impl Default for PoolType {
     fn default() -> Self {
         PoolType::Weighted
     }
 }
 
-#[derive(Copy, Debug, Default, Clone, Eq, PartialEq)]
+#[derive(Copy, Debug, Clone, Eq, PartialEq)]
 pub struct PoolCreated {
     pub pool_type: PoolType,
     pub pool_address: H160,
