@@ -203,16 +203,6 @@ mod pools_query {
         pub pools: Vec<PoolData<T>>,
     }
 
-    // #[derive(Debug, Deserialize, PartialEq)]
-    // #[serde(rename_all = "camelCase")]
-    // #[serde(tag = "poolType")]
-    // pub enum Pool {
-    //     Weighted(PoolData<WeightedToken>),
-    //     Stable(PoolData<Token>),
-    //     #[serde(other)]
-    //     Unknown,
-    // }
-
     #[derive(Debug, Deserialize, PartialEq)]
     pub struct PoolData<T> {
         pub id: H256,
@@ -302,96 +292,6 @@ mod pools_query {
             )
         }
     }
-
-    // impl Pool {
-    //     pub fn pool_type(&self) -> PoolType {
-    //         match self {
-    //             Pool::Weighted(_) => PoolType::Weighted,
-    //             Pool::Stable(_) => PoolType::Stable,
-    //             Pool::Unknown => PoolType::Other,
-    //         }
-    //     }
-    //     pub fn id(&self) -> H256 {
-    //         match self {
-    //             Pool::Weighted(data) => data.id,
-    //             Pool::Stable(data) => data.id,
-    //             // TODO - could probably do something better here.
-    //             Pool::Unknown => H256::default(),
-    //         }
-    //     }
-    //
-    //     pub fn factory(&self) -> Option<H160> {
-    //         match self {
-    //             Pool::Weighted(data) => data.factory,
-    //             Pool::Stable(data) => data.factory,
-    //             Pool::Unknown => None,
-    //         }
-    //     }
-    //
-    //     pub fn into_registered_pool(self, block_fetched: u64) -> Result<RegisteredPool> {
-    //         // The Balancer subgraph does not contain information for the block
-    //         // in which a pool was created. Instead, we just use the block that
-    //         // the data was fetched for, as the created block is guaranteed to
-    //         // be older than that.
-    //         let block_created_upper_bound = block_fetched;
-    //
-    //         match self {
-    //             Pool::Stable(data) => {
-    //                 let token_count = data.tokens.len();
-    //                 data.tokens.iter().try_fold(
-    //                     RegisteredPool::Stable(RegisteredStablePool {
-    //                         pool_id: data.id,
-    //                         pool_address: data.address,
-    //                         tokens: Vec::with_capacity(token_count),
-    //                         scaling_exponents: Vec::with_capacity(token_count),
-    //                         block_created: block_created_upper_bound,
-    //                     }),
-    //                     |mut registered_pool, token| {
-    //                         if let RegisteredPool::Stable(ref mut pool) = registered_pool {
-    //                             pool.tokens.push(token.address);
-    //                             pool.scaling_exponents.push(
-    //                                 18u8.checked_sub(token.decimals).ok_or_else(|| {
-    //                                     anyhow!("unsupported token with more than 18 decimals")
-    //                                 })?,
-    //                             );
-    //                             Ok(registered_pool)
-    //                         } else {
-    //                             unreachable!("Not a stable pool!");
-    //                         }
-    //                     },
-    //                 )
-    //             }
-    //             Pool::Weighted(data) => {
-    //                 let token_count = data.tokens.len();
-    //                 data.tokens.iter().try_fold(
-    //                     RegisteredPool::Weighted(RegisteredWeightedPool {
-    //                         pool_id: data.id,
-    //                         pool_address: data.address,
-    //                         tokens: Vec::with_capacity(token_count),
-    //                         normalized_weights: Vec::with_capacity(token_count),
-    //                         scaling_exponents: Vec::with_capacity(token_count),
-    //                         block_created: block_created_upper_bound,
-    //                     }),
-    //                     |mut registered_pool, token| {
-    //                         if let RegisteredPool::Weighted(ref mut pool) = registered_pool {
-    //                             pool.tokens.push(token.address);
-    //                             pool.normalized_weights.push(token.weight);
-    //                             pool.scaling_exponents.push(
-    //                                 18u8.checked_sub(token.decimals).ok_or_else(|| {
-    //                                     anyhow!("unsupported token with more than 18 decimals")
-    //                                 })?,
-    //                             );
-    //                             Ok(registered_pool)
-    //                         } else {
-    //                             unreachable!("Not a weighted pool");
-    //                         }
-    //                     },
-    //                 )
-    //             }
-    //             Pool::Unknown => unimplemented!()
-    //         }
-    //     }
-    // }
 }
 
 mod block_number_query {
