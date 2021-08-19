@@ -91,7 +91,7 @@ impl BalancerV2Liquidity {
         let liquidity = pools
             .into_iter()
             .filter_map(|pool| {
-                let weighted_pool = pool.try_as_weighted().ok()?;
+                let weighted_pool = pool.try_into_weighted().ok()?;
                 Some(WeightedProductOrder {
                     reserves: weighted_pool.reserves,
                     fee: weighted_pool.swap_fee_percentage.into(),

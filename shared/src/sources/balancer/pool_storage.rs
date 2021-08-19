@@ -106,13 +106,6 @@ impl Default for RegisteredPool {
     }
 }
 
-#[cfg(test)]
-impl Default for PoolType {
-    fn default() -> Self {
-        PoolType::Weighted
-    }
-}
-
 #[derive(Copy, Debug, Clone, Eq, PartialEq)]
 pub struct PoolCreated {
     pub pool_type: PoolType,
@@ -358,7 +351,7 @@ mod tests {
     use mockall::predicate::eq;
 
     pub type PoolInitData = (Vec<H256>, Vec<H160>, Vec<H160>, Vec<Bfp>, Vec<PoolCreated>);
-    fn pool_init_data(start: usize, end: usize) -> PoolInitData {
+    fn pool_init_data(start: usize, end: usize, pool_type: PoolType) -> PoolInitData {
         let pool_ids: Vec<H256> = (start..end + 1)
             .map(|i| H256::from_low_u64_be(i as u64))
             .collect();
@@ -371,7 +364,7 @@ mod tests {
         let weights: Vec<Bfp> = (start..end + 2).map(|i| Bfp::from_wei(i.into())).collect();
         let creation_events: Vec<PoolCreated> = (start..end + 1)
             .map(|i| PoolCreated {
-                pool_type: Default::default(),
+                pool_type,
                 pool_address: pool_addresses[i],
             })
             .collect();
@@ -428,9 +421,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn insert_events() {
+    async fn insert_weighted_pool_events() {
         let n = 3usize;
-        let (pool_ids, pool_addresses, tokens, weights, creation_events) = pool_init_data(0, n);
+        let (pool_ids, pool_addresses, tokens, weights, creation_events) =
+            pool_init_data(0, n, PoolType::Weighted);
 
         let events: Vec<(EventIndex, PoolCreated)> = vec![
             (EventIndex::new(1, 0), creation_events[0]),
@@ -492,11 +486,90 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn replace_events() {
+    async fn insert_stable_pool_events() {
+        let n = 3usize;
+        let (pool_ids, pool_addresses, tokens, weights, creation_events) =
+            pool_init_data(0, n, PoolType::Stable);
+
+        let events: Vec<(EventIndex, PoolCreated)> = vec![
+            (EventIndex::new(1, 0), creation_events[0]),
+            (EventIndex::new(2, 0), creation_events[1]),
+            (EventIndex::new(3, 0), creation_events[2]),
+        ];
+
+        let mut dummy_data_fetcher = MockPoolInfoFetching::new();
+        for i in 0..n {
+            let expected_pool_data = PoolInfo {
+                pool_id: pool_ids[i],
+                tokens: vec![tokens[i], tokens[i + 1]],
+                weights: vec![weights[i], weights[i + 1]],
+                scaling_exponents: vec![0, 0],
+                amplification_parameter: Default::default(),
+            };
+            dummy_data_fetcher
+                .expect_get_stable_pool_data()
+                .with(eq(pool_addresses[i]))
+                .returning(move |_| Ok(expected_pool_data.clone()));
+        }
+
+        let mut pool_store = PoolStorage::empty(Arc::new(dummy_data_fetcher));
+        pool_store.insert_events(events).await.unwrap();
+        // Note that it is never expected that blocks for events will differ,
+        // but in this test block_created for the pool is the first block it receives.
+        assert_eq!(pool_store.last_event_block(), 3);
+        assert_eq!(
+            pool_store.pools_by_token.get(&tokens[0]).unwrap(),
+            &hashset! { pool_ids[0] }
+        );
+        assert_eq!(
+            pool_store.pools_by_token.get(&tokens[1]).unwrap(),
+            &hashset! { pool_ids[0], pool_ids[1] }
+        );
+        assert_eq!(
+            pool_store.pools_by_token.get(&tokens[2]).unwrap(),
+            &hashset! { pool_ids[1], pool_ids[2] }
+        );
+        assert_eq!(
+            pool_store.pools_by_token.get(&tokens[3]).unwrap(),
+            &hashset! { pool_ids[2] }
+        );
+        for i in 0..n {
+            assert_eq!(
+                pool_store.registered_pools.get(&pool_ids[i]).unwrap(),
+                &RegisteredPool::Stable(RegisteredStablePool {
+                    pool_id: pool_ids[i],
+                    pool_address: pool_addresses[i],
+                    tokens: vec![tokens[i], tokens[i + 1]],
+                    scaling_exponents: vec![0, 0],
+                    block_created: i as u64 + 1
+                }),
+                "failed assertion at index {}",
+                i
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn insert_other_pool_events_errors() {
+        let event = (
+            EventIndex::new(1, 0),
+            PoolCreated {
+                pool_type: PoolType::Other,
+                pool_address: Default::default(),
+            },
+        );
+        let dummy_data_fetcher = MockPoolInfoFetching::new();
+
+        let mut pool_store = PoolStorage::empty(Arc::new(dummy_data_fetcher));
+        assert!(pool_store.insert_events(vec![event]).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn replace_weighted_pool_events() {
         let start_block = 0;
         let end_block = 5;
         let (pool_ids, pool_addresses, tokens, weights, creation_events) =
-            pool_init_data(start_block, end_block);
+            pool_init_data(start_block, end_block, PoolType::Weighted);
         // Setup all the variables to initialize Balancer Pool State
 
         let converted_events: Vec<(EventIndex, PoolCreated)> = (start_block..end_block + 1)
@@ -524,7 +597,7 @@ mod tests {
         let new_token = H160::from_low_u64_be(808);
         let new_weight = Bfp::from_wei(1337.into());
         let new_creation = PoolCreated {
-            pool_type: Default::default(),
+            pool_type: PoolType::Weighted,
             pool_address: new_pool_address,
         };
         let new_event = (EventIndex::new(3, 0), new_creation);
@@ -550,7 +623,6 @@ mod tests {
             .await
             .unwrap();
         // Everything until block 3 is unchanged.
-        // TODO - make sure to do some check for stable pools!
         for i in 0..3 {
             assert_eq!(
                 pool_store.registered_pools.get(&pool_ids[i]).unwrap(),
@@ -610,10 +682,124 @@ mod tests {
         assert_eq!(pool_store.last_event_block(), new_event_block);
     }
 
+    #[tokio::test]
+    async fn replace_stable_pool_events() {
+        let start_block = 0;
+        let end_block = 5;
+        let (pool_ids, pool_addresses, tokens, _, creation_events) =
+            pool_init_data(start_block, end_block, PoolType::Stable);
+        // Setup all the variables to initialize Balancer Pool State
+        let converted_events: Vec<(EventIndex, PoolCreated)> = (start_block..end_block + 1)
+            .map(|i| (EventIndex::new(i as u64, 0), creation_events[i]))
+            .collect();
+
+        let mut dummy_data_fetcher = MockPoolInfoFetching::new();
+        for i in start_block..end_block + 1 {
+            let expected_pool_data = PoolInfo {
+                pool_id: pool_ids[i],
+                tokens: vec![tokens[i], tokens[i + 1]],
+                weights: vec![],
+                scaling_exponents: vec![0, 0],
+                amplification_parameter: Default::default(),
+            };
+            dummy_data_fetcher
+                .expect_get_stable_pool_data()
+                .with(eq(pool_addresses[i]))
+                .returning(move |_| Ok(expected_pool_data.clone()));
+        }
+
+        // Have to prepare return data for new stuff before we pass on the data fetcher
+        let new_pool_id = H256::from_low_u64_be(43110);
+        let new_pool_address = H160::from_low_u64_be(42);
+        let new_token = H160::from_low_u64_be(808);
+        let new_creation = PoolCreated {
+            pool_type: PoolType::Stable,
+            pool_address: new_pool_address,
+        };
+        let new_event = (EventIndex::new(3, 0), new_creation);
+        dummy_data_fetcher
+            .expect_get_stable_pool_data()
+            .with(eq(new_pool_address))
+            .returning(move |_| {
+                Ok(PoolInfo {
+                    pool_id: new_pool_id,
+                    tokens: vec![new_token],
+                    weights: vec![],
+                    scaling_exponents: vec![0],
+                    amplification_parameter: Default::default(),
+                })
+            });
+
+        let mut pool_store = PoolStorage::empty(Arc::new(dummy_data_fetcher));
+        pool_store.insert_events(converted_events).await.unwrap();
+        // Let the tests begin!
+        assert_eq!(pool_store.last_event_block(), end_block as u64);
+        pool_store
+            .replace_events_inner(3, vec![new_event])
+            .await
+            .unwrap();
+        // Everything until block 3 is unchanged.
+        for i in 0..3 {
+            assert_eq!(
+                pool_store.registered_pools.get(&pool_ids[i]).unwrap(),
+                &RegisteredPool::Stable(RegisteredStablePool {
+                    pool_id: pool_ids[i],
+                    pool_address: pool_addresses[i],
+                    tokens: vec![tokens[i], tokens[i + 1]],
+                    scaling_exponents: vec![0, 0],
+                    block_created: i as u64
+                }),
+                "assertion failed at index {}",
+                i
+            );
+        }
+        assert_eq!(
+            pool_store.pools_by_token.get(&tokens[0]).unwrap(),
+            &hashset! { pool_ids[0] }
+        );
+        assert_eq!(
+            pool_store.pools_by_token.get(&tokens[1]).unwrap(),
+            &hashset! { pool_ids[0], pool_ids[1] }
+        );
+        assert_eq!(
+            pool_store.pools_by_token.get(&tokens[2]).unwrap(),
+            &hashset! { pool_ids[1], pool_ids[2] }
+        );
+        assert_eq!(
+            pool_store.pools_by_token.get(&tokens[3]).unwrap(),
+            &hashset! { pool_ids[2] }
+        );
+
+        // Everything old from block 3 on is gone.
+        for pool_id in pool_ids.iter().take(6).skip(3) {
+            assert!(pool_store.registered_pools.get(pool_id).is_none());
+        }
+        for token in tokens.iter().take(7).skip(4) {
+            assert!(pool_store.pools_by_token.get(token).unwrap().is_empty());
+        }
+
+        let new_event_block = new_event.0.block_number;
+
+        // All new data is included.
+        assert_eq!(
+            pool_store.registered_pools.get(&new_pool_id).unwrap(),
+            &RegisteredPool::Stable(RegisteredStablePool {
+                pool_id: new_pool_id,
+                pool_address: new_pool_address,
+                tokens: vec![new_token],
+                scaling_exponents: vec![0],
+                block_created: new_event_block
+            })
+        );
+
+        assert!(pool_store.pools_by_token.get(&new_token).is_some());
+        assert_eq!(pool_store.last_event_block(), new_event_block);
+    }
+
     #[test]
     fn ids_for_pools_containing_token_pairs_() {
         let n = 3;
-        let (pool_ids, pool_addresses, tokens, _, _) = pool_init_data(0, n);
+        let (pool_ids, pool_addresses, tokens, _, _) = pool_init_data(0, n, PoolType::Weighted);
         let token_pairs: Vec<TokenPair> = (0..n)
             .map(|i| TokenPair::new(tokens[i], tokens[(i + 1) % n]).unwrap())
             .collect();

@@ -40,8 +40,7 @@ impl WeightedPoolState {
     }
 }
 
-/// Weighted pool data as a reference used for computing input and output
-/// amounts.
+/// Weighted pool data as a reference used for computing input and output amounts.
 pub struct WeightedPoolRef<'a> {
     // TODO - Filter before so these are only ever Weighted Pools, or handle both here!
     pub reserves: &'a HashMap<H160, WeightedPoolState>,

@@ -129,7 +129,7 @@ impl BalancerPool {
         }
     }
 
-    pub fn try_as_weighted(&self) -> Result<WeightedPool> {
+    pub fn try_into_weighted(&self) -> Result<WeightedPool> {
         if let BalancerPool::Weighted(pool) = self {
             Ok(pool.clone())
         } else {
@@ -137,7 +137,7 @@ impl BalancerPool {
         }
     }
 
-    pub fn try_as_stable(&self) -> Result<StablePool> {
+    pub fn try_into_stable(&self) -> Result<StablePool> {
         if let BalancerPool::Stable(pool) = self {
             Ok(pool.clone())
         } else {
@@ -372,8 +372,8 @@ mod tests {
             paused: true,
         });
 
-        assert!(weighted_pool.try_as_weighted().is_ok());
-        assert!(weighted_pool.try_as_stable().is_err());
+        assert!(weighted_pool.try_into_weighted().is_ok());
+        assert!(weighted_pool.try_into_stable().is_err());
 
         let stable_pool = BalancerPool::Stable(StablePool {
             pool_id: H256::from_low_u64_be(1),
@@ -384,7 +384,7 @@ mod tests {
             paused: false,
         });
 
-        assert!(stable_pool.try_as_stable().is_ok());
-        assert!(stable_pool.try_as_weighted().is_err());
+        assert!(stable_pool.try_into_stable().is_ok());
+        assert!(stable_pool.try_into_weighted().is_err());
     }
 }
