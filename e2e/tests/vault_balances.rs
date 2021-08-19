@@ -1,7 +1,7 @@
 use contracts::IUniswapLikeRouter;
 use ethcontract::prelude::{Account, Address, PrivateKey, U256};
 use model::{
-    order::{OrderBuilder, OrderKind, SellTokenSource},
+    order::{BuyTokenDestination, OrderBuilder, OrderKind, SellTokenSource},
     SigningScheme,
 };
 use secp256k1::SecretKey;
@@ -116,6 +116,7 @@ async fn vault_balances(web3: Web3) {
         .with_fee_amount(to_wei(1))
         .with_buy_token(gpv2.native_token.address())
         .with_buy_amount(to_wei(8))
+        .with_buy_token_balance(BuyTokenDestination::Internal)
         .with_valid_to(shared::time::now_in_epoch_seconds() + 300)
         .with_signing_scheme(SigningScheme::Eip712)
         .sign_with(
@@ -192,10 +193,10 @@ async fn vault_balances(web3: Web3) {
     assert_eq!(balance, U256::zero());
 
     let balance = gpv2
-        .native_token
-        .balance_of(trader.address())
+        .vault
+        .get_internal_balance(trader.address(), vec![gpv2.native_token.address()])
         .call()
         .await
         .expect("Couldn't fetch native token balance");
-    assert_eq!(balance, U256::from(8_972_194_924_949_384_291_u128));
+    assert_eq!(balance, [U256::from(8_972_194_924_949_384_291_u128)]);
 }

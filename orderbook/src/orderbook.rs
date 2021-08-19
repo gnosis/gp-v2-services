@@ -7,7 +7,7 @@ use anyhow::Result;
 use chrono::Utc;
 use contracts::WETH9;
 use model::order::{
-    BuyTokenDestination, OrderCancellation, OrderCreation, OrderCreationPayload, SellTokenSource,
+    OrderCancellation, OrderCreation, OrderCreationPayload, SellTokenSource,
 };
 use model::{
     order::{Order, OrderStatus, OrderUid, BUY_ETH_ADDRESS},
@@ -38,7 +38,6 @@ pub enum AddOrderResult {
     UnsupportedToken(H160),
     TransferEthToContract,
     SameBuyAndSellToken,
-    UnsupportedBuyTokenDestination(BuyTokenDestination),
     UnsupportedSellTokenSource(SellTokenSource),
 }
 
@@ -97,12 +96,6 @@ impl Orderbook {
     pub async fn add_order(&self, payload: OrderCreationPayload) -> Result<AddOrderResult> {
         let order = payload.order_creation;
 
-        // Temporary - reject new order types until last stage of balancer integration
-        if order.buy_token_balance != BuyTokenDestination::Erc20 {
-            return Ok(AddOrderResult::UnsupportedBuyTokenDestination(
-                order.buy_token_balance,
-            ));
-        }
         if !matches!(
             order.sell_token_balance,
             SellTokenSource::Erc20 | SellTokenSource::External
