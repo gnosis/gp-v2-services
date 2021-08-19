@@ -90,18 +90,20 @@ impl BalancerV2Liquidity {
 
         let liquidity = pools
             .into_iter()
-            .filter(|pool| pool.is_weighted())
-            .map(|pool| WeightedProductOrder {
-                reserves: pool.as_weighted().clone().reserves,
-                fee: pool.swap_fee_percentage().into(),
-                settlement_handling: Arc::new(SettlementHandler {
-                    pool_id: pool.pool_id(),
-                    contracts: self.contracts.clone(),
-                    allowances: allowances.clone(),
-                }),
+            .filter_map(|pool| {
+                let weighted_pool = pool.try_as_weighted().ok()?;
+                Some(WeightedProductOrder {
+                    reserves: weighted_pool.reserves,
+                    fee: weighted_pool.swap_fee_percentage.into(),
+                    settlement_handling: Arc::new(SettlementHandler {
+                        pool_id: weighted_pool.pool_id,
+                        contracts: self.contracts.clone(),
+                        allowances: allowances.clone(),
+                    }),
+                })
             })
             .collect();
-
+        // TODO(bh2smith) - fetch stable pools in following PR.
         Ok(liquidity)
     }
 }

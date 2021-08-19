@@ -17,7 +17,7 @@ use crate::{
     token_info::TokenInfoFetching,
     Web3,
 };
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use ethcontract::{H160, H256, U256};
 use model::TokenPair;
 use reqwest::Client;
@@ -129,19 +129,19 @@ impl BalancerPool {
         }
     }
 
-    pub fn as_weighted(&self) -> &WeightedPool {
+    pub fn try_as_weighted(&self) -> Result<WeightedPool> {
         if let BalancerPool::Weighted(pool) = self {
-            pool
+            Ok(pool.clone())
         } else {
-            panic!("Not a weighted pool!")
+            Err(anyhow!("Not a weighted pool!"))
         }
     }
 
-    pub fn as_stable(&self) -> &StablePool {
+    pub fn try_as_stable(&self) -> Result<StablePool> {
         if let BalancerPool::Stable(pool) = self {
-            pool
+            Ok(pool.clone())
         } else {
-            panic!("Not a stable pool!")
+            Err(anyhow!("Not a weighted pool!"))
         }
     }
 
@@ -338,5 +338,53 @@ mod tests {
         let filtered_pools = filter_paused(pools.clone());
         assert_eq!(filtered_pools.len(), 1);
         assert_eq!(filtered_pools[0].pool_id(), pools[1].pool_id());
+    }
+
+    #[test]
+    fn is_weighted_() {
+        let weighted_pool = BalancerPool::Weighted(WeightedPool {
+            pool_id: H256::from_low_u64_be(0),
+            pool_address: Default::default(),
+            swap_fee_percentage: Bfp::zero(),
+            reserves: Default::default(),
+            paused: true,
+        });
+        let stable_pool = BalancerPool::Stable(StablePool {
+            pool_id: H256::from_low_u64_be(1),
+            pool_address: Default::default(),
+            swap_fee_percentage: Bfp::zero(),
+            amplification_parameter: Default::default(),
+            reserves: Default::default(),
+            paused: false,
+        });
+
+        assert!(weighted_pool.is_weighted());
+        assert!(!stable_pool.is_weighted());
+    }
+
+    #[test]
+    fn try_into_stable_and_weighted() {
+        let weighted_pool = BalancerPool::Weighted(WeightedPool {
+            pool_id: H256::from_low_u64_be(0),
+            pool_address: Default::default(),
+            swap_fee_percentage: Bfp::zero(),
+            reserves: Default::default(),
+            paused: true,
+        });
+
+        assert!(weighted_pool.try_as_weighted().is_ok());
+        assert!(weighted_pool.try_as_stable().is_err());
+
+        let stable_pool = BalancerPool::Stable(StablePool {
+            pool_id: H256::from_low_u64_be(1),
+            pool_address: Default::default(),
+            swap_fee_percentage: Bfp::zero(),
+            amplification_parameter: Default::default(),
+            reserves: Default::default(),
+            paused: false,
+        });
+
+        assert!(stable_pool.try_as_stable().is_ok());
+        assert!(stable_pool.try_as_weighted().is_err());
     }
 }
