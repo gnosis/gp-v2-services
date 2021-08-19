@@ -4,9 +4,8 @@ use self::api::{
     DefaultParaswapApi, ParaswapApi, PriceQuery, PriceResponse, Side, TransactionBuilderQuery,
     TransactionBuilderResponse,
 };
-use super::single_order_solver::SingleOrderSolving;
+use super::single_order_solver::{SettlementError, SingleOrderSolving};
 use crate::solver::paraswap_solver::api::ParaswapResponseError;
-use crate::solver::solver_utils::SettlementError;
 use crate::{
     encoding::EncodedInteraction,
     interactions::allowances::{AllowanceManager, AllowanceManaging},

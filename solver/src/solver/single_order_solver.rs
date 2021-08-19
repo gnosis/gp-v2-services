@@ -1,13 +1,13 @@
 use std::time::Instant;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Error, Result};
 use futures::future;
 use rand::prelude::SliceRandom;
 
 use crate::{
     liquidity::{LimitOrder, Liquidity},
     settlement::Settlement,
-    solver::{solver_utils::SettlementError, Solver},
+    solver::Solver,
 };
 use ethcontract::Account;
 use itertools::Itertools;
@@ -135,5 +135,20 @@ impl<I: SingleOrderSolving + Send + Sync> SingleOrderSolver<I> {
                     .join("\n")
             ))
         })
+    }
+}
+
+#[derive(Debug)]
+pub struct SettlementError {
+    pub inner: anyhow::Error,
+    pub retryable: bool,
+}
+
+impl From<anyhow::Error> for SettlementError {
+    fn from(err: Error) -> Self {
+        SettlementError {
+            inner: err,
+            retryable: false,
+        }
     }
 }

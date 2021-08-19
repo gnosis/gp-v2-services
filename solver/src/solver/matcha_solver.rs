@@ -28,10 +28,9 @@ use ethcontract::{Account, Bytes};
 use maplit::hashmap;
 use reqwest::Client;
 
-use super::single_order_solver::SingleOrderSolving;
+use super::single_order_solver::{SettlementError, SingleOrderSolving};
 
 use self::api::{DefaultMatchaApi, SwapQuery, SwapResponse};
-use crate::solver::solver_utils::SettlementError;
 use crate::{
     encoding::EncodedInteraction,
     liquidity::LimitOrder,

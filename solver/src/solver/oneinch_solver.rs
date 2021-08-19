@@ -5,9 +5,8 @@
 
 pub mod api;
 use self::api::{Amount, OneInchClient, Swap, SwapQuery};
-use super::single_order_solver::SingleOrderSolving;
+use super::single_order_solver::{SettlementError, SingleOrderSolving};
 use super::solver_utils::Slippage;
-use crate::solver::solver_utils::SettlementError;
 use crate::{
     encoding::EncodedInteraction,
     interactions::allowances::{AllowanceManager, AllowanceManaging},
