@@ -6,9 +6,7 @@ use crate::{
 use anyhow::Result;
 use chrono::Utc;
 use contracts::WETH9;
-use model::order::{
-    OrderCancellation, OrderCreation, OrderCreationPayload, SellTokenSource,
-};
+use model::order::{OrderCancellation, OrderCreation, OrderCreationPayload, SellTokenSource};
 use model::{
     order::{Order, OrderStatus, OrderUid, BUY_ETH_ADDRESS},
     DomainSeparator,
