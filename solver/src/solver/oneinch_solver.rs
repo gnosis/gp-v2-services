@@ -198,6 +198,7 @@ mod tests {
     use crate::liquidity::LimitOrder;
     use crate::solver::oneinch_solver::api::Protocols;
     use crate::solver::oneinch_solver::api::Spender;
+    use crate::solver::SingleOrderSolver;
     use crate::test::account;
     use contracts::{GPv2Settlement, WETH9};
     use ethcontract::{Web3, H160, U256};
@@ -226,16 +227,17 @@ mod tests {
 
     #[tokio::test]
     async fn ignores_buy_orders() {
-        assert!(
-            dummy_solver(MockOneInchClient::new(), MockAllowanceManaging::new())
-                .settle_order(LimitOrder {
-                    kind: OrderKind::Buy,
-                    ..Default::default()
-                },)
-                .await
-                .unwrap()
-                .is_none()
-        );
+        assert!(SingleOrderSolver::from(dummy_solver(
+            MockOneInchClient::new(),
+            MockAllowanceManaging::new()
+        ))
+        .settle_order(LimitOrder {
+            kind: OrderKind::Buy,
+            ..Default::default()
+        },)
+        .await
+        .unwrap()
+        .is_none());
     }
 
     #[tokio::test]
@@ -272,7 +274,7 @@ mod tests {
             .expect_get_approval()
             .returning(|_, _, _| Ok(Approval::AllowanceSufficient));
 
-        let solver = dummy_solver(client, allowance_fetcher);
+        let solver = SingleOrderSolver::from(dummy_solver(client, allowance_fetcher));
 
         let order_passing_limit = LimitOrder {
             sell_token,
@@ -340,10 +342,10 @@ mod tests {
             })
         });
 
-        let solver = OneInchSolver {
+        let solver = SingleOrderSolver::from(OneInchSolver {
             disabled_protocols: hashset!["BadProtocol".to_string(), "VeryBadProtocol".to_string()],
             ..dummy_solver(client, allowance_fetcher)
-        };
+        });
 
         // Limit price violated. Actual assert is happening in `expect_get_swap()`
         assert!(solver
@@ -397,7 +399,7 @@ mod tests {
             .returning(|_, _, _| Ok(Approval::AllowanceSufficient))
             .in_sequence(&mut seq);
 
-        let solver = dummy_solver(client, allowance_fetcher);
+        let solver = SingleOrderSolver::from(dummy_solver(client, allowance_fetcher));
 
         let order = LimitOrder {
             sell_token,

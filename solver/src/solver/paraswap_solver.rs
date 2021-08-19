@@ -17,7 +17,6 @@ use anyhow::{anyhow, Result};
 use contracts::GPv2Settlement;
 use derivative::Derivative;
 use ethcontract::{Account, Bytes, H160, U256};
-use itertools::Itertools;
 use maplit::hashmap;
 use reqwest::Client;
 use shared::token_info::TokenInfo;
@@ -88,35 +87,6 @@ impl From<ParaswapResponseError> for SettlementError {
 
 #[async_trait::async_trait]
 impl SingleOrderSolving for ParaswapSolver {
-    async fn settle_order(&self, order: LimitOrder) -> Result<Option<Settlement>> {
-        let max_retries = 2;
-        let mut errors = vec![];
-        for _ in 0..max_retries {
-            match self.try_settle_order(order.clone()).await {
-                Ok(settlement) => return Ok(settlement),
-                Err(err) if err.retryable => {
-                    tracing::debug!("Retrying Paraswap settlement due to: {:?}", &err);
-                    errors.push(err.inner);
-                    continue;
-                }
-                Err(err) => return Err(err.inner),
-            }
-        }
-        // One last attempt, else throw converted error
-        self.try_settle_order(order).await.map_err(|err| {
-            errors.push(err.inner);
-            anyhow!(format!(
-                "Paraswap Errored after {} attempts. Accumulated errors follow \n{}",
-                max_retries + 1,
-                errors
-                    .iter()
-                    .enumerate()
-                    .map(|(i, err)| format!("Attempt {}: {}", i + 1, err.to_string()))
-                    .join("\n")
-            ))
-        })
-    }
-
     async fn try_settle_order(
         &self,
         order: LimitOrder,
@@ -249,6 +219,7 @@ fn satisfies_limit_price(order: &LimitOrder, response: &PriceResponse) -> bool {
 mod tests {
     use super::{api::MockParaswapApi, *};
     use crate::interactions::allowances::{Approval, MockAllowanceManaging};
+    use crate::solver::SingleOrderSolver;
     use crate::test::account;
     use contracts::WETH9;
     use ethcontract::U256;
@@ -315,7 +286,7 @@ mod tests {
             .expect_get_token_infos()
             .return_const(HashMap::new());
 
-        let solver = ParaswapSolver {
+        let solver = SingleOrderSolver::from(ParaswapSolver {
             account: account(),
             client,
             solver_address: Default::default(),
@@ -324,7 +295,7 @@ mod tests {
             settlement_contract: dummy_contract!(GPv2Settlement, H160::zero()),
             slippage_bps: 10,
             disabled_paraswap_dexs: vec![],
-        };
+        });
 
         let order = LimitOrder::default();
         let result = solver.settle_order(order).await;
@@ -364,7 +335,7 @@ mod tests {
             }
         });
 
-        let solver = ParaswapSolver {
+        let solver = SingleOrderSolver::from(ParaswapSolver {
             account: account(),
             client,
             solver_address: Default::default(),
@@ -373,7 +344,7 @@ mod tests {
             settlement_contract: dummy_contract!(GPv2Settlement, H160::zero()),
             slippage_bps: 10,
             disabled_paraswap_dexs: vec![],
-        };
+        });
 
         let order_passing_limit = LimitOrder {
             sell_token,
@@ -456,7 +427,7 @@ mod tests {
             }
         });
 
-        let solver = ParaswapSolver {
+        let solver = SingleOrderSolver::from(ParaswapSolver {
             account: account(),
             client,
             solver_address: Default::default(),
@@ -465,7 +436,7 @@ mod tests {
             settlement_contract: dummy_contract!(GPv2Settlement, H160::zero()),
             slippage_bps: 10,
             disabled_paraswap_dexs: vec![],
-        };
+        });
 
         let order = LimitOrder {
             sell_token,
@@ -533,7 +504,7 @@ mod tests {
             }
         });
 
-        let solver = ParaswapSolver {
+        let solver = SingleOrderSolver::from(ParaswapSolver {
             account: account(),
             client,
             solver_address: Default::default(),
@@ -542,7 +513,7 @@ mod tests {
             settlement_contract: dummy_contract!(GPv2Settlement, H160::zero()),
             slippage_bps: 1000, // 10%
             disabled_paraswap_dexs: vec![],
-        };
+        });
 
         let sell_order = LimitOrder {
             sell_token,
@@ -582,7 +553,7 @@ mod tests {
         let weth = WETH9::deployed(&web3).await.unwrap();
         let gno = shared::addr!("6810e776880c02933d47db1b9fc05908e5386b96");
 
-        let solver = ParaswapSolver::new(
+        let solver = SingleOrderSolver::from(ParaswapSolver::new(
             account(),
             web3,
             settlement,
@@ -591,7 +562,7 @@ mod tests {
             0,
             vec![],
             Client::new(),
-        );
+        ));
 
         let settlement = solver
             .settle_order(
@@ -660,7 +631,7 @@ mod tests {
             }
         });
 
-        let solver = ParaswapSolver {
+        let solver = SingleOrderSolver::from(ParaswapSolver {
             account: account(),
             client,
             solver_address: Default::default(),
@@ -669,7 +640,7 @@ mod tests {
             settlement_contract: dummy_contract!(GPv2Settlement, H160::zero()),
             slippage_bps: 1000, // 10%
             disabled_paraswap_dexs: Vec::new(),
-        };
+        });
 
         let order = LimitOrder {
             sell_token,
@@ -724,7 +695,7 @@ mod tests {
             }
         });
 
-        let solver = ParaswapSolver {
+        let solver = SingleOrderSolver::from(ParaswapSolver {
             account: account(),
             client,
             solver_address: Default::default(),
@@ -733,7 +704,7 @@ mod tests {
             settlement_contract: dummy_contract!(GPv2Settlement, H160::zero()),
             slippage_bps: 1000, // 10%
             disabled_paraswap_dexs: Vec::new(),
-        };
+        });
 
         let order = LimitOrder {
             sell_token,
@@ -773,7 +744,7 @@ mod tests {
             }
         });
 
-        let solver = ParaswapSolver {
+        let solver = SingleOrderSolver::from(ParaswapSolver {
             account: account(),
             client,
             solver_address: Default::default(),
@@ -782,7 +753,7 @@ mod tests {
             settlement_contract: dummy_contract!(GPv2Settlement, H160::zero()),
             slippage_bps: 1000, // 10%
             disabled_paraswap_dexs: Vec::new(),
-        };
+        });
 
         let order = LimitOrder {
             sell_token,

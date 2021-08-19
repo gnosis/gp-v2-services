@@ -15,37 +15,6 @@ use itertools::Itertools;
 #[async_trait::async_trait]
 /// Implementations of this trait know how to settle a single limit order (not taking advantage of batching multiple orders together)
 pub trait SingleOrderSolving {
-    /// Return a settlement for the given limit order (if possible)
-    async fn settle_order(&self, order: LimitOrder) -> Result<Option<Settlement>> {
-        let max_retries = 2;
-        let mut errors = vec![];
-        for _ in 0..max_retries {
-            match self.try_settle_order(order.clone()).await {
-                Ok(settlement) => return Ok(settlement),
-                Err(err) if err.retryable => {
-                    tracing::debug!("Retrying {} settlement due to: {:?}", self.name(), &err);
-                    errors.push(err.inner);
-                    continue;
-                }
-                Err(err) => return Err(err.inner),
-            }
-        }
-        // One last attempt, else throw converted error
-        self.try_settle_order(order).await.map_err(|err| {
-            errors.push(err.inner);
-            anyhow!(format!(
-                "{} Errored after {} attempts. Accumulated errors follow \n{}",
-                self.name(),
-                max_retries + 1,
-                errors
-                    .iter()
-                    .enumerate()
-                    .map(|(i, err)| format!("Attempt {}: {}", i + 1, err.to_string()))
-                    .join("\n")
-            ))
-        })
-    }
-
     async fn try_settle_order(
         &self,
         order: LimitOrder,
@@ -69,6 +38,7 @@ const MAX_SETTLEMENTS: usize = 5;
 pub struct SingleOrderSolver<I> {
     inner: I,
 }
+
 impl<I: SingleOrderSolving> From<I> for SingleOrderSolver<I> {
     fn from(inner: I) -> Self {
         Self { inner }
@@ -97,11 +67,13 @@ impl<I: SingleOrderSolving + Send + Sync> Solver for SingleOrderSolver<I> {
             orders.shuffle(&mut rand::thread_rng());
         }
 
-        let settlements =
-            future::join_all(orders.into_iter().take(MAX_SETTLEMENTS).map(|order| {
-                tokio::time::timeout_at(deadline.into(), self.inner.settle_order(order))
-            }))
-            .await;
+        let settlements = future::join_all(
+            orders
+                .into_iter()
+                .take(MAX_SETTLEMENTS)
+                .map(|order| tokio::time::timeout_at(deadline.into(), self.settle_order(order))),
+        )
+        .await;
 
         Ok(settlements
             .into_iter()
@@ -129,5 +101,39 @@ impl<I: SingleOrderSolving + Send + Sync> Solver for SingleOrderSolver<I> {
 
     fn name(&self) -> &'static str {
         self.inner.name()
+    }
+}
+
+impl<I: SingleOrderSolving + Send + Sync> SingleOrderSolver<I> {
+    /// Return a settlement for the given limit order (if possible)
+    pub async fn settle_order(&self, order: LimitOrder) -> Result<Option<Settlement>> {
+        let solver_name = self.inner.name();
+        let max_retries = 2;
+        let mut errors = vec![];
+        for _ in 0..max_retries {
+            match self.inner.try_settle_order(order.clone()).await {
+                Ok(settlement) => return Ok(settlement),
+                Err(err) if err.retryable => {
+                    tracing::debug!("Retrying {} settlement due to: {:?}", solver_name, &err);
+                    errors.push(err.inner);
+                    continue;
+                }
+                Err(err) => return Err(err.inner),
+            }
+        }
+        // One last attempt, else throw converted error
+        self.inner.try_settle_order(order).await.map_err(|err| {
+            errors.push(err.inner);
+            anyhow!(format!(
+                "{} Errored after {} attempts. Accumulated errors follow \n{}",
+                solver_name,
+                max_retries + 1,
+                errors
+                    .iter()
+                    .enumerate()
+                    .map(|(i, err)| format!("Attempt {}: {}", i + 1, err.to_string()))
+                    .join("\n")
+            ))
+        })
     }
 }

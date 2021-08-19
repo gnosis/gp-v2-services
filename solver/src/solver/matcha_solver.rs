@@ -168,6 +168,7 @@ mod tests {
     use crate::liquidity::tests::CapturingSettlementHandler;
     use crate::liquidity::LimitOrder;
     use crate::solver::matcha_solver::api::MockMatchaApi;
+    use crate::solver::single_order_solver::SingleOrderSolver;
     use crate::test::account;
     use contracts::{GPv2Settlement, WETH9};
     use ethcontract::{Web3, H160, U256};
@@ -186,8 +187,9 @@ mod tests {
         let weth = WETH9::deployed(&web3).await.unwrap();
         let gno = shared::addr!("6810e776880c02933d47db1b9fc05908e5386b96");
 
-        let solver =
-            MatchaSolver::new(account(), web3, settlement, chain_id, Client::new()).unwrap();
+        let solver = SingleOrderSolver::from(
+            MatchaSolver::new(account(), web3, settlement, chain_id, Client::new()).unwrap(),
+        );
         let settlement = solver
             .settle_order(
                 Order {
@@ -195,7 +197,7 @@ mod tests {
                         sell_token: weth.address(),
                         buy_token: gno,
                         sell_amount: 1_000_000_000_000_000_000u128.into(),
-                        buy_amount: 1u128.into(),
+                        buy_amount: 2u128.into(),
                         kind: OrderKind::Sell,
                         ..Default::default()
                     },
@@ -219,8 +221,9 @@ mod tests {
         let weth = WETH9::deployed(&web3).await.unwrap();
         let gno = shared::addr!("6810e776880c02933d47db1b9fc05908e5386b96");
 
-        let solver =
-            MatchaSolver::new(account(), web3, settlement, chain_id, Client::new()).unwrap();
+        let solver = SingleOrderSolver::from(
+            MatchaSolver::new(account(), web3, settlement, chain_id, Client::new()).unwrap(),
+        );
         let settlement = solver
             .settle_order(
                 Order {
@@ -274,11 +277,11 @@ mod tests {
                 })
             });
 
-        let solver = MatchaSolver {
+        let solver = SingleOrderSolver::from(MatchaSolver {
             account: account(),
             client,
             allowance_fetcher,
-        };
+        });
 
         let buy_order_passing_limit = LimitOrder {
             sell_token,
@@ -404,11 +407,11 @@ mod tests {
             .returning(|_, _, _| Ok(Approval::AllowanceSufficient))
             .in_sequence(&mut seq);
 
-        let solver = MatchaSolver {
+        let solver = SingleOrderSolver::from(MatchaSolver {
             account: account(),
             client,
             allowance_fetcher,
-        };
+        });
 
         let order = LimitOrder {
             sell_token,
@@ -450,11 +453,11 @@ mod tests {
             .expect_get_approval()
             .returning(|_, _, _| Ok(Approval::AllowanceSufficient));
 
-        let solver = MatchaSolver {
+        let solver = SingleOrderSolver::from(MatchaSolver {
             account: account(),
             client,
             allowance_fetcher,
-        };
+        });
 
         let order = LimitOrder {
             sell_token,
@@ -518,11 +521,11 @@ mod tests {
             })
             .in_sequence(&mut seq);
 
-        let solver = MatchaSolver {
+        let solver = SingleOrderSolver::from(MatchaSolver {
             account: account(),
             client,
             allowance_fetcher,
-        };
+        });
 
         let order = LimitOrder {
             ..Default::default()
@@ -547,11 +550,11 @@ mod tests {
                 Err(MatchaResponseError::ServerError(String::new()))
             })
             .in_sequence(&mut seq);
-        let solver = MatchaSolver {
+        let solver = SingleOrderSolver::from(MatchaSolver {
             account: account(),
             client,
             allowance_fetcher,
-        };
+        });
         let order = LimitOrder {
             ..Default::default()
         };
@@ -576,11 +579,11 @@ mod tests {
             })
             .in_sequence(&mut seq);
 
-        let solver = MatchaSolver {
+        let solver = SingleOrderSolver::from(MatchaSolver {
             account: account(),
             client,
             allowance_fetcher,
-        };
+        });
 
         let order = LimitOrder {
             ..Default::default()
