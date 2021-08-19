@@ -178,12 +178,7 @@ impl RegisteredStablePool {
 pub struct PoolStorage {
     /// Used for O(1) access to all pool_ids for a given token
     pools_by_token: HashMap<H160, HashSet<H256>>,
-    /// WeightedPool data for a given PoolId
-    weighted_pools: HashMap<H256, RegisteredWeightedPool>,
-    /// StablePool data for a given PoolId
-    stable_pools: HashMap<H256, RegisteredStablePool>,
-    // TODO - either store weighted and stable in separate or together (but pick one!)
-    /// All static Balancer Pool details for a given PoolId
+    /// All (static) Balancer Pool details for a given PoolId
     registered_pools: HashMap<H256, RegisteredPool>,
     #[derivative(Debug = "ignore")]
     data_fetcher: Arc<dyn PoolInfoFetching>,
@@ -198,7 +193,6 @@ impl PoolStorage {
         let mut pools_by_token = HashMap::<_, HashSet<_>>::new();
         let mut registered_pools = HashMap::new();
 
-        let mut weighted_pools = HashMap::new();
         for pool in initial_weighted_pools {
             for token in &pool.tokens {
                 pools_by_token
@@ -206,12 +200,9 @@ impl PoolStorage {
                     .or_default()
                     .insert(pool.pool_id);
             }
-            // TODO - pick one!
-            weighted_pools.insert(pool.pool_id, pool.clone());
             registered_pools.insert(pool.pool_id, RegisteredPool::Weighted(pool));
         }
 
-        let mut stable_pools = HashMap::new();
         for pool in initial_stable_pools {
             for token in &pool.tokens {
                 pools_by_token
@@ -219,15 +210,11 @@ impl PoolStorage {
                     .or_default()
                     .insert(pool.pool_id);
             }
-            // TODO - pick one!
-            stable_pools.insert(pool.pool_id, pool.clone());
             registered_pools.insert(pool.pool_id, RegisteredPool::Stable(pool));
         }
 
         PoolStorage {
             pools_by_token,
-            weighted_pools,
-            stable_pools,
             registered_pools,
             data_fetcher,
         }
@@ -263,34 +250,6 @@ impl PoolStorage {
             .collect()
     }
 
-    pub fn weighted_pools_for(&self, pool_ids: &HashSet<H256>) -> Vec<RegisteredWeightedPool> {
-        self.weighted_pools
-            .iter()
-            .filter_map(|(pool_id, pool)| {
-                if pool_ids.contains(pool_id) {
-                    Some(pool)
-                } else {
-                    None
-                }
-            })
-            .cloned()
-            .collect()
-    }
-
-    pub fn stable_pools_for(&self, pool_ids: &HashSet<H256>) -> Vec<RegisteredStablePool> {
-        self.stable_pools
-            .iter()
-            .filter_map(|(pool_id, pool)| {
-                if pool_ids.contains(pool_id) {
-                    Some(pool)
-                } else {
-                    None
-                }
-            })
-            .cloned()
-            .collect()
-    }
-
     pub fn pools_for(&self, pool_ids: &HashSet<H256>) -> Vec<RegisteredPool> {
         self.registered_pools
             .iter()
@@ -316,8 +275,6 @@ impl PoolStorage {
                     )
                     .await?;
                     let pool_id = pool.pool_id;
-                    // TODO Remove one!
-                    self.stable_pools.insert(pool_id, pool.clone());
                     self.registered_pools
                         .insert(pool_id, RegisteredPool::Stable(pool.clone()));
                     for token in pool.tokens {
@@ -335,8 +292,6 @@ impl PoolStorage {
                     )
                     .await?;
                     let pool_id = pool.pool_id;
-                    // TODO Remove one!
-                    self.weighted_pools.insert(pool_id, pool.clone());
                     self.registered_pools
                         .insert(pool_id, RegisteredPool::Weighted(pool.clone()));
                     for token in pool.tokens {
@@ -372,10 +327,6 @@ impl PoolStorage {
     }
 
     fn delete_pools(&mut self, delete_from_block_number: u64) {
-        self.weighted_pools
-            .retain(|_, pool| pool.block_created < delete_from_block_number);
-        self.stable_pools
-            .retain(|_, pool| pool.block_created < delete_from_block_number);
         self.registered_pools
             .retain(|_, pool| pool.block_created() < delete_from_block_number);
         // Note that this could result in an empty set for some tokens.

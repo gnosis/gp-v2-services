@@ -12,7 +12,6 @@
 //!
 //! *Note that* when loading pool from a cold start synchronization can take quite long, but is
 //! otherwise as quick as possible (i.e. taking advantage of as much cached information as possible).
-use crate::sources::balancer::pool_storage::{PoolType, RegisteredStablePool};
 use crate::{
     event_handling::{BlockNumber, EventHandler, EventIndex, EventStoring},
     impl_event_retrieving,
@@ -20,7 +19,9 @@ use crate::{
     sources::balancer::{
         info_fetching::PoolInfoFetching,
         pool_init::PoolInitializing,
-        pool_storage::{PoolCreated, PoolStorage, RegisteredWeightedPool},
+        pool_storage::{
+            PoolCreated, PoolStorage, PoolType, RegisteredStablePool, RegisteredWeightedPool,
+        },
     },
     Web3,
 };
@@ -130,18 +131,24 @@ impl BalancerPoolRegistry {
         &self,
         pool_ids: &HashSet<H256>,
     ) -> Vec<RegisteredWeightedPool> {
-        let mut pool_set_1 = self
+        let mut pool_set_1: Vec<RegisteredWeightedPool> = self
             .weighted_pool_updater
             .lock()
             .await
             .store
-            .weighted_pools_for(pool_ids);
-        let pool_set_2 = self
+            .pools_for(pool_ids)
+            .into_iter()
+            .filter_map(|pool| pool.try_into_weighted().ok())
+            .collect();
+        let pool_set_2: Vec<RegisteredWeightedPool> = self
             .two_token_pool_updater
             .lock()
             .await
             .store
-            .weighted_pools_for(pool_ids);
+            .pools_for(pool_ids)
+            .into_iter()
+            .filter_map(|pool| pool.try_into_weighted().ok())
+            .collect();
         pool_set_1.extend(pool_set_2);
         pool_set_1
     }
@@ -151,7 +158,10 @@ impl BalancerPoolRegistry {
             .lock()
             .await
             .store
-            .stable_pools_for(pool_ids)
+            .pools_for(pool_ids)
+            .into_iter()
+            .filter_map(|pool| pool.try_into_stable().ok())
+            .collect()
     }
 }
 
