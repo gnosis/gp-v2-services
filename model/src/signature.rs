@@ -15,7 +15,7 @@ pub enum SigningScheme {
 }
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Default, Hash)]
-pub struct Signature {
+pub struct EcdsaSignature {
     pub r: H256,
     pub s: H256,
     pub v: u8,
@@ -50,7 +50,7 @@ fn hashed_signing_message(
     }
 }
 
-impl Signature {
+impl EcdsaSignature {
     /// r + s + v
     pub fn to_bytes(self) -> [u8; 65] {
         let mut bytes = [0u8; 65];
@@ -61,7 +61,7 @@ impl Signature {
     }
 
     pub fn from_bytes(bytes: &[u8; 65]) -> Self {
-        Signature {
+        EcdsaSignature {
             r: H256::from_slice(&bytes[..32]),
             s: H256::from_slice(&bytes[32..64]),
             v: bytes[64],
@@ -97,7 +97,7 @@ impl Signature {
     }
 }
 
-impl Serialize for Signature {
+impl Serialize for EcdsaSignature {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -112,17 +112,20 @@ impl Serialize for Signature {
     }
 }
 
-impl<'de> Deserialize<'de> for Signature {
+impl<'de> Deserialize<'de> for EcdsaSignature {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         struct Visitor {}
         impl<'de> de::Visitor<'de> for Visitor {
-            type Value = Signature;
+            type Value = EcdsaSignature;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                write!(formatter, "the 65 signature bytes as a hex encoded string")
+                write!(
+                    formatter,
+                    "the 65 ecdsa signature bytes as a hex encoded string"
+                )
             }
 
             fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
@@ -131,18 +134,18 @@ impl<'de> Deserialize<'de> for Signature {
             {
                 let s = s.strip_prefix("0x").ok_or_else(|| {
                     de::Error::custom(format!(
-                        "{:?} can't be decoded as hex signature because it does not start with '0x'",
+                        "{:?} can't be decoded as hex ecdsa signature because it does not start with '0x'",
                         s
                     ))
                 })?;
                 let mut bytes = [0u8; 65];
                 hex::decode_to_slice(s, &mut bytes).map_err(|err| {
                     de::Error::custom(format!(
-                        "failed to decode {:?} as hex signature: {}",
+                        "failed to decode {:?} as hex ecdsa signature: {}",
                         s, err
                     ))
                 })?;
-                Ok(Signature::from_bytes(&bytes))
+                Ok(EcdsaSignature::from_bytes(&bytes))
             }
         }
 

@@ -7,7 +7,7 @@ use futures::stream::TryStreamExt;
 use model::order::{BuyTokenDestination, SellTokenSource};
 use model::{
     order::{Order, OrderCreation, OrderKind, OrderMetaData, OrderStatus, OrderUid},
-    signature::{Signature, SigningScheme},
+    signature::{EcdsaSignature, SigningScheme},
 };
 use primitive_types::H160;
 use std::{borrow::Cow, convert::TryInto};
@@ -359,7 +359,7 @@ impl OrdersQueryRow {
                 .ok_or_else(|| anyhow!("buy_amount is not U256"))?,
             kind: self.kind.into(),
             partially_fillable: self.partially_fillable,
-            signature: Signature::from_bytes(
+            signature: EcdsaSignature::from_bytes(
                 &self
                     .signature
                     .try_into()

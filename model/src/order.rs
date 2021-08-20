@@ -3,7 +3,7 @@
 use crate::{
     appdata_hexadecimal,
     h160_hexadecimal::{self, HexadecimalH160},
-    signature::{Signature, SigningScheme},
+    signature::{EcdsaSignature, SigningScheme},
     u256_decimal::{self, DecimalU256},
     DomainSeparator, TokenPair,
 };
@@ -167,7 +167,7 @@ impl OrderBuilder {
     pub fn sign_with(mut self, domain: &DomainSeparator, key: SecretKeyRef) -> Self {
         self.0.order_meta_data.owner = key.address();
         self.0.order_meta_data.uid = self.0.order_creation.uid(domain, &key.address());
-        self.0.order_creation.signature = Signature::sign(
+        self.0.order_creation.signature = EcdsaSignature::sign(
             self.0.order_creation.signing_scheme,
             domain,
             &self.0.order_creation.hash_struct(),
@@ -206,7 +206,7 @@ pub struct OrderCreation {
     pub fee_amount: U256,
     pub kind: OrderKind,
     pub partially_fillable: bool,
-    pub signature: Signature,
+    pub signature: EcdsaSignature,
     pub signing_scheme: SigningScheme,
     #[serde(default)]
     pub sell_token_balance: SellTokenSource,
@@ -240,7 +240,7 @@ impl Default for OrderCreation {
             sell_token_balance: Default::default(),
             buy_token_balance: Default::default(),
         };
-        result.signature = Signature::sign(
+        result.signature = EcdsaSignature::sign(
             result.signing_scheme,
             &DomainSeparator::default(),
             &result.hash_struct(),
@@ -326,7 +326,7 @@ impl OrderCreation {
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Hash)]
 pub struct OrderCancellation {
     pub order_uid: OrderUid,
-    pub signature: Signature,
+    pub signature: EcdsaSignature,
     pub signing_scheme: SigningScheme,
 }
 
@@ -337,7 +337,7 @@ impl Default for OrderCancellation {
             signature: Default::default(),
             signing_scheme: SigningScheme::Eip712,
         };
-        result.signature = Signature::sign(
+        result.signature = EcdsaSignature::sign(
             result.signing_scheme,
             &DomainSeparator::default(),
             &result.hash_struct(),
@@ -626,7 +626,7 @@ mod tests {
                 fee_amount: U256::MAX,
                 kind: OrderKind::Buy,
                 partially_fillable: false,
-                signature: Signature {
+                signature: EcdsaSignature {
                     v: 1,
                     r: H256::from_str(
                         "0200000000000000000000000000000000000000000000000000000000000003",
@@ -689,7 +689,7 @@ mod tests {
                 sell_token_balance: SellTokenSource::Erc20,
                 buy_token_balance: BuyTokenDestination::Erc20,
                 signing_scheme: *signing_scheme,
-                signature: Signature::from_bytes(signature),
+                signature: EcdsaSignature::from_bytes(signature),
             };
 
             let owner = order
@@ -752,7 +752,7 @@ mod tests {
         ] {
             let cancellation = OrderCancellation {
                 order_uid: OrderUid(hex!("2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a")),
-                signature: Signature::from_bytes(signature),
+                signature: EcdsaSignature::from_bytes(signature),
                 signing_scheme: *signing_scheme,
             };
             let owner = cancellation.validate(&domain_separator).unwrap();

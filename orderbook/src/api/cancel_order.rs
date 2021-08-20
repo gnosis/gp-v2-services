@@ -1,7 +1,7 @@
 use crate::api::extract_payload;
 use crate::orderbook::{OrderCancellationResult, Orderbook};
 use anyhow::Result;
-use model::signature::Signature;
+use model::signature::EcdsaSignature;
 use model::{
     order::{OrderCancellation, OrderUid},
     signature::SigningScheme,
@@ -13,7 +13,7 @@ use warp::{hyper::StatusCode, Filter, Rejection, Reply};
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CancellationPayload {
-    signature: Signature,
+    signature: EcdsaSignature,
     signing_scheme: SigningScheme,
 }
 
@@ -99,7 +99,7 @@ mod tests {
             }))
             .unwrap(),
             CancellationPayload {
-                signature: Signature {
+                signature: EcdsaSignature {
                     r: H256(hex!(
                         "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
                     )),
