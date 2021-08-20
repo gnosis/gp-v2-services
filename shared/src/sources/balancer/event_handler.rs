@@ -141,7 +141,10 @@ impl BalancerPoolRegistry {
                 .store
                 .pools_for(pool_ids)
                 .into_iter()
-                .filter_map(|pool| pool.try_into_weighted().ok())
+                .map(|pool| {
+                    pool.try_into_weighted()
+                        .expect("weighted_pool_updater only contains weighted pools")
+                })
                 .collect::<Vec<_>>(),
         );
         pools.extend(
@@ -151,7 +154,10 @@ impl BalancerPoolRegistry {
                 .store
                 .pools_for(pool_ids)
                 .into_iter()
-                .filter_map(|pool| pool.try_into_weighted().ok())
+                .map(|pool| {
+                    pool.try_into_weighted()
+                        .expect("two_token_pool_updater only contains weighted pools")
+                })
                 .collect::<Vec<_>>(),
         );
         pools
@@ -164,7 +170,10 @@ impl BalancerPoolRegistry {
             .store
             .pools_for(pool_ids)
             .into_iter()
-            .filter_map(|pool| pool.try_into_stable().ok())
+            .map(|pool| {
+                pool.try_into_stable()
+                    .expect("stable_pool_updater only holds stable pools")
+            })
             .collect()
     }
 }
