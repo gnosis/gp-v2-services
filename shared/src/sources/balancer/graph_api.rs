@@ -94,12 +94,7 @@ impl BalancerSubgraphClient {
             .query_graph_for::<StableToken>(block_number, pools_query::STABLE_POOL_QUERY)
             .await?
             .into_iter()
-            .map(|pool| {
-                (
-                    pool.factory,
-                    pool.into_registered_pool(block_number),
-                )
-            });
+            .map(|pool| (pool.factory, pool.into_registered_pool(block_number)));
 
         let mut pools_by_factory = HashMap::<H160, Vec<RegisteredPool>>::new();
         for (factory, pool) in weighted_pools.chain(stable_pools) {
