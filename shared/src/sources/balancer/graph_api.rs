@@ -89,15 +89,36 @@ impl BalancerSubgraphClient {
             .query_graph_for::<WeightedToken>(block_number, pools_query::WEIGHTED_POOL_QUERY)
             .await?
             .into_iter()
-            .map(|pool| (pool.factory, pool.into_registered_pool(block_number)));
+            .map(|pool_data| {
+                (
+                    pool_data.factory,
+                    pool_data.into_registered_pool(block_number),
+                )
+            });
         let stable_pools = self
             .query_graph_for::<StableToken>(block_number, pools_query::STABLE_POOL_QUERY)
             .await?
             .into_iter()
-            .map(|pool| (pool.factory, pool.into_registered_pool(block_number)));
+            .map(|pool_data| {
+                (
+                    pool_data.factory,
+                    pool_data.into_registered_pool(block_number),
+                )
+            });
 
         let mut pools_by_factory = HashMap::<H160, Vec<RegisteredPool>>::new();
         for (factory, pool) in weighted_pools.chain(stable_pools) {
+            let pool = match pool {
+                Ok(pool) => pool,
+                Err(err) => {
+                    // Technically this should never happen and would only ever be from
+                    // a token with more than 18 decimals (not supported by balancer contracts)
+                    // https://github.com/balancer-labs/balancer-v2-monorepo/blob/deployments-latest/pkg/pool-utils/contracts/BasePool.sol#L476-L487
+                    // We, thus, log but skip this error.
+                    tracing::error!("Unexpected failure to build registered pool {}", err);
+                    continue;
+                }
+            };
             pools_by_factory
                 .entry(factory.unwrap_or_default())
                 .or_default()
@@ -142,6 +163,7 @@ mod pools_query {
         pool_storage::{RegisteredPool, RegisteredStablePool, RegisteredWeightedPool},
         swap::fixed_point::Bfp,
     };
+    use anyhow::{anyhow, Result};
     use ethcontract::{H160, H256};
     use serde::Deserialize;
 
@@ -216,7 +238,7 @@ mod pools_query {
     }
 
     impl PoolData<WeightedToken> {
-        pub fn into_registered_pool(self, block_fetched: u64) -> RegisteredPool {
+        pub fn into_registered_pool(self, block_fetched: u64) -> Result<RegisteredPool> {
             // The Balancer subgraph does not contain information for the block
             // in which a pool was created. Instead, we just use the block that
             // the data was fetched for, as the created block is guaranteed to
@@ -224,7 +246,7 @@ mod pools_query {
             let block_created_upper_bound = block_fetched;
 
             let token_count = self.tokens.len();
-            self.tokens.iter().fold(
+            self.tokens.iter().try_fold(
                 RegisteredPool::Weighted(RegisteredWeightedPool {
                     pool_id: self.id,
                     pool_address: self.address,
@@ -237,11 +259,11 @@ mod pools_query {
                     if let RegisteredPool::Weighted(ref mut pool) = registered_pool {
                         pool.tokens.push(token.address);
                         pool.normalized_weights.push(token.weight);
-                        pool.scaling_exponents.push(
-                            18u8.checked_sub(token.decimals)
-                                .expect("unsupported token with more than 18 decimals"),
-                        );
-                        registered_pool
+                        pool.scaling_exponents
+                            .push(18u8.checked_sub(token.decimals).ok_or_else(|| {
+                                anyhow!("unsupported token with more than 18 decimals")
+                            })?);
+                        Ok(registered_pool)
                     } else {
                         unreachable!("Not a weighted pool");
                     }
@@ -251,7 +273,7 @@ mod pools_query {
     }
 
     impl PoolData<StableToken> {
-        pub fn into_registered_pool(self, block_fetched: u64) -> RegisteredPool {
+        pub fn into_registered_pool(self, block_fetched: u64) -> Result<RegisteredPool> {
             // The Balancer subgraph does not contain information for the block
             // in which a pool was created. Instead, we just use the block that
             // the data was fetched for, as the created block is guaranteed to
@@ -259,7 +281,7 @@ mod pools_query {
             let block_created_upper_bound = block_fetched;
 
             let token_count = self.tokens.len();
-            self.tokens.iter().fold(
+            self.tokens.iter().try_fold(
                 RegisteredPool::Stable(RegisteredStablePool {
                     pool_id: self.id,
                     pool_address: self.address,
@@ -270,11 +292,11 @@ mod pools_query {
                 |mut registered_pool, token| {
                     if let RegisteredPool::Stable(ref mut pool) = registered_pool {
                         pool.tokens.push(token.address);
-                        pool.scaling_exponents.push(
-                            18u8.checked_sub(token.decimals)
-                                .expect("unsupported token with more than 18 decimals"),
-                        );
-                        registered_pool
+                        pool.scaling_exponents
+                            .push(18u8.checked_sub(token.decimals).ok_or_else(|| {
+                                anyhow!("unsupported token with more than 18 decimals")
+                            })?);
+                        Ok(registered_pool)
                     } else {
                         unreachable!("Not a stable pool!");
                     }
