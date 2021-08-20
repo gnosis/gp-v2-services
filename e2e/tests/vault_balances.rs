@@ -122,6 +122,7 @@ async fn vault_balances(web3: Web3) {
             &gpv2.domain_separator,
             SecretKeyRef::from(&SecretKey::from_slice(&TRADER).unwrap()),
         )
+        .unwrap()
         .build()
         .order_creation;
     let placement = client

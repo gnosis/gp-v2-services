@@ -154,6 +154,7 @@ async fn eth_integration(web3: Web3) {
             &gpv2.domain_separator,
             SecretKeyRef::from(&SecretKey::from_slice(&TRADER_BUY_ETH_A_PK).unwrap()),
         )
+        .unwrap()
         .build()
         .order_creation;
     let placement = client
@@ -175,6 +176,7 @@ async fn eth_integration(web3: Web3) {
             &gpv2.domain_separator,
             SecretKeyRef::from(&SecretKey::from_slice(&TRADER_BUY_ETH_B_PK).unwrap()),
         )
+        .unwrap()
         .build()
         .order_creation;
     let placement = client

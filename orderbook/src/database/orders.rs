@@ -364,7 +364,8 @@ impl OrdersQueryRow {
                     .signature
                     .try_into()
                     .map_err(|_| anyhow!("signature has wrong length"))?,
-            ),
+            )
+            .into(),
             signing_scheme: self.signing_scheme.into(),
             sell_token_balance: self.sell_token_balance.into(),
             buy_token_balance: self.buy_token_balance.into(),

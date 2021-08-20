@@ -13,6 +13,60 @@ pub enum SigningScheme {
     Eip712,
     EthSign,
 }
+#[derive(Eq, PartialEq, Clone, Copy, Debug, Default, Deserialize, Serialize, Hash)]
+pub struct Signature(EcdsaSignature);
+
+impl From<EcdsaSignature> for Signature {
+    fn from(signature: EcdsaSignature) -> Self {
+        Signature(signature)
+    }
+}
+
+impl Signature {
+    pub fn validate(
+        &self,
+        signing_scheme: SigningScheme,
+        domain_separator: &DomainSeparator,
+        struct_hash: &[u8; 32],
+    ) -> Option<H160> {
+        self.0.validate(
+            signing_scheme
+                .try_to_ecdsa_scheme()
+                .expect("Only ecdsa schemes are currently supported"),
+            domain_separator,
+            struct_hash,
+        )
+    }
+
+    pub fn to_bytes(&self) -> [u8; 65] {
+        self.0.to_bytes()
+    }
+}
+
+#[derive(Eq, PartialEq, Clone, Copy, Debug, Deserialize, Serialize, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum EcdsaSigningScheme {
+    Eip712,
+    EthSign,
+}
+
+impl From<EcdsaSigningScheme> for SigningScheme {
+    fn from(scheme: EcdsaSigningScheme) -> Self {
+        match scheme {
+            EcdsaSigningScheme::Eip712 => Self::Eip712,
+            EcdsaSigningScheme::EthSign => Self::EthSign,
+        }
+    }
+}
+
+impl SigningScheme {
+    pub fn try_to_ecdsa_scheme(&self) -> Option<EcdsaSigningScheme> {
+        match self {
+            Self::Eip712 => Some(EcdsaSigningScheme::Eip712),
+            Self::EthSign => Some(EcdsaSigningScheme::EthSign),
+        }
+    }
+}
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Default, Hash)]
 pub struct EcdsaSignature {
@@ -40,13 +94,13 @@ fn hashed_ethsign_message(domain_separator: &DomainSeparator, struct_hash: &[u8;
 }
 
 fn hashed_signing_message(
-    signing_scheme: SigningScheme,
+    signing_scheme: EcdsaSigningScheme,
     domain_separator: &DomainSeparator,
     struct_hash: &[u8; 32],
 ) -> [u8; 32] {
     match signing_scheme {
-        SigningScheme::Eip712 => hashed_eip712_message(domain_separator, struct_hash),
-        SigningScheme::EthSign => hashed_ethsign_message(domain_separator, struct_hash),
+        EcdsaSigningScheme::Eip712 => hashed_eip712_message(domain_separator, struct_hash),
+        EcdsaSigningScheme::EthSign => hashed_ethsign_message(domain_separator, struct_hash),
     }
 }
 
@@ -70,7 +124,7 @@ impl EcdsaSignature {
 
     pub fn validate(
         &self,
-        signing_scheme: SigningScheme,
+        signing_scheme: EcdsaSigningScheme,
         domain_separator: &DomainSeparator,
         struct_hash: &[u8; 32],
     ) -> Option<H160> {
@@ -81,7 +135,7 @@ impl EcdsaSignature {
     }
 
     pub fn sign(
-        signing_scheme: SigningScheme,
+        signing_scheme: EcdsaSigningScheme,
         domain_separator: &DomainSeparator,
         struct_hash: &[u8; 32],
         key: SecretKeyRef,

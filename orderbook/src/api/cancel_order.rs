@@ -4,7 +4,7 @@ use anyhow::Result;
 use model::signature::EcdsaSignature;
 use model::{
     order::{OrderCancellation, OrderUid},
-    signature::SigningScheme,
+    signature::EcdsaSigningScheme,
 };
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, sync::Arc};
@@ -14,7 +14,7 @@ use warp::{hyper::StatusCode, Filter, Rejection, Reply};
 #[serde(rename_all = "camelCase")]
 struct CancellationPayload {
     signature: EcdsaSignature,
-    signing_scheme: SigningScheme,
+    signing_scheme: EcdsaSigningScheme,
 }
 
 pub fn cancel_order_request(
@@ -108,7 +108,7 @@ mod tests {
                     )),
                     v: 27,
                 },
-                signing_scheme: SigningScheme::Eip712,
+                signing_scheme: EcdsaSigningScheme::Eip712,
             },
         );
     }

@@ -3,7 +3,7 @@
 use crate::{
     appdata_hexadecimal,
     h160_hexadecimal::{self, HexadecimalH160},
-    signature::{EcdsaSignature, SigningScheme},
+    signature::{EcdsaSignature, EcdsaSigningScheme, Signature, SigningScheme},
     u256_decimal::{self, DecimalU256},
     DomainSeparator, TokenPair,
 };
@@ -94,7 +94,7 @@ impl Order {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct OrderBuilder(Order);
 
 impl OrderBuilder {
@@ -164,16 +164,23 @@ impl OrderBuilder {
     }
 
     /// Sets owner, uid, signature.
-    pub fn sign_with(mut self, domain: &DomainSeparator, key: SecretKeyRef) -> Self {
+    pub fn sign_with(mut self, domain: &DomainSeparator, key: SecretKeyRef) -> Result<Self, Self> {
+        let ecdsa_signing_scheme =
+            if let Some(scheme) = self.0.order_creation.signing_scheme.try_to_ecdsa_scheme() {
+                scheme
+            } else {
+                return Err(self);
+            };
         self.0.order_meta_data.owner = key.address();
         self.0.order_meta_data.uid = self.0.order_creation.uid(domain, &key.address());
         self.0.order_creation.signature = EcdsaSignature::sign(
-            self.0.order_creation.signing_scheme,
+            ecdsa_signing_scheme,
             domain,
             &self.0.order_creation.hash_struct(),
             key,
-        );
-        self
+        )
+        .into();
+        Ok(self)
     }
 
     pub fn build(self) -> Order {
@@ -206,7 +213,7 @@ pub struct OrderCreation {
     pub fee_amount: U256,
     pub kind: OrderKind,
     pub partially_fillable: bool,
-    pub signature: EcdsaSignature,
+    pub signature: Signature,
     pub signing_scheme: SigningScheme,
     #[serde(default)]
     pub sell_token_balance: SellTokenSource,
@@ -224,6 +231,7 @@ pub struct OrderCreationPayload {
 impl Default for OrderCreation {
     // Custom implementation to make sure the default order is valid
     fn default() -> Self {
+        let signing_scheme = EcdsaSigningScheme::Eip712;
         let mut result = Self {
             sell_token: Default::default(),
             buy_token: Default::default(),
@@ -235,17 +243,18 @@ impl Default for OrderCreation {
             fee_amount: Default::default(),
             kind: Default::default(),
             partially_fillable: Default::default(),
-            signing_scheme: SigningScheme::Eip712,
+            signing_scheme: signing_scheme.into(),
             signature: Default::default(),
             sell_token_balance: Default::default(),
             buy_token_balance: Default::default(),
         };
         result.signature = EcdsaSignature::sign(
-            result.signing_scheme,
+            signing_scheme,
             &DomainSeparator::default(),
             &result.hash_struct(),
             SecretKeyRef::new(&ONE_KEY),
-        );
+        )
+        .into();
         result
     }
 }
@@ -327,7 +336,7 @@ impl OrderCreation {
 pub struct OrderCancellation {
     pub order_uid: OrderUid,
     pub signature: EcdsaSignature,
-    pub signing_scheme: SigningScheme,
+    pub signing_scheme: EcdsaSigningScheme,
 }
 
 impl Default for OrderCancellation {
@@ -335,7 +344,7 @@ impl Default for OrderCancellation {
         let mut result = Self {
             order_uid: OrderUid::default(),
             signature: Default::default(),
-            signing_scheme: SigningScheme::Eip712,
+            signing_scheme: EcdsaSigningScheme::Eip712,
         };
         result.signature = EcdsaSignature::sign(
             result.signing_scheme,
@@ -636,7 +645,8 @@ mod tests {
                         "0400000000000000000000000000000000000000000000000000000000000005",
                     )
                     .unwrap(),
-                },
+                }
+                .into(),
                 signing_scheme: SigningScheme::Eip712,
                 sell_token_balance: SellTokenSource::External,
                 buy_token_balance: BuyTokenDestination::Internal,
@@ -689,7 +699,7 @@ mod tests {
                 sell_token_balance: SellTokenSource::Erc20,
                 buy_token_balance: BuyTokenDestination::Erc20,
                 signing_scheme: *signing_scheme,
-                signature: EcdsaSignature::from_bytes(signature),
+                signature: EcdsaSignature::from_bytes(signature).into(),
             };
 
             let owner = order
@@ -747,8 +757,8 @@ mod tests {
         let ethsign_signature = hex!("5fef0aed159777403f964da946b2b6c7d2ca6a931f009328c17ed481bf5fe25b46c8da3dfdca2657c9e6e7fbd3a1abbf52ee0ccaf610395fb2445256f5d24eb41b");
 
         for (signing_scheme, signature) in &[
-            (SigningScheme::Eip712, eip712_signature),
-            (SigningScheme::EthSign, ethsign_signature),
+            (EcdsaSigningScheme::Eip712, eip712_signature),
+            (EcdsaSigningScheme::EthSign, ethsign_signature),
         ] {
             let cancellation = OrderCancellation {
                 order_uid: OrderUid(hex!("2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a")),
@@ -806,6 +816,7 @@ mod tests {
             .with_valid_to(u32::MAX)
             .with_kind(OrderKind::Sell)
             .sign_with(&DomainSeparator::default(), SecretKeyRef::from(&sk))
+            .unwrap()
             .build();
 
         let owner = order
