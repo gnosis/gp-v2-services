@@ -183,7 +183,7 @@ impl OrderBuilder {
 
 /// An order as provided to the orderbook by the frontend.
 #[serde_as]
-#[derive(Eq, PartialEq, Clone, Copy, Derivative, Deserialize, Serialize, Hash)]
+#[derive(Eq, PartialEq, Clone, Derivative, Deserialize, Serialize, Hash)]
 #[derivative(Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderCreation {
@@ -214,7 +214,7 @@ pub struct OrderCreation {
     pub buy_token_balance: BuyTokenDestination,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct OrderCreationPayload {
     #[serde(flatten)]
     pub order_creation: OrderCreation,
