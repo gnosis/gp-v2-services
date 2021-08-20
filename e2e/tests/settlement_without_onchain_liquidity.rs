@@ -3,7 +3,7 @@ use ethcontract::prelude::{Account, Address, PrivateKey, U256};
 use hex_literal::hex;
 use model::{
     order::{OrderBuilder, OrderKind},
-    SigningScheme,
+    signature::SigningScheme,
 };
 use secp256k1::SecretKey;
 use serde_json::json;

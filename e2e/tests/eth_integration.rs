@@ -2,7 +2,7 @@ use contracts::IUniswapLikeRouter;
 use ethcontract::prelude::{Account, Address, PrivateKey, U256};
 use model::{
     order::{OrderBuilder, OrderKind, BUY_ETH_ADDRESS},
-    SigningScheme,
+    signature::SigningScheme,
 };
 use secp256k1::SecretKey;
 use serde_json::json;

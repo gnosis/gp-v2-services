@@ -3,8 +3,9 @@
 use crate::{
     appdata_hexadecimal,
     h160_hexadecimal::{self, HexadecimalH160},
+    signature::{Signature, SigningScheme},
     u256_decimal::{self, DecimalU256},
-    DomainSeparator, Signature, SigningScheme, TokenPair,
+    DomainSeparator, TokenPair,
 };
 use chrono::{offset::Utc, DateTime, NaiveDateTime};
 use derivative::Derivative;
@@ -256,7 +257,10 @@ impl OrderCreation {
 
     pub fn uid(&self, domain: &DomainSeparator, owner: &H160) -> OrderUid {
         let mut uid = OrderUid([0u8; 56]);
-        uid.0[0..32].copy_from_slice(&super::hashed_eip712_message(domain, &self.hash_struct()));
+        uid.0[0..32].copy_from_slice(&super::signature::hashed_eip712_message(
+            domain,
+            &self.hash_struct(),
+        ));
         uid.0[32..52].copy_from_slice(owner.as_fixed_bytes());
         uid.0[52..56].copy_from_slice(&self.valid_to.to_be_bytes());
         uid

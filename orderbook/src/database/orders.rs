@@ -7,7 +7,7 @@ use futures::stream::TryStreamExt;
 use model::order::{BuyTokenDestination, SellTokenSource};
 use model::{
     order::{Order, OrderCreation, OrderKind, OrderMetaData, OrderStatus, OrderUid},
-    Signature, SigningScheme,
+    signature::{Signature, SigningScheme},
 };
 use primitive_types::H160;
 use std::{borrow::Cow, convert::TryInto};

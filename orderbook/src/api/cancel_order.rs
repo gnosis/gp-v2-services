@@ -1,10 +1,10 @@
 use crate::api::extract_payload;
 use crate::orderbook::{OrderCancellationResult, Orderbook};
 use anyhow::Result;
-use model::Signature;
+use model::signature::Signature;
 use model::{
     order::{OrderCancellation, OrderUid},
-    SigningScheme,
+    signature::SigningScheme,
 };
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, sync::Arc};

@@ -1,7 +1,7 @@
 use ethcontract::Bytes;
 use model::{
     order::{BuyTokenDestination, OrderCreation, OrderKind, SellTokenSource},
-    SigningScheme,
+    signature::SigningScheme,
 };
 use primitive_types::{H160, U256};
 
