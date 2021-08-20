@@ -104,53 +104,57 @@ impl BalancerPoolRegistry {
         &self,
         token_pairs: HashSet<TokenPair>,
     ) -> HashSet<H256> {
-        let weighted_pools = self
-            .weighted_pool_updater
-            .lock()
-            .await
-            .store
-            .ids_for_pools_containing_token_pairs(token_pairs.clone());
-        let two_token_pools = self
-            .two_token_pool_updater
-            .lock()
-            .await
-            .store
-            .ids_for_pools_containing_token_pairs(token_pairs.clone());
-        let weighted_pool_ids: HashSet<_> =
-            weighted_pools.union(&two_token_pools).copied().collect();
-        let stable_pools = self
-            .stable_pool_updater
-            .lock()
-            .await
-            .store
-            .ids_for_pools_containing_token_pairs(token_pairs);
-        weighted_pool_ids.union(&stable_pools).copied().collect()
+        let mut pool_ids = HashSet::new();
+        pool_ids.extend(
+            self.weighted_pool_updater
+                .lock()
+                .await
+                .store
+                .ids_for_pools_containing_token_pairs(token_pairs.clone()),
+        );
+        pool_ids.extend(
+            self.two_token_pool_updater
+                .lock()
+                .await
+                .store
+                .ids_for_pools_containing_token_pairs(token_pairs.clone()),
+        );
+        pool_ids.extend(
+            self.stable_pool_updater
+                .lock()
+                .await
+                .store
+                .ids_for_pools_containing_token_pairs(token_pairs),
+        );
+        pool_ids
     }
 
     pub async fn get_weighted_pools(
         &self,
         pool_ids: &HashSet<H256>,
     ) -> Vec<RegisteredWeightedPool> {
-        let mut pool_set_1: Vec<RegisteredWeightedPool> = self
-            .weighted_pool_updater
-            .lock()
-            .await
-            .store
-            .pools_for(pool_ids)
-            .into_iter()
-            .filter_map(|pool| pool.try_into_weighted().ok())
-            .collect();
-        let pool_set_2: Vec<RegisteredWeightedPool> = self
-            .two_token_pool_updater
-            .lock()
-            .await
-            .store
-            .pools_for(pool_ids)
-            .into_iter()
-            .filter_map(|pool| pool.try_into_weighted().ok())
-            .collect();
-        pool_set_1.extend(pool_set_2);
-        pool_set_1
+        let mut pools: Vec<RegisteredWeightedPool> = Vec::new();
+        pools.extend(
+            self.weighted_pool_updater
+                .lock()
+                .await
+                .store
+                .pools_for(pool_ids)
+                .into_iter()
+                .filter_map(|pool| pool.try_into_weighted().ok())
+                .collect::<Vec<_>>(),
+        );
+        pools.extend(
+            self.two_token_pool_updater
+                .lock()
+                .await
+                .store
+                .pools_for(pool_ids)
+                .into_iter()
+                .filter_map(|pool| pool.try_into_weighted().ok())
+                .collect::<Vec<_>>(),
+        );
+        pools
     }
 
     pub async fn get_stable_pools(&self, pool_ids: &HashSet<H256>) -> Vec<RegisteredStablePool> {

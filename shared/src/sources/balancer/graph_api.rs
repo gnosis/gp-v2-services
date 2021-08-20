@@ -8,12 +8,13 @@
 //! - ensure that we are using the latest up-to-date pool data by using events
 //!   from the node
 
-use crate::sources::balancer::graph_api::pools_query::{StableToken, WeightedToken};
+use crate::sources::balancer::graph_api::pools_query::{PoolData, StableToken, WeightedToken};
 use crate::{
     event_handling::MAX_REORG_BLOCK_COUNT, sources::balancer::pool_storage::RegisteredPool,
     subgraph::SubgraphClient,
 };
 use anyhow::{bail, Result};
+use ethcontract::jsonrpc::serde::de::DeserializeOwned;
 use ethcontract::{H160, H256};
 use reqwest::Client;
 use serde_json::json;
@@ -46,72 +47,67 @@ impl BalancerSubgraphClient {
         )?))
     }
 
-    /// Retrieves the list of registered stable pools from the subgraph.
+    // We do paging by last ID instead of using `skip`. This is the
+    // suggested approach to paging best performance:
+    // <https://thegraph.com/docs/graphql-api#pagination>
+    async fn query_graph_for<T: DeserializeOwned>(
+        &self,
+        block_number: u64,
+        query: &str,
+    ) -> Result<Vec<PoolData<T>>> {
+        let mut result = Vec::new();
+        let mut last_id = H256::default();
+        while {
+            let page = self
+                .0
+                .query::<pools_query::Data<T>>(
+                    query,
+                    Some(json_map! {
+                        "block" => block_number,
+                        "pageSize" => QUERY_PAGE_SIZE,
+                        "lastId" => json!(last_id),
+                    }),
+                )
+                .await?
+                .pools;
+
+            let has_next_page = page.len() == QUERY_PAGE_SIZE;
+            if let Some(last_pool) = page.last() {
+                last_id = last_pool.id;
+            }
+            result.extend(page);
+            has_next_page
+        } {}
+        Ok(result)
+    }
+
+    /// Retrieves the list of registered pools from the subgraph.
     pub async fn get_registered_pools(&self) -> Result<RegisteredPools> {
         let block_number = self.get_safe_block().await?;
+
+        let weighted_pools = self
+            .query_graph_for::<WeightedToken>(block_number, pools_query::WEIGHTED_POOL_QUERY)
+            .await?
+            .into_iter()
+            .map(|pool| (pool.factory, pool.into_registered_pool(block_number)));
+        let stable_pools = self
+            .query_graph_for::<StableToken>(block_number, pools_query::STABLE_POOL_QUERY)
+            .await?
+            .into_iter()
+            .map(|pool| {
+                (
+                    pool.factory,
+                    pool.into_registered_pool(block_number),
+                )
+            });
+
         let mut pools_by_factory = HashMap::<H160, Vec<RegisteredPool>>::new();
-
-        // We do paging by last ID instead of using `skip`. This is the
-        // suggested approach to paging best performance:
-        // <https://thegraph.com/docs/graphql-api#pagination>
-        let mut last_id = H256::default();
-        while {
-            let page = self
-                .0
-                .query::<pools_query::Data<WeightedToken>>(
-                    pools_query::WEIGHTED_POOL_QUERY,
-                    Some(json_map! {
-                        "block" => block_number,
-                        "pageSize" => QUERY_PAGE_SIZE,
-                        "lastId" => json!(last_id),
-                    }),
-                )
-                .await?
-                .pools;
-
-            let has_next_page = page.len() == QUERY_PAGE_SIZE;
-            if let Some(last_pool) = page.last() {
-                last_id = last_pool.id;
-            }
-
-            for pool in page {
-                pools_by_factory
-                    .entry(pool.factory.unwrap_or_default())
-                    .or_default()
-                    .push(pool.into_registered_pool(block_number)?);
-            }
-
-            has_next_page
-        } {}
-
-        let mut last_id = H256::default();
-        while {
-            let page = self
-                .0
-                .query::<pools_query::Data<StableToken>>(
-                    pools_query::STABLE_POOL_QUERY,
-                    Some(json_map! {
-                        "block" => block_number,
-                        "pageSize" => QUERY_PAGE_SIZE,
-                        "lastId" => json!(last_id),
-                    }),
-                )
-                .await?
-                .pools;
-            let has_next_page = page.len() == QUERY_PAGE_SIZE;
-            if let Some(last_pool) = page.last() {
-                last_id = last_pool.id;
-            }
-
-            for pool in page {
-                pools_by_factory
-                    .entry(pool.factory.unwrap_or_default())
-                    .or_default()
-                    .push(pool.into_registered_pool(block_number)?);
-            }
-
-            has_next_page
-        } {}
+        for (factory, pool) in weighted_pools.chain(stable_pools) {
+            pools_by_factory
+                .entry(factory.unwrap_or_default())
+                .or_default()
+                .push(pool);
+        }
 
         Ok(RegisteredPools {
             fetched_block_number: block_number,
@@ -151,7 +147,6 @@ mod pools_query {
         pool_storage::{RegisteredPool, RegisteredStablePool, RegisteredWeightedPool},
         swap::fixed_point::Bfp,
     };
-    use anyhow::{anyhow, Result};
     use ethcontract::{H160, H256};
     use serde::Deserialize;
 
@@ -226,7 +221,7 @@ mod pools_query {
     }
 
     impl PoolData<WeightedToken> {
-        pub fn into_registered_pool(self, block_fetched: u64) -> Result<RegisteredPool> {
+        pub fn into_registered_pool(self, block_fetched: u64) -> RegisteredPool {
             // The Balancer subgraph does not contain information for the block
             // in which a pool was created. Instead, we just use the block that
             // the data was fetched for, as the created block is guaranteed to
@@ -234,7 +229,7 @@ mod pools_query {
             let block_created_upper_bound = block_fetched;
 
             let token_count = self.tokens.len();
-            self.tokens.iter().try_fold(
+            self.tokens.iter().fold(
                 RegisteredPool::Weighted(RegisteredWeightedPool {
                     pool_id: self.id,
                     pool_address: self.address,
@@ -247,11 +242,11 @@ mod pools_query {
                     if let RegisteredPool::Weighted(ref mut pool) = registered_pool {
                         pool.tokens.push(token.address);
                         pool.normalized_weights.push(token.weight);
-                        pool.scaling_exponents
-                            .push(18u8.checked_sub(token.decimals).ok_or_else(|| {
-                                anyhow!("unsupported token with more than 18 decimals")
-                            })?);
-                        Ok(registered_pool)
+                        pool.scaling_exponents.push(
+                            18u8.checked_sub(token.decimals)
+                                .expect("unsupported token with more than 18 decimals"),
+                        );
+                        registered_pool
                     } else {
                         unreachable!("Not a weighted pool");
                     }
@@ -261,7 +256,7 @@ mod pools_query {
     }
 
     impl PoolData<StableToken> {
-        pub fn into_registered_pool(self, block_fetched: u64) -> Result<RegisteredPool> {
+        pub fn into_registered_pool(self, block_fetched: u64) -> RegisteredPool {
             // The Balancer subgraph does not contain information for the block
             // in which a pool was created. Instead, we just use the block that
             // the data was fetched for, as the created block is guaranteed to
@@ -269,7 +264,7 @@ mod pools_query {
             let block_created_upper_bound = block_fetched;
 
             let token_count = self.tokens.len();
-            self.tokens.iter().try_fold(
+            self.tokens.iter().fold(
                 RegisteredPool::Stable(RegisteredStablePool {
                     pool_id: self.id,
                     pool_address: self.address,
@@ -280,11 +275,11 @@ mod pools_query {
                 |mut registered_pool, token| {
                     if let RegisteredPool::Stable(ref mut pool) = registered_pool {
                         pool.tokens.push(token.address);
-                        pool.scaling_exponents
-                            .push(18u8.checked_sub(token.decimals).ok_or_else(|| {
-                                anyhow!("unsupported token with more than 18 decimals")
-                            })?);
-                        Ok(registered_pool)
+                        pool.scaling_exponents.push(
+                            18u8.checked_sub(token.decimals)
+                                .expect("unsupported token with more than 18 decimals"),
+                        );
+                        registered_pool
                     } else {
                         unreachable!("Not a stable pool!");
                     }
