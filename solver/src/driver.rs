@@ -269,7 +269,8 @@ impl Driver {
             }
         };
 
-        for (((solver, settlement), _previous_error), result) in errors.into_iter().zip(simulations) {
+        for (((solver, settlement), _previous_error), result) in errors.into_iter().zip(simulations)
+        {
             let error_at_earlier_block = match result {
                 Ok(()) => continue,
                 Err(err) => err,
@@ -291,7 +292,7 @@ impl Driver {
     fn report_matched_but_unsettled_orders<'a>(
         &self,
         submitted: &Settlement,
-        all: impl Iterator<Item = &'a (Arc<dyn Solver>, RatedSettlement)>,
+        all: impl Iterator<Item = RatedSettlement>,
     ) {
         let submitted: HashSet<_> = submitted
             .trades()
@@ -299,7 +300,7 @@ impl Driver {
             .map(|trade| trade.order.order_meta_data.uid)
             .collect();
         let all_matched: HashSet<_> = all
-            .flat_map(|(_, solution)| solution.settlement.trades().to_vec())
+            .flat_map(|solution| solution.settlement.trades().to_vec())
             .map(|trade| trade.order.order_meta_data.uid)
             .collect();
         let matched_but_not_settled: HashSet<_> = all_matched.difference(&submitted).collect();
@@ -343,7 +344,7 @@ impl Driver {
                 };
                 tracing::info!(
                     "Objective value for solver {} is {}: surplus={}, gas_estimate={}, gas_price={}",
-                    "",
+                    solver.name(),
                     rated_settlement.objective_value(),
                     rated_settlement.surplus,
                     rated_settlement.gas_estimate,
@@ -456,7 +457,11 @@ impl Driver {
             }
 
             tracing::info!("winning settlement: {:?}", settlement);
-            if self.submit_settlement(solver, settlement.clone()).await.is_ok() {
+            if self
+                .submit_settlement(solver, settlement.clone())
+                .await
+                .is_ok()
+            {
                 self.inflight_trades = settlement
                     .settlement
                     .trades()
@@ -465,7 +470,10 @@ impl Driver {
                     .collect::<HashSet<OrderUid>>();
             }
 
-            self.report_matched_but_unsettled_orders(&settlement.settlement, rated_settlements.iter());
+            self.report_matched_but_unsettled_orders(
+                &settlement.settlement,
+                rated_settlements.iter().map(|(_, solution)| solution),
+            );
         }
 
         // Happens after settlement submission so that we do not delay it.
