@@ -130,7 +130,7 @@ mod tests {
         let network_id = web3.net().version().await.unwrap();
         let contract = GPv2Settlement::deployed(&web3).await.unwrap();
         let account = Account::Offline(PrivateKey::from_raw([1; 32]).unwrap(), None);
-        let solver: Arc<dyn Solver> = crate::solver::naive_solver(account).into();
+        let solver = crate::solver::naive_solver(account);
 
         let settlements = vec![
             (

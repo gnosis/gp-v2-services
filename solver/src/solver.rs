@@ -184,8 +184,8 @@ pub fn create(
 }
 
 /// Returns a naive solver to be used e.g. in e2e tests.
-pub fn naive_solver(account: Account) -> Box<dyn Solver> {
-    Box::new(NaiveSolver::new(account))
+pub fn naive_solver(account: Account) -> Arc<dyn Solver> {
+    Arc::new(NaiveSolver::new(account))
 }
 
 /// A solver that remove limit order below a certain threshold and
