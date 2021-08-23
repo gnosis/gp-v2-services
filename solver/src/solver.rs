@@ -35,7 +35,7 @@ mod solver_utils;
 /// independent `Settlements`. Solvers are free to choose which types `Liquidity` they
 /// would like to process, including their own private sources.
 #[async_trait::async_trait]
-pub trait Solver {
+pub trait Solver: 'static {
     /// Runs the solver.
     ///
     /// The returned settlements should be independent (for example not reusing the same user
@@ -55,6 +55,9 @@ pub trait Solver {
     /// This method is used for logging and metrics collection.
     fn name(&self) -> &'static str;
 }
+
+/// A vector of solvers.
+pub type Solvers = Vec<Arc<dyn Solver>>;
 
 arg_enum! {
     #[derive(Debug)]
@@ -89,12 +92,12 @@ pub fn create(
     paraswap_slippage_bps: usize,
     disabled_paraswap_dexs: Vec<String>,
     client: Client,
-) -> Result<Vec<Box<dyn Solver>>> {
+) -> Result<Solvers> {
     // Tiny helper function to help out with type inference. Otherwise, all
     // `Box::new(...)` expressions would have to be cast `as Box<dyn Solver>`.
     #[allow(clippy::unnecessary_wraps)]
-    fn boxed(solver: impl Solver + 'static) -> Result<Box<dyn Solver>> {
-        Ok(Box::new(solver))
+    fn boxed(solver: impl Solver + 'static) -> Result<Arc<dyn Solver>> {
+        Ok(Arc::new(solver))
     }
 
     let buffer_retriever = Arc::new(BufferRetriever::new(
