@@ -48,7 +48,7 @@ fn run() -> Result<()> {
         )?
         .github(
             "BalancerV2StablePoolFactory",
-            "balancer-labs/balancer-subgraph-v2/2b97edd5e65aed06718ce64a69111ccdabccf048/abis/StablePoolFactory.json",
+            "balancer-labs/balancer-v2-monorepo/stable-deployment/pkg/deployments/tasks/20210624-stable-pool/abi/StablePoolFactory.json",
         )?
         .npm(
             "ERC20Mintable",
