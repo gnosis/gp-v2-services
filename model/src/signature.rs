@@ -178,7 +178,7 @@ impl<'de> Deserialize<'de> for EcdsaSignature {
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 write!(
                     formatter,
-                    "the 65 ecdsa signature bytes as a hex encoded string"
+                    "the 65 ecdsa signature bytes as a hex encoded string, ordered as r, s, v, where v is either 27 or 28"
                 )
             }
 
