@@ -137,10 +137,7 @@ mod tests {
                 solver.clone(),
                 Settlement::with_trades(Default::default(), vec![Default::default()]),
             ),
-            (
-                solver.clone(),
-                Settlement::new(Default::default()),
-            ),
+            (solver.clone(), Settlement::new(Default::default())),
         ];
         let result = simulate_settlements(
             settlements.iter(),
