@@ -335,7 +335,7 @@ mod block_number_query {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sources::balancer::pool_storage::RegisteredWeightedPool;
+    use crate::sources::balancer::pool_storage::{RegisteredStablePool, RegisteredWeightedPool};
     use crate::sources::balancer::swap::fixed_point::Bfp;
     use ethcontract::{H160, H256};
 
@@ -411,9 +411,10 @@ mod tests {
 
     #[test]
     fn convert_pool_to_registered_pool() {
+        // Note that this test also demonstrates unreachable code is indeed unreachable
         use pools_query::*;
 
-        let pool = PoolData {
+        let weighted_pool_data = PoolData {
             id: H256([2; 32]),
             address: H160([1; 20]),
             factory: None,
@@ -432,7 +433,7 @@ mod tests {
         };
 
         assert_eq!(
-            pool.into_registered_pool(42).unwrap(),
+            weighted_pool_data.into_registered_pool(42).unwrap(),
             RegisteredPool::Weighted(RegisteredWeightedPool {
                 pool_id: H256([2; 32]),
                 pool_address: H160([1; 20]),
@@ -442,6 +443,33 @@ mod tests {
                     Bfp::from_wei(1_337_000_000_000_000_000u128.into()),
                     Bfp::from_wei(4_200_000_000_000_000_000u128.into()),
                 ],
+                block_created: 42,
+            })
+        );
+
+        let stable_pool_data = PoolData {
+            id: H256([2; 32]),
+            address: H160([1; 20]),
+            factory: None,
+            tokens: vec![
+                StableToken {
+                    address: H160([2; 20]),
+                    decimals: 1,
+                },
+                StableToken {
+                    address: H160([3; 20]),
+                    decimals: 2,
+                },
+            ],
+        };
+
+        assert_eq!(
+            stable_pool_data.into_registered_pool(42).unwrap(),
+            RegisteredPool::Stable(RegisteredStablePool {
+                pool_id: H256([2; 32]),
+                pool_address: H160([1; 20]),
+                tokens: vec![H160([2; 20]), H160([3; 20])],
+                scaling_exponents: vec![17, 16],
                 block_created: 42,
             })
         );
