@@ -509,6 +509,5 @@ mod tests {
                 .sum::<usize>(),
             pools.fetched_block_number,
         );
-
     }
 }
