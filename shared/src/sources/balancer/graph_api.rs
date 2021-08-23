@@ -501,10 +501,14 @@ mod tests {
             "Retrieved {} total pools at block {}",
             pools
                 .pools_by_factory
-                .values()
-                .map(|p| p.len())
+                .iter()
+                .map(|(factory, pool)| {
+                    println!("Retrieved {} pools for factory at {}", pool.len(), factory);
+                    pool.len()
+                })
                 .sum::<usize>(),
             pools.fetched_block_number,
         );
+
     }
 }
