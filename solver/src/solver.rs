@@ -99,7 +99,7 @@ pub fn create(
     // Tiny helper function to help out with type inference. Otherwise, all
     // `Box::new(...)` expressions would have to be cast `as Box<dyn Solver>`.
     #[allow(clippy::unnecessary_wraps)]
-    fn boxed(solver: impl Solver + 'static) -> Result<Arc<dyn Solver>> {
+    fn shared(solver: impl Solver + 'static) -> Result<Arc<dyn Solver>> {
         Ok(Arc::new(solver))
     }
 
@@ -131,12 +131,12 @@ pub fn create(
     solvers
         .into_iter()
         .map(|solver_type| match solver_type {
-            SolverType::Naive => boxed(NaiveSolver::new(account.clone())),
+            SolverType::Naive => shared(NaiveSolver::new(account.clone())),
             SolverType::Baseline => {
-                boxed(BaselineSolver::new(account.clone(), base_tokens.clone()))
+                shared(BaselineSolver::new(account.clone(), base_tokens.clone()))
             }
-            SolverType::Mip => boxed(create_http_solver(mip_solver_url.clone(), "Mip")),
-            SolverType::Quasimodo => boxed(create_http_solver(
+            SolverType::Mip => shared(create_http_solver(mip_solver_url.clone(), "Mip")),
+            SolverType::Quasimodo => shared(create_http_solver(
                 quasimodo_solver_url.clone(),
                 "Quasimodo",
             )),
@@ -151,7 +151,7 @@ pub fn create(
                 )?
                 .into();
                 // We only want to use 1Inch for high value orders
-                boxed(SellVolumeFilteringSolver::new(
+                shared(SellVolumeFilteringSolver::new(
                     Box::new(one_inch_solver),
                     price_estimator.clone(),
                     native_token,
@@ -167,9 +167,9 @@ pub fn create(
                     client.clone(),
                 )
                 .unwrap();
-                boxed(SingleOrderSolver::from(matcha_solver))
+                shared(SingleOrderSolver::from(matcha_solver))
             }
-            SolverType::Paraswap => boxed(SingleOrderSolver::from(ParaswapSolver::new(
+            SolverType::Paraswap => shared(SingleOrderSolver::from(ParaswapSolver::new(
                 account.clone(),
                 web3.clone(),
                 settlement_contract.clone(),
