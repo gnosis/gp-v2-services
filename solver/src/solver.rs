@@ -59,6 +59,9 @@ pub trait Solver: 'static {
 /// A vector of solvers.
 pub type Solvers = Vec<Arc<dyn Solver>>;
 
+/// A single settlement and a solver that've produced it.
+pub type SettlementWithSolver = (Arc<dyn Solver>, Settlement);
+
 arg_enum! {
     #[derive(Debug)]
     pub enum SolverType {

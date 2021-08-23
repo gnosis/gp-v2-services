@@ -1,7 +1,7 @@
 pub mod solver_settlements;
 
 use self::solver_settlements::RatedSettlement;
-use crate::solver::Solvers;
+use crate::solver::{SettlementWithSolver, Solvers};
 use crate::{
     liquidity::Liquidity,
     liquidity_collector::LiquidityCollector,
@@ -211,11 +211,11 @@ impl Driver {
     // Split settlements into successfully simulating ones and errors.
     async fn simulate_settlements(
         &self,
-        settlements: Vec<(Arc<dyn Solver>, Settlement)>,
+        settlements: Vec<SettlementWithSolver>,
         gas_price_wei: f64,
     ) -> Result<(
-        Vec<(Arc<dyn Solver>, Settlement)>,
-        Vec<((Arc<dyn Solver>, Settlement), Error)>,
+        Vec<SettlementWithSolver>,
+        Vec<(SettlementWithSolver, Error)>,
     )> {
         let simulations = settlement_simulation::simulate_settlements(
             settlements.iter(),
@@ -244,7 +244,7 @@ impl Driver {
     // the block has changed just as were were querying the node.
     async fn report_simulation_errors(
         &self,
-        errors: &[((Arc<dyn Solver>, Settlement), Error)],
+        errors: &[(SettlementWithSolver, Error)],
         current_block_during_liquidity_fetch: u64,
         gas_price_wei: f64,
     ) {
@@ -269,8 +269,7 @@ impl Driver {
             }
         };
 
-        for (((solver, settlement), _previous_error), result) in errors.into_iter().zip(simulations)
-        {
+        for (((solver, settlement), _previous_error), result) in errors.iter().zip(simulations) {
             let error_at_earlier_block = match result {
                 Ok(()) => continue,
                 Err(err) => err,
@@ -289,7 +288,7 @@ impl Driver {
 
     // Record metric with the amount of orders that were matched but not settled in this runloop (effectively queued for the next one)
     // Should help us to identify how much we can save by parallelizing execution.
-    fn report_matched_but_unsettled_orders<'a>(
+    fn report_matched_but_unsettled_orders(
         &self,
         submitted: &Settlement,
         all: impl Iterator<Item = RatedSettlement>,
@@ -311,7 +310,7 @@ impl Driver {
     // Rate settlements, ignoring those for which the rating procedure failed.
     async fn rate_settlements(
         &self,
-        settlements: Vec<(Arc<dyn Solver>, Settlement)>,
+        settlements: Vec<SettlementWithSolver>,
         prices: &HashMap<H160, BigRational>,
         gas_price_wei: f64,
     ) -> Vec<(Arc<dyn Solver>, RatedSettlement)> {
@@ -472,7 +471,7 @@ impl Driver {
 
             self.report_matched_but_unsettled_orders(
                 &settlement.settlement,
-                rated_settlements.iter().map(|(_, solution)| solution),
+                rated_settlements.into_iter().map(|(_, solution)| solution),
             );
         }
 
