@@ -82,12 +82,13 @@ pub fn settle_method_builder(
     contract: &GPv2Settlement,
     settlement: EncodedSettlement,
 ) -> DynMethodBuilder<()> {
-    contract.settle(
-        settlement.tokens,
-        settlement.clearing_prices,
-        settlement.trades,
-        settlement.interactions,
-    )
+    contract
+        .settle(
+            settlement.tokens,
+            settlement.clearing_prices,
+            settlement.trades,
+            settlement.interactions,
+        )
 }
 
 // We never send cancellations but we still need to have types that implement the traits.
