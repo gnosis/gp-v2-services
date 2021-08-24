@@ -13,33 +13,72 @@ pub enum SigningScheme {
     Eip712,
     EthSign,
 }
-#[derive(Eq, PartialEq, Clone, Copy, Debug, Default, Deserialize, Serialize, Hash)]
-pub struct Signature(EcdsaSignature);
+#[derive(Eq, PartialEq, Clone, Copy, Debug, Deserialize, Serialize, Hash)]
+#[serde(rename_all = "lowercase")]
+#[serde(tag = "signingScheme", content = "signature")]
+pub enum Signature {
+    Eip712(EcdsaSignature),
+    EthSign(EcdsaSignature),
+}
 
-impl From<EcdsaSignature> for Signature {
-    fn from(signature: EcdsaSignature) -> Self {
-        Signature(signature)
+impl Default for Signature {
+    fn default() -> Self {
+        Self::default_with(SigningScheme::Eip712)
+    }
+}
+
+impl Signature {
+    pub fn default_with(scheme: SigningScheme) -> Self {
+        match scheme {
+            SigningScheme::Eip712 => Signature::Eip712(Default::default()),
+            SigningScheme::EthSign => Signature::EthSign(Default::default()),
+        }
     }
 }
 
 impl Signature {
     pub fn validate(
         &self,
-        signing_scheme: SigningScheme,
         domain_separator: &DomainSeparator,
         struct_hash: &[u8; 32],
     ) -> Option<H160> {
-        self.0.validate(
-            signing_scheme
-                .try_to_ecdsa_scheme()
-                .expect("Only ecdsa schemes are currently supported"),
-            domain_separator,
-            struct_hash,
-        )
+        match self {
+            Signature::Eip712(sig) | Signature::EthSign(sig) => sig.validate(
+                self.scheme()
+                    .try_to_ecdsa_scheme()
+                    .expect("matches an ecdsa scheme"),
+                domain_separator,
+                struct_hash,
+            ),
+        }
+    }
+
+    pub fn from_bytes(scheme: SigningScheme, bytes: &[u8; 65]) -> Self {
+        match scheme {
+            scheme @ (SigningScheme::Eip712 | SigningScheme::EthSign) => EcdsaSignature {
+                r: H256::from_slice(&bytes[..32]),
+                s: H256::from_slice(&bytes[32..64]),
+                v: bytes[64],
+            }
+            .to_signature(
+                scheme
+                    .try_to_ecdsa_scheme()
+                    .expect("scheme is an ecdsa scheme"),
+            ),
+        }
     }
 
     pub fn to_bytes(&self) -> [u8; 65] {
-        self.0.to_bytes()
+        match self {
+            Signature::Eip712(sig) | Signature::EthSign(sig) => sig.to_bytes(),
+        }
+    }
+
+    pub fn scheme(&self) -> SigningScheme {
+        match self {
+            Signature::Eip712(_) => SigningScheme::Eip712,
+            Signature::EthSign(_) => SigningScheme::EthSign,
+        }
     }
 }
 
@@ -105,6 +144,13 @@ fn hashed_signing_message(
 }
 
 impl EcdsaSignature {
+    pub fn to_signature(self, scheme: EcdsaSigningScheme) -> Signature {
+        match scheme {
+            EcdsaSigningScheme::Eip712 => Signature::Eip712(self),
+            EcdsaSigningScheme::EthSign => Signature::EthSign(self),
+        }
+    }
+
     /// r + s + v
     pub fn to_bytes(self) -> [u8; 65] {
         let mut bytes = [0u8; 65];

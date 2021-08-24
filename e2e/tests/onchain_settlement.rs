@@ -3,7 +3,7 @@ use ethcontract::prelude::{Account, Address, PrivateKey, U256};
 use hex_literal::hex;
 use model::{
     order::{OrderBuilder, OrderKind},
-    signature::SigningScheme,
+    signature::EcdsaSigningScheme,
 };
 use secp256k1::SecretKey;
 use serde_json::json;
@@ -157,8 +157,8 @@ async fn onchain_settlement(web3: Web3) {
         .with_buy_amount(to_wei(80))
         .with_valid_to(shared::time::now_in_epoch_seconds() + 300)
         .with_kind(OrderKind::Sell)
-        .with_signing_scheme(SigningScheme::Eip712)
         .sign_with(
+            EcdsaSigningScheme::Eip712,
             &gpv2.domain_separator,
             SecretKeyRef::from(&SecretKey::from_slice(&TRADER_A_PK).unwrap()),
         )
@@ -180,8 +180,8 @@ async fn onchain_settlement(web3: Web3) {
         .with_buy_amount(to_wei(40))
         .with_valid_to(shared::time::now_in_epoch_seconds() + 300)
         .with_kind(OrderKind::Sell)
-        .with_signing_scheme(SigningScheme::EthSign)
         .sign_with(
+            EcdsaSigningScheme::EthSign,
             &gpv2.domain_separator,
             SecretKeyRef::from(&SecretKey::from_slice(&TRADER_B_PK).unwrap()),
         )

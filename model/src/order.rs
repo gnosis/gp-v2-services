@@ -3,7 +3,7 @@
 use crate::{
     appdata_hexadecimal,
     h160_hexadecimal::{self, HexadecimalH160},
-    signature::{EcdsaSignature, EcdsaSigningScheme, Signature, SigningScheme},
+    signature::{EcdsaSignature, EcdsaSigningScheme, Signature},
     u256_decimal::{self, DecimalU256},
     DomainSeparator, TokenPair,
 };
@@ -63,11 +63,9 @@ impl Order {
         domain: &DomainSeparator,
         settlement_contract: H160,
     ) -> Option<Self> {
-        let owner = order_creation.signature.validate(
-            order_creation.signing_scheme,
-            domain,
-            &order_creation.hash_struct(),
-        )?;
+        let owner = order_creation
+            .signature
+            .validate(domain, &order_creation.hash_struct())?;
         Some(Self {
             order_meta_data: OrderMetaData {
                 creation_date: chrono::offset::Utc::now(),
@@ -158,28 +156,22 @@ impl OrderBuilder {
         self
     }
 
-    pub fn with_signing_scheme(mut self, signing_scheme: SigningScheme) -> Self {
-        self.0.order_creation.signing_scheme = signing_scheme;
-        self
-    }
-
     /// Sets owner, uid, signature.
-    pub fn sign_with(mut self, domain: &DomainSeparator, key: SecretKeyRef) -> Result<Self, Self> {
-        let ecdsa_signing_scheme =
-            if let Some(scheme) = self.0.order_creation.signing_scheme.try_to_ecdsa_scheme() {
-                scheme
-            } else {
-                return Err(self);
-            };
+    pub fn sign_with(
+        mut self,
+        signing_scheme: EcdsaSigningScheme,
+        domain: &DomainSeparator,
+        key: SecretKeyRef,
+    ) -> Result<Self, Self> {
         self.0.order_meta_data.owner = key.address();
         self.0.order_meta_data.uid = self.0.order_creation.uid(domain, &key.address());
         self.0.order_creation.signature = EcdsaSignature::sign(
-            ecdsa_signing_scheme,
+            signing_scheme,
             domain,
             &self.0.order_creation.hash_struct(),
             key,
         )
-        .into();
+        .to_signature(signing_scheme);
         Ok(self)
     }
 
@@ -213,8 +205,8 @@ pub struct OrderCreation {
     pub fee_amount: U256,
     pub kind: OrderKind,
     pub partially_fillable: bool,
+    #[serde(flatten)]
     pub signature: Signature,
-    pub signing_scheme: SigningScheme,
     #[serde(default)]
     pub sell_token_balance: SellTokenSource,
     #[serde(default)]
@@ -243,7 +235,6 @@ impl Default for OrderCreation {
             fee_amount: Default::default(),
             kind: Default::default(),
             partially_fillable: Default::default(),
-            signing_scheme: signing_scheme.into(),
             signature: Default::default(),
             sell_token_balance: Default::default(),
             buy_token_balance: Default::default(),
@@ -254,7 +245,7 @@ impl Default for OrderCreation {
             &result.hash_struct(),
             SecretKeyRef::new(&ONE_KEY),
         )
-        .into();
+        .to_signature(signing_scheme);
         result
     }
 }
@@ -572,6 +563,7 @@ pub fn debug_biguint_to_string(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::signature::{EcdsaSigningScheme, SigningScheme};
     use chrono::NaiveDateTime;
     use hex_literal::hex;
     use maplit::hashset;
@@ -610,6 +602,7 @@ mod tests {
             "sellTokenBalance": "external",
             "buyTokenBalance": "internal",
         });
+        let signing_scheme = EcdsaSigningScheme::Eip712;
         let expected = Order {
             order_meta_data: OrderMetaData {
                 creation_date: DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(3, 0), Utc),
@@ -646,8 +639,7 @@ mod tests {
                     )
                     .unwrap(),
                 }
-                .into(),
-                signing_scheme: SigningScheme::Eip712,
+                .to_signature(signing_scheme),
                 sell_token_balance: SellTokenSource::External,
                 buy_token_balance: BuyTokenDestination::Internal,
             },
@@ -698,13 +690,12 @@ mod tests {
                 partially_fillable: false,
                 sell_token_balance: SellTokenSource::Erc20,
                 buy_token_balance: BuyTokenDestination::Erc20,
-                signing_scheme: *signing_scheme,
-                signature: EcdsaSignature::from_bytes(signature).into(),
+                signature: Signature::from_bytes(*signing_scheme, signature),
             };
 
             let owner = order
                 .signature
-                .validate(*signing_scheme, &domain_separator, &order.hash_struct())
+                .validate(&domain_separator, &order.hash_struct())
                 .unwrap();
             assert_eq!(owner, expected_owner);
         }
@@ -815,7 +806,11 @@ mod tests {
             .with_buy_amount(80.into())
             .with_valid_to(u32::MAX)
             .with_kind(OrderKind::Sell)
-            .sign_with(&DomainSeparator::default(), SecretKeyRef::from(&sk))
+            .sign_with(
+                EcdsaSigningScheme::Eip712,
+                &DomainSeparator::default(),
+                SecretKeyRef::from(&sk),
+            )
             .unwrap()
             .build();
 
@@ -823,7 +818,6 @@ mod tests {
             .order_creation
             .signature
             .validate(
-                order.order_creation.signing_scheme,
                 &DomainSeparator::default(),
                 &order.order_creation.hash_struct(),
             )
