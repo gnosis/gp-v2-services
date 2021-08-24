@@ -217,7 +217,6 @@ impl OrderbookServices {
             fee_calculator,
             price_estimator.clone(),
             API_HOST[7..].parse().expect("Couldn't parse API address"),
-            registry,
             metrics,
         );
 
