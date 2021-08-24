@@ -6,9 +6,7 @@ use std::{
 
 use anyhow::Result;
 use model::order::Order;
-use prometheus::{
-    HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGaugeVec, Opts, Registry,
-};
+use prometheus::{HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGaugeVec, Opts};
 use shared::{
     metrics::LivenessChecking,
     sources::{
@@ -50,7 +48,9 @@ pub struct Metrics {
 }
 
 impl Metrics {
-    pub fn new(registry: &Registry) -> Result<Self> {
+    pub fn new() -> Result<Self> {
+        let registry = prometheus::default_registry();
+
         let trade_counter = IntCounterVec::new(
             Opts::new("gp_v2_solver_trade_counter", "Number of trades settled"),
             &["solver_type"],
@@ -263,8 +263,7 @@ mod tests {
 
     #[test]
     fn metrics_work() {
-        let registry = Registry::default();
-        let metrics = Metrics::new(&registry).unwrap();
+        let metrics = Metrics::new().unwrap();
         metrics.settlement_computed("asdf", Instant::now());
         metrics.order_settled(&Default::default(), "test");
         metrics.settlement_simulation_succeeded("test");

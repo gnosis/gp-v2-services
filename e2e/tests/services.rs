@@ -137,8 +137,7 @@ pub struct OrderbookServices {
 
 impl OrderbookServices {
     pub async fn new(web3: &Web3, gpv2: &GPv2, uniswap_factory: &UniswapV2Factory) -> Self {
-        let registry = Registry::default();
-        let metrics = Arc::new(Metrics::new(&registry).unwrap());
+        let metrics = Arc::new(Metrics::new().unwrap());
         let chain_id = web3
             .eth()
             .chain_id()

@@ -1,4 +1,4 @@
-use prometheus::{Encoder, Registry};
+use prometheus::Encoder;
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 use tokio::task::{self, JoinHandle};
 use warp::{Filter, Rejection, Reply};
@@ -10,20 +10,15 @@ pub trait LivenessChecking: Send + Sync {
     async fn is_alive(&self) -> bool;
 }
 
-pub fn serve_metrics(
-    registry: Registry,
-    liveness: Arc<dyn LivenessChecking>,
-    address: SocketAddr,
-) -> JoinHandle<()> {
-    let filter = handle_metrics(registry).or(handle_liveness(liveness));
+pub fn serve_metrics(liveness: Arc<dyn LivenessChecking>, address: SocketAddr) -> JoinHandle<()> {
+    let filter = handle_metrics().or(handle_liveness(liveness));
     tracing::info!(%address, "serving metrics");
     task::spawn(warp::serve(filter).bind(address))
 }
 
 // `/metrics` route exposing encoded prometheus data to monitoring system
-pub fn handle_metrics(
-    registry: Registry,
-) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
+pub fn handle_metrics() -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
+    let registry = prometheus::default_registry();
     warp::path("metrics").map(move || {
         let encoder = prometheus::TextEncoder::new();
         let mut buffer = Vec::new();

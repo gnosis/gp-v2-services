@@ -1,5 +1,5 @@
 use anyhow::Result;
-use prometheus::{Histogram, HistogramOpts, HistogramVec, IntCounter, IntGaugeVec, Opts, Registry};
+use prometheus::{Histogram, HistogramOpts, HistogramVec, IntCounter, IntGaugeVec, Opts};
 use shared::{
     sources::uniswap::pool_cache::PoolCacheMetrics, transport::instrumented::TransportMetrics,
 };
@@ -22,7 +22,9 @@ pub struct Metrics {
 }
 
 impl Metrics {
-    pub fn new(registry: &Registry) -> Result<Self> {
+    pub fn new() -> Result<Self> {
+        let registry = prometheus::default_registry();
+
         let opts = HistogramOpts::new(
             "gp_v2_api_requests",
             "API Request durations labelled by route and response status code",
