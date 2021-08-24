@@ -11,7 +11,6 @@ use orderbook::{
     account_balances::Web3BalanceFetcher, database::Postgres, event_updater::EventUpdater,
     fee::EthAwareMinFeeCalculator, metrics::Metrics, orderbook::Orderbook,
 };
-use prometheus::Registry;
 use reqwest::Client;
 use shared::{
     bad_token::list_based::ListBasedDetector,
