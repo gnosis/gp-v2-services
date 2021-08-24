@@ -110,14 +110,10 @@ impl BalancerSubgraphClient {
         for (factory, pool) in weighted_pools.chain(stable_pools) {
             let pool = match pool {
                 Ok(pool) => pool,
-                Err(err) => {
-                    // Technically this should never happen and would only ever be from
-                    // a token with more than 18 decimals (not supported by balancer contracts)
-                    // https://github.com/balancer-labs/balancer-v2-monorepo/blob/deployments-latest/pkg/pool-utils/contracts/BasePool.sol#L476-L487
-                    // We, thus, log but skip this error.
-                    tracing::error!("Unexpected failure to build registered pool {}", err);
-                    continue;
-                }
+                // Technically this should never happen and should only ever be from
+                // a token with more than 18 decimals (not supported by balancer contracts)
+                // https://github.com/balancer-labs/balancer-v2-monorepo/blob/deployments-latest/pkg/pool-utils/contracts/BasePool.sol#L476-L487
+                Err(err) => bail!("failed conversion to registered pool with {}", err),
             };
             pools_by_factory
                 .entry(factory.unwrap_or_default())
@@ -246,29 +242,28 @@ mod pools_query {
             let block_created_upper_bound = block_fetched;
 
             let token_count = self.tokens.len();
-            self.tokens.iter().try_fold(
-                RegisteredPool::Weighted(RegisteredWeightedPool {
-                    pool_id: self.id,
-                    pool_address: self.address,
-                    tokens: Vec::with_capacity(token_count),
-                    normalized_weights: Vec::with_capacity(token_count),
-                    scaling_exponents: Vec::with_capacity(token_count),
-                    block_created: block_created_upper_bound,
-                }),
-                |mut registered_pool, token| {
-                    if let RegisteredPool::Weighted(ref mut pool) = registered_pool {
+            self.tokens
+                .iter()
+                .try_fold(
+                    RegisteredWeightedPool {
+                        pool_id: self.id,
+                        pool_address: self.address,
+                        tokens: Vec::with_capacity(token_count),
+                        normalized_weights: Vec::with_capacity(token_count),
+                        scaling_exponents: Vec::with_capacity(token_count),
+                        block_created: block_created_upper_bound,
+                    },
+                    |mut pool, token| {
                         pool.tokens.push(token.address);
                         pool.normalized_weights.push(token.weight);
                         pool.scaling_exponents
                             .push(18u8.checked_sub(token.decimals).ok_or_else(|| {
                                 anyhow!("unsupported token with more than 18 decimals")
                             })?);
-                        Ok(registered_pool)
-                    } else {
-                        unreachable!("Not a weighted pool");
-                    }
-                },
-            )
+                        Ok(pool)
+                    },
+                )
+                .map(RegisteredPool::Weighted)
         }
     }
 
@@ -281,27 +276,26 @@ mod pools_query {
             let block_created_upper_bound = block_fetched;
 
             let token_count = self.tokens.len();
-            self.tokens.iter().try_fold(
-                RegisteredPool::Stable(RegisteredStablePool {
-                    pool_id: self.id,
-                    pool_address: self.address,
-                    tokens: Vec::with_capacity(token_count),
-                    scaling_exponents: Vec::with_capacity(token_count),
-                    block_created: block_created_upper_bound,
-                }),
-                |mut registered_pool, token| {
-                    if let RegisteredPool::Stable(ref mut pool) = registered_pool {
+            self.tokens
+                .iter()
+                .try_fold(
+                    RegisteredStablePool {
+                        pool_id: self.id,
+                        pool_address: self.address,
+                        tokens: Vec::with_capacity(token_count),
+                        scaling_exponents: Vec::with_capacity(token_count),
+                        block_created: block_created_upper_bound,
+                    },
+                    |mut pool, token| {
                         pool.tokens.push(token.address);
                         pool.scaling_exponents
                             .push(18u8.checked_sub(token.decimals).ok_or_else(|| {
                                 anyhow!("unsupported token with more than 18 decimals")
                             })?);
-                        Ok(registered_pool)
-                    } else {
-                        unreachable!("Not a stable pool!");
-                    }
-                },
-            )
+                        Ok(pool)
+                    },
+                )
+                .map(RegisteredPool::Stable)
         }
     }
 }
@@ -381,6 +375,46 @@ mod tests {
                             address: H160([0x44; 20]),
                             decimals: 4,
                             weight: Bfp::from_wei(500_000_000_000_000_000u128.into()),
+                        },
+                    ],
+                }],
+            }
+        );
+
+        assert_eq!(
+            serde_json::from_value::<Data<StableToken>>(json!({
+                "pools": [
+                    {
+                        "address": "0x2222222222222222222222222222222222222222",
+                        "id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+                        "factory": "0x5555555555555555555555555555555555555555",
+                        "tokens": [
+                            {
+                                "address": "0x3333333333333333333333333333333333333333",
+                                "decimals": 3,
+                            },
+                            {
+                                "address": "0x4444444444444444444444444444444444444444",
+                                "decimals": 4,
+                            },
+                        ],
+                    },
+                ],
+            }))
+            .unwrap(),
+            Data {
+                pools: vec![PoolData {
+                    id: H256([0x11; 32]),
+                    address: H160([0x22; 20]),
+                    factory: Some(H160([0x55; 20])),
+                    tokens: vec![
+                        StableToken {
+                            address: H160([0x33; 20]),
+                            decimals: 3,
+                        },
+                        StableToken {
+                            address: H160([0x44; 20]),
+                            decimals: 4,
                         },
                     ],
                 }],
