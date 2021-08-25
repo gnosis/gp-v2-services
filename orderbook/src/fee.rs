@@ -203,6 +203,7 @@ impl MinFeeCalculator {
                 self.native_token,
                 U256::from_f64_lossy(fee_in_eth),
                 model::order::OrderKind::Buy,
+                true,
             )
             .await
         {

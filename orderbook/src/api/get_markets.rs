@@ -113,7 +113,7 @@ pub fn get_amount_estimate(
                 OrderKind::Sell => (market.quote_token, market.base_token),
             };
             let result = price_estimator
-                .estimate_price(sell_token, buy_token, query.amount, query.kind)
+                .estimate_price(sell_token, buy_token, query.amount, query.kind, true)
                 .await;
             Result::<_, Infallible>::Ok(get_amount_estimate_response(result, query))
         }
