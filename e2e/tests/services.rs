@@ -1,10 +1,7 @@
 use contracts::{
     BalancerV2Vault, ERC20Mintable, GPv2Settlement, UniswapV2Factory, UniswapV2Router02, WETH9,
 };
-use ethcontract::{
-    prelude::{Account, U256},
-    H160,
-};
+use ethcontract::{prelude::U256, H160};
 use maplit::hashset;
 use model::DomainSeparator;
 use orderbook::{
