@@ -93,7 +93,7 @@ struct Arguments {
     /// Individual private keys for each solver
     #[structopt(
         long,
-        env = "SOLVER_PRIVATE_KEY",
+        env = "SOLVER_PRIVATE_KEYS",
         case_insensitive = true,
         use_delimiter = true,
         hide_env_values = true

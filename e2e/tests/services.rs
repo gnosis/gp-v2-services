@@ -69,7 +69,7 @@ pub struct GPv2 {
 }
 
 impl GPv2 {
-    pub async fn fetch(web3: &Web3, designated_solver: &Account) -> Self {
+    pub async fn fetch(web3: &Web3) -> Self {
         let vault = BalancerV2Vault::deployed(web3)
             .await
             .expect("Failed to load deployed BalancerV2Vault");
