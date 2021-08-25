@@ -83,19 +83,13 @@ impl Metrics {
         registry.register(Box::new(liquidity.clone()))?;
 
         let settlement_simulations = IntCounterVec::new(
-            Opts::new(
-                "settlement_simulations",
-                "Settlement simulation counts",
-            ),
+            Opts::new("settlement_simulations", "Settlement simulation counts"),
             &["result", "solver_type"],
         )?;
         registry.register(Box::new(settlement_simulations.clone()))?;
 
         let settlement_submissions = IntCounterVec::new(
-            Opts::new(
-                "settlement_submissions",
-                "Settlement submission counts",
-            ),
+            Opts::new("settlement_submissions", "Settlement submission counts"),
             &["result", "solver_type"],
         )?;
         registry.register(Box::new(settlement_submissions.clone()))?;
