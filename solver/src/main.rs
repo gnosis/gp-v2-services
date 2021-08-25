@@ -1,6 +1,7 @@
 use contracts::{IUniswapLikeRouter, WETH9};
 use ethcontract::{Account, PrivateKey, H160, U256};
 use reqwest::Url;
+use shared::metrics::setup_metrics_registry;
 use shared::{
     bad_token::list_based::ListBasedDetector,
     current_block::current_block_stream,
@@ -199,6 +200,7 @@ async fn main() {
     args.shared.validate();
     tracing::info!("running solver with validated {:#?}", args);
 
+    setup_metrics_registry(Some("gp_v2_solver".into()), None);
     let metrics = Arc::new(Metrics::new().expect("Couldn't register metrics"));
 
     let client = shared::http_client(args.shared.http_timeout);

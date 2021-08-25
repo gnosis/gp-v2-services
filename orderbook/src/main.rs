@@ -13,6 +13,7 @@ use orderbook::{
     serve_task, verify_deployed_contract_constants,
 };
 use primitive_types::H160;
+use shared::metrics::setup_metrics_registry;
 use shared::{
     bad_token::{
         cache::CachingDetector,
@@ -127,6 +128,7 @@ async fn main() {
     args.shared.validate();
     tracing::info!("running order book with validated {:#?}", args);
 
+    setup_metrics_registry(Some("gp_v2_api".into()), None);
     let metrics = Arc::new(Metrics::new().unwrap());
 
     let client = shared::http_client(args.shared.http_timeout);

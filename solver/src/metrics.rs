@@ -17,6 +17,7 @@ use shared::{
 use strum::{AsStaticRef, VariantNames};
 
 use crate::liquidity::Liquidity;
+use shared::metrics::get_metrics_registry;
 
 /// The maximum time between the completion of two run loops. If exceeded the service will be considered unhealthy.
 const MAX_RUNLOOP_DURATION: Duration = Duration::from_secs(7 * 60);
@@ -49,23 +50,23 @@ pub struct Metrics {
 
 impl Metrics {
     pub fn new() -> Result<Self> {
-        let registry = prometheus::default_registry();
+        let registry = get_metrics_registry();
 
         let trade_counter = IntCounterVec::new(
-            Opts::new("gp_v2_solver_trade_counter", "Number of trades settled"),
+            Opts::new("trade_counter", "Number of trades settled"),
             &["solver_type"],
         )?;
         registry.register(Box::new(trade_counter.clone()))?;
 
         let order_settlement_time = IntCounter::new(
-            "gp_v2_solver_order_settlement_time_seconds",
+            "order_settlement_time_seconds",
             "Counter for the number of seconds between creation and settlement of an order",
         )?;
         registry.register(Box::new(order_settlement_time.clone()))?;
 
         let solver_computation_time = IntCounterVec::new(
             Opts::new(
-                "gp_v2_solver_computation_time_ms",
+                "computation_time_ms",
                 "Ms each solver takes to compute their solution",
             ),
             &["solver_type"],
@@ -74,7 +75,7 @@ impl Metrics {
 
         let liquidity = IntGaugeVec::new(
             Opts::new(
-                "gp_v2_solver_liquidity_gauge",
+                "liquidity_gauge",
                 "Amount of orders labeled by liquidity type currently available to the solvers",
             ),
             &["liquidity_type"],
@@ -83,7 +84,7 @@ impl Metrics {
 
         let settlement_simulations = IntCounterVec::new(
             Opts::new(
-                "gp_v2_solver_settlement_simulations",
+                "settlement_simulations",
                 "Settlement simulation counts",
             ),
             &["result", "solver_type"],
@@ -92,7 +93,7 @@ impl Metrics {
 
         let settlement_submissions = IntCounterVec::new(
             Opts::new(
-                "gp_v2_solver_settlement_submissions",
+                "settlement_submissions",
                 "Settlement submission counts",
             ),
             &["result", "solver_type"],
@@ -100,26 +101,26 @@ impl Metrics {
         registry.register(Box::new(settlement_submissions.clone()))?;
 
         let matched_but_unsettled_orders = IntCounter::new(
-            "gp_v2_solver_orders_matched_not_settled",
+            "orders_matched_not_settled",
             "Counter for the number of orders for which at least one solver computed an execution which was not chosen in this run-loop",
         )?;
         registry.register(Box::new(matched_but_unsettled_orders.clone()))?;
 
         let opts = HistogramOpts::new(
-            "gp_v2_solver_transport_requests",
+            "transport_requests",
             "RPC Request durations labelled by method",
         );
         let transport_requests = HistogramVec::new(opts, &["method"]).unwrap();
         registry.register(Box::new(transport_requests.clone()))?;
 
         let pool_cache_hits = IntCounter::new(
-            "gp_v2_solver_pool_cache_hits",
+            "pool_cache_hits",
             "Number of cache hits in the pool fetcher cache.",
         )?;
         registry.register(Box::new(pool_cache_hits.clone()))?;
 
         let pool_cache_misses = IntCounter::new(
-            "gp_v2_solver_pool_cache_misses",
+            "pool_cache_misses",
             "Number of cache misses in the pool fetcher cache.",
         )?;
         registry.register(Box::new(pool_cache_misses.clone()))?;
