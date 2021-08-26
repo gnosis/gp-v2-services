@@ -211,12 +211,16 @@ impl<'a> ArcherSolutionSubmitter<'a> {
                 .append_to_execution_plan(block_coinbase::PayBlockCoinbase {
                     amount: tx_gas_cost_in_ether_wei,
                 });
-            let method = super::retry::settle_method_builder(self.contract, settlement.into(), self.account.clone())
-                .nonce(nonce)
-                // Wouldn't work because the function isn't payable.
-                // .value(tx_gas_cost_in_ether_wei)
-                .gas(U256::from_f64_lossy(gas_limit))
-                .gas_price(GasPrice::Value(U256::zero()));
+            let method = super::retry::settle_method_builder(
+                self.contract,
+                settlement.into(),
+                self.account.clone(),
+            )
+            .nonce(nonce)
+            // Wouldn't work because the function isn't payable.
+            // .value(tx_gas_cost_in_ether_wei)
+            .gas(U256::from_f64_lossy(gas_limit))
+            .gas_price(GasPrice::Value(U256::zero()));
 
             // simulate transaction
 
