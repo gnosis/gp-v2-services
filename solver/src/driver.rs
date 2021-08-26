@@ -336,6 +336,10 @@ impl Driver {
                     solver.account().clone(),
                 )
                 .await
+                .map_err(|err| {
+                    tracing::warn!("Failed to estimate gas for solver {}: {:?}", solver.name(), err);
+                    err
+                })
                 .ok()?;
                 let rated_settlement = RatedSettlement {
                     settlement,
