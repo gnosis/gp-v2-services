@@ -40,8 +40,11 @@ pub trait Solver: 'static {
     ///
     /// The returned settlements should be independent (for example not reusing the same user
     /// order) so that they can be merged by the driver at its leisure.
+    ///
+    /// id identifies this instance of solving by the driver in which it invokes all solvers.
     async fn solve(
         &self,
+        id: u64,
         orders: Vec<Liquidity>,
         gas_price: f64,
         deadline: Instant,
@@ -77,9 +80,8 @@ arg_enum! {
 
 #[allow(clippy::too_many_arguments)]
 pub fn create(
-    account: Account,
     web3: Web3,
-    solvers: Vec<SolverType>,
+    solvers: Vec<(Account, SolverType)>,
     base_tokens: HashSet<H160>,
     native_token: H160,
     mip_solver_url: Url,
@@ -107,11 +109,12 @@ pub fn create(
         web3.clone(),
         settlement_contract.address(),
     ));
+    let http_solver_cache = http_solver::InstanceCache::default();
     // Helper function to create http solver instances.
-    let create_http_solver = |url: Url, name: &'static str| -> HttpSolver {
+    let create_http_solver = |account: Account, url: Url, name: &'static str| -> HttpSolver {
         HttpSolver::new(
             name,
-            account.clone(),
+            account,
             url,
             None,
             SolverConfig {
@@ -125,24 +128,24 @@ pub fn create(
             chain_id,
             fee_subsidy_factor,
             client.clone(),
+            http_solver_cache.clone(),
         )
     };
 
     solvers
         .into_iter()
-        .map(|solver_type| match solver_type {
-            SolverType::Naive => shared(NaiveSolver::new(account.clone())),
-            SolverType::Baseline => {
-                shared(BaselineSolver::new(account.clone(), base_tokens.clone()))
-            }
-            SolverType::Mip => shared(create_http_solver(mip_solver_url.clone(), "Mip")),
+        .map(|(account, solver_type)| match solver_type {
+            SolverType::Naive => shared(NaiveSolver::new(account)),
+            SolverType::Baseline => shared(BaselineSolver::new(account, base_tokens.clone())),
+            SolverType::Mip => shared(create_http_solver(account, mip_solver_url.clone(), "Mip")),
             SolverType::Quasimodo => shared(create_http_solver(
+                account,
                 quasimodo_solver_url.clone(),
                 "Quasimodo",
             )),
             SolverType::OneInch => {
                 let one_inch_solver: SingleOrderSolver<_> = OneInchSolver::with_disabled_protocols(
-                    account.clone(),
+                    account,
                     web3.clone(),
                     settlement_contract.clone(),
                     chain_id,
@@ -160,7 +163,7 @@ pub fn create(
             }
             SolverType::Matcha => {
                 let matcha_solver = MatchaSolver::new(
-                    account.clone(),
+                    account,
                     web3.clone(),
                     settlement_contract.clone(),
                     chain_id,
@@ -170,10 +173,9 @@ pub fn create(
                 shared(SingleOrderSolver::from(matcha_solver))
             }
             SolverType::Paraswap => shared(SingleOrderSolver::from(ParaswapSolver::new(
-                account.clone(),
+                account,
                 web3.clone(),
                 settlement_contract.clone(),
-                account.address(),
                 token_info_fetcher.clone(),
                 paraswap_slippage_bps,
                 disabled_paraswap_dexs.clone(),
@@ -261,6 +263,7 @@ impl SellVolumeFilteringSolver {
 impl Solver for SellVolumeFilteringSolver {
     async fn solve(
         &self,
+        id: u64,
         orders: Vec<Liquidity>,
         gas_price: f64,
         deadline: Instant,
@@ -272,7 +275,7 @@ impl Solver for SellVolumeFilteringSolver {
             original_length - filtered_liquidity.len()
         );
         self.inner
-            .solve(filtered_liquidity, gas_price, deadline)
+            .solve(id, filtered_liquidity, gas_price, deadline)
             .await
     }
 
@@ -298,7 +301,13 @@ mod tests {
     pub struct NoopSolver();
     #[async_trait::async_trait]
     impl Solver for NoopSolver {
-        async fn solve(&self, _: Vec<Liquidity>, _: f64, _: Instant) -> Result<Vec<Settlement>> {
+        async fn solve(
+            &self,
+            _: u64,
+            _: Vec<Liquidity>,
+            _: f64,
+            _: Instant,
+        ) -> Result<Vec<Settlement>> {
             Ok(Vec::new())
         }
 
