@@ -93,8 +93,8 @@ pub struct Arguments {
 impl Arguments {
     pub fn validate(&self) {
         assert!(
-            0f64 <= self.fee_subsidy_factor && self.fee_subsidy_factor <= 1f64,
-            "Fee subsidy must be in the range [0, 1]"
+            0f64 <= self.fee_subsidy_factor && self.fee_subsidy_factor < 1f64,
+            "Fee subsidy must be in the range [0, 1)"
         );
     }
 }
