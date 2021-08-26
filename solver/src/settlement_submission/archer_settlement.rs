@@ -211,8 +211,7 @@ impl<'a> ArcherSolutionSubmitter<'a> {
                 .append_to_execution_plan(block_coinbase::PayBlockCoinbase {
                     amount: tx_gas_cost_in_ether_wei,
                 });
-            let method = super::retry::settle_method_builder(self.contract, settlement.into())
-                .from(self.account.clone())
+            let method = super::retry::settle_method_builder(self.contract, settlement.into(), self.account.clone())
                 .nonce(nonce)
                 // Wouldn't work because the function isn't payable.
                 // .value(tx_gas_cost_in_ether_wei)
@@ -349,10 +348,13 @@ mod tests {
         let gas_price_cap = 100e9;
 
         let settlement = Settlement::new(Default::default());
-        let gas_estimate =
-            crate::settlement_submission::estimate_gas(&contract, &settlement.clone().into())
-                .await
-                .unwrap();
+        let gas_estimate = crate::settlement_submission::estimate_gas(
+            &contract,
+            &settlement.clone().into(),
+            account.clone(),
+        )
+        .await
+        .unwrap();
 
         let submitter = ArcherSolutionSubmitter {
             web3: &web3,
