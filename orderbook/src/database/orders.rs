@@ -168,8 +168,8 @@ const ORDERS_SELECT: &str = "\
     COALESCE(SUM(t.buy_amount), 0) AS sum_buy, \
     COALESCE(SUM(t.sell_amount), 0) AS sum_sell, \
     COALESCE(SUM(t.fee_amount), 0) AS sum_fee, \
-    (COUNT(invalidations.*) > 0 OR o.cancellation_timestamp IS NOT NULL) AS invalidated \
-    (COUNT(ps.*) > 0) AS presignature_signed \
+    (COUNT(invalidations.*) > 0 OR o.cancellation_timestamp IS NOT NULL) AS invalidated, \
+    (o.signing_scheme = 'presign' AND COUNT(ps.*) = 0) AS presignature_pending \
 ";
 
 const ORDERS_FROM: &str = "\
@@ -360,7 +360,7 @@ struct OrdersQueryRow {
     settlement_contract: Vec<u8>,
     sell_token_balance: DbSellTokenSource,
     buy_token_balance: DbBuyTokenDestination,
-    presignature_signed: bool,
+    presignature_pending: bool,
 }
 
 impl OrdersQueryRow {
@@ -383,7 +383,7 @@ impl OrdersQueryRow {
         if self.valid_to < Utc::now().timestamp() {
             return OrderStatus::Expired;
         }
-        if self.signing_scheme == DbSigningScheme::PreSign && !self.presignature_signed {
+        if self.presignature_pending {
             return OrderStatus::SignaturePending;
         }
         OrderStatus::Open
@@ -502,7 +502,7 @@ mod tests {
             settlement_contract: vec![0; 20],
             sell_token_balance: DbSellTokenSource::External,
             buy_token_balance: DbBuyTokenDestination::Internal,
-            presignature_signed: false,
+            presignature_pending: false,
         };
 
         // Open - sell (filled - 0%)
@@ -524,7 +524,7 @@ mod tests {
         assert_eq!(
             OrdersQueryRow {
                 signing_scheme: DbSigningScheme::PreSign,
-                presignature_signed: true,
+                presignature_pending: false,
                 ..order_row()
             }
             .calculate_status(),
@@ -535,7 +535,7 @@ mod tests {
         assert_eq!(
             OrdersQueryRow {
                 signing_scheme: DbSigningScheme::PreSign,
-                presignature_signed: false,
+                presignature_pending: true,
                 ..order_row()
             }
             .calculate_status(),
