@@ -337,7 +337,7 @@ impl Driver {
                 )
                 .await
                 .map_err(|err| {
-                    tracing::warn!("Failed to estimate gas for solver {}: {:?}", solver.name(), err);
+                    tracing::error!("Failed to estimate gas for solver {}: {:?}", solver.name(), err);
                     err
                 })
                 .ok()?;
