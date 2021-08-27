@@ -116,7 +116,10 @@ impl Orderbook {
                 order.sell_token_balance,
             ));
         }
-        if order.signature.scheme() == SigningScheme::PreSign {
+        if !matches!(
+            order.signature.scheme(),
+            SigningScheme::Eip712 | SigningScheme::EthSign,
+        ) {
             return Ok(AddOrderResult::UnsupportedSignature);
         }
 
