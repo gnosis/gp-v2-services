@@ -124,7 +124,6 @@ async fn calculate_sell(
             query.buy_token,
             sell_amount_after_fee,
             OrderKind::Sell,
-            true,
         )
         .await?;
     let buy_amount_after_fee =
@@ -164,7 +163,6 @@ async fn calculate_buy(
             query.buy_token,
             query.buy_amount_after_fee,
             OrderKind::Buy,
-            true,
         )
         .await?;
     let sell_amount_after_fee =

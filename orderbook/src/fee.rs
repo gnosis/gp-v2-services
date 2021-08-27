@@ -204,7 +204,6 @@ impl MinFeeCalculator {
                 self.native_token,
                 amount_to_estimate_price,
                 model::order::OrderKind::Buy,
-                true,
             )
             .await
         {
