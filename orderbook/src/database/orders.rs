@@ -35,6 +35,7 @@ pub struct OrderFilter {
     pub exclude_invalidated: bool,
     pub exclude_insufficient_balance: bool,
     pub exclude_unsupported_tokens: bool,
+    pub exclude_presignature_pending: bool,
     pub uid: Option<OrderUid>,
 }
 
@@ -277,7 +278,8 @@ impl OrderStoring for Postgres {
                     WHEN 'sell' THEN sum_sell < sell_amount \
                     WHEN 'buy' THEN sum_buy < buy_amount \
                 END) AND \
-                ($7 OR NOT invalidated);"
+                ($7 OR NOT invalidated) AND
+                ($8 OR NOT presignature_pending);"
         );
         sqlx::query_as(QUERY)
             .bind(filter.min_valid_to as i64)
@@ -287,6 +289,7 @@ impl OrderStoring for Postgres {
             .bind(filter.uid.as_ref().map(|uid| uid.0.as_ref()))
             .bind(!filter.exclude_fully_executed)
             .bind(!filter.exclude_invalidated)
+            .bind(!filter.exclude_presignature_pending)
             .fetch(&self.pool)
             .err_into()
             .and_then(|row: OrdersQueryRow| async move { row.into_order() })
@@ -1329,5 +1332,92 @@ mod tests {
         // Re-signing sets the status back to open.
         insert_presignature(true).await;
         assert_eq!(order_status().await, OrderStatus::Open);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn postgres_filter_presignature_pending() {
+        let db = Postgres::new("postgresql://").unwrap();
+        db.clear().await.unwrap();
+        let order_uid = |uid: u8| OrderUid([uid; 56]);
+        let order = |uid: u8, scheme: SigningScheme| Order {
+            order_creation: OrderCreation {
+                signature: Signature::default_with(scheme),
+                ..Default::default()
+            },
+            order_meta_data: OrderMetaData {
+                uid: order_uid(uid),
+                ..Default::default()
+            },
+        };
+
+        db.insert_order(&order(0, SigningScheme::Eip712))
+            .await
+            .unwrap();
+        db.insert_order(&order(1, SigningScheme::PreSign))
+            .await
+            .unwrap();
+        db.insert_order(&order(2, SigningScheme::PreSign))
+            .await
+            .unwrap();
+        db.insert_order(&order(3, SigningScheme::PreSign))
+            .await
+            .unwrap();
+
+        // Insert:
+        // - No presignature events for order 0 (but its a ECDSA signed order)
+        // - A signed event for order 1.
+        // - No presignature events for order 2
+        // - A signed and unsigned event for order 3
+        sqlx::query(
+            "INSERT INTO presignature_events \
+                 (block_number, log_index, owner, order_uid, signed) \
+             VALUES \
+                 (0, 0, $1, $2, true), \
+                 (1, 0, $1, $3, true), \
+                 (2, 0, $1, $3, false);",
+        )
+        .bind(&[0u8; 20][..])
+        .bind(&order_uid(1).0[..])
+        .bind(&order_uid(3).0[..])
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        let filtered_orders = db
+            .orders(&OrderFilter {
+                exclude_presignature_pending: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|order| order.order_meta_data.uid)
+            .collect::<Vec<_>>();
+        // With presignature pending filter, only orders that aren't waiting for
+        // a presignature event are returned.
+        assert_eq!(
+            filtered_orders,
+            [
+                order_uid(0), // No presignature event, but its an ECDSA signed order
+                order_uid(1), // Pre-sign order with pre-sign event
+            ]
+        );
+
+        let unfiltered_orders = db
+            .orders(&OrderFilter {
+                exclude_presignature_pending: false,
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|order| order.order_meta_data.uid)
+            .collect::<Vec<_>>();
+        // Without presignature pending filter, all orders are returned.
+        assert_eq!(
+            unfiltered_orders,
+            [order_uid(0), order_uid(1), order_uid(2), order_uid(3)],
+        );
     }
 }
