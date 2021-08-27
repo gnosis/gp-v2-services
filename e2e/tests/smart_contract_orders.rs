@@ -40,9 +40,15 @@ async fn smart_contract_orders(web3: Web3) {
 
     let accounts: Vec<Address> = web3.eth().accounts().await.expect("get accounts failed");
     let solver_account = Account::Local(accounts[0], None);
+
+    // Note that this account is technically not a SC order. However, we allow
+    // presign orders from EOAs as well, and it is easier to setup an order
+    // for an EOA then SC wallet. In the future, once we add EIP-1271 support,
+    // where we would **need** an SC wallet, we can also change this trader to
+    // use one.
     let trader = Account::Offline(PrivateKey::from_raw(TRADER).unwrap(), None);
 
-    let gpv2 = GPv2::fetch(&web3, &solver_account).await;
+    let gpv2 = GPv2::fetch(&web3).await;
     let UniswapContracts {
         uniswap_factory,
         uniswap_router,
