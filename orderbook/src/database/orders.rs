@@ -1354,32 +1354,35 @@ mod tests {
         db.insert_order(&order(0, SigningScheme::Eip712))
             .await
             .unwrap();
-        db.insert_order(&order(1, SigningScheme::PreSign))
-            .await
-            .unwrap();
-        db.insert_order(&order(2, SigningScheme::PreSign))
-            .await
-            .unwrap();
-        db.insert_order(&order(3, SigningScheme::PreSign))
-            .await
-            .unwrap();
+        for i in 1..=4 {
+            db.insert_order(&order(i, SigningScheme::PreSign))
+                .await
+                .unwrap();
+        }
 
         // Insert:
         // - No presignature events for order 0 (but its a ECDSA signed order)
         // - A signed event for order 1.
         // - No presignature events for order 2
         // - A signed and unsigned event for order 3
+        // - A signed, unsigned and a final signed event for order 4
         sqlx::query(
             "INSERT INTO presignature_events \
                  (block_number, log_index, owner, order_uid, signed) \
              VALUES \
                  (0, 0, $1, $2, true), \
+                 \
                  (1, 0, $1, $3, true), \
-                 (2, 0, $1, $3, false);",
+                 (2, 0, $1, $3, false),
+                 \
+                 (3, 0, $1, $4, true), \
+                 (4, 0, $1, $4, false), \
+                 (5, 0, $1, $4, true);",
         )
         .bind(&[0u8; 20][..])
         .bind(&order_uid(1).0[..])
         .bind(&order_uid(3).0[..])
+        .bind(&order_uid(4).0[..])
         .execute(&db.pool)
         .await
         .unwrap();
@@ -1401,6 +1404,7 @@ mod tests {
             [
                 order_uid(0), // No presignature event, but its an ECDSA signed order
                 order_uid(1), // Pre-sign order with pre-sign event
+                order_uid(4), // Pre-sign order where the last event was a "signed" presignature
             ]
         );
 
@@ -1417,7 +1421,7 @@ mod tests {
         // Without presignature pending filter, all orders are returned.
         assert_eq!(
             unfiltered_orders,
-            [order_uid(0), order_uid(1), order_uid(2), order_uid(3)],
+            (0..=4).map(order_uid).collect::<Vec<_>>(),
         );
     }
 }
