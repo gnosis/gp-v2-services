@@ -148,11 +148,8 @@ where
             fetched_block_number: pools.fetched_block_number,
         };
 
-        // Log an error in order to trigger an alert. This will allow us to make
-        // sure we get notified if new pool factories are added that we don't
-        // index for.
         for factory in pools.pools_by_factory.keys() {
-            tracing::error!("unsupported pool factory {:?}", factory);
+            tracing::warn!("unsupported pool factory {:?}", factory);
         }
 
         Ok(result)
@@ -241,11 +238,8 @@ where
             fetched_block_number: pools.fetched_block_number,
         };
 
-        // Log an error in order to trigger an alert. This will allow us to make
-        // sure we get notified if new pool factories are added that we don't
-        // index for.
         for factory in pools.pools_by_factory.keys() {
-            tracing::error!("unsupported pool factory {:?}", factory);
+            tracing::warn!("unsupported pool factory {:?}", factory);
         }
 
         Ok(result)
