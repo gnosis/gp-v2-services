@@ -326,7 +326,8 @@ impl OrderStoring for Postgres {
                     WHEN 'sell' THEN sum_sell < sell_amount \
                     WHEN 'buy' THEN sum_buy < buy_amount \
                 END AND \
-                (NOT invalidated);"
+                (NOT invalidated) AND \
+                (NOT presignature_pending);"
         );
         sqlx::query_as(QUERY)
             .bind(min_valid_to as i64)
@@ -1145,6 +1146,64 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
+    async fn postgres_solvable_presign_orders() {
+        let db = Postgres::new("postgresql://").unwrap();
+        db.clear().await.unwrap();
+
+        let order = Order {
+            order_meta_data: Default::default(),
+            order_creation: OrderCreation {
+                sell_amount: 1.into(),
+                buy_amount: 1.into(),
+                signature: Signature::default_with(SigningScheme::PreSign),
+                ..Default::default()
+            },
+        };
+        db.insert_order(&order).await.unwrap();
+
+        let get_order = || {
+            let db = db.clone();
+            async move {
+                let orders = db.solvable_orders(0).await.unwrap();
+                orders.into_iter().next()
+            }
+        };
+        let pre_signature_event = |block_number: u64, signed: bool| {
+            let db = db.clone();
+            let events = vec![(
+                EventIndex {
+                    block_number,
+                    log_index: 0,
+                },
+                Event::PreSignature(PreSignature {
+                    owner: order.order_meta_data.owner,
+                    order_uid: order.order_meta_data.uid,
+                    signed,
+                }),
+            )];
+            async move {
+                db.append_events_(events).await.unwrap();
+            }
+        };
+
+        // not solvable because there is no presignature event.
+        assert!(get_order().await.is_none());
+
+        // solvable because once presignature event is observed.
+        pre_signature_event(0, true).await;
+        assert!(get_order().await.is_some());
+
+        // not solvable because "unsigned" presignature event.
+        pre_signature_event(1, false).await;
+        assert!(get_order().await.is_none());
+
+        // solvable once again because of new presignature event.
+        pre_signature_event(2, true).await;
+        assert!(get_order().await.is_some());
+    }
+
+    #[tokio::test]
+    #[ignore]
     async fn postgres_solvable_orders() {
         let db = Postgres::new("postgresql://").unwrap();
         db.clear().await.unwrap();
@@ -1387,18 +1446,29 @@ mod tests {
         .await
         .unwrap();
 
-        let filtered_orders = db
-            .orders(&OrderFilter {
-                exclude_presignature_pending: true,
-                ..Default::default()
-            })
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|order| order.order_meta_data.uid)
-            .collect::<Vec<_>>();
+        let query_order_uids = |filter: OrderFilter| {
+            let db = db.clone();
+            async move {
+                let mut order_uids = db
+                    .orders(&filter)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|order| order.order_meta_data.uid)
+                    .collect::<Vec<_>>();
+                // Make sure the list is sorted, this makes assertions easier.
+                order_uids.sort_by_key(|uid| uid.0);
+                order_uids
+            }
+        };
+
         // With presignature pending filter, only orders that aren't waiting for
         // a presignature event are returned.
+        let filtered_orders = query_order_uids(OrderFilter {
+            exclude_presignature_pending: true,
+            ..Default::default()
+        })
+        .await;
         assert_eq!(
             filtered_orders,
             [
@@ -1408,17 +1478,12 @@ mod tests {
             ]
         );
 
-        let unfiltered_orders = db
-            .orders(&OrderFilter {
-                exclude_presignature_pending: false,
-                ..Default::default()
-            })
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|order| order.order_meta_data.uid)
-            .collect::<Vec<_>>();
         // Without presignature pending filter, all orders are returned.
+        let unfiltered_orders = query_order_uids(OrderFilter {
+            exclude_presignature_pending: false,
+            ..Default::default()
+        })
+        .await;
         assert_eq!(
             unfiltered_orders,
             (0..=4).map(order_uid).collect::<Vec<_>>(),
