@@ -80,6 +80,9 @@ impl ParaswapApi for DefaultParaswapApi {
 
 #[derive(Deserialize)]
 #[serde(untagged)]
+// Some Paraswap errors may contain both an error and an Ok response.
+// In those cases we should treat the response as an error which is why the error variant
+// is declared first (serde will encodes a mixed response as the first matching variant).
 pub enum RawResponse<Ok> {
     ResponseErr { error: String },
     ResponseOk(Ok),
