@@ -668,6 +668,19 @@ mod tests {
             .calculate_status(),
             OrderStatus::Expired
         );
+
+        // Expired - with pending presignature
+        assert_eq!(
+            OrdersQueryRow {
+                signing_scheme: DbSigningScheme::PreSign,
+                invalidated: false,
+                valid_to: valid_to_yesterday.timestamp(),
+                presignature_pending: true,
+                ..order_row()
+            }
+            .calculate_status(),
+            OrderStatus::Expired
+        );
     }
 
     #[tokio::test]
@@ -1273,23 +1286,23 @@ mod tests {
                 .status
         };
         let block_number = AtomicI64::new(0);
-        let block_number_ref = &block_number;
-        let db_ref = &db;
-        let owner_ref = order.order_meta_data.owner.as_bytes();
-        let insert_presignature = {
-            |signed: bool| async move {
+        let insert_presignature = |signed: bool| {
+            let db = db.clone();
+            let block_number = &block_number;
+            let owner = order.order_meta_data.owner.as_bytes();
+            async move {
                 sqlx::query(
                     "INSERT INTO presignature_events \
                     (block_number, log_index, owner, order_uid, signed) \
                  VALUES \
                     ($1, $2, $3, $4, $5)",
                 )
-                .bind(block_number_ref.fetch_add(1, Ordering::SeqCst))
+                .bind(block_number.fetch_add(1, Ordering::SeqCst))
                 .bind(0i64)
-                .bind(owner_ref)
+                .bind(owner)
                 .bind(&uid.0[..])
                 .bind(signed)
-                .execute(&db_ref.pool)
+                .execute(&db.pool)
                 .await
                 .unwrap();
             }
