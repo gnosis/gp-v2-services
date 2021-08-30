@@ -741,6 +741,7 @@ checksum = "5ea4f8a3e0a51e6745974d16076eb8f56b1abe12c642b5e9068adb5915ed991b"
 dependencies = [
  "arrayvec 0.7.1",
  "ethcontract-common",
+ "ethcontract-derive",
  "futures",
  "futures-timer",
  "hex",
@@ -773,6 +774,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ethcontract-derive"
+version = "0.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a08621590a64c4d3cf0a120c2110a7ca466f8795d09b37839ab08c2090205458"
+dependencies = [
+ "anyhow",
+ "ethcontract-common",
+ "ethcontract-generate",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "ethcontract-generate"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -786,6 +801,19 @@ dependencies = [
  "quote",
  "syn",
  "url",
+]
+
+[[package]]
+name = "ethcontract-mock"
+version = "0.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d97fdeb07be4374cbea23685c00565deb536c3415c1dfe4f19d89c906ad3e1c7"
+dependencies = [
+ "ethcontract",
+ "hex",
+ "mockall",
+ "predicates",
+ "rlp",
 ]
 
 [[package]]
@@ -2558,6 +2586,7 @@ dependencies = [
  "contracts",
  "derivative",
  "ethcontract",
+ "ethcontract-mock",
  "futures",
  "gas-estimation",
  "hex",
@@ -2589,6 +2618,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "signal-hook-registry"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e51e73328dc4ac0c7ccbda3a494dfa03df1de2f46018127f60c693f2648455b0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2608,6 +2646,21 @@ checksum = "9e3dfc207c526015c632472a77be09cf1b6e46866581aecae5cc38fb4235dea2"
 dependencies = [
  "libc",
  "winapi",
+]
+
+[[package]]
+name = "soketto"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4919971d141dbadaa0e82b5d369e2d7666c98e4625046140615ca363e50d4daa"
+dependencies = [
+ "base64",
+ "bytes",
+ "futures",
+ "httparse",
+ "log",
+ "rand",
+ "sha-1",
 ]
 
 [[package]]
@@ -2965,7 +3018,10 @@ dependencies = [
  "memchr",
  "mio",
  "num_cpus",
+ "once_cell",
+ "parking_lot",
  "pin-project-lite",
+ "signal-hook-registry",
  "tokio-macros",
  "winapi",
 ]
@@ -3039,6 +3095,7 @@ checksum = "1caa0b0c8d94a049db56b5acf8cba99dc0623aab1b26d5b5f5e2d945846b3592"
 dependencies = [
  "bytes",
  "futures-core",
+ "futures-io",
  "futures-sink",
  "log",
  "pin-project-lite",
@@ -3475,7 +3532,23 @@ dependencies = [
  "secp256k1",
  "serde",
  "serde_json",
+ "soketto",
  "tiny-keccak",
+ "tokio",
+ "tokio-util",
+ "url",
+ "web3-async-native-tls",
+]
+
+[[package]]
+name = "web3-async-native-tls"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f6d8d1636b2627fe63518d5a9b38a569405d9c9bc665c43c9c341de57227ebb"
+dependencies = [
+ "native-tls",
+ "thiserror",
+ "tokio",
  "url",
 ]
 

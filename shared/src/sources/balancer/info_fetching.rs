@@ -10,20 +10,20 @@ use ethcontract::{batch::CallBatch, Bytes, H160, H256, U256};
 use mockall::*;
 use std::sync::Arc;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CommonPoolInfo {
     pub pool_id: H256,
     pub tokens: Vec<H160>,
     pub scaling_exponents: Vec<u8>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct WeightedPoolInfo {
     pub common: CommonPoolInfo,
     pub weights: Vec<Bfp>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct StablePoolInfo {
     pub common: CommonPoolInfo,
     pub amplification_parameter: U256,
@@ -146,5 +146,127 @@ impl PoolInfoFetching for PoolInfoFetcher {
             },
             amplification_parameter: amplification_parameter.await?.0,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::token_info::{MockTokenInfoFetching, TokenInfo};
+    use ethcontract_mock::Mock;
+    use maplit::hashmap;
+
+    #[tokio::test]
+    async fn get_stable_pool_data_err() {
+        let mock = Mock::new(1);
+        let web3 = mock.web3();
+
+        let vault = mock.deploy(BalancerV2Vault::raw_contract().abi.clone());
+        let stable_pool = mock.deploy(BalancerV2StablePool::raw_contract().abi.clone());
+
+        let pool_id = H256::from_low_u64_be(1);
+        let token = H160::from_low_u64_be(1);
+        stable_pool
+            .expect(BalancerV2StablePool::signatures().get_pool_id())
+            .returns(Bytes(pool_id.0));
+        vault
+            .expect(BalancerV2Vault::signatures().get_pool_tokens())
+            .predicate((predicate::eq(Bytes(pool_id.0)),))
+            .returns((vec![token], vec![], U256::zero()));
+        stable_pool
+            .expect(BalancerV2StablePool::signatures().get_amplification_parameter())
+            .returns((U256::one(), false, U256::zero()));
+
+        let mut mock_token_info_fetcher = MockTokenInfoFetching::new();
+        mock_token_info_fetcher
+            .expect_get_token_infos()
+            .return_once(move |_| {
+                hashmap! {
+                    token => TokenInfo { decimals: None },
+                }
+            });
+
+        let pool_info_fetcher = PoolInfoFetcher {
+            web3: web3.clone(),
+            token_info_fetcher: Arc::new(mock_token_info_fetcher),
+        };
+
+        let pool_info = pool_info_fetcher
+            .get_stable_pool_data(stable_pool.address())
+            .await;
+
+        assert!(pool_info.is_err());
+
+        let mut mock_token_info_fetcher = MockTokenInfoFetching::new();
+        mock_token_info_fetcher
+            .expect_get_token_infos()
+            .return_once(move |_| {
+                hashmap! {
+                    token => TokenInfo { decimals: Some(19) },
+                }
+            });
+        let pool_info_fetcher = PoolInfoFetcher {
+            web3,
+            token_info_fetcher: Arc::new(mock_token_info_fetcher),
+        };
+
+        let pool_info = pool_info_fetcher
+            .get_stable_pool_data(stable_pool.address())
+            .await;
+
+        assert!(pool_info.is_err());
+    }
+
+    #[tokio::test]
+    async fn get_stable_pool_data_ok() {
+        let mock = Mock::new(1);
+        let web3 = mock.web3();
+
+        let vault = mock.deploy(BalancerV2Vault::raw_contract().abi.clone());
+        let stable_pool = mock.deploy(BalancerV2StablePool::raw_contract().abi.clone());
+
+        let pool_id = H256::from_low_u64_be(1);
+        let tokens = vec![H160::from_low_u64_be(1), H160::from_low_u64_be(2)];
+
+        stable_pool
+            .expect(BalancerV2StablePool::signatures().get_pool_id())
+            .returns(Bytes(pool_id.0));
+        vault
+            .expect(BalancerV2Vault::signatures().get_pool_tokens())
+            .predicate((predicate::eq(Bytes(pool_id.0)),))
+            .returns((tokens.clone(), vec![], U256::zero()));
+        stable_pool
+            .expect(BalancerV2StablePool::signatures().get_amplification_parameter())
+            .returns((U256::one(), false, U256::zero()));
+
+        let mut token_info_fetcher = MockTokenInfoFetching::new();
+        token_info_fetcher
+            .expect_get_token_infos()
+            .return_once(move |_| {
+                hashmap! {
+                    tokens[0] => TokenInfo { decimals: Some(18) },
+                    tokens[1] => TokenInfo { decimals: Some(17) },
+                }
+            });
+
+        let pool_info_fetcher = PoolInfoFetcher {
+            web3,
+            token_info_fetcher: Arc::new(token_info_fetcher),
+        };
+
+        let pool_info_result = pool_info_fetcher
+            .get_stable_pool_data(stable_pool.address())
+            .await;
+
+        assert!(pool_info_result.is_ok());
+
+        let pool_info = pool_info_result.unwrap();
+        assert_eq!(
+            pool_info.common.tokens,
+            vec![H160::from_low_u64_be(1), H160::from_low_u64_be(2)]
+        );
+        assert_eq!(pool_info.common.pool_id, pool_id);
+        assert_eq!(pool_info.common.scaling_exponents, vec![0u8, 1u8]);
+        assert_eq!(pool_info.amplification_parameter, U256::one());
     }
 }
