@@ -3,7 +3,7 @@ use ethcontract::prelude::{Account, Address, PrivateKey, U256};
 use hex_literal::hex;
 use model::{
     order::{OrderBuilder, OrderKind},
-    SigningScheme,
+    signature::EcdsaSigningScheme,
 };
 use secp256k1::SecretKey;
 use serde_json::json;
@@ -53,7 +53,7 @@ async fn onchain_settlement(web3: Web3) {
     let trader_a = Account::Offline(PrivateKey::from_raw(TRADER_A_PK).unwrap(), None);
     let trader_b = Account::Offline(PrivateKey::from_raw(TRADER_B_PK).unwrap(), None);
 
-    let gpv2 = GPv2::fetch(&web3, &solver_account).await;
+    let gpv2 = GPv2::fetch(&web3).await;
     let UniswapContracts {
         uniswap_factory,
         uniswap_router,
@@ -157,11 +157,12 @@ async fn onchain_settlement(web3: Web3) {
         .with_buy_amount(to_wei(80))
         .with_valid_to(shared::time::now_in_epoch_seconds() + 300)
         .with_kind(OrderKind::Sell)
-        .with_signing_scheme(SigningScheme::Eip712)
         .sign_with(
+            EcdsaSigningScheme::Eip712,
             &gpv2.domain_separator,
             SecretKeyRef::from(&SecretKey::from_slice(&TRADER_A_PK).unwrap()),
         )
+        .unwrap()
         .build()
         .order_creation;
     let placement = client
@@ -179,11 +180,12 @@ async fn onchain_settlement(web3: Web3) {
         .with_buy_amount(to_wei(40))
         .with_valid_to(shared::time::now_in_epoch_seconds() + 300)
         .with_kind(OrderKind::Sell)
-        .with_signing_scheme(SigningScheme::EthSign)
         .sign_with(
+            EcdsaSigningScheme::EthSign,
             &gpv2.domain_separator,
             SecretKeyRef::from(&SecretKey::from_slice(&TRADER_B_PK).unwrap()),
         )
+        .unwrap()
         .build()
         .order_creation;
     let placement = client
@@ -231,7 +233,7 @@ async fn onchain_settlement(web3: Web3) {
         Duration::from_secs(30),
         None,
         block_stream,
-        0.0,
+        1.0,
         SolutionSubmitter {
             web3: web3.clone(),
             contract: gpv2.settlement.clone(),

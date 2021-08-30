@@ -1,7 +1,7 @@
 use contracts::{IUniswapLikeRouter, WETH9};
 use ethcontract::{Account, PrivateKey, H160, U256};
-use prometheus::Registry;
 use reqwest::Url;
+use shared::metrics::setup_metrics_registry;
 use shared::{
     bad_token::list_based::ListBasedDetector,
     current_block::current_block_stream,
@@ -59,7 +59,7 @@ struct Arguments {
 
     /// The private key used by the driver to sign transactions.
     #[structopt(short = "k", long, env = "PRIVATE_KEY", hide_env_values = true)]
-    private_key: PrivateKey,
+    private_key: Option<PrivateKey>,
 
     /// The target confirmation time for settlement transactions used to estimate gas price.
     #[structopt(
@@ -89,6 +89,16 @@ struct Arguments {
         use_delimiter = true,
     )]
     solvers: Vec<SolverType>,
+
+    /// Individual private keys for each solver
+    #[structopt(
+        long,
+        env = "SOLVER_PRIVATE_KEYS",
+        case_insensitive = true,
+        use_delimiter = true,
+        hide_env_values = true
+    )]
+    solver_private_keys: Option<Vec<PrivateKey>>,
 
     /// A settlement must contain at least one order older than this duration for it to be applied.
     /// Larger values delay individual settlements more but have a higher coincidence of wants
@@ -197,11 +207,10 @@ arg_enum! {
 async fn main() {
     let args = Arguments::from_args();
     shared::tracing::initialize(args.shared.log_filter.as_str());
-    args.shared.validate();
     tracing::info!("running solver with validated {:#?}", args);
 
-    let registry = Registry::default();
-    let metrics = Arc::new(Metrics::new(&registry).expect("Couldn't register metrics"));
+    setup_metrics_registry(Some("gp_v2_solver".into()), None);
+    let metrics = Arc::new(Metrics::new().expect("Couldn't register metrics"));
 
     let client = shared::http_client(args.shared.http_timeout);
 
@@ -222,8 +231,7 @@ async fn main() {
         .await
         .expect("failed to get network id");
     let network_name = network_name(&network_id, chain_id);
-    let account = Account::Offline(args.private_key, Some(chain_id));
-    let settlement_contract = solver::get_settlement_contract(&web3, account.clone())
+    let settlement_contract = solver::get_settlement_contract(&web3)
         .await
         .expect("couldn't load deployed settlement");
     let native_token_contract = WETH9::deployed(&web3)
@@ -338,10 +346,31 @@ async fn main() {
         web3.clone(),
     )
     .await;
+
+    let solvers = {
+        if let Some(private_keys) = args.solver_private_keys {
+            assert!(
+                private_keys.len() == args.solvers.len(),
+                "number of solver does not match the number of private keys"
+            );
+
+            private_keys
+                .into_iter()
+                .map(|private_key| Account::Offline(private_key, Some(chain_id)))
+                .zip(args.solvers)
+                .collect()
+        } else if let Some(private_key) = args.private_key {
+            std::iter::repeat(Account::Offline(private_key, Some(chain_id)))
+                .zip(args.solvers)
+                .collect()
+        } else {
+            panic!("either SOLVER_PRIVATE_KEY or PRIVATE_KEY must be set")
+        }
+    };
+
     let solver = solver::solver::create(
-        account.clone(),
         web3.clone(),
-        args.solvers,
+        solvers,
         base_tokens,
         native_token_contract.address(),
         args.mip_solver_url,
@@ -351,7 +380,7 @@ async fn main() {
         price_estimator.clone(),
         network_name.to_string(),
         chain_id,
-        args.shared.fee_subsidy_factor,
+        args.shared.fee_factor,
         args.min_order_size_one_inch,
         args.disabled_one_inch_protocols,
         args.paraswap_slippage_bps,
@@ -403,7 +432,7 @@ async fn main() {
         args.solver_time_limit,
         market_makable_token_list,
         current_block_stream.clone(),
-        args.shared.fee_subsidy_factor,
+        args.shared.fee_factor,
         solution_submitter,
     );
 
@@ -416,7 +445,7 @@ async fn main() {
     };
     tokio::task::spawn(maintainer.run_maintenance_on_new_block(current_block_stream));
 
-    serve_metrics(registry, metrics, ([0, 0, 0, 0], args.metrics_port).into());
+    serve_metrics(metrics, ([0, 0, 0, 0], args.metrics_port).into());
     driver.run_forever().await;
 }
 

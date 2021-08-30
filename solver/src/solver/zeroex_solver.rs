@@ -1,7 +1,7 @@
-//! Module containing implementation of the Matcha solver.
+//! Module containing implementation of the 0x solver.
 //!
-//! This solver will simply use the Matcha API to get a quote for a
-//! single GPv2 order and produce a settlement directly against Matcha.
+//! This solver will simply use the 0x API to get a quote for a
+//! single GPv2 order and produce a settlement directly against 0x.
 //!
 //! Please be aware of the following subtlety for buy orders:
 //! 0x's API is adding the defined slippage on the sellAmount of a buy order
@@ -15,13 +15,13 @@
 //! fees also in the sell token, though, the fee's might not always be sufficient.
 //! This risk should be covered in a future PR.
 //!
-//! Sell orders are unproblematic, especially, since the positive slippage is handed back from matcha
+//! Sell orders are unproblematic, especially, since the positive slippage is handed back from 0x
 
 pub mod api;
 
 use super::solver_utils::Slippage;
 use crate::interactions::allowances::{AllowanceManager, AllowanceManaging};
-use crate::solver::matcha_solver::api::{MatchaApi, MatchaResponseError};
+use crate::solver::zeroex_solver::api::{ZeroExApi, ZeroExResponseError};
 use anyhow::{anyhow, ensure, Result};
 use contracts::GPv2Settlement;
 use ethcontract::{Account, Bytes};
@@ -30,7 +30,7 @@ use reqwest::Client;
 
 use super::single_order_solver::{SettlementError, SingleOrderSolving};
 
-use self::api::{DefaultMatchaApi, SwapQuery, SwapResponse};
+use self::api::{DefaultZeroExApi, SwapQuery, SwapResponse};
 use crate::{
     encoding::EncodedInteraction,
     liquidity::LimitOrder,
@@ -41,19 +41,19 @@ use shared::Web3;
 use std::fmt::{self, Display, Formatter};
 
 /// Constant maximum slippage of 5 BPS (0.05%) to use for on-chain liquidity.
-pub const STANDARD_MATCHA_SLIPPAGE_BPS: u16 = 5;
+pub const STANDARD_ZEROEX_SLIPPAGE_BPS: u16 = 5;
 
-/// A GPv2 solver that matches GP orders to direct Matcha swaps.
-pub struct MatchaSolver {
+/// A GPv2 solver that matches GP orders to direct 0x swaps.
+pub struct ZeroExSolver {
     account: Account,
-    client: Box<dyn MatchaApi + Send + Sync>,
+    client: Box<dyn ZeroExApi + Send + Sync>,
     allowance_fetcher: Box<dyn AllowanceManaging>,
 }
 
 /// Chain ID for Mainnet.
 const MAINNET_CHAIN_ID: u64 = 1;
 
-impl MatchaSolver {
+impl ZeroExSolver {
     pub fn new(
         account: Account,
         web3: Web3,
@@ -63,14 +63,14 @@ impl MatchaSolver {
     ) -> Result<Self> {
         ensure!(
             chain_id == MAINNET_CHAIN_ID,
-            "Matcha solver only supported on Mainnet",
+            "0x solver only supported on Mainnet",
         );
         let allowance_fetcher = AllowanceManager::new(web3, settlement_contract.address());
         Ok(Self {
             account,
             allowance_fetcher: Box::new(allowance_fetcher),
-            client: Box::new(DefaultMatchaApi::new(
-                DefaultMatchaApi::DEFAULT_URL,
+            client: Box::new(DefaultZeroExApi::new(
+                DefaultZeroExApi::DEFAULT_URL,
                 client,
             )?),
         })
@@ -78,7 +78,7 @@ impl MatchaSolver {
 }
 
 #[async_trait::async_trait]
-impl SingleOrderSolving for MatchaSolver {
+impl SingleOrderSolving for ZeroExSolver {
     async fn try_settle_order(
         &self,
         order: LimitOrder,
@@ -92,14 +92,14 @@ impl SingleOrderSolving for MatchaSolver {
             buy_token: order.buy_token,
             sell_amount,
             buy_amount,
-            slippage_percentage: Slippage::number_from_basis_points(STANDARD_MATCHA_SLIPPAGE_BPS)
+            slippage_percentage: Slippage::number_from_basis_points(STANDARD_ZEROEX_SLIPPAGE_BPS)
                 .unwrap(),
             skip_validation: Some(true),
         };
 
-        tracing::debug!("querying Matcha swap api with {:?}", query);
+        tracing::debug!("querying 0x swap api with {:?}", query);
         let swap = self.client.get_swap(query).await?;
-        tracing::debug!("proposed Matcha swap is {:?}", swap);
+        tracing::debug!("proposed 0x swap is {:?}", swap);
 
         if !swap_respects_limit_price(&swap, &order) {
             tracing::debug!("Order limit price not respected");
@@ -128,15 +128,15 @@ impl SingleOrderSolving for MatchaSolver {
     }
 
     fn name(&self) -> &'static str {
-        "Matcha"
+        "0x"
     }
 }
 
-impl From<MatchaResponseError> for SettlementError {
-    fn from(err: MatchaResponseError) -> Self {
+impl From<ZeroExResponseError> for SettlementError {
+    fn from(err: ZeroExResponseError) -> Self {
         SettlementError {
-            inner: anyhow!("Matcha Response Error {:?}", err),
-            retryable: matches!(err, MatchaResponseError::ServerError(_)),
+            inner: anyhow!("0x Response Error {:?}", err),
+            retryable: matches!(err, ZeroExResponseError::ServerError(_)),
         }
     }
 }
@@ -154,9 +154,9 @@ impl Interaction for SwapResponse {
     }
 }
 
-impl Display for MatchaSolver {
+impl Display for ZeroExSolver {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "MatchaSolver")
+        write!(f, "ZeroExSolver")
     }
 }
 
@@ -166,8 +166,7 @@ mod tests {
     use crate::interactions::allowances::{Approval, MockAllowanceManaging};
     use crate::liquidity::tests::CapturingSettlementHandler;
     use crate::liquidity::LimitOrder;
-    use crate::solver::matcha_solver::api::MockMatchaApi;
-    use crate::solver::single_order_solver::SingleOrderSolver;
+    use crate::solver::zeroex_solver::api::MockZeroExApi;
     use crate::test::account;
     use contracts::{GPv2Settlement, WETH9};
     use ethcontract::{Web3, H160, U256};
@@ -178,7 +177,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
-    async fn solve_sell_order_on_matcha() {
+    async fn solve_sell_order_on_zeroex() {
         let web3 = Web3::new(create_env_test_transport());
         let chain_id = web3.eth().chain_id().await.unwrap().as_u64();
         let settlement = GPv2Settlement::deployed(&web3).await.unwrap();
@@ -186,11 +185,10 @@ mod tests {
         let weth = WETH9::deployed(&web3).await.unwrap();
         let gno = shared::addr!("6810e776880c02933d47db1b9fc05908e5386b96");
 
-        let solver = SingleOrderSolver::from(
-            MatchaSolver::new(account(), web3, settlement, chain_id, Client::new()).unwrap(),
-        );
+        let solver =
+            ZeroExSolver::new(account(), web3, settlement, chain_id, Client::new()).unwrap();
         let settlement = solver
-            .settle_order(
+            .try_settle_order(
                 Order {
                     order_creation: OrderCreation {
                         sell_token: weth.address(),
@@ -212,7 +210,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
-    async fn solve_buy_order_on_matcha() {
+    async fn solve_buy_order_on_zeroex() {
         let web3 = Web3::new(create_env_test_transport());
         let chain_id = web3.eth().chain_id().await.unwrap().as_u64();
         let settlement = GPv2Settlement::deployed(&web3).await.unwrap();
@@ -220,11 +218,10 @@ mod tests {
         let weth = WETH9::deployed(&web3).await.unwrap();
         let gno = shared::addr!("6810e776880c02933d47db1b9fc05908e5386b96");
 
-        let solver = SingleOrderSolver::from(
-            MatchaSolver::new(account(), web3, settlement, chain_id, Client::new()).unwrap(),
-        );
+        let solver =
+            ZeroExSolver::new(account(), web3, settlement, chain_id, Client::new()).unwrap();
         let settlement = solver
-            .settle_order(
+            .try_settle_order(
                 Order {
                     order_creation: OrderCreation {
                         sell_token: weth.address(),
@@ -246,7 +243,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_satisfies_limit_price_for_orders() {
-        let mut client = Box::new(MockMatchaApi::new());
+        let mut client = Box::new(MockZeroExApi::new());
         let mut allowance_fetcher = Box::new(MockAllowanceManaging::new());
 
         let sell_token = H160::from_low_u64_be(1);
@@ -276,11 +273,11 @@ mod tests {
                 })
             });
 
-        let solver = SingleOrderSolver::from(MatchaSolver {
+        let solver = ZeroExSolver {
             account: account(),
             client,
             allowance_fetcher,
-        });
+        };
 
         let buy_order_passing_limit = LimitOrder {
             sell_token,
@@ -316,7 +313,7 @@ mod tests {
         };
 
         let result = solver
-            .settle_order(sell_order_passing_limit)
+            .try_settle_order(sell_order_passing_limit)
             .await
             .unwrap()
             .unwrap();
@@ -329,13 +326,13 @@ mod tests {
         );
 
         let result = solver
-            .settle_order(sell_order_violating_limit)
+            .try_settle_order(sell_order_violating_limit)
             .await
             .unwrap();
         assert!(result.is_none());
 
         let result = solver
-            .settle_order(buy_order_passing_limit)
+            .try_settle_order(buy_order_passing_limit)
             .await
             .unwrap()
             .unwrap();
@@ -348,7 +345,7 @@ mod tests {
         );
 
         let result = solver
-            .settle_order(buy_order_violating_limit)
+            .try_settle_order(buy_order_violating_limit)
             .await
             .unwrap();
         assert!(result.is_none());
@@ -363,12 +360,12 @@ mod tests {
         let chain_id = web3.eth().chain_id().await.unwrap().as_u64();
         let settlement = GPv2Settlement::deployed(&web3).await.unwrap();
 
-        assert!(MatchaSolver::new(account(), web3, settlement, chain_id, Client::new()).is_err())
+        assert!(ZeroExSolver::new(account(), web3, settlement, chain_id, Client::new()).is_err())
     }
 
     #[tokio::test]
     async fn test_sets_allowance_if_necessary() {
-        let mut client = Box::new(MockMatchaApi::new());
+        let mut client = Box::new(MockZeroExApi::new());
         let mut allowance_fetcher = Box::new(MockAllowanceManaging::new());
 
         let sell_token = H160::from_low_u64_be(1);
@@ -406,11 +403,11 @@ mod tests {
             .returning(|_, _, _| Ok(Approval::AllowanceSufficient))
             .in_sequence(&mut seq);
 
-        let solver = SingleOrderSolver::from(MatchaSolver {
+        let solver = ZeroExSolver {
             account: account(),
             client,
             allowance_fetcher,
-        });
+        };
 
         let order = LimitOrder {
             sell_token,
@@ -421,11 +418,15 @@ mod tests {
         };
 
         // On first run we have two main interactions (approve + swap)
-        let result = solver.settle_order(order.clone()).await.unwrap().unwrap();
+        let result = solver
+            .try_settle_order(order.clone())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(result.encoder.finish().interactions[1].len(), 2);
 
         // On second run we have only have one main interactions (swap)
-        let result = solver.settle_order(order).await.unwrap().unwrap();
+        let result = solver.try_settle_order(order).await.unwrap().unwrap();
         assert_eq!(result.encoder.finish().interactions[1].len(), 1)
     }
 
@@ -434,7 +435,7 @@ mod tests {
         let sell_token = H160::from_low_u64_be(1);
         let buy_token = H160::from_low_u64_be(2);
 
-        let mut client = Box::new(MockMatchaApi::new());
+        let mut client = Box::new(MockZeroExApi::new());
         client.expect_get_swap().returning(move |_| {
             Ok(SwapResponse {
                 sell_amount: 1000.into(),
@@ -452,11 +453,11 @@ mod tests {
             .expect_get_approval()
             .returning(|_, _, _| Ok(Approval::AllowanceSufficient));
 
-        let solver = SingleOrderSolver::from(MatchaSolver {
+        let solver = ZeroExSolver {
             account: account(),
             client,
             allowance_fetcher,
-        });
+        };
 
         let order = LimitOrder {
             sell_token,
@@ -469,7 +470,7 @@ mod tests {
         // Sell orders are fully executed
         let handler = CapturingSettlementHandler::arc();
         solver
-            .settle_order(LimitOrder {
+            .try_settle_order(LimitOrder {
                 kind: OrderKind::Sell,
                 settlement_handling: handler.clone(),
                 ..order.clone()
@@ -482,7 +483,7 @@ mod tests {
         // Buy orders are fully executed
         let handler = CapturingSettlementHandler::arc();
         solver
-            .settle_order(LimitOrder {
+            .try_settle_order(LimitOrder {
                 kind: OrderKind::Buy,
                 settlement_handling: handler.clone(),
                 ..order
@@ -491,102 +492,5 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(handler.calls(), vec![4321.into()]);
-    }
-
-    #[tokio::test]
-    async fn settle_order_retry_until_succeeds() {
-        let mut allowance_fetcher = Box::new(MockAllowanceManaging::new());
-        allowance_fetcher
-            .expect_get_approval()
-            .returning(|_, _, _| Ok(Approval::AllowanceSufficient));
-
-        let mut client = Box::new(MockMatchaApi::new());
-        let mut seq = Sequence::new();
-        client
-            .expect_get_swap()
-            .times(2)
-            .returning(|_| {
-                // Retryable error
-                Err(MatchaResponseError::ServerError(String::new()))
-            })
-            .in_sequence(&mut seq);
-        client
-            .expect_get_swap()
-            .times(1)
-            .returning(|_| {
-                Ok(SwapResponse {
-                    ..Default::default()
-                })
-            })
-            .in_sequence(&mut seq);
-
-        let solver = SingleOrderSolver::from(MatchaSolver {
-            account: account(),
-            client,
-            allowance_fetcher,
-        });
-
-        let order = LimitOrder {
-            ..Default::default()
-        };
-        assert!(solver.settle_order(order).await.is_ok());
-    }
-
-    #[tokio::test]
-    async fn settle_order_retry_until_exceeds() {
-        let mut allowance_fetcher = Box::new(MockAllowanceManaging::new());
-        allowance_fetcher
-            .expect_get_approval()
-            .returning(|_, _, _| Ok(Approval::AllowanceSufficient));
-
-        let mut client = Box::new(MockMatchaApi::new());
-        let mut seq = Sequence::new();
-        client
-            .expect_get_swap()
-            .times(3)
-            .returning(|_| {
-                // Retryable error
-                Err(MatchaResponseError::ServerError(String::new()))
-            })
-            .in_sequence(&mut seq);
-        let solver = SingleOrderSolver::from(MatchaSolver {
-            account: account(),
-            client,
-            allowance_fetcher,
-        });
-        let order = LimitOrder {
-            ..Default::default()
-        };
-        assert!(solver.settle_order(order).await.is_err());
-    }
-
-    #[tokio::test]
-    async fn settle_order_unretryable_error() {
-        let mut allowance_fetcher = Box::new(MockAllowanceManaging::new());
-        allowance_fetcher
-            .expect_get_approval()
-            .returning(|_, _, _| Ok(Approval::AllowanceSufficient));
-
-        let mut client = Box::new(MockMatchaApi::new());
-        let mut seq = Sequence::new();
-        client
-            .expect_get_swap()
-            .times(1)
-            .returning(|_| {
-                // Non-Retryable error
-                Err(MatchaResponseError::UnknownMatchaError(String::new()))
-            })
-            .in_sequence(&mut seq);
-
-        let solver = SingleOrderSolver::from(MatchaSolver {
-            account: account(),
-            client,
-            allowance_fetcher,
-        });
-
-        let order = LimitOrder {
-            ..Default::default()
-        };
-        assert!(solver.settle_order(order).await.is_err());
     }
 }

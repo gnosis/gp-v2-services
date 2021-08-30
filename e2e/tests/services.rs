@@ -1,17 +1,13 @@
 use contracts::{
     BalancerV2Vault, ERC20Mintable, GPv2Settlement, UniswapV2Factory, UniswapV2Router02, WETH9,
 };
-use ethcontract::{
-    prelude::{Account, U256},
-    H160,
-};
+use ethcontract::{prelude::U256, H160};
 use maplit::hashset;
 use model::DomainSeparator;
 use orderbook::{
     account_balances::Web3BalanceFetcher, database::Postgres, event_updater::EventUpdater,
     fee::EthAwareMinFeeCalculator, metrics::Metrics, orderbook::Orderbook,
 };
-use prometheus::Registry;
 use reqwest::Client;
 use shared::{
     bad_token::list_based::ListBasedDetector,
@@ -70,11 +66,11 @@ pub struct GPv2 {
 }
 
 impl GPv2 {
-    pub async fn fetch(web3: &Web3, designated_solver: &Account) -> Self {
+    pub async fn fetch(web3: &Web3) -> Self {
         let vault = BalancerV2Vault::deployed(web3)
             .await
             .expect("Failed to load deployed BalancerV2Vault");
-        let settlement = solver::get_settlement_contract(web3, designated_solver.clone())
+        let settlement = solver::get_settlement_contract(web3)
             .await
             .expect("Failed to load deployed GPv2Settlement");
         let allowance = settlement
@@ -137,8 +133,7 @@ pub struct OrderbookServices {
 
 impl OrderbookServices {
     pub async fn new(web3: &Web3, gpv2: &GPv2, uniswap_factory: &UniswapV2Factory) -> Self {
-        let registry = Registry::default();
-        let metrics = Arc::new(Metrics::new(&registry).unwrap());
+        let metrics = Arc::new(Metrics::new().unwrap());
         let chain_id = web3
             .eth()
             .chain_id()
@@ -219,7 +214,6 @@ impl OrderbookServices {
             fee_calculator,
             price_estimator.clone(),
             API_HOST[7..].parse().expect("Couldn't parse API address"),
-            registry,
             metrics,
         );
 

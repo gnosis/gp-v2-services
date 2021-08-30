@@ -3,11 +3,12 @@ use crate::conversions::*;
 use anyhow::{anyhow, Context, Result};
 use bigdecimal::{BigDecimal, Zero};
 use chrono::{DateTime, Utc};
+use const_format::concatcp;
 use futures::stream::TryStreamExt;
 use model::order::{BuyTokenDestination, SellTokenSource};
 use model::{
     order::{Order, OrderCreation, OrderKind, OrderMetaData, OrderStatus, OrderUid},
-    Signature, SigningScheme,
+    signature::{Signature, SigningScheme},
 };
 use primitive_types::H160;
 use std::{borrow::Cow, convert::TryInto};
@@ -17,6 +18,10 @@ pub trait OrderStoring: Send + Sync {
     async fn insert_order(&self, order: &Order) -> Result<(), InsertionError>;
     async fn cancel_order(&self, order_uid: &OrderUid, now: DateTime<Utc>) -> Result<()>;
     async fn orders(&self, filter: &OrderFilter) -> Result<Vec<Order>>;
+    async fn single_order(&self, uid: &OrderUid) -> Result<Option<Order>>;
+    async fn solvable_orders(&self, min_valid_to: u32) -> Result<Vec<Order>>;
+    // Soon:
+    // async fn user_orders(&self, filter, order_uid) -> Result<Vec<Order>>;
 }
 
 /// Any default value means that this field is unfiltered.
@@ -149,6 +154,28 @@ impl From<sqlx::Error> for InsertionError {
     }
 }
 
+// When querying orders we have several specialized use cases working with their own filtering,
+// ordering, indexes. The parts that are shared between all queries are defined here so they can be
+// reused.
+
+const ORDERS_SELECT: &str = "\
+    o.uid, o.owner, o.creation_timestamp, o.sell_token, o.buy_token, o.sell_amount, o.buy_amount, \
+    o.valid_to, o.app_data, o.fee_amount, o.kind, o.partially_fillable, o.signature, o.receiver, \
+    o.signing_scheme, o.settlement_contract, o.sell_token_balance, o.buy_token_balance, \
+    COALESCE(SUM(t.buy_amount), 0) AS sum_buy, \
+    COALESCE(SUM(t.sell_amount), 0) AS sum_sell, \
+    COALESCE(SUM(t.fee_amount), 0) AS sum_fee, \
+    (COUNT(invalidations.*) > 0 OR o.cancellation_timestamp IS NOT NULL) AS invalidated \
+";
+
+const ORDERS_FROM: &str = "\
+    orders o \
+    LEFT OUTER JOIN trades t ON o.uid = t.order_uid \
+    LEFT OUTER JOIN invalidations ON o.uid = invalidations.order_uid \
+";
+
+const ORDERS_GROUP_BY: &str = "o.uid ";
+
 #[async_trait::async_trait]
 impl OrderStoring for Postgres {
     async fn insert_order(&self, order: &Order) -> Result<(), InsertionError> {
@@ -177,7 +204,9 @@ impl OrderStoring for Postgres {
             .bind(DbOrderKind::from(order.order_creation.kind))
             .bind(order.order_creation.partially_fillable)
             .bind(order.order_creation.signature.to_bytes().as_ref())
-            .bind(DbSigningScheme::from(order.order_creation.signing_scheme))
+            .bind(DbSigningScheme::from(
+                order.order_creation.signature.scheme(),
+            ))
             .bind(order.order_meta_data.settlement_contract.as_bytes())
             .bind(DbSellTokenSource::from(
                 order.order_creation.sell_token_balance,
@@ -220,44 +249,74 @@ impl OrderStoring for Postgres {
         // The `or`s in the `where` clause are there so that each filter is ignored when not set.
         // We use a subquery instead of a `having` clause in the inner query because we would not be
         // able to use the `sum_*` columns there.
-        const QUERY: &str = "\
-        SELECT * FROM ( \
-            SELECT \
-                o.uid, o.owner, o.creation_timestamp, o.sell_token, o.buy_token, o.sell_amount, \
-                o.buy_amount, o.valid_to, o.app_data, o.fee_amount, o.kind, o.partially_fillable, \
-                o.signature, o.receiver, o.signing_scheme, o.settlement_contract, o.sell_token_balance, \
-                o.buy_token_balance, \
-                COALESCE(SUM(t.buy_amount), 0) AS sum_buy, \
-                COALESCE(SUM(t.sell_amount), 0) AS sum_sell, \
-                COALESCE(SUM(t.fee_amount), 0) AS sum_fee, \
-                (COUNT(invalidations.*) > 0 OR o.cancellation_timestamp IS NOT NULL) AS invalidated \
-            FROM \
-                orders o \
-                LEFT OUTER JOIN trades t ON o.uid = t.order_uid \
-                LEFT OUTER JOIN invalidations ON o.uid = invalidations.order_uid \
+        #[rustfmt::skip]
+        const QUERY: &str = concatcp!(
+            "SELECT * FROM ( ",
+                "SELECT ", ORDERS_SELECT,
+                "FROM ", ORDERS_FROM,
+                "WHERE \
+                    o.valid_to >= $1 AND \
+                    ($2 IS NULL OR o.owner = $2) AND \
+                    ($3 IS NULL OR o.sell_token = $3) AND \
+                    ($4 IS NULL OR o.buy_token = $4) AND \
+                    ($5 IS NULL OR o.uid = $5) ",
+                "GROUP BY ", ORDERS_GROUP_BY,
+            ") AS unfiltered \
             WHERE \
-                o.valid_to >= $1 AND \
-                ($2 IS NULL OR o.owner = $2) AND \
-                ($3 IS NULL OR o.sell_token = $3) AND \
-                ($4 IS NULL OR o.buy_token = $4) AND \
-                ($5 IS NULL OR o.uid = $5) \
-            GROUP BY o.uid \
-        ) AS unfiltered \
-        WHERE
-            ($6 OR CASE kind \
-                WHEN 'sell' THEN sum_sell < sell_amount \
-                WHEN 'buy' THEN sum_buy < buy_amount \
-            END) AND \
-            ($7 OR NOT invalidated);";
-
+                ($6 OR CASE kind \
+                    WHEN 'sell' THEN sum_sell < sell_amount \
+                    WHEN 'buy' THEN sum_buy < buy_amount \
+                END) AND \
+                ($7 OR NOT invalidated);"
+        );
         sqlx::query_as(QUERY)
-            .bind(filter.min_valid_to)
+            .bind(filter.min_valid_to as i64)
             .bind(filter.owner.as_ref().map(|h160| h160.as_bytes()))
             .bind(filter.sell_token.as_ref().map(|h160| h160.as_bytes()))
             .bind(filter.buy_token.as_ref().map(|h160| h160.as_bytes()))
             .bind(filter.uid.as_ref().map(|uid| uid.0.as_ref()))
             .bind(!filter.exclude_fully_executed)
             .bind(!filter.exclude_invalidated)
+            .fetch(&self.pool)
+            .err_into()
+            .and_then(|row: OrdersQueryRow| async move { row.into_order() })
+            .try_collect()
+            .await
+    }
+
+    async fn single_order(&self, uid: &OrderUid) -> Result<Option<Order>> {
+        #[rustfmt::skip]
+        const QUERY: &str = concatcp!(
+            "SELECT ", ORDERS_SELECT,
+            "FROM ", ORDERS_FROM,
+            "WHERE o.uid = $1 ",
+            "GROUP BY ", ORDERS_GROUP_BY,
+        );
+        let order = sqlx::query_as(QUERY)
+            .bind(uid.0.as_ref())
+            .fetch_optional(&self.pool)
+            .await?;
+        order.map(OrdersQueryRow::into_order).transpose()
+    }
+
+    async fn solvable_orders(&self, min_valid_to: u32) -> Result<Vec<Order>> {
+        #[rustfmt::skip]
+        const QUERY: &str = concatcp!(
+            "SELECT * FROM ( ",
+                "SELECT ", ORDERS_SELECT,
+                "FROM ", ORDERS_FROM,
+                "WHERE o.valid_to >= $1 ",
+                "GROUP BY ", ORDERS_GROUP_BY,
+            ") AS unfiltered \
+            WHERE \
+                CASE kind \
+                    WHEN 'sell' THEN sum_sell < sell_amount \
+                    WHEN 'buy' THEN sum_buy < buy_amount \
+                END AND \
+                (NOT invalidated);"
+        );
+        sqlx::query_as(QUERY)
+            .bind(min_valid_to as i64)
             .fetch(&self.pool)
             .err_into()
             .and_then(|row: OrdersQueryRow| async move { row.into_order() })
@@ -342,6 +401,7 @@ impl OrdersQueryRow {
             status,
             settlement_contract: h160_from_vec(self.settlement_contract)?,
         };
+        let signing_scheme = self.signing_scheme.into();
         let order_creation = OrderCreation {
             sell_token: h160_from_vec(self.sell_token)?,
             buy_token: h160_from_vec(self.buy_token)?,
@@ -360,12 +420,12 @@ impl OrdersQueryRow {
             kind: self.kind.into(),
             partially_fillable: self.partially_fillable,
             signature: Signature::from_bytes(
+                signing_scheme,
                 &self
                     .signature
                     .try_into()
-                    .map_err(|_| anyhow!("signature has wrong length"))?,
+                    .map_err(|_| anyhow!("invalid signature"))?,
             ),
-            signing_scheme: self.signing_scheme.into(),
             sell_token_balance: self.sell_token_balance.into(),
             buy_token_balance: self.buy_token_balance.into(),
         };
@@ -597,8 +657,7 @@ mod tests {
                     fee_amount: 5.into(),
                     kind: OrderKind::Sell,
                     partially_fillable: true,
-                    signature: Default::default(),
-                    signing_scheme: *signing_scheme,
+                    signature: Signature::default_with(*signing_scheme),
                     sell_token_balance: SellTokenSource::Erc20,
                     buy_token_balance: BuyTokenDestination::Internal,
                 },
@@ -1002,5 +1061,121 @@ mod tests {
         .await
         .unwrap();
         assert!(!is_order_valid().await);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn postgres_solvable_orders() {
+        let db = Postgres::new("postgresql://").unwrap();
+        db.clear().await.unwrap();
+
+        let order = Order {
+            order_meta_data: Default::default(),
+            order_creation: OrderCreation {
+                kind: OrderKind::Sell,
+                sell_amount: 10.into(),
+                buy_amount: 100.into(),
+                valid_to: 3,
+                partially_fillable: true,
+                ..Default::default()
+            },
+        };
+        db.insert_order(&order).await.unwrap();
+
+        let get_order = |min_valid_to| {
+            let db = db.clone();
+            async move {
+                let orders = db.solvable_orders(min_valid_to).await.unwrap();
+                orders.into_iter().next()
+            }
+        };
+
+        // not solvable because valid to
+        assert!(get_order(4).await.is_none());
+
+        // not solvable because fully executed
+        db.append_events_(vec![(
+            EventIndex {
+                block_number: 0,
+                log_index: 0,
+            },
+            Event::Trade(Trade {
+                order_uid: order.order_meta_data.uid,
+                sell_amount_including_fee: 10.into(),
+                ..Default::default()
+            }),
+        )])
+        .await
+        .unwrap();
+        assert!(get_order(0).await.is_none());
+        db.replace_events_(0, Vec::new()).await.unwrap();
+
+        // not solvable because invalidated
+        db.append_events_(vec![(
+            EventIndex {
+                block_number: 0,
+                log_index: 0,
+            },
+            Event::Invalidation(Invalidation {
+                order_uid: order.order_meta_data.uid,
+            }),
+        )])
+        .await
+        .unwrap();
+        assert!(get_order(0).await.is_none());
+        db.replace_events_(0, Vec::new()).await.unwrap();
+
+        // solvable
+        assert!(get_order(3).await.is_some());
+
+        // still solvable because only partially filled
+        db.append_events_(vec![(
+            EventIndex {
+                block_number: 0,
+                log_index: 0,
+            },
+            Event::Trade(Trade {
+                order_uid: order.order_meta_data.uid,
+                sell_amount_including_fee: 5.into(),
+                ..Default::default()
+            }),
+        )])
+        .await
+        .unwrap();
+        assert!(get_order(3).await.is_some());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn postgres_single_order() {
+        let db = Postgres::new("postgresql://").unwrap();
+        db.clear().await.unwrap();
+
+        let order0 = Order {
+            order_meta_data: OrderMetaData {
+                uid: OrderUid([1u8; 56]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let order1 = Order {
+            order_meta_data: OrderMetaData {
+                uid: OrderUid([2u8; 56]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(order0.order_meta_data.uid != order1.order_meta_data.uid);
+        db.insert_order(&order0).await.unwrap();
+        db.insert_order(&order1).await.unwrap();
+
+        let get_order = |uid| {
+            let db = db.clone();
+            async move { db.single_order(uid).await.unwrap() }
+        };
+
+        assert!(get_order(&order0.order_meta_data.uid).await.is_some());
+        assert!(get_order(&order1.order_meta_data.uid).await.is_some());
+        assert!(get_order(&OrderUid::default()).await.is_none());
     }
 }
