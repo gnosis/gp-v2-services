@@ -167,14 +167,14 @@ mod tests {
         let pool_id = H256::from_low_u64_be(1);
         let token = H160::from_low_u64_be(1);
         stable_pool
-            .expect(BalancerV2StablePool::signatures().get_pool_id())
+            .expect_call(BalancerV2StablePool::signatures().get_pool_id())
             .returns(Bytes(pool_id.0));
         vault_contract
-            .expect(BalancerV2Vault::signatures().get_pool_tokens())
+            .expect_call(BalancerV2Vault::signatures().get_pool_tokens())
             .predicate((predicate::eq(Bytes(pool_id.0)),))
             .returns((vec![token], vec![], U256::zero()));
         stable_pool
-            .expect(BalancerV2StablePool::signatures().get_amplification_parameter())
+            .expect_call(BalancerV2StablePool::signatures().get_amplification_parameter())
             .returns((U256::one(), false, U256::zero()));
 
         let mut mock_token_info_fetcher = MockTokenInfoFetching::new();
@@ -232,14 +232,14 @@ mod tests {
         let tokens = vec![H160::from_low_u64_be(1), H160::from_low_u64_be(2)];
 
         stable_pool
-            .expect(BalancerV2StablePool::signatures().get_pool_id())
+            .expect_call(BalancerV2StablePool::signatures().get_pool_id())
             .returns(Bytes(pool_id.0));
         vault_contract
-            .expect(BalancerV2Vault::signatures().get_pool_tokens())
+            .expect_call(BalancerV2Vault::signatures().get_pool_tokens())
             .predicate((predicate::eq(Bytes(pool_id.0)),))
             .returns((tokens.clone(), vec![], U256::zero()));
         stable_pool
-            .expect(BalancerV2StablePool::signatures().get_amplification_parameter())
+            .expect_call(BalancerV2StablePool::signatures().get_amplification_parameter())
             .returns((U256::one(), false, U256::zero()));
 
         let mut token_info_fetcher = MockTokenInfoFetching::new();
