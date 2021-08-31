@@ -178,11 +178,22 @@ checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
 
 [[package]]
 name = "bigdecimal"
-version = "0.2.0"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc403c26e6b03005522e6e8053384c4e881dfe5b2bf041c0c2c49be33d64a539"
+checksum = "d1e50562e37200edf7c6c43e54a08e64a5553bfb59d9c297d5572512aa517256"
 dependencies = [
  "num-bigint 0.3.2",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
+name = "bigdecimal"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6aaf33151a6429fe9211d1b276eafdf70cdff28b071e76c0b0e1503221ea3744"
+dependencies = [
+ "num-bigint 0.4.0",
  "num-integer",
  "num-traits",
  "serde",
@@ -1574,7 +1585,7 @@ dependencies = [
 name = "model"
 version = "0.1.0"
 dependencies = [
- "bigdecimal",
+ "bigdecimal 0.3.0",
  "chrono",
  "derivative",
  "enum-utils",
@@ -1821,7 +1832,7 @@ dependencies = [
  "anyhow",
  "assert_approx_eq",
  "async-trait",
- "bigdecimal",
+ "bigdecimal 0.3.0",
  "chrono",
  "const_format",
  "contracts",
@@ -2651,7 +2662,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "bigdecimal",
+ "bigdecimal 0.3.0",
  "chrono",
  "contracts",
  "derivative",
@@ -2720,7 +2731,7 @@ dependencies = [
  "ahash",
  "atoi",
  "base64",
- "bigdecimal",
+ "bigdecimal 0.2.2",
  "bitflags",
  "byteorder",
  "bytes",
