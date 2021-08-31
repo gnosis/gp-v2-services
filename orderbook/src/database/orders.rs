@@ -169,13 +169,13 @@ const ORDERS_SELECT: &str = "\
     COALESCE(SUM(t.sell_amount), 0) AS sum_sell, \
     COALESCE(SUM(t.fee_amount), 0) AS sum_fee, \
     (COUNT(invalidations.*) > 0 OR o.cancellation_timestamp IS NOT NULL) AS invalidated, \
-    COALESCE((o.signing_scheme = 'presign' AND ( \
+    (o.signing_scheme = 'presign' AND COALESCE(( \
         SELECT (NOT p.signed) as unsigned \
         FROM presignature_events p \
         WHERE o.uid = p.order_uid \
         ORDER BY p.block_number DESC, p.log_index DESC \
         LIMIT 1 \
-    )), true) AS presignature_pending \
+    ), true)) AS presignature_pending \
 ";
 
 const ORDERS_FROM: &str = "\
