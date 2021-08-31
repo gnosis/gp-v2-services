@@ -30,7 +30,7 @@ struct Query {
     #[serde(default)]
     include_unsupported_tokens: bool,
     #[serde(default)]
-    include_signature_pending: bool,
+    include_presignature_pending: bool,
 }
 
 impl Query {
@@ -48,7 +48,7 @@ impl Query {
             exclude_invalidated: !self.include_invalidated,
             exclude_insufficient_balance: !self.include_insufficient_balance,
             exclude_unsupported_tokens: !self.include_unsupported_tokens,
-            exclude_presignature_pending: !self.include_signature_pending,
+            exclude_presignature_pending: !self.include_presignature_pending,
             uid: None,
         })
     }
@@ -114,7 +114,7 @@ mod tests {
                  &includeFullyExecuted=true\
                  &includeInvalidated=true\
                  &includeInsufficientBalance=true\
-                 &includeSignaturePending=true",
+                 &includePresignaturePending=true",
             owner, sell, buy
         );
         let request = request().path(path.as_str());

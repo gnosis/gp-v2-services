@@ -278,7 +278,7 @@ impl OrderStoring for Postgres {
                     WHEN 'sell' THEN sum_sell < sell_amount \
                     WHEN 'buy' THEN sum_buy < buy_amount \
                 END) AND \
-                ($7 OR NOT invalidated) AND
+                ($7 OR NOT invalidated) AND \
                 ($8 OR NOT presignature_pending);"
         );
         sqlx::query_as(QUERY)
@@ -387,7 +387,7 @@ impl OrdersQueryRow {
             return OrderStatus::Expired;
         }
         if self.presignature_pending {
-            return OrderStatus::SignaturePending;
+            return OrderStatus::PresignaturePending;
         }
         OrderStatus::Open
     }
@@ -534,7 +534,7 @@ mod tests {
             OrderStatus::Open
         );
 
-        // SignaturePending - without presignature
+        // PresignaturePending - without presignature
         assert_eq!(
             OrdersQueryRow {
                 signing_scheme: DbSigningScheme::PreSign,
@@ -542,7 +542,7 @@ mod tests {
                 ..order_row()
             }
             .calculate_status(),
-            OrderStatus::SignaturePending
+            OrderStatus::PresignaturePending
         );
 
         // Filled - sell (filled - 100%)
@@ -722,7 +722,7 @@ mod tests {
                         Utc,
                     ),
                     status: match signing_scheme {
-                        SigningScheme::PreSign => OrderStatus::SignaturePending,
+                        SigningScheme::PreSign => OrderStatus::PresignaturePending,
                         _ => OrderStatus::Open,
                     },
                     ..Default::default()
@@ -1370,7 +1370,7 @@ mod tests {
         };
 
         // "presign" order with no signature events has pending status.
-        assert_eq!(order_status().await, OrderStatus::SignaturePending);
+        assert_eq!(order_status().await, OrderStatus::PresignaturePending);
 
         // Inserting a presignature event changes the order status.
         insert_presignature(true).await;
@@ -1378,11 +1378,11 @@ mod tests {
 
         // "unsigning" the presignature makes the signature pending again.
         insert_presignature(false).await;
-        assert_eq!(order_status().await, OrderStatus::SignaturePending);
+        assert_eq!(order_status().await, OrderStatus::PresignaturePending);
 
         // Multiple "unsign" events keep the signature pending.
         insert_presignature(false).await;
-        assert_eq!(order_status().await, OrderStatus::SignaturePending);
+        assert_eq!(order_status().await, OrderStatus::PresignaturePending);
 
         // Re-signing sets the status back to open.
         insert_presignature(true).await;
