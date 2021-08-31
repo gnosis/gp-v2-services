@@ -43,6 +43,7 @@ pub struct StablePoolInfo {
 pub struct PoolInfoFetcher {
     pub web3: Web3,
     pub token_info_fetcher: Arc<dyn TokenInfoFetching>,
+    pub vault: BalancerV2Vault,
 }
 
 #[automock]
@@ -58,12 +59,11 @@ impl PoolInfoFetching for PoolInfoFetcher {
     async fn get_weighted_pool_data(&self, pool_address: H160) -> Result<WeightedPoolInfo> {
         let mut batch = CallBatch::new(self.web3.transport());
         let pool_contract = BalancerV2WeightedPool::at(&self.web3, pool_address);
-        // Need vault and pool_id before we can fetch tokens.
-        let vault = BalancerV2Vault::deployed(&self.web3).await?;
         let pool_id = H256::from(pool_contract.methods().get_pool_id().call().await?.0);
 
         // token_data and weight calls can be batched
-        let token_data = vault
+        let token_data = self
+            .vault
             .methods()
             .get_pool_tokens(Bytes(pool_id.0))
             .batch_call(&mut batch);
@@ -107,12 +107,11 @@ impl PoolInfoFetching for PoolInfoFetcher {
     async fn get_stable_pool_data(&self, pool_address: H160) -> Result<StablePoolInfo> {
         let mut batch = CallBatch::new(self.web3.transport());
         let pool_contract = BalancerV2StablePool::at(&self.web3, pool_address);
-        // Need vault and pool_id before we can fetch tokens.
-        let vault = BalancerV2Vault::deployed(&self.web3).await?;
         let pool_id = H256::from(pool_contract.methods().get_pool_id().call().await?.0);
 
         // token_data and weight calls can be batched
-        let token_data = vault
+        let token_data = self
+            .vault
             .methods()
             .get_pool_tokens(Bytes(pool_id.0))
             .batch_call(&mut batch);
@@ -158,10 +157,11 @@ mod tests {
 
     #[tokio::test]
     async fn get_stable_pool_data_err() {
-        let mock = Mock::new(1);
+        let mock = Mock::new(49);
         let web3 = mock.web3();
 
-        let vault = mock.deploy(BalancerV2Vault::raw_contract().abi.clone());
+        let vault_contract = mock.deploy(BalancerV2Vault::raw_contract().abi.clone());
+        let vault = BalancerV2Vault::at(&web3.clone(), vault_contract.address());
         let stable_pool = mock.deploy(BalancerV2StablePool::raw_contract().abi.clone());
 
         let pool_id = H256::from_low_u64_be(1);
@@ -169,7 +169,7 @@ mod tests {
         stable_pool
             .expect(BalancerV2StablePool::signatures().get_pool_id())
             .returns(Bytes(pool_id.0));
-        vault
+        vault_contract
             .expect(BalancerV2Vault::signatures().get_pool_tokens())
             .predicate((predicate::eq(Bytes(pool_id.0)),))
             .returns((vec![token], vec![], U256::zero()));
@@ -189,6 +189,7 @@ mod tests {
         let pool_info_fetcher = PoolInfoFetcher {
             web3: web3.clone(),
             token_info_fetcher: Arc::new(mock_token_info_fetcher),
+            vault: vault.clone(),
         };
 
         let pool_info = pool_info_fetcher
@@ -208,6 +209,7 @@ mod tests {
         let pool_info_fetcher = PoolInfoFetcher {
             web3,
             token_info_fetcher: Arc::new(mock_token_info_fetcher),
+            vault,
         };
 
         let pool_info = pool_info_fetcher
@@ -219,10 +221,11 @@ mod tests {
 
     #[tokio::test]
     async fn get_stable_pool_data_ok() {
-        let mock = Mock::new(1);
+        let mock = Mock::new(49);
         let web3 = mock.web3();
 
-        let vault = mock.deploy(BalancerV2Vault::raw_contract().abi.clone());
+        let vault_contract = mock.deploy(BalancerV2Vault::raw_contract().abi.clone());
+        let vault = BalancerV2Vault::at(&web3.clone(), vault_contract.address());
         let stable_pool = mock.deploy(BalancerV2StablePool::raw_contract().abi.clone());
 
         let pool_id = H256::from_low_u64_be(1);
@@ -231,7 +234,7 @@ mod tests {
         stable_pool
             .expect(BalancerV2StablePool::signatures().get_pool_id())
             .returns(Bytes(pool_id.0));
-        vault
+        vault_contract
             .expect(BalancerV2Vault::signatures().get_pool_tokens())
             .predicate((predicate::eq(Bytes(pool_id.0)),))
             .returns((tokens.clone(), vec![], U256::zero()));
@@ -252,12 +255,13 @@ mod tests {
         let pool_info_fetcher = PoolInfoFetcher {
             web3,
             token_info_fetcher: Arc::new(token_info_fetcher),
+            vault,
         };
 
         let pool_info_result = pool_info_fetcher
             .get_stable_pool_data(stable_pool.address())
             .await;
-
+        println!("{:?}", pool_info_result);
         assert!(pool_info_result.is_ok());
 
         let pool_info = pool_info_result.unwrap();
