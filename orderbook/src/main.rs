@@ -13,7 +13,7 @@ use orderbook::{
     serve_task, verify_deployed_contract_constants,
 };
 use primitive_types::H160;
-use prometheus::Registry;
+use shared::metrics::setup_metrics_registry;
 use shared::{
     bad_token::{
         cache::CachingDetector,
@@ -125,11 +125,10 @@ pub async fn database_metrics(metrics: Arc<Metrics>, database: Postgres) -> ! {
 async fn main() {
     let args = Arguments::from_args();
     shared::tracing::initialize(args.shared.log_filter.as_str());
-    args.shared.validate();
     tracing::info!("running order book with validated {:#?}", args);
 
-    let registry = Registry::default();
-    let metrics = Arc::new(Metrics::new(&registry).unwrap());
+    setup_metrics_registry(Some("gp_v2_api".into()), None);
+    let metrics = Arc::new(Metrics::new().unwrap());
 
     let client = shared::http_client(args.shared.http_timeout);
 
@@ -304,13 +303,14 @@ async fn main() {
         base_tokens,
         bad_token_detector.clone(),
         native_token.address(),
+        args.shared.amount_to_estimate_prices_with,
     ));
     let fee_calculator = Arc::new(EthAwareMinFeeCalculator::new(
         price_estimator.clone(),
         gas_price_estimator,
         native_token.address(),
         database.clone(),
-        args.shared.fee_subsidy_factor,
+        args.shared.fee_factor,
         bad_token_detector.clone(),
     ));
 
@@ -342,7 +342,6 @@ async fn main() {
         fee_calculator,
         price_estimator,
         args.bind_address,
-        registry,
         metrics.clone(),
     );
     let maintenance_task =
