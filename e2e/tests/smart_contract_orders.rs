@@ -141,7 +141,7 @@ async fn smart_contract_orders(web3: Web3) {
     };
 
     // Execute pre-sign transaction.
-    assert_eq!(order_status().await, OrderStatus::SignaturePending);
+    assert_eq!(order_status().await, OrderStatus::PresignaturePending);
     tx!(
         trader,
         gpv2.settlement
@@ -191,7 +191,7 @@ async fn smart_contract_orders(web3: Web3) {
         Duration::from_secs(30),
         None,
         block_stream,
-        0.0,
+        1.0,
         SolutionSubmitter {
             web3: web3.clone(),
             contract: gpv2.settlement.clone(),
