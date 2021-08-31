@@ -261,7 +261,6 @@ mod tests {
         let pool_info_result = pool_info_fetcher
             .get_stable_pool_data(stable_pool.address())
             .await;
-        println!("{:?}", pool_info_result);
         assert!(pool_info_result.is_ok());
 
         let pool_info = pool_info_result.unwrap();
