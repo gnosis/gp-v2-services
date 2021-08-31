@@ -50,8 +50,9 @@ pub struct Driver {
     market_makable_token_list: Option<TokenList>,
     inflight_trades: HashSet<OrderUid>,
     block_stream: CurrentBlockStream,
-    fee_subsidy_factor: f64,
+    fee_factor: f64,
     solution_submitter: SolutionSubmitter,
+    solve_id: u64,
 }
 impl Driver {
     #[allow(clippy::too_many_arguments)]
@@ -71,7 +72,7 @@ impl Driver {
         solver_time_limit: Duration,
         market_makable_token_list: Option<TokenList>,
         block_stream: CurrentBlockStream,
-        fee_subsidy_factor: f64,
+        fee_factor: f64,
         solution_submitter: SolutionSubmitter,
     ) -> Self {
         Self {
@@ -91,8 +92,9 @@ impl Driver {
             market_makable_token_list,
             inflight_trades: HashSet::new(),
             block_stream,
-            fee_subsidy_factor,
+            fee_factor,
             solution_submitter,
+            solve_id: 0,
         }
     }
 
@@ -114,6 +116,7 @@ impl Driver {
         gas_price: f64,
     ) -> Vec<(Arc<dyn Solver>, Result<Vec<Settlement>>)> {
         let deadline = Instant::now() + self.solver_time_limit;
+        let id = self.solve_id;
         join_all(self.solvers.iter().map(|solver| {
             let liquidity = liquidity.clone();
             let metrics = &self.metrics;
@@ -121,7 +124,7 @@ impl Driver {
                 let start_time = Instant::now();
                 let result = match tokio::time::timeout_at(
                     deadline.into(),
-                    solver.solve(liquidity, gas_price, deadline),
+                    solver.solve(id, liquidity, gas_price, deadline),
                 )
                 .await
                 {
@@ -270,19 +273,21 @@ impl Driver {
         };
 
         for (((solver, settlement), _previous_error), result) in errors.iter().zip(simulations) {
-            let error_at_earlier_block = match result {
-                Ok(()) => continue,
-                Err(err) => err,
-            };
-            tracing::error!(
-                "{} settlement simulation failed at submission and block {}:\n{:?}",
-                solver.name(),
-                current_block_during_liquidity_fetch,
-                error_at_earlier_block,
-            );
-            // This is an additional debug log so that the log message doesn't get too long as
-            // settlement information is recoverable through tenderly anyway.
-            tracing::warn!("settlement failure for: \n{:#?}", settlement);
+            if let Err(error_at_earlier_block) = result {
+                tracing::warn!(
+                    "{} settlement simulation failed at submission and block {}:\n{:?}",
+                    solver.name(),
+                    current_block_during_liquidity_fetch,
+                    error_at_earlier_block,
+                );
+                // split warning into separate logs so that the messages aren't too long.
+                tracing::warn!("settlement failure for: \n{:#?}", settlement);
+
+                self.metrics.settlement_simulation_failed(solver.name());
+            } else {
+                self.metrics
+                    .settlement_simulation_failed_on_latest(solver.name());
+            }
         }
     }
 
@@ -327,12 +332,17 @@ impl Driver {
                 let surplus = settlement.total_surplus(prices);
                 // Because of a potential fee discount, the solver fees may by themselves not be sufficient to make a solution economically viable (leading to a negative objective value)
                 // We therefore reverse apply the fee discount to simulate unsubsidized fees for ranking.
-                let unsubsidized_solver_fees = settlement.total_fees(prices) / BigRational::from_float(1f64 - self.fee_subsidy_factor).expect("Discount factor is not a rational");
+                let unsubsidized_solver_fees = settlement.total_fees(prices) / BigRational::from_float(self.fee_factor).expect("Discount factor is not a rational");
                 let gas_estimate = settlement_submission::estimate_gas(
                     &self.settlement_contract,
                     &settlement.clone().into(),
+                    solver.account().clone(),
                 )
                 .await
+                .map_err(|err| {
+                    tracing::error!("Failed to estimate gas for solver {}: {:?}", solver.name(), err);
+                    err
+                })
                 .ok()?;
                 let rated_settlement = RatedSettlement {
                     settlement,
@@ -385,7 +395,9 @@ impl Driver {
 
         let mut solver_settlements = Vec::new();
 
-        for (solver, settlements) in self.run_solvers(liquidity, gas_price_wei).await {
+        let run_solver_results = self.run_solvers(liquidity, gas_price_wei).await;
+        self.solve_id += 1;
+        for (solver, settlements) in run_solver_results {
             let name = solver.name();
 
             let mut settlements = match settlements {
@@ -430,9 +442,6 @@ impl Driver {
         );
         for (solver, _) in &settlements {
             self.metrics.settlement_simulation_succeeded(solver.name());
-        }
-        for ((solver, _), _) in &errors {
-            self.metrics.settlement_simulation_failed(solver.name());
         }
 
         let rated_settlements = self

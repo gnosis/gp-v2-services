@@ -1,7 +1,7 @@
 use ethcontract::Bytes;
 use model::{
     order::{BuyTokenDestination, OrderCreation, OrderKind, SellTokenSource},
-    SigningScheme,
+    signature::SigningScheme,
 };
 use primitive_types::{H160, U256};
 
@@ -62,9 +62,10 @@ fn order_flags(order: &OrderCreation) -> U256 {
         BuyTokenDestination::Internal => 0b1,
     } << 4;
     // The signing scheme is encoded as a 2 bits in position 5.
-    result |= match order.signing_scheme {
+    result |= match order.signature.scheme() {
         SigningScheme::Eip712 => 0b00,
         SigningScheme::EthSign => 0b01,
+        SigningScheme::PreSign => 0b11,
     } << 5;
     result.into()
 }
@@ -86,6 +87,7 @@ pub struct EncodedSettlement {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use model::signature::Signature;
 
     #[test]
     fn order_flag_permutations() {
@@ -96,7 +98,7 @@ mod tests {
                     partially_fillable: false,
                     sell_token_balance: SellTokenSource::Erc20,
                     buy_token_balance: BuyTokenDestination::Erc20,
-                    signing_scheme: SigningScheme::Eip712,
+                    signature: Signature::default_with(SigningScheme::Eip712),
                     ..Default::default()
                 },
                 // ......0 - sell order
@@ -112,7 +114,7 @@ mod tests {
                     partially_fillable: true,
                     sell_token_balance: SellTokenSource::Erc20,
                     buy_token_balance: BuyTokenDestination::Internal,
-                    signing_scheme: SigningScheme::Eip712,
+                    signature: Signature::default_with(SigningScheme::Eip712),
                     ..Default::default()
                 },
                 // ......0 - sell order
@@ -128,15 +130,15 @@ mod tests {
                     partially_fillable: false,
                     sell_token_balance: SellTokenSource::External,
                     buy_token_balance: BuyTokenDestination::Erc20,
-                    signing_scheme: SigningScheme::Eip712,
+                    signature: Signature::default_with(SigningScheme::PreSign),
                     ..Default::default()
                 },
                 // ......1 - buy order
                 // .....0. - fill-or-kill order
                 // ...10.. - Vault-external sell token balance
                 // ..0.... - ERC20 buy token balance
-                // 00..... - EIP-712 signing scheme
-                0b0001001,
+                // 11..... - Pre-sign signing scheme
+                0b1101001,
             ),
             (
                 OrderCreation {
@@ -144,7 +146,7 @@ mod tests {
                     partially_fillable: false,
                     sell_token_balance: SellTokenSource::Internal,
                     buy_token_balance: BuyTokenDestination::Erc20,
-                    signing_scheme: SigningScheme::EthSign,
+                    signature: Signature::default_with(SigningScheme::EthSign),
                     ..Default::default()
                 },
                 // ......0 - sell order
@@ -160,15 +162,15 @@ mod tests {
                     partially_fillable: true,
                     sell_token_balance: SellTokenSource::Internal,
                     buy_token_balance: BuyTokenDestination::Internal,
-                    signing_scheme: SigningScheme::EthSign,
+                    signature: Signature::default_with(SigningScheme::PreSign),
                     ..Default::default()
                 },
                 // ......1 - buy order
                 // .....1. - partially fillable order
                 // ...11.. - Vault-internal sell token balance
                 // ..1.... - Vault-internal buy token balance
-                // 01..... - Eth-sign signing scheme
-                0b0111111,
+                // 11..... - Pre-sign signing scheme
+                0b1111111,
             ),
         ] {
             assert_eq!(order_flags(order), U256::from(*flags));

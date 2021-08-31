@@ -6,8 +6,12 @@ use crate::{
 use anyhow::Result;
 use chrono::Utc;
 use contracts::WETH9;
-use model::order::{
-    BuyTokenDestination, OrderCancellation, OrderCreation, OrderCreationPayload, SellTokenSource,
+use model::{
+    order::{
+        BuyTokenDestination, OrderCancellation, OrderCreation, OrderCreationPayload,
+        SellTokenSource,
+    },
+    signature::SigningScheme,
 };
 use model::{
     order::{Order, OrderStatus, OrderUid, BUY_ETH_ADDRESS},
@@ -30,6 +34,7 @@ pub enum AddOrderResult {
     WrongOwner(H160),
     DuplicatedOrder,
     InvalidSignature,
+    UnsupportedSignature,
     Forbidden,
     MissingOrderData,
     InsufficientValidTo,
@@ -51,6 +56,7 @@ pub enum OrderCancellationResult {
     AlreadyCancelled,
     OrderFullyExecuted,
     OrderExpired,
+    OnChainOrder,
 }
 
 pub struct Orderbook {
@@ -110,6 +116,12 @@ impl Orderbook {
             return Ok(AddOrderResult::UnsupportedSellTokenSource(
                 order.sell_token_balance,
             ));
+        }
+        if !matches!(
+            order.signature.scheme(),
+            SigningScheme::Eip712 | SigningScheme::EthSign,
+        ) {
+            return Ok(AddOrderResult::UnsupportedSignature);
         }
 
         if has_same_buy_and_sell_token(&order, &self.native_token) {
@@ -211,39 +223,35 @@ impl Orderbook {
             None => return Ok(OrderCancellationResult::OrderNotFound),
         };
 
-        match cancellation.validate(&self.domain_separator) {
-            Some(signer) => {
-                match order.order_meta_data.status {
-                    OrderStatus::Fulfilled => Ok(OrderCancellationResult::OrderFullyExecuted),
-                    OrderStatus::Cancelled => Ok(OrderCancellationResult::AlreadyCancelled),
-                    OrderStatus::Expired => Ok(OrderCancellationResult::OrderExpired),
-                    OrderStatus::Open => {
-                        if signer == order.order_meta_data.owner {
-                            // order is already known to exist in DB at this point!
-                            self.database
-                                .cancel_order(&order.order_meta_data.uid, Utc::now())
-                                .await?;
-                            Ok(OrderCancellationResult::Cancelled)
-                        } else {
-                            Ok(OrderCancellationResult::WrongOwner)
-                        }
-                    }
-                }
+        match order.order_meta_data.status {
+            OrderStatus::SignaturePending => return Ok(OrderCancellationResult::OnChainOrder),
+            OrderStatus::Open if !order.order_creation.signature.scheme().is_ecdsa_scheme() => {
+                return Ok(OrderCancellationResult::OnChainOrder);
             }
-            None => Ok(OrderCancellationResult::InvalidSignature),
+            OrderStatus::Fulfilled => return Ok(OrderCancellationResult::OrderFullyExecuted),
+            OrderStatus::Cancelled => return Ok(OrderCancellationResult::AlreadyCancelled),
+            OrderStatus::Expired => return Ok(OrderCancellationResult::OrderExpired),
+            _ => {}
         }
+
+        match cancellation.validate(&self.domain_separator) {
+            Some(signer) if signer != order.order_meta_data.owner => {}
+            Some(_) => return Ok(OrderCancellationResult::WrongOwner),
+            None => return Ok(OrderCancellationResult::InvalidSignature),
+        };
+
+        // order is already known to exist in DB at this point, and signer is
+        // known to be correct!
+        self.database
+            .cancel_order(&order.order_meta_data.uid, Utc::now())
+            .await?;
+        Ok(OrderCancellationResult::Cancelled)
     }
 
     pub async fn get_orders(&self, filter: &OrderFilter) -> Result<Vec<Order>> {
         let mut orders = self.database.orders(filter).await?;
         let balances =
             track_and_get_balances(self.balance_fetcher.as_ref(), orders.as_slice()).await;
-        // The meaning of the available balance field is different depending on whether we return
-        // orders for the solver or the frontend. For the frontend (else case) balances are always
-        // actual balances but for the solver there is custom logic to decide which orders get
-        // prioritized when a user's balance is too small to cover all of their orders.
-        // We can hopefully resolve this when we have a custom struct for orders in the
-        // get_solver_orders route and a custom endpoint to query user balances for the frontend.
         set_available_balances(orders.as_mut_slice(), &balances);
         if filter.exclude_insufficient_balance {
             orders = solvable_orders(orders, &balances);
@@ -254,16 +262,27 @@ impl Orderbook {
         Ok(orders)
     }
 
-    pub async fn get_solvable_orders(&self) -> Result<Vec<Order>> {
-        let filter = OrderFilter {
-            min_valid_to: now_in_epoch_seconds() + self.min_order_validity_period.as_secs() as u32,
-            exclude_fully_executed: true,
-            exclude_invalidated: true,
-            exclude_insufficient_balance: true,
-            exclude_unsupported_tokens: true,
-            ..Default::default()
+    pub async fn get_order(&self, uid: &OrderUid) -> Result<Option<Order>> {
+        let mut order = match self.database.single_order(uid).await? {
+            Some(order) => order,
+            None => return Ok(None),
         };
-        self.get_orders(&filter).await
+        let balances =
+            track_and_get_balances(self.balance_fetcher.as_ref(), std::slice::from_ref(&order))
+                .await;
+        set_available_balances(std::slice::from_mut(&mut order), &balances);
+        Ok(Some(order))
+    }
+
+    pub async fn get_solvable_orders(&self) -> Result<Vec<Order>> {
+        let min_valid_to = now_in_epoch_seconds() + self.min_order_validity_period.as_secs() as u32;
+        let orders = self.database.solvable_orders(min_valid_to).await?;
+        let orders = filter_unsupported_tokens(orders, self.bad_token_detector.as_ref()).await?;
+        let balances =
+            track_and_get_balances(self.balance_fetcher.as_ref(), orders.as_slice()).await;
+        let mut orders = solvable_orders(orders, &balances);
+        set_available_balances(orders.as_mut_slice(), &balances);
+        Ok(orders)
     }
 }
 
