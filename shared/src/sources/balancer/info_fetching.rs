@@ -51,6 +51,7 @@ pub struct PoolInfoFetcher {
 pub trait PoolInfoFetching: Send + Sync {
     async fn get_weighted_pool_data(&self, pool_address: H160) -> Result<WeightedPoolInfo>;
     async fn get_stable_pool_data(&self, pool_address: H160) -> Result<StablePoolInfo>;
+    async fn get_scaling_exponents(&self, tokens: &[H160]) -> Result<Vec<u8>>;
 }
 
 #[async_trait::async_trait]
@@ -74,33 +75,18 @@ impl PoolInfoFetching for PoolInfoFetcher {
         batch.execute_all(MAX_BATCH_SIZE).await;
 
         let tokens = token_data.await?.0;
-
-        let token_decimals = self.token_info_fetcher.get_token_infos(&tokens).await;
-        let ordered_decimals = tokens
-            .iter()
-            .map(|token| token_decimals.get(token).and_then(|t| t.decimals))
-            .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| anyhow!("all token decimals required to build scaling factors"))?;
-        // Note that balancer does not support tokens with more than 18 decimals
-        // https://github.com/balancer-labs/balancer-v2-monorepo/blob/ce70f7663e0ac94b25ed60cb86faaa8199fd9e13/pkg/pool-utils/contracts/BasePool.sol#L497-L508
-        let scaling_exponents = ordered_decimals
-            .iter()
-            .map(|decimals| 18u8.checked_sub(*decimals))
-            .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| anyhow!("token with more than 18 decimals"))?;
-
-        let weights = raw_normalized_weights
-            .await?
-            .into_iter()
-            .map(Bfp::from_wei)
-            .collect();
+        let scaling_exponents = self.get_scaling_exponents(&tokens).await?;
         Ok(WeightedPoolInfo {
             common: CommonPoolInfo {
                 pool_id,
                 tokens,
                 scaling_exponents,
             },
-            weights,
+            weights: raw_normalized_weights
+                .await?
+                .into_iter()
+                .map(Bfp::from_wei)
+                .collect(),
         })
     }
 
@@ -122,21 +108,7 @@ impl PoolInfoFetching for PoolInfoFetcher {
         batch.execute_all(MAX_BATCH_SIZE).await;
 
         let tokens = token_data.await?.0;
-
-        let token_decimals = self.token_info_fetcher.get_token_infos(&tokens).await;
-        let ordered_decimals = tokens
-            .iter()
-            .map(|token| token_decimals.get(token).and_then(|t| t.decimals))
-            .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| anyhow!("all token decimals required to build scaling factors"))?;
-        // Note that balancer does not support tokens with more than 18 decimals
-        // https://github.com/balancer-labs/balancer-v2-monorepo/blob/ce70f7663e0ac94b25ed60cb86faaa8199fd9e13/pkg/pool-utils/contracts/BasePool.sol#L497-L508
-        let scaling_exponents = ordered_decimals
-            .iter()
-            .map(|decimals| 18u8.checked_sub(*decimals))
-            .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| anyhow!("token with more than 18 decimals"))?;
-
+        let scaling_exponents = self.get_scaling_exponents(&tokens).await?;
         Ok(StablePoolInfo {
             common: CommonPoolInfo {
                 pool_id,
@@ -145,6 +117,22 @@ impl PoolInfoFetching for PoolInfoFetcher {
             },
             amplification_parameter: amplification_parameter.await?.0,
         })
+    }
+
+    async fn get_scaling_exponents(&self, tokens: &[H160]) -> Result<Vec<u8>> {
+        let token_decimals = self.token_info_fetcher.get_token_infos(&tokens).await;
+        let ordered_decimals = tokens
+            .iter()
+            .map(|token| token_decimals.get(token).and_then(|t| t.decimals))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| anyhow!("all token decimals required to build scaling factors"))?;
+        // Note that balancer does not support tokens with more than 18 decimals
+        // https://github.com/balancer-labs/balancer-v2-monorepo/blob/ce70f7663e0ac94b25ed60cb86faaa8199fd9e13/pkg/pool-utils/contracts/BasePool.sol#L497-L508
+        ordered_decimals
+            .iter()
+            .map(|decimals| 18u8.checked_sub(*decimals))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| anyhow!("token with more than 18 decimals"))
     }
 }
 
@@ -400,5 +388,98 @@ mod tests {
         assert_eq!(pool_info.common.pool_id, pool_id);
         assert_eq!(pool_info.common.scaling_exponents, vec![0u8, 1u8]);
         assert_eq!(pool_info.amplification_parameter, U256::one());
+    }
+
+    #[tokio::test]
+    async fn get_scaling_exponents_err() {
+        let token = H160::from_low_u64_be(1);
+
+        let mock = Mock::new(49);
+        let web3 = mock.web3();
+        let vault_contract = mock.deploy(BalancerV2Vault::raw_contract().abi.clone());
+        let vault = BalancerV2Vault::at(&web3.clone(), vault_contract.address());
+
+        let mut seq = Sequence::new();
+        let mut mock_token_info_fetcher = MockTokenInfoFetching::new();
+        mock_token_info_fetcher
+            .expect_get_token_infos()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(move |_| {
+                hashmap! {
+                    token => TokenInfo { decimals: None },
+                    H160::zero() => TokenInfo { decimals: Some(1) }
+                }
+            });
+        mock_token_info_fetcher
+            .expect_get_token_infos()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(move |_| {
+                hashmap! {
+                    token => TokenInfo { decimals: Some(19) },
+                }
+            });
+
+        let pool_info_fetcher = PoolInfoFetcher {
+            web3,
+            token_info_fetcher: Arc::new(mock_token_info_fetcher),
+            vault,
+        };
+
+        assert_eq!(
+            pool_info_fetcher
+                .get_scaling_exponents(&[token])
+                .await
+                .unwrap_err()
+                .to_string(),
+            "all token decimals required to build scaling factors"
+        );
+
+        assert_eq!(
+            pool_info_fetcher
+                .get_scaling_exponents(&[token])
+                .await
+                .unwrap_err()
+                .to_string(),
+            "token with more than 18 decimals"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_scaling_exponents_ok() {
+        let tokens = [
+            H160::from_low_u64_be(1),
+            H160::from_low_u64_be(2),
+            H160::from_low_u64_be(3),
+        ];
+
+        let mock = Mock::new(49);
+        let web3 = mock.web3();
+        let vault_contract = mock.deploy(BalancerV2Vault::raw_contract().abi.clone());
+        let vault = BalancerV2Vault::at(&web3.clone(), vault_contract.address());
+
+        let mut mock_token_info_fetcher = MockTokenInfoFetching::new();
+        mock_token_info_fetcher
+            .expect_get_token_infos()
+            .return_once(move |_| {
+                hashmap! {
+                    tokens[0] => TokenInfo { decimals: Some(0) },
+                    tokens[1] => TokenInfo { decimals: Some(9) },
+                    tokens[2] => TokenInfo { decimals: Some(18) },
+                }
+            });
+
+        let pool_info_fetcher = PoolInfoFetcher {
+            web3,
+            token_info_fetcher: Arc::new(mock_token_info_fetcher),
+            vault,
+        };
+
+        let scaling_exponents = pool_info_fetcher
+            .get_scaling_exponents(&tokens)
+            .await
+            .unwrap();
+        assert_eq!(scaling_exponents, vec![18, 9, 0]);
     }
 }
