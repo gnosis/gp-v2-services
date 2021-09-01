@@ -120,7 +120,7 @@ impl PoolInfoFetching for PoolInfoFetcher {
     }
 
     async fn get_scaling_exponents(&self, tokens: &[H160]) -> Result<Vec<u8>> {
-        let token_decimals = self.token_info_fetcher.get_token_infos(&tokens).await;
+        let token_decimals = self.token_info_fetcher.get_token_infos(tokens).await;
         let ordered_decimals = tokens
             .iter()
             .map(|token| token_decimals.get(token).and_then(|t| t.decimals))
