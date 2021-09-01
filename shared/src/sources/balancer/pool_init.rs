@@ -20,6 +20,8 @@ use futures::stream::{self, StreamExt as _, TryStreamExt as _};
 use reqwest::Client;
 use std::sync::Arc;
 
+const STABLE_POOL_FACTORY_ADDRESS: H160 = addr!("c66ba2b6595d3613ccab350c886ace23866ede24");
+
 #[derive(Debug, Default, PartialEq)]
 pub struct BalancerRegisteredPools {
     pub weighted_pools: Vec<RegisteredWeightedPool>,
@@ -148,6 +150,9 @@ where
             fetched_block_number: pools.fetched_block_number,
         };
 
+        //TODO: remove when we support the stable pool factoru
+        pools.pools_by_factory.remove(&STABLE_POOL_FACTORY_ADDRESS);
+
         // Log an error in order to trigger an alert. This will allow us to make
         // sure we get notified if new pool factories are added that we don't
         // index for.
@@ -241,6 +246,7 @@ where
             fetched_block_number: pools.fetched_block_number,
         };
 
+        pools.pools_by_factory.remove(&STABLE_POOL_FACTORY_ADDRESS);
         // Log an error in order to trigger an alert. This will allow us to make
         // sure we get notified if new pool factories are added that we don't
         // index for.
@@ -311,6 +317,7 @@ async fn deployment_block(contract: &Contract, chain_id: u64) -> Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sources::balancer::info_fetching::CommonPoolInfo;
     use crate::sources::balancer::pool_storage::RegisteredStablePool;
     use crate::sources::balancer::{
         info_fetching::{MockPoolInfoFetching, WeightedPoolInfo},
@@ -527,15 +534,17 @@ mod tests {
         let mut pool_info = MockPoolInfoFetching::new();
         let mut seq = Sequence::new();
         pool_info
-            .expect_get_pool_data()
+            .expect_get_weighted_pool_data()
             .times(1)
             .in_sequence(&mut seq)
             .with(eq(H160([1; 20])))
             .returning(|_| {
                 Ok(WeightedPoolInfo {
-                    pool_id: H256([1; 32]),
-                    tokens: vec![H160([0x11; 20]), H160([0x22; 20])],
-                    scaling_exponents: vec![0, 0],
+                    common: CommonPoolInfo {
+                        pool_id: H256([1; 32]),
+                        tokens: vec![H160([0x11; 20]), H160([0x22; 20])],
+                        scaling_exponents: vec![0, 0],
+                    },
                     weights: vec![
                         Bfp::from_wei(500_000_000_000_000_000u128.into()),
                         Bfp::from_wei(500_000_000_000_000_000u128.into()),
@@ -543,15 +552,17 @@ mod tests {
                 })
             });
         pool_info
-            .expect_get_pool_data()
+            .expect_get_weighted_pool_data()
             .times(1)
             .in_sequence(&mut seq)
             .with(eq(H160([2; 20])))
             .returning(|_| {
                 Ok(WeightedPoolInfo {
-                    pool_id: H256([2; 32]),
-                    tokens: vec![H160([0x11; 20]), H160([0x33; 20]), H160([0x44; 20])],
-                    scaling_exponents: vec![0, 0, 0],
+                    common: CommonPoolInfo {
+                        pool_id: H256([2; 32]),
+                        tokens: vec![H160([0x11; 20]), H160([0x33; 20]), H160([0x44; 20])],
+                        scaling_exponents: vec![0, 0, 0],
+                    },
                     weights: vec![
                         Bfp::from_wei(500_000_000_000_000_000u128.into()),
                         Bfp::from_wei(250_000_000_000_000_000u128.into()),

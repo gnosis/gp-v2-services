@@ -48,9 +48,10 @@ impl Default for Order {
     }
 }
 
-#[derive(Eq, PartialEq, Clone, Debug, Deserialize, Serialize, Hash)]
+#[derive(Eq, PartialEq, Clone, Copy, Debug, Deserialize, Serialize, Hash)]
 #[serde(rename_all = "camelCase")]
 pub enum OrderStatus {
+    PresignaturePending,
     Open,
     Fulfilled,
     Cancelled,
@@ -162,7 +163,7 @@ impl OrderBuilder {
         signing_scheme: EcdsaSigningScheme,
         domain: &DomainSeparator,
         key: SecretKeyRef,
-    ) -> Result<Self, Self> {
+    ) -> Self {
         self.0.order_meta_data.owner = key.address();
         self.0.order_meta_data.uid = self.0.order_creation.uid(domain, &key.address());
         self.0.order_creation.signature = EcdsaSignature::sign(
@@ -172,7 +173,13 @@ impl OrderBuilder {
             key,
         )
         .to_signature(signing_scheme);
-        Ok(self)
+        self
+    }
+
+    pub fn with_presign(mut self, owner: H160) -> Self {
+        self.0.order_meta_data.owner = owner;
+        self.0.order_creation.signature = Signature::PreSign(owner);
+        self
     }
 
     pub fn build(self) -> Order {
@@ -417,6 +424,15 @@ impl Default for OrderMetaData {
 // uid as 56 bytes: 32 for orderDigest, 20 for ownerAddress and 4 for validTo
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub struct OrderUid(pub [u8; 56]);
+
+impl OrderUid {
+    /// Intended for easier uid creation in tests.
+    pub fn from_integer(i: u32) -> Self {
+        let mut uid = OrderUid::default();
+        uid.0[0..4].copy_from_slice(&i.to_le_bytes());
+        uid
+    }
+}
 
 impl FromStr for OrderUid {
     type Err = hex::FromHexError;
@@ -690,7 +706,7 @@ mod tests {
                 partially_fillable: false,
                 sell_token_balance: SellTokenSource::Erc20,
                 buy_token_balance: BuyTokenDestination::Erc20,
-                signature: Signature::from_bytes(*signing_scheme, signature),
+                signature: Signature::from_bytes(*signing_scheme, signature).unwrap(),
             };
 
             let owner = order
@@ -811,7 +827,6 @@ mod tests {
                 &DomainSeparator::default(),
                 SecretKeyRef::from(&sk),
             )
-            .unwrap()
             .build();
 
         let owner = order

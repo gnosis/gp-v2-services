@@ -6,8 +6,12 @@ use crate::{
 use anyhow::Result;
 use chrono::Utc;
 use contracts::WETH9;
-use model::order::{
-    BuyTokenDestination, OrderCancellation, OrderCreation, OrderCreationPayload, SellTokenSource,
+use model::{
+    order::{
+        BuyTokenDestination, OrderCancellation, OrderCreation, OrderCreationPayload,
+        SellTokenSource,
+    },
+    signature::SigningScheme,
 };
 use model::{
     order::{Order, OrderStatus, OrderUid, BUY_ETH_ADDRESS},
@@ -30,6 +34,7 @@ pub enum AddOrderResult {
     WrongOwner(H160),
     DuplicatedOrder,
     InvalidSignature,
+    UnsupportedSignature,
     Forbidden,
     MissingOrderData,
     InsufficientValidTo,
@@ -51,6 +56,7 @@ pub enum OrderCancellationResult {
     AlreadyCancelled,
     OrderFullyExecuted,
     OrderExpired,
+    OnChainOrder,
 }
 
 pub struct Orderbook {
@@ -64,6 +70,7 @@ pub struct Orderbook {
     code_fetcher: Box<dyn CodeFetching>,
     native_token: WETH9,
     banned_users: Vec<H160>,
+    enable_presign_orders: bool,
 }
 
 impl Orderbook {
@@ -79,6 +86,7 @@ impl Orderbook {
         code_fetcher: Box<dyn CodeFetching>,
         native_token: WETH9,
         banned_users: Vec<H160>,
+        enable_presign_orders: bool,
     ) -> Self {
         Self {
             domain_separator,
@@ -91,6 +99,7 @@ impl Orderbook {
             code_fetcher,
             native_token,
             banned_users,
+            enable_presign_orders,
         }
     }
 
@@ -110,6 +119,12 @@ impl Orderbook {
             return Ok(AddOrderResult::UnsupportedSellTokenSource(
                 order.sell_token_balance,
             ));
+        }
+        if !matches!(
+            (order.signature.scheme(), self.enable_presign_orders),
+            (SigningScheme::Eip712 | SigningScheme::EthSign, _) | (SigningScheme::PreSign, true)
+        ) {
+            return Ok(AddOrderResult::UnsupportedSignature);
         }
 
         if has_same_buy_and_sell_token(&order, &self.native_token) {
@@ -211,27 +226,29 @@ impl Orderbook {
             None => return Ok(OrderCancellationResult::OrderNotFound),
         };
 
-        match cancellation.validate(&self.domain_separator) {
-            Some(signer) => {
-                match order.order_meta_data.status {
-                    OrderStatus::Fulfilled => Ok(OrderCancellationResult::OrderFullyExecuted),
-                    OrderStatus::Cancelled => Ok(OrderCancellationResult::AlreadyCancelled),
-                    OrderStatus::Expired => Ok(OrderCancellationResult::OrderExpired),
-                    OrderStatus::Open => {
-                        if signer == order.order_meta_data.owner {
-                            // order is already known to exist in DB at this point!
-                            self.database
-                                .cancel_order(&order.order_meta_data.uid, Utc::now())
-                                .await?;
-                            Ok(OrderCancellationResult::Cancelled)
-                        } else {
-                            Ok(OrderCancellationResult::WrongOwner)
-                        }
-                    }
-                }
+        match order.order_meta_data.status {
+            OrderStatus::PresignaturePending => return Ok(OrderCancellationResult::OnChainOrder),
+            OrderStatus::Open if !order.order_creation.signature.scheme().is_ecdsa_scheme() => {
+                return Ok(OrderCancellationResult::OnChainOrder);
             }
-            None => Ok(OrderCancellationResult::InvalidSignature),
+            OrderStatus::Fulfilled => return Ok(OrderCancellationResult::OrderFullyExecuted),
+            OrderStatus::Cancelled => return Ok(OrderCancellationResult::AlreadyCancelled),
+            OrderStatus::Expired => return Ok(OrderCancellationResult::OrderExpired),
+            _ => {}
         }
+
+        match cancellation.validate(&self.domain_separator) {
+            Some(signer) if signer != order.order_meta_data.owner => {}
+            Some(_) => return Ok(OrderCancellationResult::WrongOwner),
+            None => return Ok(OrderCancellationResult::InvalidSignature),
+        };
+
+        // order is already known to exist in DB at this point, and signer is
+        // known to be correct!
+        self.database
+            .cancel_order(&order.order_meta_data.uid, Utc::now())
+            .await?;
+        Ok(OrderCancellationResult::Cancelled)
     }
 
     pub async fn get_orders(&self, filter: &OrderFilter) -> Result<Vec<Order>> {

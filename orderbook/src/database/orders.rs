@@ -17,11 +17,18 @@ use std::{borrow::Cow, convert::TryInto};
 pub trait OrderStoring: Send + Sync {
     async fn insert_order(&self, order: &Order) -> Result<(), InsertionError>;
     async fn cancel_order(&self, order_uid: &OrderUid, now: DateTime<Utc>) -> Result<()>;
+    // Legacy generic orders route that we are phasing out.
     async fn orders(&self, filter: &OrderFilter) -> Result<Vec<Order>>;
     async fn single_order(&self, uid: &OrderUid) -> Result<Option<Order>>;
+    /// Orders that are solvable: minimum valid to, not fully executed, not invalidated.
     async fn solvable_orders(&self, min_valid_to: u32) -> Result<Vec<Order>>;
-    // Soon:
-    // async fn user_orders(&self, filter, order_uid) -> Result<Vec<Order>>;
+    /// All orders of a single user ordered by creation date descending (newest orders first).
+    async fn user_orders(
+        &self,
+        owner: &H160,
+        offset: u64,
+        limit: Option<u64>,
+    ) -> Result<Vec<Order>>;
 }
 
 /// Any default value means that this field is unfiltered.
@@ -35,6 +42,7 @@ pub struct OrderFilter {
     pub exclude_invalidated: bool,
     pub exclude_insufficient_balance: bool,
     pub exclude_unsupported_tokens: bool,
+    pub exclude_presignature_pending: bool,
     pub uid: Option<OrderUid>,
 }
 
@@ -65,7 +73,7 @@ impl DbOrderKind {
 /// Source from which the sellAmount should be drawn upon order fulfilment
 #[derive(sqlx::Type)]
 #[sqlx(type_name = "SellTokenSource")]
-#[sqlx(rename_all = "snake_case")]
+#[sqlx(rename_all = "lowercase")]
 pub enum DbSellTokenSource {
     /// Direct ERC20 allowances to the Vault relayer contract
     Erc20,
@@ -95,7 +103,7 @@ impl DbSellTokenSource {
 /// Destination for which the buyAmount should be transferred to order's receiver to upon fulfilment
 #[derive(sqlx::Type)]
 #[sqlx(type_name = "BuyTokenDestination")]
-#[sqlx(rename_all = "snake_case")]
+#[sqlx(rename_all = "lowercase")]
 pub enum DbBuyTokenDestination {
     /// Pay trade proceeds as an ERC20 token transfer
     Erc20,
@@ -118,12 +126,13 @@ impl DbBuyTokenDestination {
     }
 }
 
-#[derive(sqlx::Type)]
+#[derive(PartialEq, sqlx::Type)]
 #[sqlx(type_name = "SigningScheme")]
 #[sqlx(rename_all = "lowercase")]
 pub enum DbSigningScheme {
     Eip712,
     EthSign,
+    PreSign,
 }
 
 impl DbSigningScheme {
@@ -131,6 +140,7 @@ impl DbSigningScheme {
         match signing_scheme {
             SigningScheme::Eip712 => Self::Eip712,
             SigningScheme::EthSign => Self::EthSign,
+            SigningScheme::PreSign => Self::PreSign,
         }
     }
 
@@ -138,6 +148,7 @@ impl DbSigningScheme {
         match self {
             Self::Eip712 => SigningScheme::Eip712,
             Self::EthSign => SigningScheme::EthSign,
+            Self::PreSign => SigningScheme::PreSign,
         }
     }
 }
@@ -157,24 +168,45 @@ impl From<sqlx::Error> for InsertionError {
 // When querying orders we have several specialized use cases working with their own filtering,
 // ordering, indexes. The parts that are shared between all queries are defined here so they can be
 // reused.
-
+//
+// It might feel more natural to use aggregate, joins and group by to calculate trade data and
+// invalidations. The problem with that is that it makes the query inefficient when we wish to limit
+// or order the selected orders because postgres is unable to understand the query well enough.
+// For example if we want to select orders ordered by creation timestamp on which there is an index
+// with offset and limit then the group by causes postgres to not use the index for the ordering. So
+// it will select orders, aggregate them with trades grouped by uid, sort by timestamp and only then
+// apply the limit. Instead we would like to apply the limit first and only then aggregate but I
+// could not get this to happen without writing the query using sub queries. A similar situation is
+// discussed in https://dba.stackexchange.com/questions/88988/postgres-error-column-must-appear-in-the-group-by-clause-or-be-used-in-an-aggre .
+//
+// To analyze queries take a look at https://www.postgresql.org/docs/13/using-explain.html . I also
+// find it useful to
+// SET enable_seqscan = false;
+// SET enable_nestloop = false;
+// to get a better idea of what indexes postgres *could* use even if it decides that with the
+// current amount of data this wouldn't be better.
 const ORDERS_SELECT: &str = "\
     o.uid, o.owner, o.creation_timestamp, o.sell_token, o.buy_token, o.sell_amount, o.buy_amount, \
     o.valid_to, o.app_data, o.fee_amount, o.kind, o.partially_fillable, o.signature, o.receiver, \
     o.signing_scheme, o.settlement_contract, o.sell_token_balance, o.buy_token_balance, \
-    COALESCE(SUM(t.buy_amount), 0) AS sum_buy, \
-    COALESCE(SUM(t.sell_amount), 0) AS sum_sell, \
-    COALESCE(SUM(t.fee_amount), 0) AS sum_fee, \
-    (COUNT(invalidations.*) > 0 OR o.cancellation_timestamp IS NOT NULL) AS invalidated \
+    (SELECT COALESCE(SUM(t.buy_amount), 0) FROM trades t WHERE t.order_uid = o.uid) AS sum_buy, \
+    (SELECT COALESCE(SUM(t.sell_amount), 0) FROM trades t WHERE t.order_uid = o.uid) AS sum_sell, \
+    (SELECT COALESCE(SUM(t.fee_amount), 0) FROM trades t WHERE t.order_uid = o.uid) AS sum_fee, \
+    (o.cancellation_timestamp IS NOT NULL OR \
+        (SELECT COUNT(*) FROM invalidations WHERE invalidations.order_uid = o.uid) > 0 \
+    ) AS invalidated, \
+    (o.signing_scheme = 'presign' AND COALESCE(( \
+        SELECT (NOT p.signed) as unsigned \
+        FROM presignature_events p \
+        WHERE o.uid = p.order_uid \
+        ORDER BY p.block_number DESC, p.log_index DESC \
+        LIMIT 1 \
+    ), true)) AS presignature_pending \
 ";
 
 const ORDERS_FROM: &str = "\
     orders o \
-    LEFT OUTER JOIN trades t ON o.uid = t.order_uid \
-    LEFT OUTER JOIN invalidations ON o.uid = invalidations.order_uid \
 ";
-
-const ORDERS_GROUP_BY: &str = "o.uid ";
 
 #[async_trait::async_trait]
 impl OrderStoring for Postgres {
@@ -203,7 +235,7 @@ impl OrderStoring for Postgres {
             .bind(u256_to_big_decimal(&order.order_creation.fee_amount))
             .bind(DbOrderKind::from(order.order_creation.kind))
             .bind(order.order_creation.partially_fillable)
-            .bind(order.order_creation.signature.to_bytes().as_ref())
+            .bind(&*order.order_creation.signature.to_bytes())
             .bind(DbSigningScheme::from(
                 order.order_creation.signature.scheme(),
             ))
@@ -260,14 +292,14 @@ impl OrderStoring for Postgres {
                     ($3 IS NULL OR o.sell_token = $3) AND \
                     ($4 IS NULL OR o.buy_token = $4) AND \
                     ($5 IS NULL OR o.uid = $5) ",
-                "GROUP BY ", ORDERS_GROUP_BY,
             ") AS unfiltered \
             WHERE \
                 ($6 OR CASE kind \
                     WHEN 'sell' THEN sum_sell < sell_amount \
                     WHEN 'buy' THEN sum_buy < buy_amount \
                 END) AND \
-                ($7 OR NOT invalidated);"
+                ($7 OR NOT invalidated) AND \
+                ($8 OR NOT presignature_pending);"
         );
         sqlx::query_as(QUERY)
             .bind(filter.min_valid_to as i64)
@@ -277,6 +309,7 @@ impl OrderStoring for Postgres {
             .bind(filter.uid.as_ref().map(|uid| uid.0.as_ref()))
             .bind(!filter.exclude_fully_executed)
             .bind(!filter.exclude_invalidated)
+            .bind(!filter.exclude_presignature_pending)
             .fetch(&self.pool)
             .err_into()
             .and_then(|row: OrdersQueryRow| async move { row.into_order() })
@@ -290,7 +323,6 @@ impl OrderStoring for Postgres {
             "SELECT ", ORDERS_SELECT,
             "FROM ", ORDERS_FROM,
             "WHERE o.uid = $1 ",
-            "GROUP BY ", ORDERS_GROUP_BY,
         );
         let order = sqlx::query_as(QUERY)
             .bind(uid.0.as_ref())
@@ -306,17 +338,50 @@ impl OrderStoring for Postgres {
                 "SELECT ", ORDERS_SELECT,
                 "FROM ", ORDERS_FROM,
                 "WHERE o.valid_to >= $1 ",
-                "GROUP BY ", ORDERS_GROUP_BY,
             ") AS unfiltered \
             WHERE \
                 CASE kind \
                     WHEN 'sell' THEN sum_sell < sell_amount \
                     WHEN 'buy' THEN sum_buy < buy_amount \
                 END AND \
-                (NOT invalidated);"
+                (NOT invalidated) AND \
+                (NOT presignature_pending);"
         );
         sqlx::query_as(QUERY)
             .bind(min_valid_to as i64)
+            .fetch(&self.pool)
+            .err_into()
+            .and_then(|row: OrdersQueryRow| async move { row.into_order() })
+            .try_collect()
+            .await
+    }
+
+    async fn user_orders(
+        &self,
+        owner: &H160,
+        offset: u64,
+        limit: Option<u64>,
+    ) -> Result<Vec<Order>> {
+        // As a future consideration for this query we could move from offset to an approach called
+        // keyset pagination where the offset is identified by "key" of the previous query. In our
+        // case that would be the lowest creation_timestamp. This way the database can start
+        // immediately at the offset through the index without enumerating the first N elements
+        // before as is the case with OFFSET.
+        // On the other hand that approach is less flexible so we will consider if we see that these
+        // queries are taking too long in practice.
+        #[rustfmt::skip]
+        const QUERY: &str = concatcp!(
+            "SELECT ", ORDERS_SELECT,
+            "FROM ", ORDERS_FROM,
+            "WHERE o.owner = $1 ",
+            "ORDER BY o.creation_timestamp DESC ",
+            "LIMIT $2 ",
+            "OFFSET $3 ",
+        );
+        sqlx::query_as(QUERY)
+            .bind(owner.as_bytes())
+            .bind(limit.map(|limit| limit as i64))
+            .bind(offset as i64)
             .fetch(&self.pool)
             .err_into()
             .and_then(|row: OrdersQueryRow| async move { row.into_order() })
@@ -349,6 +414,7 @@ struct OrdersQueryRow {
     settlement_contract: Vec<u8>,
     sell_token_balance: DbSellTokenSource,
     buy_token_balance: DbBuyTokenDestination,
+    presignature_pending: bool,
 }
 
 impl OrdersQueryRow {
@@ -370,6 +436,9 @@ impl OrdersQueryRow {
         }
         if self.valid_to < Utc::now().timestamp() {
             return OrderStatus::Expired;
+        }
+        if self.presignature_pending {
+            return OrderStatus::PresignaturePending;
         }
         OrderStatus::Open
     }
@@ -419,13 +488,7 @@ impl OrdersQueryRow {
                 .ok_or_else(|| anyhow!("buy_amount is not U256"))?,
             kind: self.kind.into(),
             partially_fillable: self.partially_fillable,
-            signature: Signature::from_bytes(
-                signing_scheme,
-                &self
-                    .signature
-                    .try_into()
-                    .map_err(|_| anyhow!("invalid signature"))?,
-            ),
+            signature: Signature::from_bytes(signing_scheme, &self.signature)?,
             sell_token_balance: self.sell_token_balance.into(),
             buy_token_balance: self.buy_token_balance.into(),
         };
@@ -461,14 +524,16 @@ mod tests {
     use primitive_types::U256;
     use shared::event_handling::EventIndex;
     use sqlx::Executor;
-    use std::collections::HashSet;
+    use std::{
+        collections::HashSet,
+        sync::atomic::{AtomicI64, Ordering},
+    };
 
     #[test]
     fn order_status() {
         let valid_to_timestamp = Utc::now() + Duration::days(1);
 
-        // Open - sell (filled - 0%)
-        let order_row = OrdersQueryRow {
+        let order_row = || OrdersQueryRow {
             uid: vec![0; 56],
             owner: vec![0; 20],
             creation_timestamp: Utc::now(),
@@ -491,130 +556,185 @@ mod tests {
             settlement_contract: vec![0; 20],
             sell_token_balance: DbSellTokenSource::External,
             buy_token_balance: DbBuyTokenDestination::Internal,
+            presignature_pending: false,
         };
 
-        assert_eq!(order_row.calculate_status(), OrderStatus::Open);
+        // Open - sell (filled - 0%)
+        assert_eq!(order_row().calculate_status(), OrderStatus::Open);
 
         // Open - sell (almost filled - 99.99%)
-        let order_row = OrdersQueryRow {
-            kind: DbOrderKind::Sell,
-            sell_amount: BigDecimal::from(10_000),
-            sum_sell: BigDecimal::from(9_999),
-            ..order_row
-        };
+        assert_eq!(
+            OrdersQueryRow {
+                kind: DbOrderKind::Sell,
+                sell_amount: BigDecimal::from(10_000),
+                sum_sell: BigDecimal::from(9_999),
+                ..order_row()
+            }
+            .calculate_status(),
+            OrderStatus::Open
+        );
 
-        assert_eq!(order_row.calculate_status(), OrderStatus::Open);
+        // Open - with presignature
+        assert_eq!(
+            OrdersQueryRow {
+                signing_scheme: DbSigningScheme::PreSign,
+                presignature_pending: false,
+                ..order_row()
+            }
+            .calculate_status(),
+            OrderStatus::Open
+        );
+
+        // PresignaturePending - without presignature
+        assert_eq!(
+            OrdersQueryRow {
+                signing_scheme: DbSigningScheme::PreSign,
+                presignature_pending: true,
+                ..order_row()
+            }
+            .calculate_status(),
+            OrderStatus::PresignaturePending
+        );
 
         // Filled - sell (filled - 100%)
-        let order_row = OrdersQueryRow {
-            kind: DbOrderKind::Sell,
-            sell_amount: BigDecimal::from(2),
-            sum_sell: BigDecimal::from(3),
-            sum_fee: BigDecimal::from(1),
-            ..order_row
-        };
-
-        assert_eq!(order_row.calculate_status(), OrderStatus::Fulfilled);
+        assert_eq!(
+            OrdersQueryRow {
+                kind: DbOrderKind::Sell,
+                sell_amount: BigDecimal::from(2),
+                sum_sell: BigDecimal::from(3),
+                sum_fee: BigDecimal::from(1),
+                ..order_row()
+            }
+            .calculate_status(),
+            OrderStatus::Fulfilled
+        );
 
         // Open - buy (filled - 0%)
-        let order_row = OrdersQueryRow {
-            kind: DbOrderKind::Buy,
-            buy_amount: BigDecimal::from(1),
-            sum_buy: BigDecimal::from(0),
-            ..order_row
-        };
-
-        assert_eq!(order_row.calculate_status(), OrderStatus::Open);
+        assert_eq!(
+            OrdersQueryRow {
+                kind: DbOrderKind::Buy,
+                buy_amount: BigDecimal::from(1),
+                sum_buy: BigDecimal::from(0),
+                ..order_row()
+            }
+            .calculate_status(),
+            OrderStatus::Open
+        );
 
         // Open - buy (almost filled - 99.99%)
-        let order_row = OrdersQueryRow {
-            kind: DbOrderKind::Buy,
-            buy_amount: BigDecimal::from(10_000),
-            sum_buy: BigDecimal::from(9_999),
-            ..order_row
-        };
-
-        assert_eq!(order_row.calculate_status(), OrderStatus::Open);
+        assert_eq!(
+            OrdersQueryRow {
+                kind: DbOrderKind::Buy,
+                buy_amount: BigDecimal::from(10_000),
+                sum_buy: BigDecimal::from(9_999),
+                ..order_row()
+            }
+            .calculate_status(),
+            OrderStatus::Open
+        );
 
         // Filled - buy (filled - 100%)
-        let order_row = OrdersQueryRow {
-            kind: DbOrderKind::Buy,
-            buy_amount: BigDecimal::from(1),
-            sum_buy: BigDecimal::from(1),
-            ..order_row
-        };
-
-        assert_eq!(order_row.calculate_status(), OrderStatus::Fulfilled);
+        assert_eq!(
+            OrdersQueryRow {
+                kind: DbOrderKind::Buy,
+                buy_amount: BigDecimal::from(1),
+                sum_buy: BigDecimal::from(1),
+                ..order_row()
+            }
+            .calculate_status(),
+            OrderStatus::Fulfilled
+        );
 
         // Cancelled - no fills - sell
-        let order_row = OrdersQueryRow {
-            sum_sell: BigDecimal::default(),
-            sum_buy: BigDecimal::default(),
-            invalidated: true,
-            ..order_row
-        };
-
-        assert_eq!(order_row.calculate_status(), OrderStatus::Cancelled);
+        assert_eq!(
+            OrdersQueryRow {
+                invalidated: true,
+                ..order_row()
+            }
+            .calculate_status(),
+            OrderStatus::Cancelled
+        );
 
         // Cancelled - partial fill - sell
-        let order_row = OrdersQueryRow {
-            kind: DbOrderKind::Sell,
-            sell_amount: BigDecimal::from(2),
-            sum_sell: BigDecimal::from(1),
-            sum_fee: BigDecimal::default(),
-            invalidated: true,
-            ..order_row
-        };
-
-        assert_eq!(order_row.calculate_status(), OrderStatus::Cancelled);
+        assert_eq!(
+            OrdersQueryRow {
+                kind: DbOrderKind::Sell,
+                sell_amount: BigDecimal::from(2),
+                sum_sell: BigDecimal::from(1),
+                sum_fee: BigDecimal::default(),
+                invalidated: true,
+                ..order_row()
+            }
+            .calculate_status(),
+            OrderStatus::Cancelled
+        );
 
         // Cancelled - partial fill - buy
-        let order_row = OrdersQueryRow {
-            kind: DbOrderKind::Buy,
-            buy_amount: BigDecimal::from(2),
-            sum_buy: BigDecimal::from(1),
-            invalidated: true,
-            ..order_row
-        };
-
-        assert_eq!(order_row.calculate_status(), OrderStatus::Cancelled);
+        assert_eq!(
+            OrdersQueryRow {
+                kind: DbOrderKind::Buy,
+                buy_amount: BigDecimal::from(2),
+                sum_buy: BigDecimal::from(1),
+                invalidated: true,
+                ..order_row()
+            }
+            .calculate_status(),
+            OrderStatus::Cancelled
+        );
 
         // Expired - no fills
         let valid_to_yesterday = Utc::now() - Duration::days(1);
 
-        let order_row = OrdersQueryRow {
-            sum_sell: BigDecimal::default(),
-            sum_buy: BigDecimal::default(),
-            invalidated: false,
-            valid_to: valid_to_yesterday.timestamp(),
-            ..order_row
-        };
-
-        assert_eq!(order_row.calculate_status(), OrderStatus::Expired);
+        assert_eq!(
+            OrdersQueryRow {
+                invalidated: false,
+                valid_to: valid_to_yesterday.timestamp(),
+                ..order_row()
+            }
+            .calculate_status(),
+            OrderStatus::Expired
+        );
 
         // Expired - partial fill - sell
-        let order_row = OrdersQueryRow {
-            kind: DbOrderKind::Sell,
-            sell_amount: BigDecimal::from(2),
-            sum_sell: BigDecimal::from(1),
-            invalidated: false,
-            valid_to: valid_to_yesterday.timestamp(),
-            ..order_row
-        };
-
-        assert_eq!(order_row.calculate_status(), OrderStatus::Expired);
+        assert_eq!(
+            OrdersQueryRow {
+                kind: DbOrderKind::Sell,
+                sell_amount: BigDecimal::from(2),
+                sum_sell: BigDecimal::from(1),
+                invalidated: false,
+                valid_to: valid_to_yesterday.timestamp(),
+                ..order_row()
+            }
+            .calculate_status(),
+            OrderStatus::Expired
+        );
 
         // Expired - partial fill - buy
-        let order_row = OrdersQueryRow {
-            kind: DbOrderKind::Buy,
-            buy_amount: BigDecimal::from(2),
-            sum_buy: BigDecimal::from(1),
-            invalidated: false,
-            valid_to: valid_to_yesterday.timestamp(),
-            ..order_row
-        };
+        assert_eq!(
+            OrdersQueryRow {
+                kind: DbOrderKind::Buy,
+                buy_amount: BigDecimal::from(2),
+                sum_buy: BigDecimal::from(1),
+                invalidated: false,
+                valid_to: valid_to_yesterday.timestamp(),
+                ..order_row()
+            }
+            .calculate_status(),
+            OrderStatus::Expired
+        );
 
-        assert_eq!(order_row.calculate_status(), OrderStatus::Expired);
+        // Expired - with pending presignature
+        assert_eq!(
+            OrdersQueryRow {
+                signing_scheme: DbSigningScheme::PreSign,
+                invalidated: false,
+                valid_to: valid_to_yesterday.timestamp(),
+                presignature_pending: true,
+                ..order_row()
+            }
+            .calculate_status(),
+            OrderStatus::Expired
+        );
     }
 
     #[tokio::test]
@@ -622,19 +742,27 @@ mod tests {
     async fn postgres_insert_same_order_twice_fails() {
         let db = Postgres::new("postgresql://").unwrap();
         db.clear().await.unwrap();
-        let order = Order::default();
+
+        let mut order = Order::default();
         db.insert_order(&order).await.unwrap();
-        match db.insert_order(&order).await {
-            Err(InsertionError::DuplicatedRecord) => (),
-            _ => panic!("Expecting DuplicatedRecord error"),
-        };
+
+        // Note that order UIDs do not care about the signing scheme.
+        order.order_creation.signature = Signature::default_with(SigningScheme::PreSign);
+        assert!(matches!(
+            db.insert_order(&order).await,
+            Err(InsertionError::DuplicatedRecord)
+        ));
     }
 
     #[tokio::test]
     #[ignore]
     async fn postgres_order_roundtrip() {
         let db = Postgres::new("postgresql://").unwrap();
-        for signing_scheme in &[SigningScheme::Eip712, SigningScheme::EthSign] {
+        for signing_scheme in &[
+            SigningScheme::Eip712,
+            SigningScheme::EthSign,
+            SigningScheme::PreSign,
+        ] {
             db.clear().await.unwrap();
             let filter = OrderFilter::default();
             assert!(db.orders(&filter).await.unwrap().is_empty());
@@ -644,6 +772,10 @@ mod tests {
                         NaiveDateTime::from_timestamp(1234567890, 0),
                         Utc,
                     ),
+                    status: match signing_scheme {
+                        SigningScheme::PreSign => OrderStatus::PresignaturePending,
+                        _ => OrderStatus::Open,
+                    },
                     ..Default::default()
                 },
                 order_creation: OrderCreation {
@@ -1065,6 +1197,64 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
+    async fn postgres_solvable_presign_orders() {
+        let db = Postgres::new("postgresql://").unwrap();
+        db.clear().await.unwrap();
+
+        let order = Order {
+            order_meta_data: Default::default(),
+            order_creation: OrderCreation {
+                sell_amount: 1.into(),
+                buy_amount: 1.into(),
+                signature: Signature::default_with(SigningScheme::PreSign),
+                ..Default::default()
+            },
+        };
+        db.insert_order(&order).await.unwrap();
+
+        let get_order = || {
+            let db = db.clone();
+            async move {
+                let orders = db.solvable_orders(0).await.unwrap();
+                orders.into_iter().next()
+            }
+        };
+        let pre_signature_event = |block_number: u64, signed: bool| {
+            let db = db.clone();
+            let events = vec![(
+                EventIndex {
+                    block_number,
+                    log_index: 0,
+                },
+                Event::PreSignature(PreSignature {
+                    owner: order.order_meta_data.owner,
+                    order_uid: order.order_meta_data.uid,
+                    signed,
+                }),
+            )];
+            async move {
+                db.append_events_(events).await.unwrap();
+            }
+        };
+
+        // not solvable because there is no presignature event.
+        assert!(get_order().await.is_none());
+
+        // solvable because once presignature event is observed.
+        pre_signature_event(0, true).await;
+        assert!(get_order().await.is_some());
+
+        // not solvable because "unsigned" presignature event.
+        pre_signature_event(1, false).await;
+        assert!(get_order().await.is_none());
+
+        // solvable once again because of new presignature event.
+        pre_signature_event(2, true).await;
+        assert!(get_order().await.is_some());
+    }
+
+    #[tokio::test]
+    #[ignore]
     async fn postgres_solvable_orders() {
         let db = Postgres::new("postgresql://").unwrap();
         db.clear().await.unwrap();
@@ -1177,5 +1367,248 @@ mod tests {
         assert!(get_order(&order0.order_meta_data.uid).await.is_some());
         assert!(get_order(&order1.order_meta_data.uid).await.is_some());
         assert!(get_order(&OrderUid::default()).await.is_none());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn postgres_presignature_status() {
+        let db = Postgres::new("postgresql://").unwrap();
+        db.clear().await.unwrap();
+        let uid = OrderUid([0u8; 56]);
+        let order = Order {
+            order_creation: OrderCreation {
+                signature: Signature::default_with(SigningScheme::PreSign),
+                ..Default::default()
+            },
+            order_meta_data: OrderMetaData {
+                uid,
+                ..Default::default()
+            },
+        };
+        db.insert_order(&order).await.unwrap();
+
+        let order_status = || async {
+            db.orders(&OrderFilter {
+                uid: Some(uid),
+                ..Default::default()
+            })
+            .await
+            .unwrap()[0]
+                .order_meta_data
+                .status
+        };
+        let block_number = AtomicI64::new(0);
+        let insert_presignature = |signed: bool| {
+            let db = db.clone();
+            let block_number = &block_number;
+            let owner = order.order_meta_data.owner.as_bytes();
+            async move {
+                sqlx::query(
+                    "INSERT INTO presignature_events \
+                    (block_number, log_index, owner, order_uid, signed) \
+                 VALUES \
+                    ($1, $2, $3, $4, $5)",
+                )
+                .bind(block_number.fetch_add(1, Ordering::SeqCst))
+                .bind(0i64)
+                .bind(owner)
+                .bind(&uid.0[..])
+                .bind(signed)
+                .execute(&db.pool)
+                .await
+                .unwrap();
+            }
+        };
+
+        // "presign" order with no signature events has pending status.
+        assert_eq!(order_status().await, OrderStatus::PresignaturePending);
+
+        // Inserting a presignature event changes the order status.
+        insert_presignature(true).await;
+        assert_eq!(order_status().await, OrderStatus::Open);
+
+        // "unsigning" the presignature makes the signature pending again.
+        insert_presignature(false).await;
+        assert_eq!(order_status().await, OrderStatus::PresignaturePending);
+
+        // Multiple "unsign" events keep the signature pending.
+        insert_presignature(false).await;
+        assert_eq!(order_status().await, OrderStatus::PresignaturePending);
+
+        // Re-signing sets the status back to open.
+        insert_presignature(true).await;
+        assert_eq!(order_status().await, OrderStatus::Open);
+
+        // Re-signing sets the status back to open.
+        insert_presignature(true).await;
+        assert_eq!(order_status().await, OrderStatus::Open);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn postgres_filter_presignature_pending() {
+        let db = Postgres::new("postgresql://").unwrap();
+        db.clear().await.unwrap();
+        let order_uid = |uid: u8| OrderUid([uid; 56]);
+        let order = |uid: u8, scheme: SigningScheme| Order {
+            order_creation: OrderCreation {
+                signature: Signature::default_with(scheme),
+                ..Default::default()
+            },
+            order_meta_data: OrderMetaData {
+                uid: order_uid(uid),
+                ..Default::default()
+            },
+        };
+
+        db.insert_order(&order(0, SigningScheme::Eip712))
+            .await
+            .unwrap();
+        for i in 1..=4 {
+            db.insert_order(&order(i, SigningScheme::PreSign))
+                .await
+                .unwrap();
+        }
+
+        // Insert:
+        // - No presignature events for order 0 (but its a ECDSA signed order)
+        // - A signed event for order 1.
+        // - No presignature events for order 2
+        // - A signed and unsigned event for order 3
+        // - A signed, unsigned and a final signed event for order 4
+        sqlx::query(
+            "INSERT INTO presignature_events \
+                 (block_number, log_index, owner, order_uid, signed) \
+             VALUES \
+                 (0, 0, $1, $2, true), \
+                 \
+                 (1, 0, $1, $3, true), \
+                 (2, 0, $1, $3, false),
+                 \
+                 (3, 0, $1, $4, true), \
+                 (4, 0, $1, $4, false), \
+                 (5, 0, $1, $4, true);",
+        )
+        .bind(&[0u8; 20][..])
+        .bind(&order_uid(1).0[..])
+        .bind(&order_uid(3).0[..])
+        .bind(&order_uid(4).0[..])
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        let query_order_uids = |filter: OrderFilter| {
+            let db = db.clone();
+            async move {
+                let mut order_uids = db
+                    .orders(&filter)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|order| order.order_meta_data.uid)
+                    .collect::<Vec<_>>();
+                // Make sure the list is sorted, this makes assertions easier.
+                order_uids.sort_by_key(|uid| uid.0);
+                order_uids
+            }
+        };
+
+        // With presignature pending filter, only orders that aren't waiting for
+        // a presignature event are returned.
+        let filtered_orders = query_order_uids(OrderFilter {
+            exclude_presignature_pending: true,
+            ..Default::default()
+        })
+        .await;
+        assert_eq!(
+            filtered_orders,
+            [
+                order_uid(0), // No presignature event, but its an ECDSA signed order
+                order_uid(1), // Pre-sign order with pre-sign event
+                order_uid(4), // Pre-sign order where the last event was a "signed" presignature
+            ]
+        );
+
+        // Without presignature pending filter, all orders are returned.
+        let unfiltered_orders = query_order_uids(OrderFilter {
+            exclude_presignature_pending: false,
+            ..Default::default()
+        })
+        .await;
+        assert_eq!(
+            unfiltered_orders,
+            (0..=4).map(order_uid).collect::<Vec<_>>(),
+        );
+    }
+
+    fn datetime(offset: u32) -> DateTime<Utc> {
+        DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(offset as i64, 0), Utc)
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn postgres_user_orders() {
+        let db = Postgres::new("postgresql://").unwrap();
+        db.clear().await.unwrap();
+
+        let owners: Vec<H160> = (0u64..2).map(H160::from_low_u64_le).collect();
+
+        let orders = [
+            Order {
+                order_meta_data: OrderMetaData {
+                    uid: OrderUid::from_integer(3),
+                    owner: owners[0],
+                    creation_date: datetime(3),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            Order {
+                order_meta_data: OrderMetaData {
+                    uid: OrderUid::from_integer(1),
+                    owner: owners[1],
+                    creation_date: datetime(2),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            Order {
+                order_meta_data: OrderMetaData {
+                    uid: OrderUid::from_integer(0),
+                    owner: owners[0],
+                    creation_date: datetime(1),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            Order {
+                order_meta_data: OrderMetaData {
+                    uid: OrderUid::from_integer(2),
+                    owner: owners[1],
+                    creation_date: datetime(0),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        ];
+
+        for order in &orders {
+            db.insert_order(order).await.unwrap();
+        }
+
+        let result = db.user_orders(&owners[0], 0, None).await.unwrap();
+        assert_eq!(result, vec![orders[0].clone(), orders[2].clone()]);
+
+        let result = db.user_orders(&owners[1], 0, None).await.unwrap();
+        assert_eq!(result, vec![orders[1].clone(), orders[3].clone()]);
+
+        let result = db.user_orders(&owners[0], 0, Some(1)).await.unwrap();
+        assert_eq!(result, vec![orders[0].clone()]);
+
+        let result = db.user_orders(&owners[0], 1, Some(1)).await.unwrap();
+        assert_eq!(result, vec![orders[2].clone()]);
+
+        let result = db.user_orders(&owners[0], 2, Some(1)).await.unwrap();
+        assert_eq!(result, vec![]);
     }
 }
