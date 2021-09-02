@@ -537,7 +537,13 @@ mod tests {
             Ok(RegisteredPools {
                 weighted_pools_by_factory: hashmap! {
                     weighted_factory => vec![RegisteredWeightedPool {
-                        common: common_pool(1),
+                        common: CommonPoolData {
+                            pool_id: H256([1; 32]),
+                            pool_address: H160([1; 20]),
+                            tokens: vec![],
+                            scaling_exponents: vec![],
+                            block_created: 42,
+                        },
                         normalized_weights: vec![],
                     }],
                     weighted_2token_factory => vec![RegisteredWeightedPool {
