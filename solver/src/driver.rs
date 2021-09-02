@@ -365,13 +365,12 @@ impl Driver {
         let current_block_during_liquidity_fetch =
             current_block::block_number(&self.block_stream.borrow())?;
 
-        let orders = self
-            .liquidity_collector
-            .get_orders(&self.inflight_trades)
-            .await?;
         let liquidity = self
             .liquidity_collector
-            .get_liquidity_for_orders(&orders, Block::Number(current_block_during_liquidity_fetch))
+            .get_liquidity(
+                Block::Number(current_block_during_liquidity_fetch),
+                &self.inflight_trades,
+            )
             .await?;
 
         let estimated_prices =
@@ -393,7 +392,6 @@ impl Driver {
 
         let auction = Auction {
             id: self.next_auction_id(),
-            orders,
             liquidity,
             gas_price: gas_price_wei,
             deadline: Instant::now() + self.solver_time_limit,

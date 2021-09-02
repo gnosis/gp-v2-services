@@ -275,7 +275,6 @@ impl HttpSolver {
 
     async fn prepare_model(
         &self,
-        limit_orders: Vec<LimitOrder>,
         liquidity: Vec<Liquidity>,
         gas_price: f64,
     ) -> Result<(BatchAuctionModel, SettlementContext)> {
@@ -323,7 +322,7 @@ impl HttpSolver {
         let price_estimates: HashMap<H160, Result<BigRational, _>> =
             tokens.iter().cloned().zip(price_estimates).collect();
 
-        let mut orders = split_liquidity(limit_orders, liquidity);
+        let mut orders = split_liquidity(liquidity);
 
         // For the solver to run correctly we need to be sure that there are no isolated islands of
         // tokens without connection between them.
@@ -449,13 +448,13 @@ impl HttpSolver {
 }
 
 fn split_liquidity(
-    mut limit_orders: Vec<LimitOrder>,
     liquidity: Vec<Liquidity>,
 ) -> (
     Vec<LimitOrder>,
     Vec<ConstantProductOrder>,
     Vec<WeightedProductOrder>,
 ) {
+    let mut limit_orders = Vec::new();
     let mut constant_product_orders = Vec::new();
     let mut weighted_product_orders = Vec::new();
     for order in liquidity {
@@ -515,7 +514,6 @@ impl Solver for HttpSolver {
         &self,
         Auction {
             id,
-            orders,
             liquidity,
             gas_price,
             deadline,
@@ -530,7 +528,7 @@ impl Solver for HttpSolver {
             match guard.as_mut() {
                 Some(data) if data.solve_id == id => (data.model.clone(), data.context.clone()),
                 _ => {
-                    let (model, context) = self.prepare_model(orders, liquidity, gas_price).await?;
+                    let (model, context) = self.prepare_model(liquidity, gas_price).await?;
                     *guard = Some(InstanceData {
                         solve_id: id,
                         model: model.clone(),
@@ -631,27 +629,26 @@ mod tests {
             Default::default(),
         );
         let base = |x: u128| x * 10u128.pow(18);
-        let limit_orders = vec![LimitOrder {
-            buy_token,
-            sell_token,
-            buy_amount: base(1).into(),
-            sell_amount: base(2).into(),
-            kind: OrderKind::Sell,
-            partially_fillable: false,
-            fee_amount: Default::default(),
-            settlement_handling: CapturingSettlementHandler::arc(),
-            id: "0".to_string(),
-        }];
-        let liquidity = vec![Liquidity::ConstantProduct(ConstantProductOrder {
-            tokens: TokenPair::new(buy_token, sell_token).unwrap(),
-            reserves: (base(100), base(100)),
-            fee: Ratio::new(0, 1),
-            settlement_handling: CapturingSettlementHandler::arc(),
-        })];
-        let (model, _context) = solver
-            .prepare_model(limit_orders, liquidity, gas_price)
-            .await
-            .unwrap();
+        let orders = vec![
+            Liquidity::Limit(LimitOrder {
+                buy_token,
+                sell_token,
+                buy_amount: base(1).into(),
+                sell_amount: base(2).into(),
+                kind: OrderKind::Sell,
+                partially_fillable: false,
+                fee_amount: Default::default(),
+                settlement_handling: CapturingSettlementHandler::arc(),
+                id: "0".to_string(),
+            }),
+            Liquidity::ConstantProduct(ConstantProductOrder {
+                tokens: TokenPair::new(buy_token, sell_token).unwrap(),
+                reserves: (base(100), base(100)),
+                fee: Ratio::new(0, 1),
+                settlement_handling: CapturingSettlementHandler::arc(),
+            }),
+        ];
+        let (model, _context) = solver.prepare_model(orders, gas_price).await.unwrap();
         let settled = solver
             .send(&model, Instant::now() + Duration::from_secs(1000))
             .await

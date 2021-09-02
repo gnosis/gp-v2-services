@@ -22,14 +22,15 @@ impl NaiveSolver {
 
 #[async_trait::async_trait]
 impl Solver for NaiveSolver {
-    async fn solve(
-        &self,
-        Auction {
-            orders, liquidity, ..
-        }: Auction,
-    ) -> Result<Vec<Settlement>> {
+    async fn solve(&self, Auction { liquidity, .. }: Auction) -> Result<Vec<Settlement>> {
         let uniswaps = extract_deepest_amm_liquidity(&liquidity);
-        Ok(settle(orders, uniswaps).await)
+        let limit_orders = liquidity
+            .into_iter()
+            .filter_map(|liquidity| match liquidity {
+                Liquidity::Limit(order) => Some(order),
+                _ => None,
+            });
+        Ok(settle(limit_orders, uniswaps).await)
     }
 
     fn account(&self) -> &Account {
@@ -42,7 +43,7 @@ impl Solver for NaiveSolver {
 }
 
 async fn settle(
-    orders: Vec<LimitOrder>,
+    orders: impl Iterator<Item = LimitOrder>,
     uniswaps: HashMap<TokenPair, ConstantProductOrder>,
 ) -> Vec<Settlement> {
     // The multi order solver matches as many orders as possible together with one uniswap pool.
@@ -68,9 +69,11 @@ fn settle_pair(
     multi_order_solver::solve(orders.into_iter(), uniswap)
 }
 
-fn organize_orders_by_token_pair(orders: Vec<LimitOrder>) -> HashMap<TokenPair, Vec<LimitOrder>> {
+fn organize_orders_by_token_pair(
+    orders: impl Iterator<Item = LimitOrder>,
+) -> HashMap<TokenPair, Vec<LimitOrder>> {
     let mut result = HashMap::<_, Vec<LimitOrder>>::new();
-    for (order, token_pair) in orders.into_iter().filter(usable_order).filter_map(|order| {
+    for (order, token_pair) in orders.filter(usable_order).filter_map(|order| {
         let pair = TokenPair::new(order.buy_token, order.sell_token)?;
         Some((order, pair))
     }) {
