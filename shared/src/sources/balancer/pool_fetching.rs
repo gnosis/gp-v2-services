@@ -165,15 +165,20 @@ impl WeightedPool {
         // We expect the weight and token indices are aligned with balances returned from EVM query.
         // If necessary we would also pass the tokens along with the query result,
         // use them and fetch the weights from the registry by token address.
-        for (i, balance) in balances.into_iter().enumerate() {
+        for (&token, balance, &scaling_exponent, &weight) in itertools::izip!(
+            &pool_data.common.tokens,
+            balances,
+            &pool_data.common.scaling_exponents,
+            &pool_data.normalized_weights
+        ) {
             reserves.insert(
-                pool_data.common.tokens[i],
+                token,
                 WeightedTokenState {
                     token_state: TokenState {
                         balance,
-                        scaling_exponent: pool_data.common.scaling_exponents[i],
+                        scaling_exponent,
                     },
-                    weight: pool_data.normalized_weights[i],
+                    weight,
                 },
             );
         }
@@ -209,12 +214,16 @@ impl StablePool {
         // We expect the weight and token indices are aligned with balances returned from EVM query.
         // If necessary we would also pass the tokens along with the query result,
         // use them and fetch the weights from the registry by token address.
-        for (i, balance) in balances.into_iter().enumerate() {
+        for (&token, balance, &scaling_exponent) in itertools::izip!(
+            &pool_data.common.tokens,
+            balances,
+            &pool_data.common.scaling_exponents,
+        ) {
             reserves.insert(
-                pool_data.tokens()[i],
+                token,
                 TokenState {
                     balance,
-                    scaling_exponent: pool_data.scaling_exponents()[i],
+                    scaling_exponent,
                 },
             );
         }
