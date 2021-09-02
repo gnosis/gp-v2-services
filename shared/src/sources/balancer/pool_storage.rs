@@ -45,6 +45,8 @@ use std::{
 pub trait PoolEvaluating {
     fn pool_id(&self) -> H256;
     fn tokens(&self) -> Vec<H160>;
+    fn pool_address(&self) -> H160;
+    fn scaling_exponents(&self) -> Vec<u8>;
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -81,6 +83,14 @@ impl PoolEvaluating for RegisteredWeightedPool {
     fn tokens(&self) -> Vec<H160> {
         self.common.tokens.clone()
     }
+
+    fn pool_address(&self) -> H160 {
+        self.common.pool_address
+    }
+
+    fn scaling_exponents(&self) -> Vec<u8> {
+        self.common.scaling_exponents.clone()
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -96,12 +106,25 @@ impl PoolEvaluating for RegisteredStablePool {
     fn tokens(&self) -> Vec<H160> {
         self.common.tokens.clone()
     }
+
+    fn pool_address(&self) -> H160 {
+        self.common.pool_address
+    }
+
+    fn scaling_exponents(&self) -> Vec<u8> {
+        self.common.scaling_exponents.clone()
+    }
 }
 
 #[derive(Copy, Debug, Deserialize, Clone, Eq, PartialEq)]
 pub enum PoolType {
     Stable,
     Weighted,
+}
+
+pub enum RegisteredPool {
+    Weighted(RegisteredWeightedPool),
+    Stable(RegisteredStablePool),
 }
 
 #[derive(Copy, Debug, Clone, Eq, PartialEq)]
