@@ -20,7 +20,7 @@ pub struct PoolReserveFetcher {
     web3: Web3,
 }
 
-pub trait WeightedPoolCacheMetrics: Send + Sync {
+pub trait BalancerPoolCacheMetrics: Send + Sync {
     fn pools_fetched(&self, cache_hits: usize, cache_misses: usize);
 }
 
@@ -36,7 +36,7 @@ impl PoolReserveFetcher {
 }
 
 pub type BalancerPoolReserveCache =
-    RecentBlockCache<H256, WeightedPool, PoolReserveFetcher, Arc<dyn WeightedPoolCacheMetrics>>;
+    RecentBlockCache<H256, WeightedPool, PoolReserveFetcher, Arc<dyn BalancerPoolCacheMetrics>>;
 
 impl CacheKey<WeightedPool> for H256 {
     fn first_ord() -> Self {
@@ -59,19 +59,19 @@ impl CacheFetching<H256, WeightedPool> for PoolReserveFetcher {
         let block = BlockId::Number(at_block.into());
         let futures = self
             .pool_registry
-            .get_pools(&pool_ids)
+            .get_weighted_pools(&pool_ids)
             .await
             .into_iter()
             .map(|registered_pool| {
                 let pool_contract =
-                    BalancerV2WeightedPool::at(&self.web3, registered_pool.pool_address);
+                    BalancerV2WeightedPool::at(&self.web3, registered_pool.common.pool_address);
                 let swap_fee = pool_contract
                     .get_swap_fee_percentage()
                     .block(block)
                     .batch_call(&mut batch);
                 let reserves = self
                     .vault
-                    .get_pool_tokens(Bytes(registered_pool.pool_id.0))
+                    .get_pool_tokens(Bytes(registered_pool.common.pool_id.0))
                     .block(block)
                     .batch_call(&mut batch);
                 let paused_state = pool_contract
@@ -80,7 +80,7 @@ impl CacheFetching<H256, WeightedPool> for PoolReserveFetcher {
                     .batch_call(&mut batch);
                 async move {
                     #[allow(clippy::eval_order_dependence)]
-                    FetchedWeightedPool {
+                    FetchedBalancerPool {
                         registered_pool,
                         swap_fee_percentage: swap_fee.await,
                         reserves: reserves.await,
@@ -100,14 +100,14 @@ impl CacheFetching<H256, WeightedPool> for PoolReserveFetcher {
     }
 }
 
-impl CacheMetrics for Arc<dyn WeightedPoolCacheMetrics> {
+impl CacheMetrics for Arc<dyn BalancerPoolCacheMetrics> {
     fn entries_fetched(&self, cache_hits: usize, cache_misses: usize) {
         self.pools_fetched(cache_hits, cache_misses)
     }
 }
 
 /// An internal temporary struct used during pool fetching to handle errors.
-struct FetchedWeightedPool {
+struct FetchedBalancerPool {
     registered_pool: RegisteredWeightedPool,
     swap_fee_percentage: Result<U256, MethodError>,
     /// getPoolTokens returns (Tokens, Balances, LastBlockUpdated)
@@ -116,7 +116,7 @@ struct FetchedWeightedPool {
     paused_state: Result<(bool, U256, U256), MethodError>,
 }
 
-fn handle_results(results: Vec<FetchedWeightedPool>) -> Result<Vec<WeightedPool>> {
+fn handle_results(results: Vec<FetchedBalancerPool>) -> Result<Vec<WeightedPool>> {
     results
         .into_iter()
         .try_fold(Vec::new(), |mut acc, fetched_pool| {
@@ -152,14 +152,14 @@ mod tests {
 
     #[test]
     fn pool_fetcher_forwards_node_error() {
-        let results = vec![FetchedWeightedPool {
+        let results = vec![FetchedBalancerPool {
             registered_pool: RegisteredWeightedPool::default(),
             swap_fee_percentage: Ok(U256::zero()),
             reserves: Err(ethcontract_error::testing_node_error()),
             paused_state: Ok((true, U256::zero(), U256::zero())),
         }];
         assert!(handle_results(results).is_err());
-        let results = vec![FetchedWeightedPool {
+        let results = vec![FetchedBalancerPool {
             registered_pool: RegisteredWeightedPool::default(),
             swap_fee_percentage: Err(ethcontract_error::testing_node_error()),
             reserves: Ok((vec![], vec![], U256::zero())),
@@ -171,19 +171,19 @@ mod tests {
     #[test]
     fn pool_fetcher_skips_contract_error() {
         let results = vec![
-            FetchedWeightedPool {
+            FetchedBalancerPool {
                 registered_pool: RegisteredWeightedPool::default(),
                 swap_fee_percentage: Ok(U256::zero()),
                 reserves: Err(ethcontract_error::testing_contract_error()),
                 paused_state: Ok((true, U256::zero(), U256::zero())),
             },
-            FetchedWeightedPool {
+            FetchedBalancerPool {
                 registered_pool: RegisteredWeightedPool::default(),
                 swap_fee_percentage: Err(ethcontract_error::testing_contract_error()),
                 reserves: Ok((vec![], vec![], U256::zero())),
                 paused_state: Ok((true, U256::zero(), U256::zero())),
             },
-            FetchedWeightedPool {
+            FetchedBalancerPool {
                 registered_pool: RegisteredWeightedPool::default(),
                 swap_fee_percentage: Ok(U256::zero()),
                 reserves: Ok((vec![], vec![], U256::zero())),
