@@ -2,7 +2,6 @@
 //! when given a collection of `TokenPair`. Each of these pools are then queried for
 //! their `token_balances` and the `PoolFetcher` returns all up-to-date `WeightedPools`
 //! to be consumed by external users (e.g. Price Estimators and Solvers).
-use crate::sources::balancer::pool_storage::PoolEvaluating;
 use crate::{
     current_block::CurrentBlockStream,
     maintenance::Maintaining,
@@ -228,8 +227,8 @@ impl StablePool {
             );
         }
         StablePool {
-            pool_id: pool_data.pool_id(),
-            pool_address: pool_data.pool_address(),
+            pool_id: pool_data.common.pool_id,
+            pool_address: pool_data.common.pool_address,
             swap_fee_percentage,
             amplification_parameter,
             reserves,
