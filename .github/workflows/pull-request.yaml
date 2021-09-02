@@ -47,7 +47,7 @@ jobs:
           psql -c "ALTER USER $USER PASSWORD '$FLYWAY_PASSWORD';"
           flyway-${FLYWAY_VERSION}/flyway -url="jdbc:postgresql:///" -user=$USER -locations="filesystem:database/sql/" migrate
         # Postgres tests should not run in parallel because they use the same database.
-      - run: cargo test --locked --all-features --jobs 1 postgres -- --ignored --test-threads 1
+      - run: cargo test --locked --all-features postgres -- --ignored --test-threads 1
       - run: |
           npm install ganache-cli
           node_modules/.bin/ganache-cli --networkId 5777 --gasLimit 10000000 --gasPrice 0  --defaultBalanceEther 1000000 &
