@@ -41,11 +41,6 @@ use std::{
     sync::Arc,
 };
 
-pub trait PoolEvaluating {
-    fn pool_id(&self) -> H256;
-    fn tokens(&self) -> Vec<H160>;
-}
-
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct CommonPoolData {
     pub pool_id: H256,
@@ -72,29 +67,9 @@ pub struct RegisteredWeightedPool {
     pub normalized_weights: Vec<Bfp>,
 }
 
-impl PoolEvaluating for RegisteredWeightedPool {
-    fn pool_id(&self) -> H256 {
-        self.common.pool_id
-    }
-
-    fn tokens(&self) -> Vec<H160> {
-        self.common.tokens.clone()
-    }
-}
-
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RegisteredStablePool {
     pub common: CommonPoolData,
-}
-
-impl PoolEvaluating for RegisteredStablePool {
-    fn pool_id(&self) -> H256 {
-        self.common.pool_id
-    }
-
-    fn tokens(&self) -> Vec<H160> {
-        self.common.tokens.clone()
-    }
 }
 
 #[derive(Copy, Debug, Clone, Eq, PartialEq)]
