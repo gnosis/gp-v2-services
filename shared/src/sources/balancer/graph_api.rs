@@ -115,6 +115,7 @@ impl BalancerSubgraphClient {
                         .expect("failed conversion to stable pool"),
                 )
         }
+
         Ok(RegisteredPools {
             fetched_block_number: block_number,
             weighted_pools_by_factory,
