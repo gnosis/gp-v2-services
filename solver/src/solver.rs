@@ -1,4 +1,7 @@
-use crate::{liquidity::Liquidity, settlement::Settlement};
+use crate::{
+    liquidity::{LimitOrder, Liquidity},
+    settlement::Settlement,
+};
 use anyhow::Result;
 use baseline_solver::BaselineSolver;
 use contracts::GPv2Settlement;
@@ -15,7 +18,7 @@ use single_order_solver::SingleOrderSolver;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 use structopt::clap::arg_enum;
 use zeroex_solver::ZeroExSolver;
@@ -42,13 +45,7 @@ pub trait Solver: 'static {
     /// order) so that they can be merged by the driver at its leisure.
     ///
     /// id identifies this instance of solving by the driver in which it invokes all solvers.
-    async fn solve(
-        &self,
-        id: u64,
-        orders: Vec<Liquidity>,
-        gas_price: f64,
-        deadline: Instant,
-    ) -> Result<Vec<Settlement>>;
+    async fn solve(&self, auction: Auction) -> Result<Vec<Settlement>>;
 
     /// Returns solver's account that should be used to submit settlements.
     fn account(&self) -> &Account;
@@ -57,6 +54,51 @@ pub trait Solver: 'static {
     ///
     /// This method is used for logging and metrics collection.
     fn name(&self) -> &'static str;
+}
+
+/// A batch auction for a solver to produce a settlement for.
+#[derive(Clone, Debug)]
+pub struct Auction {
+    /// An ID that idetifies a batch within a `Driver` isntance.
+    ///
+    /// Note that this ID is not unique across multiple instances of drivers,
+    /// in particular it cannot be used to uniquely identify batches across
+    /// service restarts.
+    pub id: u64,
+
+    /// The GPv2 orders to match.
+    pub orders: Vec<LimitOrder>,
+
+    /// The baseline on-chain liquidity that can be used by the solvers for
+    /// settling orders.
+    pub liquidity: Vec<Liquidity>,
+
+    /// The current gas price estimate.
+    pub gas_price: f64,
+
+    /// The deadline for computing a solution.
+    ///
+    /// This can be used internally for the solver to decide when to stop
+    /// trying to optimize the settlement. The caller is expected poll the solve
+    /// future at most until the deadline is reach, at which point the future
+    /// will be dropped.
+    pub deadline: Instant,
+}
+
+impl Default for Auction {
+    fn default() -> Self {
+        const SECONDS_IN_A_YEAR: u64 = 31_622_400;
+
+        // Not actually never, but good enough...
+        let never = Instant::now() + Duration::from_secs(SECONDS_IN_A_YEAR);
+        Self {
+            id: Default::default(),
+            orders: Default::default(),
+            liquidity: Default::default(),
+            gas_price: Default::default(),
+            deadline: never,
+        }
+    }
 }
 
 /// A vector of solvers.
@@ -229,17 +271,8 @@ impl SellVolumeFilteringSolver {
         }
     }
 
-    async fn filter_liquidity(&self, orders: Vec<Liquidity>) -> Vec<Liquidity> {
-        let sell_tokens: Vec<_> = orders
-            .iter()
-            .filter_map(|order| {
-                if let Liquidity::Limit(order) = order {
-                    Some(order.sell_token)
-                } else {
-                    None
-                }
-            })
-            .collect();
+    async fn filter_orders(&self, orders: Vec<LimitOrder>) -> Vec<LimitOrder> {
+        let sell_tokens: Vec<_> = orders.iter().map(|order| order.sell_token).collect();
         let prices: HashMap<_, _> = self
             .price_estimator
             .estimate_prices(&sell_tokens, self.denominator_token)
@@ -258,17 +291,13 @@ impl SellVolumeFilteringSolver {
         orders
             .into_iter()
             .filter(|order| {
-                if let Liquidity::Limit(order) = order {
-                    prices
-                        .get(&order.sell_token)
-                        .map(|price| {
-                            price * order.sell_amount.to_big_rational()
-                                > self.min_value.to_big_rational()
-                        })
-                        .unwrap_or(false)
-                } else {
-                    true
-                }
+                prices
+                    .get(&order.sell_token)
+                    .map(|price| {
+                        price * order.sell_amount.to_big_rational()
+                            > self.min_value.to_big_rational()
+                    })
+                    .unwrap_or(false)
             })
             .collect()
     }
@@ -276,22 +305,14 @@ impl SellVolumeFilteringSolver {
 
 #[async_trait::async_trait]
 impl Solver for SellVolumeFilteringSolver {
-    async fn solve(
-        &self,
-        id: u64,
-        orders: Vec<Liquidity>,
-        gas_price: f64,
-        deadline: Instant,
-    ) -> Result<Vec<Settlement>> {
-        let original_length = orders.len();
-        let filtered_liquidity = self.filter_liquidity(orders).await;
+    async fn solve(&self, mut auction: Auction) -> Result<Vec<Settlement>> {
+        let original_length = auction.orders.len();
+        auction.orders = self.filter_orders(auction.orders).await;
         tracing::info!(
             "Filtered {} orders because on insufficient volume",
-            original_length - filtered_liquidity.len()
+            original_length - auction.orders.len()
         );
-        self.inner
-            .solve(id, filtered_liquidity, gas_price, deadline)
-            .await
+        self.inner.solve(auction).await
     }
 
     fn account(&self) -> &Account {
@@ -316,13 +337,7 @@ mod tests {
     pub struct NoopSolver();
     #[async_trait::async_trait]
     impl Solver for NoopSolver {
-        async fn solve(
-            &self,
-            _: u64,
-            _: Vec<Liquidity>,
-            _: f64,
-            _: Instant,
-        ) -> Result<Vec<Settlement>> {
+        async fn solve(&self, _: Auction) -> Result<Vec<Settlement>> {
             Ok(Vec::new())
         }
 
@@ -338,26 +353,24 @@ mod tests {
     #[tokio::test]
     async fn test_filtering_solver_removes_limit_orders_with_too_little_volume() {
         let sell_token = H160::from_low_u64_be(1);
-        let liquidity = vec![
-            // Only filter limit orders
-            Liquidity::ConstantProduct(Default::default()),
+        let orders = vec![
             // Orders with high enough amount
-            Liquidity::Limit(LimitOrder {
+            LimitOrder {
                 sell_amount: 100_000.into(),
                 sell_token,
                 ..Default::default()
-            }),
-            Liquidity::Limit(LimitOrder {
+            },
+            LimitOrder {
                 sell_amount: 500_000.into(),
                 sell_token,
                 ..Default::default()
-            }),
+            },
             // Order with small amount
-            Liquidity::Limit(LimitOrder {
+            LimitOrder {
                 sell_amount: 100.into(),
                 sell_token,
                 ..Default::default()
-            }),
+            },
         ];
 
         let price_estimator = Arc::new(FakePriceEstimator(BigRational::from_integer(42.into())));
@@ -367,17 +380,17 @@ mod tests {
             denominator_token: H160::zero(),
             min_value: 400_000.into(),
         };
-        assert_eq!(solver.filter_liquidity(liquidity).await.len(), 3);
+        assert_eq!(solver.filter_orders(orders).await.len(), 3);
     }
 
     #[tokio::test]
     async fn test_filtering_solver_removes_orders_without_price_estimate() {
         let sell_token = H160::from_low_u64_be(1);
-        let liquidity = vec![Liquidity::Limit(LimitOrder {
+        let orders = vec![LimitOrder {
             sell_amount: 100_000.into(),
             sell_token,
             ..Default::default()
-        })];
+        }];
 
         let price_estimator = Arc::new(FailingPriceEstimator());
         let solver = SellVolumeFilteringSolver {
@@ -386,6 +399,6 @@ mod tests {
             denominator_token: H160::zero(),
             min_value: 0.into(),
         };
-        assert_eq!(solver.filter_liquidity(liquidity).await.len(), 0);
+        assert_eq!(solver.filter_orders(orders).await.len(), 0);
     }
 }
