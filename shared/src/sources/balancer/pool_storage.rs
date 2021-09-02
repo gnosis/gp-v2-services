@@ -836,7 +836,6 @@ mod tests {
 
         let new_event_block = new_event.0.block_number;
 
-        // All new data is included.
         assert_eq!(
             pool_store.stable_pools.get(&new_pool_id).unwrap(),
             &RegisteredStablePool {
@@ -849,6 +848,7 @@ mod tests {
                 }
             }
         );
+        // All new data is included.
 
         assert!(pool_store.pools_by_token.get(&new_token).is_some());
         assert_eq!(pool_store.last_event_block(), new_event_block);

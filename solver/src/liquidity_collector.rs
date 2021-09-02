@@ -45,7 +45,7 @@ impl LiquidityCollector {
                     .await
                     .context("failed to get Balancer liquidity")?
                     .into_iter()
-                    .map(Liquidity::WeightedProduct),
+                    .map(Liquidity::Balancer),
             );
         }
         tracing::debug!("got {} AMMs", amms.len());

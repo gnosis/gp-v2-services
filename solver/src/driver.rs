@@ -550,7 +550,7 @@ fn liquidity_with_price(
                 Liquidity::Limit(limit_order) => [limit_order.sell_token, limit_order.buy_token]
                     .iter()
                     .all(|token| prices.contains_key(token)),
-                Liquidity::ConstantProduct(_) | Liquidity::WeightedProduct(_) => true,
+                Liquidity::ConstantProduct(_) | Liquidity::Balancer(_) => true,
             });
     if !removed_orders.is_empty() {
         tracing::debug!(
