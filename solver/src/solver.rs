@@ -130,6 +130,7 @@ pub fn create(
     disabled_one_inch_protocols: Vec<String>,
     paraswap_slippage_bps: usize,
     disabled_paraswap_dexs: Vec<String>,
+    paraswap_partner_header_value: Option<String>,
     client: Client,
 ) -> Result<Solvers> {
     // Tiny helper function to help out with type inference. Otherwise, all
@@ -218,6 +219,7 @@ pub fn create(
                     paraswap_slippage_bps,
                     disabled_paraswap_dexs.clone(),
                     client.clone(),
+                    paraswap_partner_header_value.clone(),
                 ))),
             };
 
@@ -228,7 +230,6 @@ pub fn create(
                     solver.account().address()
                 )
             }
-
             solver
         })
         .collect()
