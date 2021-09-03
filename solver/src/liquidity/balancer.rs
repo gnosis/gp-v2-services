@@ -186,7 +186,6 @@ mod tests {
             WeightedTokenState,
         },
     };
-    use std::collections::HashMap;
 
     fn dummy_contracts() -> Arc<Contracts> {
         Arc::new(Contracts {

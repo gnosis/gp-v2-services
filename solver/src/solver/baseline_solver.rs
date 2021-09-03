@@ -174,7 +174,7 @@ impl BaselineSolver {
                                 }
                             }
                             BalancerOrder::Stable(_) => {
-                                // TODO - include stable pools here where ready.
+                                // TODO - https://github.com/gnosis/gp-v2-services/issues/1074
                                 tracing::warn!("Excluded stable pool from baseline solving.")
                             }
                         }
