@@ -175,7 +175,8 @@ impl BaselineSolver {
                                     // TODO - https://github.com/gnosis/gp-v2-services/issues/1074
                                     tracing::warn!("Excluded stable pool from baseline solving.")
                                 }
-                           }
+                            }
+                        }
                     }
                     amm_map
                 });

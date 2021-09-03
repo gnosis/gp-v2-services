@@ -355,7 +355,8 @@ impl HttpSolver {
         let price_estimates: HashMap<H160, Result<BigRational, _>> =
             tokens.iter().cloned().zip(price_estimates).collect();
 
-        let (constant_product_liquidity, weighted_product_liquidity) = split_liquidity(liquidity);
+        let (constant_product_liquidity, weighted_product_liquidity, stable_pool_liquidity) =
+            split_liquidity(liquidity);
 
         // For the solver to run correctly we need to be sure that there are no isolated islands of
         // tokens without connection between them.
@@ -367,8 +368,8 @@ impl HttpSolver {
         let limit_orders = self.map_orders_for_solver(orders);
         let constant_product_orders = self.map_amm_orders_for_solver(constant_product_liquidity);
         let weighted_product_orders = self.map_amm_orders_for_solver(weighted_product_liquidity);
-        // Expected to fail.
-        let stable_pool_orders = self.map_amm_orders_for_solver(orders.3);
+        let stable_pool_orders = self.map_amm_orders_for_solver(stable_pool_liquidity);
+
         let token_models = self.token_models(&token_infos, &price_estimates, &buffers);
         let order_models = self.order_models(&limit_orders, gas_price);
         let amm_models = self
@@ -486,7 +487,11 @@ impl HttpSolver {
 
 fn split_liquidity(
     liquidity: Vec<Liquidity>,
-) -> (Vec<ConstantProductOrder>, Vec<WeightedProductOrder>, Vec<StablePoolOrder>) {
+) -> (
+    Vec<ConstantProductOrder>,
+    Vec<WeightedProductOrder>,
+    Vec<StablePoolOrder>,
+) {
     let mut constant_product_orders = Vec::new();
     let mut weighted_product_orders = Vec::new();
     let mut stable_pool_orders = Vec::new();
@@ -499,7 +504,11 @@ fn split_liquidity(
             },
         }
     }
-    (constant_product_orders, weighted_product_orders, stable_pool_orders)
+    (
+        constant_product_orders,
+        weighted_product_orders,
+        stable_pool_orders,
+    )
 }
 
 // TODO: This currently does **NOT** consider balancer pools, but definitely should.
