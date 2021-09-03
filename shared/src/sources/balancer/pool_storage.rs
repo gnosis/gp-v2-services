@@ -43,10 +43,7 @@ use std::{
 };
 
 pub trait PoolEvaluating {
-    fn pool_id(&self) -> H256;
-    fn tokens(&self) -> Vec<H160>;
-    fn pool_address(&self) -> H160;
-    fn scaling_exponents(&self) -> Vec<u8>;
+    fn properties(&self) -> CommonPoolData;
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -76,20 +73,8 @@ pub struct RegisteredWeightedPool {
 }
 
 impl PoolEvaluating for RegisteredWeightedPool {
-    fn pool_id(&self) -> H256 {
-        self.common.pool_id
-    }
-
-    fn tokens(&self) -> Vec<H160> {
-        self.common.tokens.clone()
-    }
-
-    fn pool_address(&self) -> H160 {
-        self.common.pool_address
-    }
-
-    fn scaling_exponents(&self) -> Vec<u8> {
-        self.common.scaling_exponents.clone()
+    fn properties(&self) -> CommonPoolData {
+        self.common.clone()
     }
 }
 
@@ -99,20 +84,8 @@ pub struct RegisteredStablePool {
 }
 
 impl PoolEvaluating for RegisteredStablePool {
-    fn pool_id(&self) -> H256 {
-        self.common.pool_id
-    }
-
-    fn tokens(&self) -> Vec<H160> {
-        self.common.tokens.clone()
-    }
-
-    fn pool_address(&self) -> H160 {
-        self.common.pool_address
-    }
-
-    fn scaling_exponents(&self) -> Vec<u8> {
-        self.common.scaling_exponents.clone()
+    fn properties(&self) -> CommonPoolData {
+        self.common.clone()
     }
 }
 
@@ -379,13 +352,14 @@ fn construct_pool_map<T: PoolEvaluating>(
     initial_pools
         .into_iter()
         .map(|pool| {
-            for token in pool.tokens() {
+            let pool_data = pool.properties();
+            for token in pool_data.tokens {
                 pools_by_token
                     .entry(token)
                     .or_default()
-                    .insert(pool.pool_id());
+                    .insert(pool_data.pool_id);
             }
-            (pool.pool_id(), pool)
+            (pool_data.pool_id, pool)
         })
         .collect()
 }

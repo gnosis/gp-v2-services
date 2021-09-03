@@ -100,14 +100,14 @@ impl CacheFetching<H256, BalancerPool> for PoolReserveFetcher {
             .into_iter()
             .map(|registered_pool| {
                 let pool_contract =
-                    BalancerV2StablePool::at(&self.web3, registered_pool.pool_address());
+                    BalancerV2StablePool::at(&self.web3, registered_pool.properties().pool_address);
                 let swap_fee = pool_contract
                     .get_swap_fee_percentage()
                     .block(block)
                     .batch_call(&mut batch);
                 let reserves = self
                     .vault
-                    .get_pool_tokens(Bytes(registered_pool.pool_id().0))
+                    .get_pool_tokens(Bytes(registered_pool.properties().pool_id.0))
                     .block(block)
                     .batch_call(&mut batch);
                 let paused_state = pool_contract
