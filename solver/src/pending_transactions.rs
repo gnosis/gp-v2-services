@@ -6,6 +6,11 @@ use std::collections::HashMap;
 use web3::Transport;
 
 #[derive(Debug, Deserialize)]
+struct Block {
+    transactions: Vec<Transaction>,
+}
+
+#[derive(Debug, Deserialize)]
 struct TxPool {
     pending: HashMap<String, HashMap<String, Transaction>>,
     queued: HashMap<String, HashMap<String, Transaction>>,
@@ -36,18 +41,33 @@ pub enum Fee {
 
 // Get pending transactions from a mempool.
 pub async fn pending_transactions(transport: &DynTransport) -> Result<Vec<Transaction>> {
-    let response = transport
+    match transport
         .execute("txpool_content", Default::default())
         .await
-        .context("transport failed")?;
-    let txpool: TxPool = serde_json::from_value(response).context("deserialize failed")?;
+        .context("transport failed")
+    {
+        Ok(response) => {
+            let txpool: TxPool = serde_json::from_value(response).context("deserialize failed")?;
 
-    Ok(txpool
-        .pending
-        .into_values()
-        .flatten()
-        .map(|value| value.1)
-        .collect())
+            Ok(txpool
+                .pending
+                .into_values()
+                .flatten()
+                .map(|value| value.1)
+                .collect())
+        }
+        Err(_) => {
+            //fallback to eth_getBlockByNumber
+            let params = vec!["pending".into(), true.into()];
+            let response = transport
+                .execute("eth_getBlockByNumber", params)
+                .await
+                .context("transport failed")?;
+            let block: Block = serde_json::from_value(response).context("deserialize failed")?;
+
+            Ok(block.transactions)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -60,7 +80,10 @@ mod tests {
     #[ignore]
     async fn real_node() {
         let transport = DynTransport::new(
-            web3::transports::Http::new(&std::env::var("NODE_URL").unwrap()).unwrap(),
+            web3::transports::Http::new(
+                "https://mainnet.infura.io/v3/3b497b3196e4468288eb5c7f239e86f4",
+            )
+            .unwrap(),
         );
         let transactions = pending_transactions(&transport).await.unwrap();
         dbg!(transactions.as_slice());
