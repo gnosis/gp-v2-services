@@ -94,12 +94,12 @@ pub struct WeightedProductPoolParameters {
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StablePoolParameters {
     #[serde_as(as = "HashMap<_, DecimalU256>")]
     pub reserves: HashMap<H160, U256>,
-    #[serde(with = "u256_decimal")]
-    pub amplification_parameter: U256,
+    #[serde(with = "ratio_as_decimal")]
+    pub amplification_parameter: BigRational,
 }
 
 #[serde_as]
