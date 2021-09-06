@@ -291,7 +291,7 @@ mod tests {
                 },
             },
             fee: BigRational::new(3.into(), 1.into()),
-            amplification_parameter: U256::one(),
+            amplification_parameter: BigRational::from_integer(1.into()),
             settlement_handling: sp_amm_handler.clone(),
         };
         let stable_pool_orders = hashmap! { 0 => stable_pool_order };
@@ -434,7 +434,7 @@ mod tests {
                 },
             },
             fee: BigRational::new(1.into(), 1000.into()),
-            amplification_parameter: U256::one(),
+            amplification_parameter: BigRational::from_integer(1.into()),
             settlement_handling: CapturingSettlementHandler::arc(),
         };
         let stable_pool_orders = hashmap! { 0usize => stable_pool_order.clone() };

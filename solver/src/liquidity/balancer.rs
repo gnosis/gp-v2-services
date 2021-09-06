@@ -174,7 +174,6 @@ mod tests {
     use super::*;
     use crate::interactions::allowances::{Approval, MockAllowanceManaging};
     use crate::settlement::Interaction;
-    use ethcontract::U256;
     use maplit::{hashmap, hashset};
     use mockall::predicate::*;
     use model::TokenPair;
@@ -259,7 +258,7 @@ mod tests {
                 pool_id: H256([0x92; 32]),
                 pool_address: H160([0x92; 20]),
                 swap_fee_percentage: "0.002".parse().unwrap(),
-                amplification_parameter: U256::one(),
+                amplification_parameter: BigRational::from_integer(1.into()),
                 reserves: hashmap! {
                     H160([0x73; 20]) => TokenState {
                             balance: 1_000_000_000_000_000_000u128.into(),

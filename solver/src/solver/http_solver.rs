@@ -282,7 +282,7 @@ impl HttpSolver {
                 let pool_model = AmmModel {
                     parameters: AmmParameters::Stable(StablePoolParameters {
                         reserves,
-                        amplification_parameter: amm.amplification_parameter,
+                        amplification_parameter: amm.amplification_parameter.clone(),
                     }),
                     fee: amm.fee.clone(),
                     cost: CostModel {

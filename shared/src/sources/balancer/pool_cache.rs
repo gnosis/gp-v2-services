@@ -1,3 +1,4 @@
+use crate::conversions::U256Ext;
 use crate::sources::balancer::pool_storage::{PoolEvaluating, RegisteredPool};
 use crate::{
     recent_block_cache::{Block, CacheFetching, CacheKey, CacheMetrics, RecentBlockCache},
@@ -199,8 +200,8 @@ fn handle_results(results: Vec<FetchedBalancerPool>) -> Result<Vec<BalancerPool>
                             .amplification_parameter
                             .expect("Stable pools must have this set."),
                     )? {
-                        // We only keep the U256 value and disregard isUpdating and precision.
-                        Some(state) => state.0,
+                        // This is the ratio of amplification_parameter / precision.
+                        Some(state) => state.0.to_big_rational() / state.2.to_big_rational(),
                         None => return Ok(acc),
                     };
                     acc.push(BalancerPool::Stable(StablePool::new(

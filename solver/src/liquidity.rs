@@ -154,7 +154,7 @@ impl std::fmt::Debug for WeightedProductOrder {
 pub struct StablePoolOrder {
     pub reserves: HashMap<H160, TokenState>,
     pub fee: BigRational,
-    pub amplification_parameter: U256,
+    pub amplification_parameter: BigRational,
     pub settlement_handling: Arc<dyn SettlementHandling<Self>>,
 }
 
@@ -282,7 +282,7 @@ impl Default for StablePoolOrder {
         StablePoolOrder {
             reserves: Default::default(),
             fee: num::Zero::zero(),
-            amplification_parameter: Default::default(),
+            amplification_parameter: BigRational::from_integer(1.into()),
             settlement_handling: tests::CapturingSettlementHandler::arc(),
         }
     }
