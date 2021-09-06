@@ -80,10 +80,7 @@ mod tests {
     #[ignore]
     async fn real_node() {
         let transport = DynTransport::new(
-            web3::transports::Http::new(
-                "https://mainnet.infura.io/v3/3b497b3196e4468288eb5c7f239e86f4",
-            )
-            .unwrap(),
+            web3::transports::Http::new(&std::env::var("NODE_URL").unwrap()).unwrap(),
         );
         let transactions = pending_transactions(&transport).await.unwrap();
         dbg!(transactions.as_slice());
