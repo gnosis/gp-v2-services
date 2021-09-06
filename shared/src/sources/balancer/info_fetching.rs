@@ -110,11 +110,9 @@ impl PoolInfoFetching for PoolInfoFetcher {
 
         let tokens = token_data.await?.0;
         let scaling_exponents = self.get_scaling_exponents(&tokens).await?;
-        let amplification_data = amplification_parameter.await?;
-        let amplification_parameter = BigRational::new(
-            amplification_data.0.to_big_int(),
-            amplification_data.2.to_big_int(),
-        );
+        let (amplification_factor, _, precision) = amplification_parameter.await?;
+        let amplification_parameter =
+            BigRational::new(amplification_factor.to_big_int(), precision.to_big_int());
         Ok(StablePoolInfo {
             common: CommonPoolInfo {
                 pool_id,

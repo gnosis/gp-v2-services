@@ -15,6 +15,7 @@ use crate::{
 use anyhow::Result;
 use contracts::{BalancerV2StablePool, BalancerV2Vault, BalancerV2WeightedPool};
 use ethcontract::{batch::CallBatch, errors::MethodError, BlockId, Bytes, H160, H256, U256};
+use num::BigRational;
 use std::{collections::HashSet, sync::Arc};
 
 pub struct PoolReserveFetcher {
@@ -201,7 +202,10 @@ fn handle_results(results: Vec<FetchedBalancerPool>) -> Result<Vec<BalancerPool>
                             .expect("Stable pools must have this set."),
                     )? {
                         // This is the ratio of amplification_parameter / precision.
-                        Some(state) => state.0.to_big_rational() / state.2.to_big_rational(),
+                        Some((amplification_factor, _, precision)) => BigRational::new(
+                            amplification_factor.to_big_int(),
+                            precision.to_big_int(),
+                        ),
                         None => return Ok(acc),
                     };
                     acc.push(BalancerPool::Stable(StablePool::new(
