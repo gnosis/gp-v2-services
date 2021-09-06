@@ -44,13 +44,17 @@ pub async fn pending_transactions(transport: &DynTransport) -> Result<Vec<Transa
     match transport
         .execute("txpool_content", Default::default())
         .await
-        .context("transport failed")
     {
         Ok(response) => {
             let txpool: TxPool = serde_json::from_value(response).context("deserialize failed")?;
 
-            Ok(txpool
+            let transactions = txpool
                 .pending
+                .into_iter()
+                .chain(txpool.queued)
+                .collect::<HashMap<String, HashMap<String, Transaction>>>();
+
+            Ok(transactions
                 .into_values()
                 .flatten()
                 .map(|value| value.1)
