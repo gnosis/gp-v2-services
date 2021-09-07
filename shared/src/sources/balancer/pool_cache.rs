@@ -1,11 +1,13 @@
 use crate::conversions::U256Ext;
-use crate::sources::balancer::pool_storage::{PoolEvaluating, RegisteredPool};
+use crate::sources::balancer::pool_storage::{
+    PoolEvaluating, RegisteredStablePool, RegisteredWeightedPool,
+};
 use crate::{
     recent_block_cache::{Block, CacheFetching, CacheKey, CacheMetrics, RecentBlockCache},
     sources::{
         balancer::{
             event_handler::BalancerPoolRegistry,
-            pool_fetching::{BalancerPool, StablePool, WeightedPool},
+            pool_fetching::{BalancerPoolEvaluating, StablePool, WeightedPool},
             swap::fixed_point::Bfp,
         },
         uniswap::pool_fetching::{handle_contract_error, MAX_BATCH_SIZE},
@@ -39,26 +41,40 @@ impl PoolReserveFetcher {
     }
 }
 
-pub type BalancerPoolReserveCache =
-    RecentBlockCache<H256, BalancerPool, PoolReserveFetcher, Arc<dyn BalancerPoolCacheMetrics>>;
+pub type WeightedPoolReserveCache =
+    RecentBlockCache<H256, WeightedPool, PoolReserveFetcher, Arc<dyn BalancerPoolCacheMetrics>>;
 
-impl CacheKey<BalancerPool> for H256 {
+pub type StablePoolReserveCache =
+    RecentBlockCache<H256, StablePool, PoolReserveFetcher, Arc<dyn BalancerPoolCacheMetrics>>;
+
+impl CacheKey<StablePool> for H256 {
     fn first_ord() -> Self {
         H256::zero()
     }
 
-    fn for_value(value: &BalancerPool) -> Self {
-        value.pool_id()
+    fn for_value(value: &StablePool) -> Self {
+        value.properties().pool_id()
     }
 }
 
+impl CacheKey<WeightedPool> for H256 {
+    fn first_ord() -> Self {
+        H256::zero()
+    }
+
+    fn for_value(value: &WeightedPool) -> Self {
+        value.properties().pool_id()
+    }
+}
+
+
 #[async_trait::async_trait]
-impl CacheFetching<H256, BalancerPool> for PoolReserveFetcher {
+impl CacheFetching<H256, WeightedPool> for PoolReserveFetcher {
     async fn fetch_values(
         &self,
         pool_ids: HashSet<H256>,
         at_block: Block,
-    ) -> Result<Vec<BalancerPool>> {
+    ) -> Result<Vec<WeightedPool>> {
         let mut batch = CallBatch::new(self.web3.transport());
         let block = BlockId::Number(at_block.into());
         let weighted_pool_futures = self
@@ -84,18 +100,39 @@ impl CacheFetching<H256, BalancerPool> for PoolReserveFetcher {
                     .batch_call(&mut batch);
                 async move {
                     #[allow(clippy::eval_order_dependence)]
-                    FetchedBalancerPool {
-                        registered_pool: RegisteredPool::Weighted(registered_pool),
-                        swap_fee_percentage: swap_fee.await,
-                        reserves: reserves.await,
-                        paused_state: paused_state.await,
-                        /// This value is irrelevant for weighted pools
-                        amplification_parameter: None,
+                    FetchedWeightedPool {
+                        registered_pool,
+                        common: FetchedCommonPool {
+                            swap_fee_percentage: swap_fee.await,
+                            reserves: reserves.await,
+                            paused_state: paused_state.await,
+                        },
                     }
                 }
             })
             .collect::<Vec<_>>();
-        let stable_pool_futures = self
+        batch.execute_all(MAX_BATCH_SIZE).await;
+
+        let mut results: Vec<FetchedWeightedPool> = Vec::new();
+        for future in weighted_pool_futures {
+            // Batch has already been executed, so these awaits resolve immediately.
+            results.push(future.await);
+        }
+
+        FetchedBalancerPoolConverting::accumulate_handled_results(results)
+    }
+}
+
+#[async_trait::async_trait]
+impl CacheFetching<H256, StablePool> for PoolReserveFetcher {
+    async fn fetch_values(
+        &self,
+        pool_ids: HashSet<H256>,
+        at_block: Block,
+    ) -> Result<Vec<StablePool>> {
+        let mut batch = CallBatch::new(self.web3.transport());
+        let block = BlockId::Number(at_block.into());
+        let futures = self
             .pool_registry
             .get_stable_pools(&pool_ids)
             .await
@@ -122,29 +159,28 @@ impl CacheFetching<H256, BalancerPool> for PoolReserveFetcher {
                     .batch_call(&mut batch);
                 async move {
                     #[allow(clippy::eval_order_dependence)]
-                    FetchedBalancerPool {
-                        registered_pool: RegisteredPool::Stable(registered_pool),
-                        swap_fee_percentage: swap_fee.await,
-                        reserves: reserves.await,
-                        paused_state: paused_state.await,
-                        amplification_parameter: Some(amplification_parameter.await),
+                    FetchedStablePool {
+                        registered_pool,
+                        common: FetchedCommonPool {
+                            swap_fee_percentage: swap_fee.await,
+                            reserves: reserves.await,
+                            paused_state: paused_state.await,
+                        },
+                        amplification_parameter: amplification_parameter.await,
                     }
                 }
             })
             .collect::<Vec<_>>();
         batch.execute_all(MAX_BATCH_SIZE).await;
 
-        let mut results = Vec::new();
-        for future in weighted_pool_futures {
+        let mut results: Vec<FetchedStablePool> = Vec::new();
+
+        for future in futures {
             // Batch has already been executed, so these awaits resolve immediately.
             results.push(future.await);
         }
 
-        for future in stable_pool_futures {
-            // Batch has already been executed, so these awaits resolve immediately.
-            results.push(future.await);
-        }
-        handle_results(results)
+        FetchedBalancerPoolConverting::accumulate_handled_results(results)
     }
 }
 
@@ -154,71 +190,102 @@ impl CacheMetrics for Arc<dyn BalancerPoolCacheMetrics> {
     }
 }
 
-/// An internal temporary struct used during pool fetching to handle errors.
-struct FetchedBalancerPool {
-    registered_pool: RegisteredPool,
+struct FetchedCommonPool {
     swap_fee_percentage: Result<U256, MethodError>,
     /// getPoolTokens returns (Tokens, Balances, LastBlockUpdated)
     reserves: Result<(Vec<H160>, Vec<U256>, U256), MethodError>,
     /// getPausedState returns (paused, pauseWindowEndTime, bufferPeriodEndTime)
     paused_state: Result<(bool, U256, U256), MethodError>,
-    /// getAmplificationParameter returns (value, isUpdating, precision)
-    /// Only relevant for Stable Pools.
-    amplification_parameter: Option<Result<(U256, bool, U256), MethodError>>,
 }
 
-fn handle_results(results: Vec<FetchedBalancerPool>) -> Result<Vec<BalancerPool>> {
-    results
-        .into_iter()
-        .try_fold(Vec::new(), |mut acc, fetched_pool| {
-            let balances = match handle_contract_error(fetched_pool.reserves)? {
-                // We only keep the balances entry of reserves query.
-                Some(reserves) => reserves.1,
-                None => return Ok(acc),
-            };
-            let swap_fee_percentage = match handle_contract_error(fetched_pool.swap_fee_percentage)?
-            {
-                Some(swap_fee) => swap_fee,
-                None => return Ok(acc),
-            };
-            let paused = match handle_contract_error(fetched_pool.paused_state)? {
-                // We only keep the boolean value regarding whether the pool is paused or not
-                Some(state) => state.0,
-                None => return Ok(acc),
-            };
-            match fetched_pool.registered_pool {
-                RegisteredPool::Weighted(pool_data) => {
-                    acc.push(BalancerPool::Weighted(WeightedPool::new(
-                        pool_data,
-                        balances,
-                        Bfp::from_wei(swap_fee_percentage),
-                        paused,
-                    )));
+/// An internal temporary struct used during pool fetching to handle errors.
+struct FetchedWeightedPool {
+    registered_pool: RegisteredWeightedPool,
+    common: FetchedCommonPool,
+}
+
+struct FetchedStablePool {
+    registered_pool: RegisteredStablePool,
+    common: FetchedCommonPool,
+    /// getAmplificationParameter returns (value, isUpdating, precision)
+    amplification_parameter: Result<(U256, bool, U256), MethodError>,
+}
+
+pub trait FetchedBalancerPoolConverting<T> {
+    fn handle_results(self) -> Result<Option<T>>;
+    fn accumulate_handled_results(results: Vec<Box<Self>>) -> Result<Vec<T>> {
+        results
+            .into_iter()
+            .try_fold(Vec::new(), |mut acc, fetched_pool| {
+                match fetched_pool.handle_results()? {
+                    None => return Ok(acc),
+                    Some(pool) => acc.push(pool),
                 }
-                RegisteredPool::Stable(pool_data) => {
-                    let amplification_parameter = match handle_contract_error(
-                        fetched_pool
-                            .amplification_parameter
-                            .expect("Stable pools must have this set."),
-                    )? {
-                        // This is the ratio of amplification_parameter / precision.
-                        Some((amplification_factor, _, precision)) => BigRational::new(
-                            amplification_factor.to_big_int(),
-                            precision.to_big_int(),
-                        ),
-                        None => return Ok(acc),
-                    };
-                    acc.push(BalancerPool::Stable(StablePool::new(
-                        pool_data,
-                        balances,
-                        Bfp::from_wei(swap_fee_percentage),
-                        amplification_parameter,
-                        paused,
-                    )));
-                }
+                Ok(acc)
+            })
+    }
+}
+
+impl FetchedBalancerPoolConverting<CommonFetchedPoolInfo> for FetchedCommonPool {
+    fn handle_results(self) -> Result<Option<CommonFetchedPoolInfo>> {
+        let balances = match handle_contract_error(self.reserves)? {
+            // We only keep the balances entry of reserves query.
+            Some(reserves) => reserves.1,
+            None => return Ok(None),
+        };
+        let swap_fee_percentage = match handle_contract_error(self.swap_fee_percentage)? {
+            Some(swap_fee) => swap_fee,
+            None => return Ok(None),
+        };
+        let paused_state = match handle_contract_error(self.paused_state)? {
+            // We only keep the boolean value regarding whether the pool is paused or not
+            Some(state) => state.0,
+            None => return Ok(None),
+        };
+
+        Ok(Some((balances, swap_fee_percentage, paused_state)))
+    }
+}
+type CommonFetchedPoolInfo = (Vec<U256>, U256, bool);
+
+impl FetchedBalancerPoolConverting<StablePool> for FetchedStablePool {
+    fn handle_results(self) -> Result<Option<StablePool>> {
+        let (balances, swap_fee_percentage, paused) = match self.common.handle_results()? {
+            Some(results) => results,
+            None => None,
+        };
+
+        let amplification_parameter = match handle_contract_error(self.amplification_parameter)? {
+            // This is the ratio of amplification_parameter / precision.
+            Some((amplification_factor, _, precision)) => {
+                BigRational::new(amplification_factor.to_big_int(), precision.to_big_int())
             }
-            Ok(acc)
-        })
+            None => return Ok(None),
+        };
+        Ok(Some(StablePool::new(
+            self.registered_pool,
+            balances,
+            Bfp::from_wei(swap_fee_percentage),
+            amplification_parameter,
+            paused,
+        )))
+    }
+}
+
+impl FetchedBalancerPoolConverting<WeightedPool> for FetchedWeightedPool {
+    fn handle_results(self) -> Result<Option<WeightedPool>> {
+        let (balances, swap_fee_percentage, paused) = match self.common.handle_results()? {
+            Some(results) => results,
+            None => None,
+        };
+
+        Ok(Some(WeightedPool::new(
+            self.registered_pool,
+            balances,
+            Bfp::from_wei(swap_fee_percentage),
+            paused,
+        )))
+    }
 }
 
 #[cfg(test)]
