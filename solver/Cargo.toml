@@ -22,6 +22,7 @@ contracts = { path = "../contracts" }
 derivative = "2.2"
 derive_more = "0.99"
 ethcontract = { version = "0.15.1", default-features = false }
+ethcontract-mock = "0.15.3"
 futures = "0.3"
 gas-estimation = { git = "https://github.com/gnosis/gp-gas-estimation.git", tag = "v0.3.1", features = ["web3_"] }
 hex = "0.4"
@@ -39,13 +40,13 @@ rand = "0.8"
 reqwest = { version = "0.11", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde_with = { version = "1.9", default-features = false }
+serde_with = { version = "1.10", default-features = false }
 shared = { path = "../shared" }
 structopt = "0.3"
 strum = "0.20"
 strum_macros = "0.21"
 thiserror = "1.0"
-tokio = { version = "1.10", features = ["macros", "rt-multi-thread", "time", "test-util"] }
+tokio = { version = "1.11", features = ["macros", "rt-multi-thread", "time", "test-util"] }
 tracing = "0.1"
 transaction-retry = { git = "https://github.com/gnosis/gp-transaction-retry.git", tag = "v0.1.1" }
 web3 = { version = "0.17", default-features = false }

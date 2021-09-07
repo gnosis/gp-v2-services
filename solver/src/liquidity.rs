@@ -4,13 +4,13 @@ pub mod slippage;
 pub mod uniswap;
 
 use crate::settlement::SettlementEncoder;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 #[cfg(test)]
 use model::order::Order;
 use model::{order::OrderKind, TokenPair};
 use num::{rational::Ratio, BigRational};
 use primitive_types::{H160, U256};
-use shared::sources::balancer::pool_fetching::PoolTokenState;
+use shared::sources::balancer::pool_fetching::{TokenState, WeightedTokenState};
 #[cfg(test)]
 use shared::sources::uniswap::pool_fetching::Pool;
 use std::collections::HashMap;
@@ -20,9 +20,8 @@ use strum_macros::{AsStaticStr, EnumVariantNames};
 /// Defines the different types of liquidity our solvers support
 #[derive(Clone, AsStaticStr, EnumVariantNames, Debug)]
 pub enum Liquidity {
-    Limit(LimitOrder),
     ConstantProduct(ConstantProductOrder),
-    WeightedProduct(WeightedProductOrder),
+    Balancer(BalancerOrder),
 }
 
 /// A trait associating some liquidity model to how it is executed and encoded
@@ -140,35 +139,46 @@ impl From<Pool> for ConstantProductOrder {
 /// 2 sided weighted product automated market maker with weighted reserves and a trading fee (e.g. BalancerV2)
 #[derive(Clone)]
 pub struct WeightedProductOrder {
-    pub reserves: HashMap<H160, PoolTokenState>,
+    pub reserves: HashMap<H160, WeightedTokenState>,
     pub fee: BigRational,
     pub settlement_handling: Arc<dyn SettlementHandling<Self>>,
-}
-
-impl WeightedProductOrder {
-    pub fn token_pairs(&self) -> Vec<TokenPair> {
-        // The `HashMap` docs specifically say that we can't rely on ordering
-        // of keys (even across multiple calls). So, first collect all tokens
-        // into a collection and then use it to make the final enumeration with
-        // all token pair permutations.
-        let tokens = self.reserves.keys().collect::<Vec<_>>();
-        tokens
-            .iter()
-            .enumerate()
-            .flat_map(|(i, &token_a)| {
-                tokens[i + 1..].iter().map(move |&token_b| {
-                    TokenPair::new(*token_a, *token_b)
-                        .expect("unexpected duplicate key in hash map")
-                })
-            })
-            .collect()
-    }
 }
 
 impl std::fmt::Debug for WeightedProductOrder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Weighted Product AMM {:?}", self.reserves.keys())
     }
+}
+
+#[derive(Clone)]
+pub struct StablePoolOrder {
+    pub reserves: HashMap<H160, TokenState>,
+    pub fee: BigRational,
+    pub amplification_parameter: BigRational,
+    pub settlement_handling: Arc<dyn SettlementHandling<Self>>,
+}
+
+impl std::fmt::Debug for StablePoolOrder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Stable Pool AMM {:?}", self.reserves.keys())
+    }
+}
+
+pub fn token_pairs<T>(reserves: &HashMap<H160, T>) -> Vec<TokenPair> {
+    // The `HashMap` docs specifically say that we can't rely on ordering
+    // of keys (even across multiple calls). So, first collect all tokens
+    // into a collection and then use it to make the final enumeration with
+    // all token pair permutations.
+    let tokens = reserves.keys().collect::<Vec<_>>();
+    tokens
+        .iter()
+        .enumerate()
+        .flat_map(|(i, &token_a)| {
+            tokens[i + 1..].iter().map(move |&token_b| {
+                TokenPair::new(*token_a, *token_b).expect("unexpected duplicate key in hash map")
+            })
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -199,6 +209,50 @@ impl Settleable for WeightedProductOrder {
     }
 }
 
+impl Settleable for StablePoolOrder {
+    type Execution = AmmOrderExecution;
+
+    fn settlement_handling(&self) -> &dyn SettlementHandling<Self> {
+        &*self.settlement_handling
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum BalancerOrder {
+    Weighted(WeightedProductOrder),
+    Stable(StablePoolOrder),
+}
+
+impl BalancerOrder {
+    pub fn tokens(&self) -> Vec<H160> {
+        match self {
+            BalancerOrder::Weighted(order) => order.reserves.keys().cloned().collect(),
+            BalancerOrder::Stable(order) => order.reserves.keys().cloned().collect(),
+        }
+    }
+
+    pub fn fee(&self) -> BigRational {
+        match self {
+            BalancerOrder::Weighted(order) => order.fee.clone(),
+            BalancerOrder::Stable(order) => order.fee.clone(),
+        }
+    }
+
+    pub fn try_as_weighted(&self) -> Result<WeightedProductOrder> {
+        match self {
+            BalancerOrder::Weighted(wp_order) => Ok(wp_order.clone()),
+            BalancerOrder::Stable(_) => Err(anyhow!("Not a weighted pool order")),
+        }
+    }
+
+    pub fn try_as_stable(&self) -> Result<StablePoolOrder> {
+        match self {
+            BalancerOrder::Stable(st_order) => Ok(st_order.clone()),
+            BalancerOrder::Weighted(_) => Err(anyhow!("Not a stable pool order")),
+        }
+    }
+}
+
 #[cfg(test)]
 impl Default for ConstantProductOrder {
     fn default() -> Self {
@@ -217,6 +271,18 @@ impl Default for WeightedProductOrder {
         WeightedProductOrder {
             reserves: Default::default(),
             fee: num::Zero::zero(),
+            settlement_handling: tests::CapturingSettlementHandler::arc(),
+        }
+    }
+}
+
+#[cfg(test)]
+impl Default for StablePoolOrder {
+    fn default() -> Self {
+        StablePoolOrder {
+            reserves: Default::default(),
+            fee: num::Zero::zero(),
+            amplification_parameter: BigRational::from_integer(1.into()),
             settlement_handling: tests::CapturingSettlementHandler::arc(),
         }
     }
@@ -304,24 +370,14 @@ pub mod tests {
     }
 
     #[test]
-    fn weighted_pool_enumerate_token_pairs() {
-        let token_state = PoolTokenState {
-            balance: 0.into(),
-            weight: "0.25".parse().unwrap(),
-            scaling_exponent: 0,
+    fn enumerate_token_pairs() {
+        let token_map: HashMap<_, Option<u32>> = hashmap! {
+            H160([0x11; 20]) => None,
+            H160([0x22; 20]) => None,
+            H160([0x33; 20]) => None,
+            H160([0x44; 20]) => None,
         };
-        let pool = WeightedProductOrder {
-            reserves: hashmap! {
-                H160([0x11; 20]) => token_state.clone(),
-                H160([0x22; 20]) => token_state.clone(),
-                H160([0x33; 20]) => token_state.clone(),
-                H160([0x44; 20]) => token_state,
-            },
-            ..Default::default()
-        };
-
-        // Sort pairs for deterministic order in the result for testing.
-        let mut pairs = pool.token_pairs();
+        let mut pairs = token_pairs(&token_map);
         pairs.sort();
 
         assert_eq!(

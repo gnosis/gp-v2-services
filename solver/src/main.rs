@@ -177,6 +177,10 @@ struct Arguments {
     #[structopt(long, env, default_value = "ParaSwapPool4", use_delimiter = true)]
     disabled_paraswap_dexs: Vec<String>,
 
+    /// Special partner authentication for Paraswap API (allowing higher rater limits)
+    #[structopt(long, env)]
+    paraswap_partner_header_value: Option<String>,
+
     /// The authorization for the archer api.
     #[structopt(long, env)]
     archer_authorization: Option<String>,
@@ -200,6 +204,7 @@ arg_enum! {
     pub enum TransactionStrategyArg {
         PublicMempool,
         ArcherNetwork,
+        DryRun,
     }
 }
 
@@ -245,6 +250,12 @@ async fn main() {
     let mut base_tokens = HashSet::from_iter(args.shared.base_tokens);
     // We should always use the native token as a base token.
     base_tokens.insert(native_token_contract.address());
+
+    let amount_to_estimate_prices_with = args
+        .shared
+        .amount_to_estimate_prices_with
+        .or_else(|| shared::arguments::default_amount_to_estimate_prices_with(&network_id))
+        .expect("No amount to estimate prices with set.");
 
     let token_info_fetcher = Arc::new(CachedTokenInfoFetcher::new(Box::new(TokenInfoFetcher {
         web3: web3.clone(),
@@ -337,7 +348,7 @@ async fn main() {
         // Order book already filters bad tokens
         Arc::new(ListBasedDetector::deny_list(Vec::new())),
         native_token_contract.address(),
-        args.shared.amount_to_estimate_prices_with,
+        amount_to_estimate_prices_with,
     ));
     let uniswap_like_liquidity = build_amm_artifacts(
         &pool_caches,
@@ -385,6 +396,7 @@ async fn main() {
         args.disabled_one_inch_protocols,
         args.paraswap_slippage_bps,
         args.disabled_paraswap_dexs,
+        args.paraswap_partner_header_value,
         client.clone(),
     )
     .expect("failure creating solvers");
@@ -414,6 +426,7 @@ async fn main() {
                 ),
                 max_confirm_time: args.max_archer_submission_seconds,
             },
+            TransactionStrategyArg::DryRun => TransactionStrategy::DryRun,
         },
     };
     let mut driver = Driver::new(

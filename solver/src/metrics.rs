@@ -1,28 +1,27 @@
+use crate::liquidity::{LimitOrder, Liquidity};
+use anyhow::Result;
+use model::order::Order;
+use prometheus::{HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGaugeVec, Opts};
+use shared::{
+    metrics::get_metrics_registry,
+    metrics::LivenessChecking,
+    sources::{
+        balancer::pool_cache::BalancerPoolCacheMetrics, uniswap::pool_cache::PoolCacheMetrics,
+    },
+    transport::instrumented::TransportMetrics,
+};
 use std::{
     convert::TryInto,
     sync::Mutex,
     time::{Duration, Instant},
 };
-
-use anyhow::Result;
-use model::order::Order;
-use prometheus::{HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGaugeVec, Opts};
-use shared::{
-    metrics::LivenessChecking,
-    sources::{
-        balancer::pool_cache::WeightedPoolCacheMetrics, uniswap::pool_cache::PoolCacheMetrics,
-    },
-    transport::instrumented::TransportMetrics,
-};
 use strum::{AsStaticRef, VariantNames};
-
-use crate::liquidity::Liquidity;
-use shared::metrics::get_metrics_registry;
 
 /// The maximum time between the completion of two run loops. If exceeded the service will be considered unhealthy.
 const MAX_RUNLOOP_DURATION: Duration = Duration::from_secs(7 * 60);
 
 pub trait SolverMetrics {
+    fn orders_fetched(&self, orders: &[LimitOrder]);
     fn liquidity_fetched(&self, liquidity: &[Liquidity]);
     fn settlement_computed(&self, solver_type: &str, start: Instant);
     fn order_settled(&self, order: &Order, solver: &'static str);
@@ -137,6 +136,12 @@ impl Metrics {
 }
 
 impl SolverMetrics for Metrics {
+    fn orders_fetched(&self, orders: &[LimitOrder]) {
+        self.liquidity
+            .with_label_values(&["Limit"])
+            .set(orders.len() as _);
+    }
+
     fn liquidity_fetched(&self, liquidity: &[Liquidity]) {
         // Reset all gauges and start from scratch
         Liquidity::VARIANTS.iter().for_each(|label| {
@@ -224,7 +229,7 @@ impl PoolCacheMetrics for Metrics {
     }
 }
 
-impl WeightedPoolCacheMetrics for Metrics {
+impl BalancerPoolCacheMetrics for Metrics {
     fn pools_fetched(&self, cache_hits: usize, cache_misses: usize) {
         // We may want to distinguish cache metrics between the different
         // liquidity sources in the future, for now just use the same counters.
@@ -249,6 +254,7 @@ impl LivenessChecking for Metrics {
 pub struct NoopMetrics {}
 
 impl SolverMetrics for NoopMetrics {
+    fn orders_fetched(&self, _liquidity: &[LimitOrder]) {}
     fn liquidity_fetched(&self, _liquidity: &[Liquidity]) {}
     fn settlement_computed(&self, _solver_type: &str, _start: Instant) {}
     fn order_settled(&self, _: &Order, _: &'static str) {}
