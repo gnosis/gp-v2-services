@@ -2,8 +2,9 @@ use crate::{
     account_balances::BalanceFetching,
     database::orders::{InsertionError, OrderFilter, OrderStoring},
     fee::{EthAwareMinFeeCalculator, MinFeeCalculating},
+    solvable_orders::SolvableOrdersCache,
 };
-use anyhow::Result;
+use anyhow::{ensure, Result};
 use chrono::Utc;
 use contracts::WETH9;
 use model::{
@@ -18,11 +19,8 @@ use model::{
     DomainSeparator,
 };
 use primitive_types::{H160, U256};
-use shared::{
-    bad_token::BadTokenDetecting, metrics::LivenessChecking, time::now_in_epoch_seconds,
-    web3_traits::CodeFetching,
-};
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use shared::{bad_token::BadTokenDetecting, metrics::LivenessChecking, web3_traits::CodeFetching};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum AddOrderResult {
@@ -59,7 +57,7 @@ pub struct Orderbook {
     domain_separator: DomainSeparator,
     settlement_contract: H160,
     database: Arc<dyn OrderStoring>,
-    balance_fetcher: Box<dyn BalanceFetching>,
+    balance_fetcher: Arc<dyn BalanceFetching>,
     fee_validator: Arc<EthAwareMinFeeCalculator>,
     min_order_validity_period: Duration,
     bad_token_detector: Arc<dyn BadTokenDetecting>,
@@ -67,6 +65,7 @@ pub struct Orderbook {
     native_token: WETH9,
     banned_users: Vec<H160>,
     enable_presign_orders: bool,
+    solvable_orders: Arc<SolvableOrdersCache>,
 }
 
 impl Orderbook {
@@ -75,7 +74,7 @@ impl Orderbook {
         domain_separator: DomainSeparator,
         settlement_contract: H160,
         database: Arc<dyn OrderStoring>,
-        balance_fetcher: Box<dyn BalanceFetching>,
+        balance_fetcher: Arc<dyn BalanceFetching>,
         fee_validator: Arc<EthAwareMinFeeCalculator>,
         min_order_validity_period: Duration,
         bad_token_detector: Arc<dyn BadTokenDetecting>,
@@ -83,6 +82,7 @@ impl Orderbook {
         native_token: WETH9,
         banned_users: Vec<H160>,
         enable_presign_orders: bool,
+        solvable_orders: Arc<SolvableOrdersCache>,
     ) -> Self {
         Self {
             domain_separator,
@@ -96,6 +96,7 @@ impl Orderbook {
             native_token,
             banned_users,
             enable_presign_orders,
+            solvable_orders,
         }
     }
 
@@ -195,6 +196,7 @@ impl Orderbook {
             Err(InsertionError::DbError(err)) => return Err(err.into()),
             _ => (),
         }
+        self.solvable_orders.request_update();
         Ok(AddOrderResult::Added(order.order_meta_data.uid))
     }
 
@@ -242,11 +244,20 @@ impl Orderbook {
 
     pub async fn get_orders(&self, filter: &OrderFilter) -> Result<Vec<Order>> {
         let mut orders = self.database.orders(filter).await?;
-        let balances = get_balances(self.balance_fetcher.as_ref(), orders.as_slice()).await;
-        set_available_balances(orders.as_mut_slice(), &balances);
+        // This filter is deprecated so filtering solvable orders is a bit awkward but we'll support
+        // for a little bit.
         if filter.exclude_insufficient_balance {
-            orders = solvable_orders(orders, &balances);
+            use crate::account_balances::Query;
+            let solvable_orders = self
+                .solvable_orders
+                .cached_solvable_orders()
+                .0
+                .iter()
+                .map(Query::from_order)
+                .collect::<HashSet<_>>();
+            orders.retain(|order| solvable_orders.contains(&Query::from_order(order)));
         }
+        set_available_balances(orders.as_mut_slice(), &self.solvable_orders);
         if filter.exclude_unsupported_tokens {
             orders = filter_unsupported_tokens(orders, self.bad_token_detector.as_ref()).await?;
         }
@@ -258,19 +269,17 @@ impl Orderbook {
             Some(order) => order,
             None => return Ok(None),
         };
-        let balances =
-            get_balances(self.balance_fetcher.as_ref(), std::slice::from_ref(&order)).await;
-        set_available_balances(std::slice::from_mut(&mut order), &balances);
+        set_available_balances(std::slice::from_mut(&mut order), &self.solvable_orders);
         Ok(Some(order))
     }
 
     pub async fn get_solvable_orders(&self) -> Result<Vec<Order>> {
-        let min_valid_to = now_in_epoch_seconds() + self.min_order_validity_period.as_secs() as u32;
-        let orders = self.database.solvable_orders(min_valid_to).await?;
-        let orders = filter_unsupported_tokens(orders, self.bad_token_detector.as_ref()).await?;
-        let balances = get_balances(self.balance_fetcher.as_ref(), orders.as_slice()).await;
-        let mut orders = solvable_orders(orders, &balances);
-        set_available_balances(orders.as_mut_slice(), &balances);
+        const MAX_UPDATE_AGE: Duration = Duration::from_secs(60);
+        let (orders, timestamp) = self.solvable_orders.cached_solvable_orders();
+        ensure!(
+            timestamp.elapsed() <= MAX_UPDATE_AGE,
+            "solvable orders are out of date"
+        );
         Ok(orders)
     }
 }
@@ -282,7 +291,7 @@ impl LivenessChecking for Orderbook {
     }
 }
 
-async fn filter_unsupported_tokens(
+pub async fn filter_unsupported_tokens(
     mut orders: Vec<Order>,
     bad_token: &dyn BadTokenDetecting,
 ) -> Result<Vec<Order>> {
@@ -301,82 +310,11 @@ async fn filter_unsupported_tokens(
     Ok(orders)
 }
 
-async fn get_balances(
-    fetcher: &dyn BalanceFetching,
-    orders: &[Order],
-) -> HashMap<(H160, H160, SellTokenSource), U256> {
-    let mut balances = HashMap::<(H160, H160, SellTokenSource), U256>::new();
-    for order in orders {
-        if !matches!(order.order_meta_data.status, OrderStatus::Open) {
-            continue;
-        }
-        let query = crate::account_balances::Query::from_order(order);
-        if let Ok(balance) = fetcher.get_balances(&[query]).await[0] {
-            balances.insert((query.owner, query.token, query.source), balance);
-        }
-    }
-    balances
-}
-
-fn set_available_balances(
-    orders: &mut [Order],
-    balances: &HashMap<(H160, H160, SellTokenSource), U256>,
-) {
+fn set_available_balances(orders: &mut [Order], cache: &SolvableOrdersCache) {
     for order in orders.iter_mut() {
-        let key = &(
-            order.order_meta_data.owner,
-            order.order_creation.sell_token,
-            order.order_creation.sell_token_balance,
-        );
-        order.order_meta_data.available_balance = balances.get(key).cloned();
+        order.order_meta_data.available_balance =
+            cache.cached_balance(&crate::account_balances::Query::from_order(order));
     }
-}
-
-// The order book has to make a choice for which orders to include when a user has multiple orders
-// selling the same token but not enough balance for all of them.
-// Assumes balance fetcher is already tracking all balances.
-fn solvable_orders(
-    mut orders: Vec<Order>,
-    balances: &HashMap<(H160, H160, SellTokenSource), U256>,
-) -> Vec<Order> {
-    let mut orders_map = HashMap::<(H160, H160, SellTokenSource), Vec<Order>>::new();
-    orders.sort_by_key(|order| std::cmp::Reverse(order.order_meta_data.creation_date));
-    for order in orders {
-        let key = (
-            order.order_meta_data.owner,
-            order.order_creation.sell_token,
-            order.order_creation.sell_token_balance,
-        );
-        orders_map.entry(key).or_default().push(order);
-    }
-
-    let mut result = Vec::new();
-    for (key, orders) in orders_map {
-        let mut remaining_balance = match balances.get(&key) {
-            Some(balance) => *balance,
-            None => continue,
-        };
-        for order in orders {
-            // TODO: This is overly pessimistic for partially filled orders where the needed balance
-            // is lower. For partially fillable orders that cannot be fully filled because of the
-            // balance we could also give them as much balance as possible instead of skipping. For
-            // that we first need a way to communicate this to the solver. We could repurpose
-            // availableBalance for this.
-            let needed_balance = match order
-                .order_creation
-                .sell_amount
-                .checked_add(order.order_creation.fee_amount)
-            {
-                Some(balance) => balance,
-                None => continue,
-            };
-            if let Some(balance) = remaining_balance.checked_sub(needed_balance) {
-                remaining_balance = balance;
-                result.push(order);
-            }
-        }
-    }
-    result
 }
 
 // Mininum balance user must have in sell token for order to be accepted. None if no balance is
@@ -403,55 +341,10 @@ fn has_same_buy_and_sell_token(order: &OrderCreation, native_token: &WETH9) -> b
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::account_balances::MockBalanceFetching;
-    use chrono::{DateTime, NaiveDateTime};
     use ethcontract::H160;
     use futures::FutureExt;
-    use maplit::hashmap;
-    use model::order::{OrderBuilder, OrderCreation, OrderMetaData};
+    use model::order::{OrderBuilder, OrderCreation};
     use shared::{bad_token::list_based::ListBasedDetector, dummy_contract};
-
-    #[tokio::test]
-    async fn filters_insufficient_balances() {
-        let mut balance_fetcher = MockBalanceFetching::new();
-        balance_fetcher
-            .expect_get_balances()
-            .returning(|_| vec![Ok(10.into())]);
-
-        let mut orders = vec![
-            Order {
-                order_creation: OrderCreation {
-                    sell_amount: 3.into(),
-                    fee_amount: 3.into(),
-                    ..Default::default()
-                },
-                order_meta_data: OrderMetaData {
-                    creation_date: DateTime::from_utc(NaiveDateTime::from_timestamp(2, 0), Utc),
-                    ..Default::default()
-                },
-            },
-            Order {
-                order_creation: OrderCreation {
-                    sell_amount: 2.into(),
-                    fee_amount: 2.into(),
-                    ..Default::default()
-                },
-                order_meta_data: OrderMetaData {
-                    creation_date: DateTime::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc),
-                    ..Default::default()
-                },
-            },
-        ];
-
-        let balances = hashmap! {Default::default() => U256::from(9)};
-        let orders_ = solvable_orders(orders.clone(), &balances);
-        // Second order has lower timestamp so it isn't picked.
-        assert_eq!(orders_, orders[..1]);
-        orders[1].order_meta_data.creation_date =
-            DateTime::from_utc(NaiveDateTime::from_timestamp(3, 0), Utc);
-        let orders_ = solvable_orders(orders.clone(), &balances);
-        assert_eq!(orders_, orders[1..]);
-    }
 
     #[test]
     fn filter_unsupported_tokens_() {
