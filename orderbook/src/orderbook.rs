@@ -19,14 +19,10 @@ use model::{
 };
 use primitive_types::{H160, U256};
 use shared::{
-    bad_token::BadTokenDetecting, maintenance::Maintaining, metrics::LivenessChecking,
-    time::now_in_epoch_seconds, web3_traits::CodeFetching,
+    bad_token::BadTokenDetecting, metrics::LivenessChecking, time::now_in_epoch_seconds,
+    web3_traits::CodeFetching,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum AddOrderResult {
@@ -199,13 +195,6 @@ impl Orderbook {
             Err(InsertionError::DbError(err)) => return Err(err.into()),
             _ => (),
         }
-        self.balance_fetcher
-            .register(
-                owner,
-                order.order_creation.sell_token,
-                order.order_creation.sell_token_balance,
-            )
-            .await;
         Ok(AddOrderResult::Added(order.order_meta_data.uid))
     }
 
@@ -253,8 +242,7 @@ impl Orderbook {
 
     pub async fn get_orders(&self, filter: &OrderFilter) -> Result<Vec<Order>> {
         let mut orders = self.database.orders(filter).await?;
-        let balances =
-            track_and_get_balances(self.balance_fetcher.as_ref(), orders.as_slice()).await;
+        let balances = get_balances(self.balance_fetcher.as_ref(), orders.as_slice()).await;
         set_available_balances(orders.as_mut_slice(), &balances);
         if filter.exclude_insufficient_balance {
             orders = solvable_orders(orders, &balances);
@@ -271,8 +259,7 @@ impl Orderbook {
             None => return Ok(None),
         };
         let balances =
-            track_and_get_balances(self.balance_fetcher.as_ref(), std::slice::from_ref(&order))
-                .await;
+            get_balances(self.balance_fetcher.as_ref(), std::slice::from_ref(&order)).await;
         set_available_balances(std::slice::from_mut(&mut order), &balances);
         Ok(Some(order))
     }
@@ -281,19 +268,10 @@ impl Orderbook {
         let min_valid_to = now_in_epoch_seconds() + self.min_order_validity_period.as_secs() as u32;
         let orders = self.database.solvable_orders(min_valid_to).await?;
         let orders = filter_unsupported_tokens(orders, self.bad_token_detector.as_ref()).await?;
-        let balances =
-            track_and_get_balances(self.balance_fetcher.as_ref(), orders.as_slice()).await;
+        let balances = get_balances(self.balance_fetcher.as_ref(), orders.as_slice()).await;
         let mut orders = solvable_orders(orders, &balances);
         set_available_balances(orders.as_mut_slice(), &balances);
         Ok(orders)
-    }
-}
-
-#[async_trait::async_trait]
-impl Maintaining for Orderbook {
-    async fn run_maintenance(&self) -> Result<()> {
-        self.balance_fetcher.update().await;
-        Ok(())
     }
 }
 
@@ -323,40 +301,20 @@ async fn filter_unsupported_tokens(
     Ok(orders)
 }
 
-// Make sure the balance fetcher tracks all balances for user, sell token combinations in these
-// orders and returns said balances. Only records this for open orders.
-async fn track_and_get_balances(
+async fn get_balances(
     fetcher: &dyn BalanceFetching,
     orders: &[Order],
 ) -> HashMap<(H160, H160, SellTokenSource), U256> {
     let mut balances = HashMap::<(H160, H160, SellTokenSource), U256>::new();
-    let mut untracked = HashSet::<(H160, H160, SellTokenSource)>::new();
     for order in orders {
         if !matches!(order.order_meta_data.status, OrderStatus::Open) {
             continue;
         }
-        let key = (
-            order.order_meta_data.owner,
-            order.order_creation.sell_token,
-            order.order_creation.sell_token_balance,
-        );
-        match fetcher.get_balance(key.0, key.1, key.2) {
-            Some(balance) => {
-                balances.insert(key, balance);
-            }
-            None => {
-                untracked.insert(key);
-            }
+        let query = crate::account_balances::Query::from_order(order);
+        if let Ok(balance) = fetcher.get_balances(&[query]).await[0] {
+            balances.insert((query.owner, query.token, query.source), balance);
         }
     }
-    fetcher
-        .register_many(untracked.iter().cloned().collect())
-        .await;
-    balances.extend(untracked.into_iter().filter_map(|key| {
-        fetcher
-            .get_balance(key.0, key.1, key.2)
-            .map(|balance| (key, balance))
-    }));
     balances
 }
 
@@ -450,110 +408,15 @@ mod tests {
     use ethcontract::H160;
     use futures::FutureExt;
     use maplit::hashmap;
-    use mockall::{predicate::eq, Sequence};
     use model::order::{OrderBuilder, OrderCreation, OrderMetaData};
     use shared::{bad_token::list_based::ListBasedDetector, dummy_contract};
-
-    #[tokio::test]
-    async fn track_and_get_balances_() {
-        let mut balance_fetcher = MockBalanceFetching::new();
-
-        let a_sell_token = H160::from_low_u64_be(2);
-        let a_balance = 100.into();
-
-        let another_sell_token = H160::from_low_u64_be(3);
-        let another_balance = 200.into();
-
-        // Should not get tracked because corresponding order isn't open.
-        let untracked_sell_token = H160::from_low_u64_be(4);
-
-        let orders = vec![
-            Order {
-                order_creation: OrderCreation {
-                    sell_token: a_sell_token,
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            Order {
-                order_creation: OrderCreation {
-                    sell_token: another_sell_token,
-                    sell_token_balance: SellTokenSource::External,
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            Order {
-                order_creation: OrderCreation {
-                    sell_token: untracked_sell_token,
-                    sell_token_balance: SellTokenSource::External,
-                    ..Default::default()
-                },
-                order_meta_data: OrderMetaData {
-                    status: OrderStatus::Expired,
-                    ..Default::default()
-                },
-            },
-        ];
-        let owner = orders[0].order_meta_data.owner;
-
-        balance_fetcher
-            .expect_get_balance()
-            .with(eq(owner), eq(a_sell_token), eq(SellTokenSource::Erc20))
-            .return_const(Some(a_balance));
-
-        // Not having a balance for the second order, should trigger a register_many only for this token
-        let mut seq = Sequence::new();
-        balance_fetcher
-            .expect_get_balance()
-            .with(
-                eq(owner),
-                eq(another_sell_token),
-                eq(SellTokenSource::External),
-            )
-            .times(1)
-            .in_sequence(&mut seq)
-            .return_const(None);
-
-        balance_fetcher
-            .expect_register_many()
-            .with(eq(vec![(
-                owner,
-                another_sell_token,
-                SellTokenSource::External,
-            )]))
-            .times(1)
-            .in_sequence(&mut seq)
-            .returning(|_| ());
-
-        // Once registered, we can return the balance
-        balance_fetcher
-            .expect_get_balance()
-            .with(
-                eq(owner),
-                eq(another_sell_token),
-                eq(SellTokenSource::External),
-            )
-            .times(1)
-            .in_sequence(&mut seq)
-            .return_const(Some(another_balance));
-
-        let balances = track_and_get_balances(&balance_fetcher, orders.as_slice()).await;
-        assert_eq!(
-            balances,
-            hashmap! {
-                (owner, a_sell_token, SellTokenSource::Erc20) => a_balance,
-                (owner, another_sell_token, SellTokenSource::External) => another_balance
-            }
-        );
-    }
 
     #[tokio::test]
     async fn filters_insufficient_balances() {
         let mut balance_fetcher = MockBalanceFetching::new();
         balance_fetcher
-            .expect_get_balance()
-            .return_const(Some(10.into()));
+            .expect_get_balances()
+            .returning(|_| vec![Ok(10.into())]);
 
         let mut orders = vec![
             Order {

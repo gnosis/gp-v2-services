@@ -221,7 +221,6 @@ async fn main() {
         vault,
         vault_relayer,
         settlement_contract.address(),
-        metrics.clone(),
     );
 
     let gas_price_estimator = Arc::new(
@@ -343,12 +342,7 @@ async fn main() {
         args.enable_presign_orders,
     ));
     let service_maintainer = ServiceMaintenance {
-        maintainers: vec![
-            orderbook.clone(),
-            database.clone(),
-            Arc::new(event_updater),
-            pool_fetcher,
-        ],
+        maintainers: vec![database.clone(), Arc::new(event_updater), pool_fetcher],
     };
     check_database_connection(orderbook.as_ref()).await;
 
