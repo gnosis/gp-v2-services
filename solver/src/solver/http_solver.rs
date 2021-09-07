@@ -427,9 +427,9 @@ impl HttpSolver {
         // the driver code that calls us also enforces the timeout.
         let mut request = self.client.post(url).timeout(Duration::from_secs(u64::MAX));
         if let Some(api_key) = &self.api_key {
-            let mut header = HeaderValue::from_str(api_key.as_str()).unwrap();
+            let mut header = format!("Basic {}", api_key).parse::<HeaderValue>()?;
             header.set_sensitive(true);
-            request = request.header("X-API-KEY", header);
+            request = request.header("Authorization", header);
         }
         let body = serde_json::to_string(&model).context("failed to encode body")?;
         tracing::trace!("request {}", body);

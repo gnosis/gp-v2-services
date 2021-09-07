@@ -49,13 +49,21 @@ struct Arguments {
     #[structopt(long, env = "MIP_SOLVER_URL", default_value = "http://localhost:8000")]
     mip_solver_url: Url,
 
-    /// The API endpoint to call the mip v2 solver
+    /// The authorization token for connecting to a publically hosted MIP solver.
+    #[structopt(long, env = "MIP_SOLVER_API_KEY")]
+    mip_solver_api_key: Option<String>,
+
+    /// The API endpoint to call the Quasimodo solver
     #[structopt(
         long,
         env = "QUASIMODO_SOLVER_URL",
         default_value = "http://localhost:8000"
     )]
     quasimodo_solver_url: Url,
+
+    /// The authorization token for connecting to a publically hosted Quasimodo solver.
+    #[structopt(long, env = "QUASIMODO_SOLVER_API_KEY")]
+    quasimodo_solver_api_key: Option<String>,
 
     /// The private key used by the driver to sign transactions.
     #[structopt(short = "k", long, env = "PRIVATE_KEY", hide_env_values = true)]
@@ -385,7 +393,9 @@ async fn main() {
         base_tokens,
         native_token_contract.address(),
         args.mip_solver_url,
+        args.mip_solver_api_key,
         args.quasimodo_solver_url,
+        args.quasimodo_solver_api_key,
         &settlement_contract,
         token_info_fetcher,
         price_estimator.clone(),

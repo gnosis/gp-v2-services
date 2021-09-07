@@ -127,7 +127,9 @@ pub fn create(
     base_tokens: HashSet<H160>,
     native_token: H160,
     mip_solver_url: Url,
+    mip_solver_api_key: Option<String>,
     quasimodo_solver_url: Url,
+    quasimodo_solver_api_key: Option<String>,
     settlement_contract: &GPv2Settlement,
     token_info_fetcher: Arc<dyn TokenInfoFetching>,
     price_estimator: Arc<dyn PriceEstimating>,
@@ -154,12 +156,12 @@ pub fn create(
     ));
     let http_solver_cache = http_solver::InstanceCache::default();
     // Helper function to create http solver instances.
-    let create_http_solver = |account: Account, url: Url, name: &'static str| -> HttpSolver {
+    let create_http_solver = |account: Account, url: Url, api_key: Option<String>, name: &'static str| -> HttpSolver {
         HttpSolver::new(
             name,
             account,
             url,
-            None,
+            api_key,
             SolverConfig {
                 max_nr_exec_orders: 100,
             },
@@ -181,12 +183,16 @@ pub fn create(
             let solver = match solver_type {
                 SolverType::Naive => shared(NaiveSolver::new(account)),
                 SolverType::Baseline => shared(BaselineSolver::new(account, base_tokens.clone())),
-                SolverType::Mip => {
-                    shared(create_http_solver(account, mip_solver_url.clone(), "Mip"))
-                }
+                SolverType::Mip => shared(create_http_solver(
+                    account,
+                    mip_solver_url.clone(),
+                    mip_solver_api_key.clone(),
+                    "Mip",
+                )),
                 SolverType::Quasimodo => shared(create_http_solver(
                     account,
                     quasimodo_solver_url.clone(),
+                    quasimodo_solver_api_key.clone(),
                     "Quasimodo",
                 )),
                 SolverType::OneInch => {
