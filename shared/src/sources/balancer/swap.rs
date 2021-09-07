@@ -189,7 +189,7 @@ impl WeightedPool {
     fn as_pool_ref(&self) -> WeightedPoolRef {
         WeightedPoolRef {
             reserves: &self.reserves,
-            swap_fee_percentage: self.swap_fee_percentage,
+            swap_fee_percentage: self.common.swap_fee_percentage,
         }
     }
 }

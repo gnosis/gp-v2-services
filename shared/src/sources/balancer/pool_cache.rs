@@ -53,7 +53,7 @@ impl CacheKey<StablePool> for H256 {
     }
 
     fn for_value(value: &StablePool) -> Self {
-        value.properties().pool_id()
+        value.properties().pool_id
     }
 }
 
@@ -63,10 +63,9 @@ impl CacheKey<WeightedPool> for H256 {
     }
 
     fn for_value(value: &WeightedPool) -> Self {
-        value.properties().pool_id()
+        value.properties().pool_id
     }
 }
-
 
 #[async_trait::async_trait]
 impl CacheFetching<H256, WeightedPool> for PoolReserveFetcher {
@@ -119,7 +118,7 @@ impl CacheFetching<H256, WeightedPool> for PoolReserveFetcher {
             results.push(future.await);
         }
 
-        FetchedBalancerPoolConverting::accumulate_handled_results(results)
+        accumulate_handled_results(results)
     }
 }
 
@@ -180,7 +179,7 @@ impl CacheFetching<H256, StablePool> for PoolReserveFetcher {
             results.push(future.await);
         }
 
-        FetchedBalancerPoolConverting::accumulate_handled_results(results)
+        accumulate_handled_results(results)
     }
 }
 
@@ -213,17 +212,20 @@ struct FetchedStablePool {
 
 pub trait FetchedBalancerPoolConverting<T> {
     fn handle_results(self) -> Result<Option<T>>;
-    fn accumulate_handled_results(results: Vec<Box<Self>>) -> Result<Vec<T>> {
-        results
-            .into_iter()
-            .try_fold(Vec::new(), |mut acc, fetched_pool| {
-                match fetched_pool.handle_results()? {
-                    None => return Ok(acc),
-                    Some(pool) => acc.push(pool),
-                }
-                Ok(acc)
-            })
-    }
+}
+
+fn accumulate_handled_results<T>(
+    results: Vec<impl FetchedBalancerPoolConverting<T>>,
+) -> Result<Vec<T>> {
+    results
+        .into_iter()
+        .try_fold(Vec::new(), |mut acc, fetched_pool| {
+            match fetched_pool.handle_results()? {
+                None => return Ok(acc),
+                Some(pool) => acc.push(pool),
+            }
+            Ok(acc)
+        })
 }
 
 impl FetchedBalancerPoolConverting<CommonFetchedPoolInfo> for FetchedCommonPool {
@@ -252,7 +254,7 @@ impl FetchedBalancerPoolConverting<StablePool> for FetchedStablePool {
     fn handle_results(self) -> Result<Option<StablePool>> {
         let (balances, swap_fee_percentage, paused) = match self.common.handle_results()? {
             Some(results) => results,
-            None => None,
+            None => return Ok(None),
         };
 
         let amplification_parameter = match handle_contract_error(self.amplification_parameter)? {
@@ -276,7 +278,7 @@ impl FetchedBalancerPoolConverting<WeightedPool> for FetchedWeightedPool {
     fn handle_results(self) -> Result<Option<WeightedPool>> {
         let (balances, swap_fee_percentage, paused) = match self.common.handle_results()? {
             Some(results) => results,
-            None => None,
+            None => return Ok(None),
         };
 
         Ok(Some(WeightedPool::new(

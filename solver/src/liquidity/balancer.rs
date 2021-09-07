@@ -82,43 +82,40 @@ impl BalancerV2Liquidity {
             .collect();
         let pools = self.pool_fetcher.fetch(pairs, block).await?;
 
-        let tokens = pools.iter().flat_map(|pool| pool.reserve_keys()).collect();
+        let tokens = pools.relevant_tokens();
         let allowances = Arc::new(
             self.allowance_manager
                 .get_allowances(tokens, self.contracts.vault.address())
                 .await?,
         );
 
-        let liquidity = pools
-            .into_iter()
-            .filter_map(|pool| {
-                if pool.is_weighted() {
-                    let weighted_pool = pool.try_into_weighted().unwrap();
-                    Some(BalancerOrder::Weighted(WeightedProductOrder {
-                        reserves: weighted_pool.reserves,
-                        fee: weighted_pool.swap_fee_percentage.into(),
-                        settlement_handling: Arc::new(SettlementHandler {
-                            pool_id: weighted_pool.pool_id,
-                            contracts: self.contracts.clone(),
-                            allowances: allowances.clone(),
-                        }),
-                    }))
-                } else {
-                    // This branch covers the case of Stable and "Other" PoolType
-                    let stable_pool = pool.try_into_stable().ok()?;
-                    Some(BalancerOrder::Stable(StablePoolOrder {
-                        reserves: stable_pool.reserves,
-                        fee: stable_pool.swap_fee_percentage.into(),
-                        amplification_parameter: stable_pool.amplification_parameter,
-                        settlement_handling: Arc::new(SettlementHandler {
-                            pool_id: stable_pool.pool_id,
-                            contracts: self.contracts.clone(),
-                            allowances: allowances.clone(),
-                        }),
-                    }))
-                }
+        let mut liquidity = Vec::new();
+
+        liquidity.extend(pools.stable_pools.into_iter().map(|pool| {
+            BalancerOrder::Stable(StablePoolOrder {
+                reserves: pool.reserves,
+                fee: pool.common.swap_fee_percentage.into(),
+                amplification_parameter: pool.amplification_parameter,
+                settlement_handling: Arc::new(SettlementHandler {
+                    pool_id: pool.common.pool_id,
+                    contracts: self.contracts.clone(),
+                    allowances: allowances.clone(),
+                }),
             })
-            .collect();
+        }));
+
+        liquidity.extend(pools.weighted_pools.into_iter().map(|pool| {
+            BalancerOrder::Weighted(WeightedProductOrder {
+                reserves: pool.reserves,
+                fee: pool.common.swap_fee_percentage.into(),
+                settlement_handling: Arc::new(SettlementHandler {
+                    pool_id: pool.common.pool_id,
+                    contracts: self.contracts.clone(),
+                    allowances: allowances.clone(),
+                }),
+            })
+        }));
+
         Ok(liquidity)
     }
 }

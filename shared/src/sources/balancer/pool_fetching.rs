@@ -2,6 +2,7 @@
 //! when given a collection of `TokenPair`. Each of these pools are then queried for
 //! their `token_balances` and the `PoolFetcher` returns all up-to-date `WeightedPools`
 //! to be consumed by external users (e.g. Price Estimators and Solvers).
+use crate::sources::balancer::pool_cache::{StablePoolReserveCache, WeightedPoolReserveCache};
 use crate::{
     current_block::CurrentBlockStream,
     maintenance::Maintaining,
@@ -27,7 +28,6 @@ use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
-use crate::sources::balancer::pool_cache::{StablePoolReserveCache, WeightedPoolReserveCache};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TokenState {
@@ -41,29 +41,22 @@ pub struct WeightedTokenState {
     pub weight: Bfp,
 }
 
-pub trait ReserveStateEvaluating {
-    fn balance(&self) -> U256;
-    fn scaling_exponent(&self) -> u8;
-}
-
 pub trait BalancerPoolEvaluating {
-    fn properties(&self) -> CommonPoolState<Arc<dyn ReserveStateEvaluating>>;
-    fn reserve_keys(&self) -> HashSet<H160> {
-        self.properties().reserves.keys().copied().collect()
-    }
+    fn properties(&self) -> CommonPoolState;
 }
 
-pub struct CommonPoolState<T> {
+#[derive(Clone, Debug)]
+pub struct CommonPoolState {
     pub pool_id: H256,
     pub pool_address: H160, // This one isn't actually used (yet)
     pub swap_fee_percentage: Bfp,
-    pub reserves: HashMap<H160, T>,
     pub paused: bool,
 }
 
 #[derive(Clone, Debug)]
 pub struct WeightedPool {
-    pub common: CommonPoolState<WeightedTokenState>,
+    pub common: CommonPoolState,
+    pub reserves: HashMap<H160, WeightedTokenState>,
 }
 
 impl WeightedPool {
@@ -99,32 +92,23 @@ impl WeightedPool {
                 pool_id: pool_data.common.pool_id,
                 pool_address: pool_data.common.pool_address,
                 swap_fee_percentage,
-                reserves,
                 paused,
             },
+            reserves,
         }
     }
 }
 
 impl BalancerPoolEvaluating for WeightedPool {
-    fn properties(&self) -> CommonPoolState<WeightedTokenState> {
+    fn properties(&self) -> CommonPoolState {
         self.common.clone()
-    }
-}
-
-impl ReserveStateEvaluating for WeightedTokenState {
-    fn balance(&self) -> U256 {
-        self.token_state.balance
-    }
-
-    fn scaling_exponent(&self) -> u8 {
-        self.token_state.scaling_exponent
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct StablePool {
-    pub common: CommonPoolState<TokenState>,
+    pub common: CommonPoolState,
+    pub reserves: HashMap<H160, TokenState>,
     pub amplification_parameter: BigRational,
 }
 
@@ -158,27 +142,39 @@ impl StablePool {
                 pool_id: pool_data.common.pool_id,
                 pool_address: pool_data.common.pool_address,
                 swap_fee_percentage,
-                reserves,
                 paused,
             },
+            reserves,
             amplification_parameter,
         }
     }
 }
 
 impl BalancerPoolEvaluating for StablePool {
-    fn properties(&self) -> CommonPoolState<TokenState> {
+    fn properties(&self) -> CommonPoolState {
         self.common.clone()
     }
 }
 
-impl ReserveStateEvaluating for TokenState {
-    fn balance(&self) -> U256 {
-        self.balance
-    }
+pub struct FetchedBalancerPools {
+    pub stable_pools: Vec<StablePool>,
+    pub weighted_pools: Vec<WeightedPool>,
+}
 
-    fn scaling_exponent(&self) -> u8 {
-        self.scaling_exponent
+impl FetchedBalancerPools {
+    pub fn relevant_tokens(&self) -> HashSet<H160> {
+        let mut tokens = HashSet::new();
+        tokens.extend(
+            self.stable_pools
+                .iter()
+                .flat_map(|pool| pool.reserves.keys().copied().collect::<HashSet<_>>()),
+        );
+        tokens.extend(
+            self.weighted_pools
+                .iter()
+                .flat_map(|pool| pool.reserves.keys().copied().collect::<HashSet<_>>()),
+        );
+        tokens
     }
 }
 
@@ -189,7 +185,7 @@ pub trait BalancerPoolFetching: Send + Sync {
         &self,
         token_pairs: HashSet<TokenPair>,
         at_block: Block,
-    ) -> Result<Vec<Arc<dyn BalancerPoolEvaluating>>>;
+    ) -> Result<FetchedBalancerPools>;
 }
 
 pub struct BalancerPoolFetcher {
@@ -217,12 +213,22 @@ impl BalancerPoolFetcher {
         let pool_initializer = DefaultPoolInitializer::new(chain_id, pool_info.clone(), client)?;
         let pool_registry =
             Arc::new(BalancerPoolRegistry::new(web3.clone(), pool_initializer, pool_info).await?);
-        let reserve_fetcher = PoolReserveFetcher::new(pool_registry.clone(), web3).await?;
-        let pool_reserve_cache =
-            RecentBlockCache::new(config, reserve_fetcher, block_stream, metrics)?;
+        let stable_pool_reserve_fetcher =
+            PoolReserveFetcher::new(pool_registry.clone(), web3.clone()).await?;
+        let weighted_pool_reserve_fetcher =
+            PoolReserveFetcher::new(pool_registry.clone(), web3).await?;
+        let stable_pool_reserve_cache = RecentBlockCache::new(
+            config,
+            stable_pool_reserve_fetcher,
+            block_stream.clone(),
+            metrics.clone(),
+        )?;
+        let weighted_pool_reserve_cache =
+            RecentBlockCache::new(config, weighted_pool_reserve_fetcher, block_stream, metrics)?;
         Ok(Self {
             pool_registry,
-            pool_reserve_cache,
+            stable_pool_reserve_cache,
+            weighted_pool_reserve_cache,
         })
     }
 }
@@ -233,21 +239,31 @@ impl BalancerPoolFetching for BalancerPoolFetcher {
         &self,
         token_pairs: HashSet<TokenPair>,
         at_block: Block,
-    ) -> Result<Vec<Arc<dyn BalancerPoolEvaluating>>> {
+    ) -> Result<FetchedBalancerPools> {
         let pool_ids = self
             .pool_registry
             .get_pool_ids_containing_token_pairs(token_pairs)
             .await;
-        let fetched_pools = self.pool_reserve_cache.fetch(pool_ids, at_block).await?;
+        let fetched_stable_pools = self
+            .stable_pool_reserve_cache
+            .fetch(pool_ids.clone(), at_block)
+            .await?;
+        let fetched_weighted_pools = self
+            .weighted_pool_reserve_cache
+            .fetch(pool_ids, at_block)
+            .await?;
         // Return only those pools which are not paused.
-        Ok(filter_paused(fetched_pools))
+        Ok(FetchedBalancerPools {
+            stable_pools: filter_paused(fetched_stable_pools),
+            weighted_pools: filter_paused(fetched_weighted_pools),
+        })
     }
 }
 
 fn filter_paused<T: BalancerPoolEvaluating>(pools: Vec<T>) -> Vec<T> {
     pools
         .into_iter()
-        .filter(|pool| !pool.properties().paused())
+        .filter(|pool| !pool.properties().paused)
         .collect()
 }
 
@@ -256,7 +272,8 @@ impl Maintaining for BalancerPoolFetcher {
     async fn run_maintenance(&self) -> Result<()> {
         futures::try_join!(
             self.pool_registry.run_maintenance(),
-            self.pool_reserve_cache.update_cache(),
+            self.stable_pool_reserve_cache.update_cache(),
+            self.weighted_pool_reserve_cache.update_cache(),
         )?;
         Ok(())
     }
