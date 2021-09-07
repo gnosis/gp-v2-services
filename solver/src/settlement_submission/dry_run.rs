@@ -18,7 +18,7 @@ pub async fn log_settlement(
     let simulation_link = tenderly_link(current_block.as_u64(), &network, settlement.clone());
 
     tracing::info!("not submitting transaction in dry-run mode");
-    tracing::info!("transaction simulation: {}", simulation_link);
+    tracing::debug!("transaction simulation: {}", simulation_link);
 
     // We could technically compute a transaction hash for the settlement here,
     // but it's probably not worth the effort.
