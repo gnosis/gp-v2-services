@@ -156,26 +156,27 @@ pub fn create(
     ));
     let http_solver_cache = http_solver::InstanceCache::default();
     // Helper function to create http solver instances.
-    let create_http_solver = |account: Account, url: Url, api_key: Option<String>, name: &'static str| -> HttpSolver {
-        HttpSolver::new(
-            name,
-            account,
-            url,
-            api_key,
-            SolverConfig {
-                max_nr_exec_orders: 100,
-            },
-            native_token,
-            token_info_fetcher.clone(),
-            price_estimator.clone(),
-            buffer_retriever.clone(),
-            network_id.clone(),
-            chain_id,
-            fee_factor,
-            client.clone(),
-            http_solver_cache.clone(),
-        )
-    };
+    let create_http_solver =
+        |account: Account, url: Url, api_key: Option<String>, name: &'static str| -> HttpSolver {
+            HttpSolver::new(
+                name,
+                account,
+                url,
+                api_key,
+                SolverConfig {
+                    max_nr_exec_orders: 100,
+                },
+                native_token,
+                token_info_fetcher.clone(),
+                price_estimator.clone(),
+                buffer_retriever.clone(),
+                network_id.clone(),
+                chain_id,
+                fee_factor,
+                client.clone(),
+                http_solver_cache.clone(),
+            )
+        };
 
     solvers
         .into_iter()
