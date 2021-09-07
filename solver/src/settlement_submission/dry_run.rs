@@ -15,7 +15,7 @@ pub async fn log_settlement(
     let current_block = web3.eth().block_number().await?;
     let network = web3.net().version().await?;
     let settlement = settle_method_builder(contract, settlement.into(), account).tx;
-    let simulation_link = tenderly_link(current_block.as_u64(), &network, settlement.clone());
+    let simulation_link = tenderly_link(current_block.as_u64(), &network, settlement);
 
     tracing::info!("not submitting transaction in dry-run mode");
     tracing::debug!("transaction simulation: {}", simulation_link);
@@ -39,7 +39,7 @@ mod tests {
         assert!(log_settlement(
             Account::Local(H160([2; 20]), None),
             &GPv2Settlement::at(&web3, H160([1; 20])),
-            Settlement::new(Default::default()).into(),
+            Settlement::new(Default::default()),
         )
         .await
         .is_ok());
