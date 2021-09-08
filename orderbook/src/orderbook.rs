@@ -293,9 +293,7 @@ impl Orderbook {
             .database
             .user_orders(owner, offset, Some(limit))
             .await?;
-        let balances =
-            track_and_get_balances(self.balance_fetcher.as_ref(), orders.as_slice()).await;
-        set_available_balances(orders.as_mut_slice(), &balances);
+        set_available_balances(orders.as_mut_slice(), &self.solvable_orders);
         Ok(orders)
     }
 }
