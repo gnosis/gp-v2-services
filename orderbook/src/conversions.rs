@@ -108,8 +108,6 @@ mod tests {
             big_decimal_to_big_uint(&BigDecimal::one()),
             Some(BigUint::one())
         );
-
-        assert!(big_decimal_to_big_uint(&BigDecimal::from(-1)).is_none());
         assert!(big_decimal_to_big_uint(
             &BigDecimal::from_str(
                 "9115792089237316195423570985008687907853269984665640564039457584007913129639935"
@@ -117,6 +115,9 @@ mod tests {
             .unwrap()
         )
         .is_some());
+
+        assert!(big_decimal_to_big_uint(&BigDecimal::from(-1)).is_none());
+        assert!(big_decimal_to_u256(&BigDecimal::from_str("0.5").unwrap()).is_none());
     }
 
     #[test]
@@ -124,7 +125,7 @@ mod tests {
         assert_eq!(big_decimal_to_u256(&BigDecimal::zero()), Some(U256::zero()));
         assert_eq!(big_decimal_to_u256(&BigDecimal::one()), Some(U256::one()));
         assert!(big_decimal_to_u256(&BigDecimal::from(-1)).is_none());
-
+        assert!(big_decimal_to_u256(&BigDecimal::from_str("0.5").unwrap()).is_none());
         let max_u256_as_big_decimal = BigDecimal::from_str(
             "115792089237316195423570985008687907853269984665640564039457584007913129639935",
         )
@@ -133,7 +134,6 @@ mod tests {
             big_decimal_to_u256(&max_u256_as_big_decimal),
             Some(U256::MAX)
         );
-
         assert!(big_decimal_to_u256(&(max_u256_as_big_decimal + BigDecimal::one())).is_none());
     }
 
