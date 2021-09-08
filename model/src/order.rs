@@ -426,7 +426,6 @@ impl Default for OrderMetaData {
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub struct OrderUid(pub [u8; 56]);
 
-#[cfg(test)]
 impl OrderUid {
     /// Intended for easier uid creation in tests.
     pub fn from_integer(i: u32) -> Self {

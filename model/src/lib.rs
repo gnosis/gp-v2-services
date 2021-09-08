@@ -164,7 +164,7 @@ mod tests {
         let token_a = H160::from_low_u64_be(0);
         let token_b = H160::from_low_u64_be(1);
         let token_c = H160::from_low_u64_be(2);
-        let pair = TokenPair::new(token_a.clone(), token_b.clone()).unwrap();
+        let pair = TokenPair::new(token_a, token_b).unwrap();
 
         assert!(pair.contains(&token_a));
         assert!(pair.contains(&token_b));
@@ -176,7 +176,7 @@ mod tests {
         let token_a = H160::from_low_u64_be(0);
         let token_b = H160::from_low_u64_be(1);
         let token_c = H160::from_low_u64_be(2);
-        let pair = TokenPair::new(token_a.clone(), token_b.clone()).unwrap();
+        let pair = TokenPair::new(token_a, token_b).unwrap();
 
         assert_eq!(pair.other(&token_a), Some(token_b));
         assert_eq!(pair.other(&token_b), Some(token_a));
