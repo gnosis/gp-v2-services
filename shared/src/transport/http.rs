@@ -4,8 +4,7 @@ use futures::{future::BoxFuture, FutureExt};
 use jsonrpc_core::types::{Call, Output, Request, Value};
 use prometheus::Registry;
 use reqwest::{Client, Url};
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     collections::HashMap,
     sync::{
@@ -129,17 +128,17 @@ impl BatchTransport for HttpTransport {
 /// Workaround for Erigon nodes, which encode each element of the Batch Response as a String rather than a deserializable JSON object
 #[derive(Debug, PartialEq, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
-pub enum OutputOrString {
+enum OutputOrString {
     String(String),
     Output(Output),
 }
 
-impl From<OutputOrString> for Output {
-    fn from(output_or_string: OutputOrString) -> Self {
-        match output_or_string {
-            OutputOrString::String(string) => jsonrpc_core::serde_from_str(&string).unwrap(),
+impl OutputOrString {
+    fn try_into_output(self) -> Result<Output, Web3Error> {
+        Ok(match self {
+            OutputOrString::String(string) => jsonrpc_core::serde_from_str(&string)?,
             OutputOrString::Output(output) => output,
-        }
+        })
     }
 }
 
@@ -154,8 +153,8 @@ fn handle_batch_response(
     }
     let mut outputs = outputs
         .into_iter()
-        .map(|output| {
-            let output = output.into();
+        .map(|output_or_string| {
+            let output = output_or_string.try_into_output()?;
             Ok((
                 id_of_output(&output)?,
                 helpers::to_result_from_output(output),
@@ -294,5 +293,14 @@ mod tests {
         .map(|result| result.unwrap().as_u64().unwrap() as usize)
         .collect::<Vec<_>>();
         assert_eq!(vec![1], result);
+    }
+
+    #[test]
+    fn errors_on_invalid_string_batch_responses() {
+        assert!(handle_batch_response(
+            &[1],
+            vec![OutputOrString::String("there is no spoon".into())],
+        )
+        .is_err());
     }
 }
