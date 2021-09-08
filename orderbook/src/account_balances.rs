@@ -109,18 +109,36 @@ impl Web3BalanceFetcher {
     }
 }
 
+struct Balance {
+    balance: U256,
+    allowance: U256,
+}
+
+impl Balance {
+    fn zero() -> Self {
+        Self {
+            balance: 0.into(),
+            allowance: 0.into(),
+        }
+    }
+
+    fn effective_balance(&self) -> U256 {
+        self.balance.min(self.allowance)
+    }
+}
+
 fn erc20_balance_query(
     batch: &mut CallBatch<Web3Transport>,
     token: ERC20,
     owner: H160,
     spender: H160,
-) -> impl Future<Output = Result<U256>> {
+) -> impl Future<Output = Result<Balance>> {
     let balance = token.balance_of(owner).batch_call(batch);
     let allowance = token.allowance(owner, spender).batch_call(batch);
     async move {
         let balance = balance.await.context("balance")?;
         let allowance = allowance.await.context("allowance")?;
-        Ok(balance.min(allowance))
+        Ok(Balance { balance, allowance })
     }
 }
 
@@ -130,13 +148,13 @@ fn vault_external_balance_query(
     token: ERC20,
     owner: H160,
     relayer: H160,
-) -> impl Future<Output = Result<U256>> {
-    let balance = token.balance_of(owner).batch_call(batch);
+) -> impl Future<Output = Result<Balance>> {
+    let balance = erc20_balance_query(batch, token, owner, vault.address());
     let approval = vault.has_approved_relayer(owner, relayer).batch_call(batch);
     async move {
         Ok(match approval.await.context("allowance")? {
             true => balance.await.context("balance")?,
-            false => 0.into(),
+            false => Balance::zero(),
         })
     }
 }
@@ -173,7 +191,10 @@ impl BalanceFetching for Web3BalanceFetcher {
             .collect::<Vec<_>>();
         batch.execute_all(usize::MAX).await;
         futures::stream::iter(futures)
-            .then(|future| future)
+            .then(|future| async {
+                let balance = future.await?;
+                Ok(balance.effective_balance())
+            })
             .collect()
             .await
     }
@@ -317,7 +338,7 @@ mod tests {
             .send()
             .await
             .unwrap();
-        assert_eq!(get_balance().await, U256::zero(),);
+        assert_eq!(get_balance().await, U256::zero());
 
         // Approving allowance_target should increase available balance
         token
@@ -325,7 +346,7 @@ mod tests {
             .send()
             .await
             .unwrap();
-        assert_eq!(get_balance().await, 100.into(),);
+        assert_eq!(get_balance().await, 100.into());
 
         // Spending balance should decrease available balance
         token
@@ -489,16 +510,16 @@ mod tests {
             .send()
             .await
             .unwrap();
-        assert_eq!(get_balance().await, U256::zero(),);
+        assert_eq!(get_balance().await, U256::zero());
 
         // Balance without approval should not affect available balance
         token
-            .approve(vault.address(), 200.into())
+            .approve(vault.address(), 50.into())
             .from(trader.clone())
             .send()
             .await
             .unwrap();
-        assert_eq!(get_balance().await, U256::zero(),);
+        assert_eq!(get_balance().await, U256::zero());
 
         // Approving allowance_target as a relayer increase available balance
         vault
@@ -507,7 +528,7 @@ mod tests {
             .send()
             .await
             .unwrap();
-        assert_eq!(get_balance().await, 100.into());
+        assert_eq!(get_balance().await, 50.into());
 
         // Spending balance should decrease available balance
         token
