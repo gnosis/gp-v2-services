@@ -845,12 +845,15 @@ mod tests {
             .with_buy_token(H160::zero())
             .with_buy_amount(80.into())
             .with_valid_to(u32::MAX)
-            .with_app_data([1u8;32])
+            .with_app_data([1u8; 32])
             .with_fee_amount(U256::from(1337))
             .with_partially_fillable(true)
             .with_sell_token_balance(SellTokenSource::External)
             .with_buy_token_balance(BuyTokenDestination::Internal)
-            .with_creation_date(DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(3, 0), Utc))
+            .with_creation_date(DateTime::<Utc>::from_utc(
+                NaiveDateTime::from_timestamp(3, 0),
+                Utc,
+            ))
             .with_presign(H160::from_low_u64_be(1))
             .with_kind(OrderKind::Sell)
             .sign_with(
