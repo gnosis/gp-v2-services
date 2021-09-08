@@ -163,7 +163,7 @@ mod tests {
         let wrong_length = vec![0u8];
         assert_eq!(
             h256_from_vec(wrong_length).unwrap_err().to_string(),
-            "h160 has wrong length"
+            "h256 has wrong length"
         );
     }
 }
