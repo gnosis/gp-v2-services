@@ -380,8 +380,8 @@ mod tests {
                 "signature": "1234",
                 "signingScheme": "eip712"
             }))
-                .unwrap_err()
-                .to_string(),
+            .unwrap_err()
+            .to_string(),
             "\"1234\" can't be decoded as hex ecdsa signature because it does not start with '0x'"
         );
         assert_eq!(
@@ -390,8 +390,8 @@ mod tests {
                 "signature": "0x42",
                 "signingScheme": "eip712"
             }))
-                .unwrap_err()
-                .to_string(),
+            .unwrap_err()
+            .to_string(),
             "failed to decode \"42\" as hex ecdsa signature: Invalid string length"
         );
     }
