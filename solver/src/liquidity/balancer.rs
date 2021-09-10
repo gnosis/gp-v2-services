@@ -324,7 +324,7 @@ mod tests {
             allowance_manager: Box::new(allowance_manager),
             base_tokens: hashset![H160([0xb0; 20])],
         };
-        let liquidity = liquidity_provider
+        let (stable_orders, weighted_orders) = liquidity_provider
             .get_liquidity(
                 &[
                     LimitOrder {
@@ -348,26 +348,25 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(liquidity.len(), 3);
-        let a = liquidity[0].clone().try_as_weighted().unwrap().reserves;
+        assert_eq!(weighted_orders.len(), 2);
+        assert_eq!(stable_orders.len(), 1);
+
         assert_eq!(
-            (&a, &liquidity[0].fee()),
+            (&weighted_orders[0].reserves, &weighted_orders[0].fee),
             (
                 &weighted_pools[0].reserves,
                 &BigRational::new(2.into(), 1000.into())
             ),
         );
-        let b = liquidity[1].clone().try_as_weighted().unwrap().reserves;
         assert_eq!(
-            (&b, &liquidity[1].fee()),
+            (&weighted_orders[1].reserves, &weighted_orders[1].fee),
             (
                 &weighted_pools[1].reserves,
                 &BigRational::new(1.into(), 1000.into())
             ),
         );
-        let c = liquidity[2].clone().try_as_stable().unwrap().reserves;
         assert_eq!(
-            (&c, &liquidity[2].fee()),
+            (&stable_orders[0].reserves, &stable_orders[0].fee),
             (
                 &stable_pools[0].reserves,
                 &BigRational::new(2.into(), 1000.into())
