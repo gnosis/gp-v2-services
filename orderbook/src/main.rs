@@ -10,7 +10,9 @@ use orderbook::{
     fee::EthAwareMinFeeCalculator,
     metrics::Metrics,
     orderbook::Orderbook,
-    serve_task, verify_deployed_contract_constants,
+    serve_task,
+    solvable_orders::SolvableOrdersCache,
+    verify_deployed_contract_constants,
 };
 use primitive_types::H160;
 use shared::metrics::setup_metrics_registry;
@@ -112,6 +114,15 @@ struct Arguments {
     /// This flag can be removed once DDoS protection is implemented.
     #[structopt(long, env, parse(try_from_str), default_value = "false")]
     pub enable_presign_orders: bool,
+
+    /// If solvable orders haven't been successfully update in this time attempting to get them
+    /// errors and our liveness check fails.
+    #[structopt(
+        long,
+        default_value = "300",
+        parse(try_from_str = shared::arguments::duration_from_seconds),
+    )]
+    solvable_orders_max_update_age: Duration,
 }
 
 pub async fn database_metrics(metrics: Arc<Metrics>, database: Postgres) -> ! {
@@ -193,8 +204,7 @@ async fn main() {
     verify_deployed_contract_constants(&settlement_contract, chain_id)
         .await
         .expect("Deployed contract constants don't match the ones in this binary");
-    let domain_separator =
-        DomainSeparator::get_domain_separator(chain_id, settlement_contract.address());
+    let domain_separator = DomainSeparator::new(chain_id, settlement_contract.address());
     let postgres = Postgres::new(args.db_url.as_str()).expect("failed to create database");
     let database = Arc::new(database::instrumented::Instrumented::new(
         postgres.clone(),
@@ -216,13 +226,12 @@ async fn main() {
         database.as_ref().clone(),
         sync_start,
     );
-    let balance_fetcher = Web3BalanceFetcher::new(
+    let balance_fetcher = Arc::new(Web3BalanceFetcher::new(
         web3.clone(),
         vault,
         vault_relayer,
         settlement_contract.address(),
-        metrics.clone(),
-    );
+    ));
 
     let gas_price_estimator = Arc::new(
         shared::gas_price_estimation::create_priority_estimator(
@@ -329,11 +338,24 @@ async fn main() {
         bad_token_detector.clone(),
     ));
 
+    let solvable_orders_cache = SolvableOrdersCache::new(
+        args.min_order_validity_period,
+        database.clone(),
+        balance_fetcher.clone(),
+        bad_token_detector.clone(),
+        current_block_stream.clone(),
+    );
+    let block = current_block_stream.borrow().number.unwrap().as_u64();
+    solvable_orders_cache
+        .update(block)
+        .await
+        .expect("failed to perform initial sovlable orders update");
+
     let orderbook = Arc::new(Orderbook::new(
         domain_separator,
         settlement_contract.address(),
         database.clone(),
-        Box::new(balance_fetcher),
+        balance_fetcher,
         fee_calculator.clone(),
         args.min_order_validity_period,
         bad_token_detector,
@@ -341,14 +363,11 @@ async fn main() {
         native_token.clone(),
         args.banned_users,
         args.enable_presign_orders,
+        solvable_orders_cache,
+        args.solvable_orders_max_update_age,
     ));
     let service_maintainer = ServiceMaintenance {
-        maintainers: vec![
-            orderbook.clone(),
-            database.clone(),
-            Arc::new(event_updater),
-            pool_fetcher,
-        ],
+        maintainers: vec![database.clone(), Arc::new(event_updater), pool_fetcher],
     };
     check_database_connection(orderbook.as_ref()).await;
 
