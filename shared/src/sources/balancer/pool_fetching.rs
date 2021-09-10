@@ -282,135 +282,32 @@ impl Maintaining for BalancerPoolFetcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use maplit::{hashmap, hashset};
 
     #[test]
     fn filters_paused_pools() {
         let pools = vec![
-            BalancerPool::Weighted(WeightedPool {
-                pool_id: H256::from_low_u64_be(0),
-                pool_address: Default::default(),
-                swap_fee_percentage: Bfp::zero(),
+            WeightedPool {
+                common: CommonPoolState {
+                    pool_id: H256::from_low_u64_be(0),
+                    pool_address: Default::default(),
+                    swap_fee_percentage: Bfp::zero(),
+                    paused: true,
+                },
                 reserves: Default::default(),
-                paused: true,
-            }),
-            BalancerPool::Stable(StablePool {
-                pool_id: H256::from_low_u64_be(1),
-                pool_address: Default::default(),
-                swap_fee_percentage: Bfp::zero(),
-                amplification_parameter: BigRational::new(10.into(), 1000.into()),
+            },
+            WeightedPool {
+                common: CommonPoolState {
+                    pool_id: H256::from_low_u64_be(1),
+                    pool_address: Default::default(),
+                    swap_fee_percentage: Bfp::zero(),
+                    paused: false,
+                },
                 reserves: Default::default(),
-                paused: false,
-            }),
+            },
         ];
 
         let filtered_pools = filter_paused(pools.clone());
         assert_eq!(filtered_pools.len(), 1);
-        assert_eq!(filtered_pools[0].pool_id(), pools[1].pool_id());
-    }
-
-    #[test]
-    fn try_into_stable_and_weighted() {
-        let weighted_pool = BalancerPool::Weighted(WeightedPool {
-            pool_id: H256::from_low_u64_be(0),
-            pool_address: Default::default(),
-            swap_fee_percentage: Bfp::zero(),
-            reserves: Default::default(),
-            paused: true,
-        });
-
-        assert!(weighted_pool.try_into_weighted().is_ok());
-        assert!(weighted_pool.try_into_stable().is_err());
-
-        let stable_pool = BalancerPool::Stable(StablePool {
-            pool_id: H256::from_low_u64_be(1),
-            pool_address: Default::default(),
-            swap_fee_percentage: Bfp::zero(),
-            amplification_parameter: BigRational::new(1.into(), 2.into()),
-            reserves: Default::default(),
-            paused: false,
-        });
-
-        assert!(stable_pool.try_into_stable().is_ok());
-        assert!(stable_pool.try_into_weighted().is_err());
-    }
-
-    #[test]
-    fn balancer_pool_state_helpers() {
-        let weighted_pool_state = BalancerPoolState::Weighted(WeightedTokenState {
-            token_state: TokenState {
-                balance: U256::one(),
-                scaling_exponent: 1,
-            },
-            weight: Bfp::one(),
-        });
-        assert_eq!(weighted_pool_state.scaling_exponent(), 1);
-        assert_eq!(weighted_pool_state.balance(), U256::one());
-
-        let stable_pool_state = BalancerPoolState::Stable(TokenState {
-            balance: U256::zero(),
-            scaling_exponent: 0,
-        });
-        assert_eq!(stable_pool_state.scaling_exponent(), 0);
-        assert_eq!(stable_pool_state.balance(), U256::zero());
-    }
-
-    #[test]
-    fn balancer_pool_helpers() {
-        // Test all the helpers on Weighted Balancer Pools
-        let weighted_pool_state = WeightedTokenState {
-            token_state: TokenState {
-                balance: U256::zero(),
-                scaling_exponent: 0,
-            },
-            weight: Bfp::zero(),
-        };
-        let weighted_pool = BalancerPool::Weighted(WeightedPool {
-            pool_id: H256::from_low_u64_be(1),
-            pool_address: H160::from_low_u64_be(1),
-            swap_fee_percentage: Bfp::zero(),
-            reserves: hashmap! { H160::from_low_u64_be(1) => weighted_pool_state.clone()},
-            paused: false,
-        });
-        assert!(weighted_pool.is_weighted());
-        assert_eq!(weighted_pool.pool_id(), H256::from_low_u64_be(1));
-        assert!(!weighted_pool.paused());
-        assert_eq!(
-            weighted_pool.reserve_keys(),
-            hashset! { H160::from_low_u64_be(1) }
-        );
-        assert_eq!(weighted_pool.swap_fee_percentage(), Bfp::zero());
-        assert_eq!(weighted_pool.pool_type(), PoolType::Weighted);
-        assert_eq!(
-            weighted_pool.reserves(),
-            hashmap! { H160::from_low_u64_be(1) => BalancerPoolState::Weighted(weighted_pool_state) }
-        );
-
-        // Test all the helpers on Stable Balancer Pools
-        let stable_pool_state = TokenState {
-            balance: U256::one(),
-            scaling_exponent: 1,
-        };
-        let stable_pool = BalancerPool::Stable(StablePool {
-            pool_id: H256::from_low_u64_be(2),
-            pool_address: H160::from_low_u64_be(2),
-            swap_fee_percentage: Bfp::one(),
-            amplification_parameter: BigRational::from_integer(2.into()),
-            reserves: hashmap! { H160::from_low_u64_be(2) => stable_pool_state.clone() },
-            paused: true,
-        });
-        assert!(!stable_pool.is_weighted());
-        assert_eq!(stable_pool.pool_id(), H256::from_low_u64_be(2));
-        assert!(stable_pool.paused());
-        assert_eq!(
-            stable_pool.reserve_keys(),
-            hashset! { H160::from_low_u64_be(2) }
-        );
-        assert_eq!(stable_pool.swap_fee_percentage(), Bfp::one());
-        assert_eq!(stable_pool.pool_type(), PoolType::Stable);
-        assert_eq!(
-            stable_pool.reserves(),
-            hashmap! { H160::from_low_u64_be(2) => BalancerPoolState::Stable(stable_pool_state) }
-        );
+        assert_eq!(filtered_pools[0].common.pool_id, pools[1].common.pool_id);
     }
 }

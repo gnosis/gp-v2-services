@@ -91,11 +91,10 @@ impl BalancerV2Liquidity {
 
         let mut liquidity = Vec::new();
 
-        liquidity.extend(pools.stable_pools.into_iter().map(|pool| {
-            BalancerOrder::Stable(StablePoolOrder {
+        liquidity.extend(pools.weighted_pools.into_iter().map(|pool| {
+            BalancerOrder::Weighted(WeightedProductOrder {
                 reserves: pool.reserves,
                 fee: pool.common.swap_fee_percentage.into(),
-                amplification_parameter: pool.amplification_parameter,
                 settlement_handling: Arc::new(SettlementHandler {
                     pool_id: pool.common.pool_id,
                     contracts: self.contracts.clone(),
@@ -104,10 +103,11 @@ impl BalancerV2Liquidity {
             })
         }));
 
-        liquidity.extend(pools.weighted_pools.into_iter().map(|pool| {
-            BalancerOrder::Weighted(WeightedProductOrder {
+        liquidity.extend(pools.stable_pools.into_iter().map(|pool| {
+            BalancerOrder::Stable(StablePoolOrder {
                 reserves: pool.reserves,
                 fee: pool.common.swap_fee_percentage.into(),
+                amplification_parameter: pool.amplification_parameter,
                 settlement_handling: Arc::new(SettlementHandler {
                     pool_id: pool.common.pool_id,
                     contracts: self.contracts.clone(),
@@ -175,11 +175,11 @@ mod tests {
     use mockall::predicate::*;
     use model::TokenPair;
     use num::BigRational;
+    use shared::sources::balancer::pool_fetching::{CommonPoolState, FetchedBalancerPools};
     use shared::{
         dummy_contract,
         sources::balancer::pool_fetching::{
-            BalancerPool, MockBalancerPoolFetching, StablePool, TokenState, WeightedPool,
-            WeightedTokenState,
+            MockBalancerPoolFetching, StablePool, TokenState, WeightedPool, WeightedTokenState,
         },
     };
 
@@ -199,11 +199,14 @@ mod tests {
         let mut pool_fetcher = MockBalancerPoolFetching::new();
         let mut allowance_manager = MockAllowanceManaging::new();
 
-        let pools = vec![
-            BalancerPool::Weighted(WeightedPool {
-                pool_id: H256([0x90; 32]),
-                pool_address: H160([0x90; 20]),
-                swap_fee_percentage: "0.002".parse().unwrap(),
+        let weighted_pools = vec![
+            WeightedPool {
+                common: CommonPoolState {
+                    pool_id: H256([0x90; 32]),
+                    pool_address: H160([0x90; 20]),
+                    swap_fee_percentage: "0.002".parse().unwrap(),
+                    paused: true,
+                },
                 reserves: hashmap! {
                     H160([0x70; 20]) => WeightedTokenState {
                         token_state: TokenState {
@@ -227,12 +230,14 @@ mod tests {
                         weight: "0.5".parse().unwrap(),
                     },
                 },
-                paused: true,
-            }),
-            BalancerPool::Weighted(WeightedPool {
-                pool_id: H256([0x91; 32]),
-                pool_address: H160([0x91; 20]),
-                swap_fee_percentage: "0.001".parse().unwrap(),
+            },
+            WeightedPool {
+                common: CommonPoolState {
+                    pool_id: H256([0x91; 32]),
+                    pool_address: H160([0x91; 20]),
+                    swap_fee_percentage: "0.001".parse().unwrap(),
+                    paused: true,
+                },
                 reserves: hashmap! {
                     H160([0x73; 20]) => WeightedTokenState {
                         token_state: TokenState {
@@ -249,26 +254,28 @@ mod tests {
                         weight: "0.5".parse().unwrap(),
                     },
                 },
-                paused: true,
-            }),
-            BalancerPool::Stable(StablePool {
+            },
+        ];
+
+        let stable_pools = vec![StablePool {
+            common: CommonPoolState {
                 pool_id: H256([0x92; 32]),
                 pool_address: H160([0x92; 20]),
                 swap_fee_percentage: "0.002".parse().unwrap(),
-                amplification_parameter: BigRational::from_integer(1.into()),
-                reserves: hashmap! {
-                    H160([0x73; 20]) => TokenState {
-                            balance: 1_000_000_000_000_000_000u128.into(),
-                            scaling_exponent: 0,
-                        },
-                    H160([0xb0; 20]) => TokenState {
-                            balance: 1_000_000_000_000_000_000u128.into(),
-                            scaling_exponent: 0,
-                        }
-                },
                 paused: true,
-            }),
-        ];
+            },
+            amplification_parameter: BigRational::from_integer(1.into()),
+            reserves: hashmap! {
+                H160([0x73; 20]) => TokenState {
+                        balance: 1_000_000_000_000_000_000u128.into(),
+                        scaling_exponent: 0,
+                    },
+                H160([0xb0; 20]) => TokenState {
+                        balance: 1_000_000_000_000_000_000u128.into(),
+                        scaling_exponent: 0,
+                    }
+            },
+        }];
 
         // Fetches pools for all relevant tokens, in this example, there is no
         // pool for token 0x72..72.
@@ -286,8 +293,14 @@ mod tests {
                 always(),
             )
             .returning({
-                let pools = pools.clone();
-                move |_, _| Ok(pools.clone())
+                let weighted_pools = weighted_pools.clone();
+                let stable_pools = stable_pools.clone();
+                move |_, _| {
+                    Ok(FetchedBalancerPools {
+                        stable_pools: stable_pools.clone(),
+                        weighted_pools: weighted_pools.clone(),
+                    })
+                }
             });
 
         // Fetches allowances for all tokens in pools.
@@ -339,7 +352,7 @@ mod tests {
         assert_eq!(
             (&a, &liquidity[0].fee()),
             (
-                &pools[0].try_into_weighted().unwrap().reserves,
+                &weighted_pools[0].reserves,
                 &BigRational::new(2.into(), 1000.into())
             ),
         );
@@ -347,7 +360,7 @@ mod tests {
         assert_eq!(
             (&b, &liquidity[1].fee()),
             (
-                &pools[1].try_into_weighted().unwrap().reserves,
+                &weighted_pools[1].reserves,
                 &BigRational::new(1.into(), 1000.into())
             ),
         );
@@ -355,7 +368,7 @@ mod tests {
         assert_eq!(
             (&c, &liquidity[2].fee()),
             (
-                &pools[2].try_into_stable().unwrap().reserves,
+                &stable_pools[0].reserves,
                 &BigRational::new(2.into(), 1000.into())
             ),
         );

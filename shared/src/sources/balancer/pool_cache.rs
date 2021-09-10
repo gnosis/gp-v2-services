@@ -239,15 +239,16 @@ impl FetchedBalancerPoolConverting<CommonFetchedPoolInfo> for FetchedCommonPool 
             Some(swap_fee) => swap_fee,
             None => return Ok(None),
         };
-        let paused_state = match handle_contract_error(self.paused_state)? {
+        let paused = match handle_contract_error(self.paused_state)? {
             // We only keep the boolean value regarding whether the pool is paused or not
             Some(state) => state.0,
             None => return Ok(None),
         };
 
-        Ok(Some((balances, swap_fee_percentage, paused_state)))
+        Ok(Some((balances, swap_fee_percentage, paused)))
     }
 }
+
 type CommonFetchedPoolInfo = (Vec<U256>, U256, bool);
 
 impl FetchedBalancerPoolConverting<StablePool> for FetchedStablePool {
@@ -298,49 +299,54 @@ mod tests {
 
     #[test]
     fn pool_fetcher_forwards_node_error() {
-        let results = vec![FetchedBalancerPool {
-            registered_pool: RegisteredPool::Weighted(RegisteredWeightedPool::default()),
-            swap_fee_percentage: Ok(U256::zero()),
-            reserves: Err(ethcontract_error::testing_node_error()),
-            paused_state: Ok((true, U256::zero(), U256::zero())),
-            amplification_parameter: None,
-        }];
-        assert!(handle_results(results).is_err());
-        let results = vec![FetchedBalancerPool {
-            registered_pool: RegisteredPool::Weighted(RegisteredWeightedPool::default()),
-            swap_fee_percentage: Err(ethcontract_error::testing_node_error()),
-            reserves: Ok((vec![], vec![], U256::zero())),
-            paused_state: Ok((true, U256::zero(), U256::zero())),
-            amplification_parameter: None,
-        }];
-        assert!(handle_results(results).is_err());
+        let fetched_weighted_pool = FetchedWeightedPool {
+            registered_pool: RegisteredWeightedPool::default(),
+            common: FetchedCommonPool {
+                swap_fee_percentage: Ok(U256::zero()),
+                reserves: Err(ethcontract_error::testing_node_error()),
+                paused_state: Ok((true, U256::zero(), U256::zero())),
+            },
+        };
+        assert!(fetched_weighted_pool.handle_results().is_err());
+        let fetched_weighted_pool = FetchedWeightedPool {
+            registered_pool: RegisteredWeightedPool::default(),
+            common: FetchedCommonPool {
+                swap_fee_percentage: Err(ethcontract_error::testing_node_error()),
+                reserves: Ok((vec![], vec![], U256::zero())),
+                paused_state: Ok((true, U256::zero(), U256::zero())),
+            },
+        };
+        assert!(fetched_weighted_pool.handle_results().is_err());
     }
 
     #[test]
     fn pool_fetcher_skips_contract_error() {
         let results = vec![
-            FetchedBalancerPool {
-                registered_pool: RegisteredPool::Weighted(RegisteredWeightedPool::default()),
-                swap_fee_percentage: Ok(U256::zero()),
-                reserves: Err(ethcontract_error::testing_contract_error()),
-                paused_state: Ok((true, U256::zero(), U256::zero())),
-                amplification_parameter: None,
+            FetchedWeightedPool {
+                registered_pool: RegisteredWeightedPool::default(),
+                common: FetchedCommonPool {
+                    swap_fee_percentage: Ok(U256::zero()),
+                    reserves: Err(ethcontract_error::testing_contract_error()),
+                    paused_state: Ok((true, U256::zero(), U256::zero())),
+                },
             },
-            FetchedBalancerPool {
-                registered_pool: RegisteredPool::Weighted(RegisteredWeightedPool::default()),
-                swap_fee_percentage: Err(ethcontract_error::testing_contract_error()),
-                reserves: Ok((vec![], vec![], U256::zero())),
-                paused_state: Ok((true, U256::zero(), U256::zero())),
-                amplification_parameter: None,
+            FetchedWeightedPool {
+                registered_pool: RegisteredWeightedPool::default(),
+                common: FetchedCommonPool {
+                    swap_fee_percentage: Err(ethcontract_error::testing_contract_error()),
+                    reserves: Ok((vec![], vec![], U256::zero())),
+                    paused_state: Ok((true, U256::zero(), U256::zero())),
+                },
             },
-            FetchedBalancerPool {
-                registered_pool: RegisteredPool::Weighted(RegisteredWeightedPool::default()),
-                swap_fee_percentage: Ok(U256::zero()),
-                reserves: Ok((vec![], vec![], U256::zero())),
-                paused_state: Ok((true, U256::zero(), U256::zero())),
-                amplification_parameter: None,
+            FetchedWeightedPool {
+                registered_pool: RegisteredWeightedPool::default(),
+                common: FetchedCommonPool {
+                    swap_fee_percentage: Ok(U256::zero()),
+                    reserves: Ok((vec![], vec![], U256::zero())),
+                    paused_state: Ok((true, U256::zero(), U256::zero())),
+                },
             },
         ];
-        assert_eq!(handle_results(results).unwrap().len(), 1);
+        assert_eq!(accumulate_handled_results(results).unwrap().len(), 1);
     }
 }
