@@ -167,12 +167,12 @@ impl FetchedBalancerPools {
         tokens.extend(
             self.stable_pools
                 .iter()
-                .flat_map(|pool| pool.reserves.keys().copied().collect::<HashSet<_>>()),
+                .flat_map(|pool| pool.reserves.keys().copied()),
         );
         tokens.extend(
             self.weighted_pools
                 .iter()
-                .flat_map(|pool| pool.reserves.keys().copied().collect::<HashSet<_>>()),
+                .flat_map(|pool| pool.reserves.keys().copied()),
         );
         tokens
     }
