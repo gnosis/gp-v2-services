@@ -1,6 +1,6 @@
 use crate::{
     liquidity::{
-        token_pairs, AmmOrderExecution, BalancerOrder, ConstantProductOrder, LimitOrder, Liquidity,
+        token_pairs, AmmOrderExecution, ConstantProductOrder, LimitOrder, Liquidity,
         WeightedProductOrder,
     },
     settlement::Settlement,
@@ -159,23 +159,17 @@ impl BaselineSolver {
                                 order: AmmOrder::ConstantProduct(order),
                             });
                         }
-                        Liquidity::Balancer(order) => {
-                            match &order {
-                                BalancerOrder::Weighted(weighted_product_order) => {
-                                    for tokens in token_pairs(&weighted_product_order.reserves) {
-                                        amm_map.entry(tokens).or_default().push(Amm {
-                                            tokens,
-                                            order: AmmOrder::WeightedProduct(
-                                                weighted_product_order.clone(),
-                                            ),
-                                        });
-                                    }
-                                }
-                                BalancerOrder::Stable(_) => {
-                                    // TODO - https://github.com/gnosis/gp-v2-services/issues/1074
-                                    tracing::warn!("Excluded stable pool from baseline solving.")
-                                }
+                        Liquidity::BalancerWeighted(order) => {
+                            for tokens in token_pairs(&order.reserves) {
+                                amm_map.entry(tokens).or_default().push(Amm {
+                                    tokens,
+                                    order: AmmOrder::WeightedProduct(order.clone()),
+                                });
                             }
+                        }
+                        Liquidity::BalancerStable(_order) => {
+                            // TODO - https://github.com/gnosis/gp-v2-services/issues/1074
+                            tracing::warn!("Excluded stable pool from baseline solving.")
                         }
                     }
                     amm_map

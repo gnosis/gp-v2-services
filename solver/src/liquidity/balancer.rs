@@ -1,13 +1,13 @@
 //! Module for providing Balancer V2 pool liquidity to the solvers.
 
-use crate::liquidity::{BalancerOrder, StablePoolOrder};
 use crate::{
     interactions::{
         allowances::{AllowanceManager, AllowanceManaging, Allowances},
         BalancerSwapGivenOutInteraction,
     },
     liquidity::{
-        slippage, AmmOrderExecution, LimitOrder, SettlementHandling, WeightedProductOrder,
+        slippage, AmmOrderExecution, LimitOrder, SettlementHandling, StablePoolOrder,
+        WeightedProductOrder,
     },
     settlement::SettlementEncoder,
 };
@@ -68,7 +68,7 @@ impl BalancerV2Liquidity {
         &self,
         orders: &[LimitOrder],
         block: Block,
-    ) -> Result<Vec<BalancerOrder>> {
+    ) -> Result<(Vec<StablePoolOrder>, Vec<WeightedProductOrder>)> {
         let pairs = orders
             .iter()
             .flat_map(|order| {
@@ -89,10 +89,10 @@ impl BalancerV2Liquidity {
                 .await?,
         );
 
-        let mut liquidity = Vec::new();
-
-        liquidity.extend(pools.weighted_pools.into_iter().map(|pool| {
-            BalancerOrder::Weighted(WeightedProductOrder {
+        let weighted_product_orders = pools
+            .weighted_pools
+            .into_iter()
+            .map(|pool| WeightedProductOrder {
                 reserves: pool.reserves,
                 fee: pool.common.swap_fee_percentage.into(),
                 settlement_handling: Arc::new(SettlementHandler {
@@ -101,10 +101,11 @@ impl BalancerV2Liquidity {
                     allowances: allowances.clone(),
                 }),
             })
-        }));
-
-        liquidity.extend(pools.stable_pools.into_iter().map(|pool| {
-            BalancerOrder::Stable(StablePoolOrder {
+            .collect();
+        let stable_pool_orders = pools
+            .stable_pools
+            .into_iter()
+            .map(|pool| StablePoolOrder {
                 reserves: pool.reserves,
                 fee: pool.common.swap_fee_percentage.into(),
                 amplification_parameter: pool.amplification_parameter,
@@ -114,9 +115,9 @@ impl BalancerV2Liquidity {
                     allowances: allowances.clone(),
                 }),
             })
-        }));
+            .collect();
 
-        Ok(liquidity)
+        Ok((stable_pool_orders, weighted_product_orders))
     }
 }
 
