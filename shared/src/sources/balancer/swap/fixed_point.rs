@@ -233,6 +233,12 @@ mod tests {
             assert_eq!(Bfp::from(6).$fn_name(7.into()).unwrap(), 42.into());
             assert_eq!(Bfp::zero().$fn_name(Bfp::one()).unwrap(), Bfp::zero());
             assert_eq!(Bfp::one().$fn_name(Bfp::zero()).unwrap(), Bfp::zero());
+            assert_eq!(
+                Bfp::one()
+                    .$fn_name(Bfp(U256::MAX / U256::exp10(18)))
+                    .unwrap(),
+                Bfp(U256::MAX / U256::exp10(18))
+            );
 
             assert_eq!(
                 Bfp::one()
@@ -251,6 +257,15 @@ mod tests {
         let one_half = Bfp((5 * 10_u128.pow(17)).into());
         assert_eq!(EPSILON.mul_down(one_half).unwrap(), Bfp::zero());
         assert_eq!(EPSILON.mul_up(one_half).unwrap(), *EPSILON);
+
+        // values used in proof: shared/src/sources/balancer/swap/weighted_math.rs#L28-L33
+        let max_in_ratio = Bfp::from_wei(U256::exp10(17).checked_mul(3_u32.into()).unwrap());
+        let balance_in = Bfp::from_wei(U256::MAX / (U256::exp10(17) * U256::from(3)));
+        assert!(balance_in.mul_down(max_in_ratio).is_ok());
+        assert!((balance_in.add(Bfp::one()))
+            .unwrap()
+            .mul_down(max_in_ratio)
+            .is_err());
     }
 
     macro_rules! test_div {
