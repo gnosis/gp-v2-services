@@ -293,6 +293,7 @@ mod tests {
 
         assert_eq!(EPSILON.div_down(2.into()).unwrap(), Bfp::zero());
         assert_eq!(EPSILON.div_up(2.into()).unwrap(), *EPSILON);
+        assert_eq!(Bfp::zero().div_up(1.into()).unwrap(), Bfp::zero());
     }
 
     #[test]
@@ -405,5 +406,34 @@ mod tests {
             BigInt::from(1_000_000_000_000_000_000u64)
         ))
         .is_err());
+    }
+
+    #[test]
+    fn bfp_from_string() {
+        assert_eq!(
+            Bfp::from_str(
+                "999999999999999999999999999999999999999999999999999999999999999999999999999999"
+            )
+            .unwrap_err()
+            .to_string(),
+            "the number is too large for the type"
+        );
+        assert_eq!(
+            Bfp::from_str(
+                "9999999999999999999999999999999999999999999999999999999999999999999999999"
+            )
+            .unwrap_err()
+            .to_string(),
+            "Too large number"
+        );
+        assert_eq!(
+            Bfp::from_str(".").unwrap_err().to_string(),
+            "Invalid decimal representation"
+        );
+    }
+
+    #[test]
+    fn bfp_debug() {
+        assert_eq!(format!("{:?}", Bfp::one()), "1.000000000000000000");
     }
 }

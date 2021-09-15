@@ -406,8 +406,8 @@ mod tests {
     #[test]
     fn exp_error() {
         let input = [
-            "-41000000000000000001", // MIN_NATURAL_EXPONENT - 1
-            "130000000000000000001", // MAX_NATURAL_EXPONENT + 1
+            "-41000000000000000001",  // MIN_NATURAL_EXPONENT - 1
+            "130000000000000000001",  // MAX_NATURAL_EXPONENT + 1
             "-130000000000000000001", // -(MAX_NATURAL_EXPONENT + 1)
         ];
         // generated with `await generateErr("exp", input)`
@@ -450,10 +450,7 @@ mod tests {
                 "130000000000000000001", // MAX_NATURAL_EXPONENT + 1
                 "130000000000000000001",
             ],
-            [
-                "1",
-                "130000000000000000001",
-            ]
+            ["1", "130000000000000000001"],
         ];
         // generated with `await generateErr("pow", input)`
         let output = ["006", "007", "008", "008", "006", "007", "008", "008"];
