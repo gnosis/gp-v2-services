@@ -163,17 +163,16 @@ impl ParaswapSolver {
         let trade_amount = match order.kind {
             OrderKind::Sell => TradeAmount::Sell {
                 src_amount: price_response.src_amount,
-                slippage: self.slippage_bps,
             },
             OrderKind::Buy => TradeAmount::Buy {
                 dest_amount: price_response.dest_amount,
-                slippage: self.slippage_bps,
             },
         };
         let query = TransactionBuilderQuery {
             src_token: order.sell_token,
             dest_token: order.buy_token,
             trade_amount,
+            slippage: self.slippage_bps,
             src_decimals: decimals(token_info, &order.sell_token)?,
             dest_decimals: decimals(token_info, &order.buy_token)?,
             price_route: price_response.clone().price_route_raw,
@@ -474,9 +473,9 @@ mod tests {
                     transaction.trade_amount,
                     TradeAmount::Sell {
                         src_amount: 100.into(),
-                        slippage: 1000,
                     }
                 );
+                assert_eq!(transaction.slippage, 1000);
                 Ok(Default::default())
             })
             .in_sequence(&mut seq);
@@ -488,9 +487,9 @@ mod tests {
                     transaction.trade_amount,
                     TradeAmount::Buy {
                         dest_amount: 99.into(),
-                        slippage: 1000,
                     }
                 );
+                assert_eq!(transaction.slippage, 1000);
                 Ok(Default::default())
             })
             .in_sequence(&mut seq);

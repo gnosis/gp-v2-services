@@ -179,7 +179,7 @@ struct Arguments {
 
     /// Special partner authentication for Paraswap API (allowing higher rater limits)
     #[structopt(long, env)]
-    paraswap_partner_header_value: Option<String>,
+    paraswap_partner: Option<String>,
 
     /// The authorization for the archer api.
     #[structopt(long, env)]
@@ -407,7 +407,7 @@ async fn main() {
         args.disabled_one_inch_protocols,
         args.paraswap_slippage_bps,
         args.disabled_paraswap_dexs,
-        args.paraswap_partner_header_value,
+        args.paraswap_partner,
         client.clone(),
     )
     .expect("failure creating solvers");

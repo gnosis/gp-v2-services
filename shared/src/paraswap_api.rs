@@ -274,6 +274,8 @@ pub struct TransactionBuilderQuery {
     /// The trade amount amount
     #[serde(flatten)]
     pub trade_amount: TradeAmount,
+    /// The maximum slippage in BPS.
+    pub slippage: u32,
     /// The decimals of the source token
     pub src_decimals: usize,
     /// The decimals of the destination token
@@ -293,19 +295,22 @@ pub enum TradeAmount {
         /// The source amount
         #[serde(with = "u256_decimal")]
         src_amount: U256,
-        /// The maximum slippage in BPS.
-        slippage: u32,
     },
     #[serde(rename_all = "camelCase")]
     Buy {
         /// The destination amount
         #[serde(with = "u256_decimal")]
         dest_amount: U256,
-        /// The maximum slippage in BPS.
-        slippage: u32,
     },
 }
 
+/// A helper struct to wrap a `TransactionBuilderQuery` that we get as input from
+/// the `ParaswapApi` trait.
+///
+/// This is done because the `partner` is longer specified in the headersd but
+/// instead in the POST body, but we want the API to stay mostly compatible and
+/// not require passing it in every time we build a transaction given that the
+/// API instance already knows what the `partner` value is.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TransactionBuilderQueryWithPartner<'a> {
@@ -388,8 +393,8 @@ mod tests {
                 dest_token,
                 trade_amount: TradeAmount::Sell {
                     src_amount: price_response.src_amount,
-                    slippage: 1000,
                 },
+                slippage: 1000,
                 src_decimals: 18,
                 dest_decimals: 18,
                 price_route: price_response.price_route_raw,
@@ -451,8 +456,8 @@ mod tests {
                 dest_token,
                 trade_amount: TradeAmount::Buy {
                     dest_amount: price_response.dest_amount,
-                    slippage: 1000,
                 },
+                slippage: 1000,
                 src_decimals: 18,
                 dest_decimals: 18,
                 price_route: price_response.price_route_raw,
@@ -742,8 +747,8 @@ mod tests {
             dest_token,
             trade_amount: TradeAmount::Sell {
                 src_amount: price_response.src_amount,
-                slippage: 1000, // 10%
             },
+            slippage: 1000, // 10%
             src_decimals: 18,
             dest_decimals: 18,
             price_route: price_response.price_route_raw,
@@ -761,8 +766,8 @@ mod tests {
                 dest_token: H160([2; 20]),
                 trade_amount: TradeAmount::Sell {
                     src_amount: 1337.into(),
-                    slippage: 250,
                 },
+                slippage: 250,
                 src_decimals: 18,
                 dest_decimals: 18,
                 price_route: Value::Null,
