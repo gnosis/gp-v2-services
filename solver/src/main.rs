@@ -169,7 +169,7 @@ struct Arguments {
 
     /// The slippage tolerance we apply to the price quoted by Paraswap
     #[structopt(long, env, default_value = "10")]
-    paraswap_slippage_bps: usize,
+    paraswap_slippage_bps: u32,
 
     /// The list of disabled ParaSwap DEXs. By default, the `ParaSwapPool4`
     /// DEX (representing a private market maker) is disabled as it increases

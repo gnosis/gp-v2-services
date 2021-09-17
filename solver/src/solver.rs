@@ -139,7 +139,7 @@ pub fn create(
     fee_factor: f64,
     min_order_size_one_inch: U256,
     disabled_one_inch_protocols: Vec<String>,
-    paraswap_slippage_bps: usize,
+    paraswap_slippage_bps: u32,
     disabled_paraswap_dexs: Vec<String>,
     paraswap_partner_header_value: Option<String>,
     client: Client,
