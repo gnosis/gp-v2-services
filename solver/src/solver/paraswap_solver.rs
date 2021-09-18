@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 const REFERRER: &str = "GPv2";
-const APPROVAL_RECEIVER: H160 = shared::addr!("b70bc06d2c9bf03b3373799606dc7d39346c06b3");
+const APPROVAL_RECEIVER: H160 = shared::addr!("216B4B4Ba9F3e719726886d34a177484278Bfcae");
 
 /// A GPv2 solver that matches GP orders to direct ParaSwap swaps.
 #[derive(Derivative)]
