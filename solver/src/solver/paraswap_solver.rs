@@ -10,10 +10,11 @@ use contracts::GPv2Settlement;
 use derivative::Derivative;
 use ethcontract::{Account, Bytes, H160, U256};
 use maplit::hashmap;
+use model::order::OrderKind;
 use reqwest::Client;
 use shared::paraswap_api::{
     DefaultParaswapApi, ParaswapApi, ParaswapResponseError, PriceQuery, PriceResponse, Side,
-    TransactionBuilderQuery, TransactionBuilderResponse,
+    TradeAmount, TransactionBuilderQuery, TransactionBuilderResponse,
 };
 use shared::token_info::TokenInfo;
 use shared::{conversions::U256Ext, token_info::TokenInfoFetching, Web3};
@@ -21,7 +22,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 const REFERRER: &str = "GPv2";
-const APPROVAL_RECEIVER: H160 = shared::addr!("b70bc06d2c9bf03b3373799606dc7d39346c06b3");
 
 /// A GPv2 solver that matches GP orders to direct ParaSwap swaps.
 #[derive(Derivative)]
@@ -35,7 +35,7 @@ pub struct ParaswapSolver {
     allowance_fetcher: Box<dyn AllowanceManaging>,
     #[derivative(Debug = "ignore")]
     client: Box<dyn ParaswapApi + Send + Sync>,
-    slippage_bps: usize,
+    slippage_bps: u32,
     disabled_paraswap_dexs: Vec<String>,
 }
 
@@ -46,10 +46,10 @@ impl ParaswapSolver {
         web3: Web3,
         settlement_contract: GPv2Settlement,
         token_info: Arc<dyn TokenInfoFetching>,
-        slippage_bps: usize,
+        slippage_bps: u32,
         disabled_paraswap_dexs: Vec<String>,
         client: Client,
-        partner_header_value: Option<String>,
+        partner: Option<String>,
     ) -> Self {
         let allowance_fetcher = AllowanceManager::new(web3, settlement_contract.address());
 
@@ -60,7 +60,7 @@ impl ParaswapSolver {
             allowance_fetcher: Box::new(allowance_fetcher),
             client: Box::new(DefaultParaswapApi {
                 client,
-                partner_header_value: partner_header_value.unwrap_or_else(|| REFERRER.into()),
+                partner: partner.unwrap_or_else(|| REFERRER.into()),
             }),
             slippage_bps,
             disabled_paraswap_dexs,
@@ -111,7 +111,7 @@ impl SingleOrderSolving for ParaswapSolver {
             self.allowance_fetcher
                 .get_approval(
                     order.sell_token,
-                    APPROVAL_RECEIVER,
+                    price_response.token_transfer_proxy,
                     price_response.src_amount,
                 )
                 .await?,
@@ -141,10 +141,10 @@ impl ParaswapSolver {
         };
 
         let price_query = PriceQuery {
-            from: order.sell_token,
-            to: order.buy_token,
-            from_decimals: decimals(token_info, &order.sell_token)?,
-            to_decimals: decimals(token_info, &order.buy_token)?,
+            src_token: order.sell_token,
+            dest_token: order.buy_token,
+            src_decimals: decimals(token_info, &order.sell_token)?,
+            dest_decimals: decimals(token_info, &order.buy_token)?,
             amount,
             side,
             exclude_dexs: Some(self.disabled_paraswap_dexs.clone()),
@@ -159,36 +159,23 @@ impl ParaswapSolver {
         price_response: &PriceResponse,
         token_info: &HashMap<H160, TokenInfo>,
     ) -> Result<TransactionBuilderQuery> {
-        let (src_amount, dest_amount) = match order.kind {
-            // Buy orders apply slippage to src amount, dest amount unchanged
-            model::order::OrderKind::Buy => (
-                price_response
-                    .src_amount
-                    .checked_mul((10000 + self.slippage_bps).into())
-                    .ok_or_else(|| anyhow!("Overflow during slippage computation"))?
-                    / 10000,
-                price_response.dest_amount,
-            ),
-            // Sell orders apply slippage to dest amount, src amount unchanged
-            model::order::OrderKind::Sell => (
-                price_response.src_amount,
-                price_response
-                    .dest_amount
-                    .checked_mul((10000 - self.slippage_bps).into())
-                    .ok_or_else(|| anyhow!("Overflow during slippage computation"))?
-                    / 10000,
-            ),
+        let trade_amount = match order.kind {
+            OrderKind::Sell => TradeAmount::Sell {
+                src_amount: price_response.src_amount,
+            },
+            OrderKind::Buy => TradeAmount::Buy {
+                dest_amount: price_response.dest_amount,
+            },
         };
         let query = TransactionBuilderQuery {
             src_token: order.sell_token,
             dest_token: order.buy_token,
-            src_amount,
-            dest_amount,
-            from_decimals: decimals(token_info, &order.sell_token)?,
-            to_decimals: decimals(token_info, &order.buy_token)?,
+            trade_amount,
+            slippage: self.slippage_bps,
+            src_decimals: decimals(token_info, &order.sell_token)?,
+            dest_decimals: decimals(token_info, &order.buy_token)?,
             price_route: price_response.clone().price_route_raw,
             user_address: self.account.address(),
-            referrer: REFERRER.to_string(),
         };
         Ok(query)
     }
@@ -316,6 +303,7 @@ mod tests {
                 price_route_raw: Default::default(),
                 src_amount: 100.into(),
                 dest_amount: 99.into(),
+                token_transfer_proxy: H160([0x42; 20]),
             })
         });
         client
@@ -388,12 +376,14 @@ mod tests {
 
         let sell_token = H160::from_low_u64_be(1);
         let buy_token = H160::from_low_u64_be(2);
+        let token_transfer_proxy = H160([0x42; 20]);
 
-        client.expect_price().returning(|_| {
+        client.expect_price().returning(move |_| {
             Ok(PriceResponse {
                 price_route_raw: Default::default(),
                 src_amount: 100.into(),
                 dest_amount: 99.into(),
+                token_transfer_proxy,
             })
         });
         client
@@ -405,18 +395,26 @@ mod tests {
         allowance_fetcher
             .expect_get_approval()
             .times(1)
-            .with(eq(sell_token), eq(APPROVAL_RECEIVER), eq(U256::from(100)))
+            .with(
+                eq(sell_token),
+                eq(token_transfer_proxy),
+                eq(U256::from(100)),
+            )
             .returning(move |_, _, _| {
                 Ok(Approval::Approve {
                     token: sell_token,
-                    spender: APPROVAL_RECEIVER,
+                    spender: token_transfer_proxy,
                 })
             })
             .in_sequence(&mut seq);
         allowance_fetcher
             .expect_get_approval()
             .times(1)
-            .with(eq(sell_token), eq(APPROVAL_RECEIVER), eq(U256::from(100)))
+            .with(
+                eq(sell_token),
+                eq(token_transfer_proxy),
+                eq(U256::from(100)),
+            )
             .returning(|_, _, _| Ok(Approval::AllowanceSufficient))
             .in_sequence(&mut seq);
 
@@ -472,6 +470,7 @@ mod tests {
                 price_route_raw: Default::default(),
                 src_amount: 100.into(),
                 dest_amount: 99.into(),
+                token_transfer_proxy: H160([0x42; 20]),
             })
         });
 
@@ -481,8 +480,13 @@ mod tests {
             .expect_transaction()
             .times(1)
             .returning(|transaction| {
-                assert_eq!(transaction.src_amount, 100.into());
-                assert_eq!(transaction.dest_amount, 89.into());
+                assert_eq!(
+                    transaction.trade_amount,
+                    TradeAmount::Sell {
+                        src_amount: 100.into(),
+                    }
+                );
+                assert_eq!(transaction.slippage, 1000);
                 Ok(Default::default())
             })
             .in_sequence(&mut seq);
@@ -490,8 +494,13 @@ mod tests {
             .expect_transaction()
             .times(1)
             .returning(|transaction| {
-                assert_eq!(transaction.src_amount, 110.into());
-                assert_eq!(transaction.dest_amount, 99.into());
+                assert_eq!(
+                    transaction.trade_amount,
+                    TradeAmount::Buy {
+                        dest_amount: 99.into(),
+                    }
+                );
+                assert_eq!(transaction.slippage, 1000);
                 Ok(Default::default())
             })
             .in_sequence(&mut seq);
@@ -558,7 +567,7 @@ mod tests {
             web3,
             settlement,
             token_info_fetcher,
-            0,
+            1,
             vec![],
             Client::new(),
             None,
