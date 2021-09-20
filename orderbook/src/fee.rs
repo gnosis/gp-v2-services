@@ -8,6 +8,9 @@ use shared::{bad_token::BadTokenDetecting, price_estimate::PriceEstimating};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+// TODO - find out correct value and make it a config item.
+const BALANCER_APP_ID: [u8; 32] = [1u8;32];
+
 pub type Measurement = (U256, DateTime<Utc>);
 
 pub type EthAwareMinFeeCalculator = EthAdapter<MinFeeCalculator>;
@@ -43,7 +46,7 @@ pub trait MinFeeCalculating: Send + Sync {
     ) -> Result<Measurement, PriceEstimationError>;
 
     // Returns true if the fee satisfies a previous not yet expired estimate, or the fee is high enough given the current estimate.
-    async fn is_valid_fee(&self, sell_token: H160, fee: U256) -> bool;
+    async fn is_valid_fee(&self, sell_token: H160, fee: U256, app_data: [u8; 32]) -> bool;
 }
 
 #[async_trait::async_trait]
@@ -131,8 +134,10 @@ where
             .await
     }
 
-    async fn is_valid_fee(&self, sell_token: H160, fee: U256) -> bool {
-        self.calculator.is_valid_fee(sell_token, fee).await
+    async fn is_valid_fee(&self, sell_token: H160, fee: U256, app_data: [u8; 32]) -> bool {
+        self.calculator
+            .is_valid_fee(sell_token, fee, app_data)
+            .await
     }
 }
 
@@ -258,18 +263,25 @@ impl MinFeeCalculating for MinFeeCalculator {
     }
 
     // Returns true if the fee satisfies a previous not yet expired estimate, or the fee is high enough given the current estimate.
-    async fn is_valid_fee(&self, sell_token: H160, fee: U256) -> bool {
+    async fn is_valid_fee(&self, sell_token: H160, fee: U256, app_data: [u8; 32]) -> bool {
+
+        let app_based_fee_factor = match app_data {
+            BALANCER_APP_ID => U256::from(2),
+            _ => U256::one(),
+        };
+        let scaled_fee = fee.checked_mul(app_based_fee_factor).unwrap_or(U256::one());
+
         if let Ok(Some(past_fee)) = self
             .measurements
             .get_min_fee(sell_token, None, None, None, (self.now)())
             .await
         {
-            if fee >= past_fee {
+            if scaled_fee >= past_fee {
                 return true;
             }
         }
         if let Ok(current_fee) = self.compute_min_fee(sell_token, None, None, None).await {
-            return fee >= current_fee;
+            return scaled_fee >= current_fee;
         }
         false
     }
@@ -391,12 +403,12 @@ mod tests {
         let mut calculator = MockMinFeeCalculating::default();
         calculator
             .expect_is_valid_fee()
-            .withf(move |&sell_token, &fee| sell_token == token && fee == 42.into())
+            .withf(move |&sell_token, &fee, &_| sell_token == token && fee == 42.into())
             .times(1)
-            .returning(|_, _| true);
+            .returning(|_, _, _| true);
 
         let eth_aware = EthAdapter { calculator, weth };
-        assert!(eth_aware.is_valid_fee(token, 42.into()).await);
+        assert!(eth_aware.is_valid_fee(token, 42.into(), [0u8; 32]).await);
     }
 
     impl MinFeeCalculator {
@@ -447,11 +459,11 @@ mod tests {
 
         // fee is valid before expiry
         *time.lock().unwrap() = expiry - Duration::seconds(10);
-        assert!(fee_estimator.is_valid_fee(token, fee).await);
+        assert!(fee_estimator.is_valid_fee(token, fee, [0u8; 32]).await);
 
         // fee is invalid for some uncached token
         let token = H160::from_low_u64_be(2);
-        assert!(!fee_estimator.is_valid_fee(token, fee).await);
+        assert!(!fee_estimator.is_valid_fee(token, fee, [0u8; 32]).await);
     }
 
     #[tokio::test]
@@ -480,11 +492,11 @@ mod tests {
         let lower_fee = fee - U256::one();
 
         // slightly lower fee is not valid
-        assert!(!fee_estimator.is_valid_fee(token, lower_fee).await);
+        assert!(!fee_estimator.is_valid_fee(token, lower_fee, [0u8; 32]).await);
 
         // Gas price reduces, and slightly lower fee is now valid
         *gas_price.lock().unwrap() /= 2.0;
-        assert!(fee_estimator.is_valid_fee(token, lower_fee).await);
+        assert!(fee_estimator.is_valid_fee(token, lower_fee, [0u8; 32]).await);
     }
 
     #[tokio::test]
@@ -533,5 +545,31 @@ mod tests {
                 .await,
             Err(PriceEstimationError::UnsupportedToken(t)) if t == unsupported_token
         ));
+    }
+
+    #[tokio::test]
+    async fn is_valid_fee() {
+        let sell_token = H160::from_low_u64_be(1);
+
+        let gas_price_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(100.0))));
+        let price_estimator = Arc::new(FakePriceEstimator(price_estimate::Estimate {
+            out_amount: 1.into(),
+            gas: 1000.into(),
+        }));
+
+        let fee_estimator = MinFeeCalculator {
+            price_estimator,
+            gas_estimator: gas_price_estimator,
+            native_token: Default::default(),
+            measurements: Arc::new(InMemoryFeeStore::default()),
+            now: Box::new(Utc::now),
+            fee_factor: 1.0,
+            bad_token_detector: Arc::new(ListBasedDetector::deny_list(vec![])),
+        };
+        let (fee, _) = fee_estimator.min_fee(sell_token, None, None, None).await.unwrap();
+        let lower_fee = fee - U256::one();
+        assert_eq!(fee_estimator.is_valid_fee(sell_token, lower_fee, BALANCER_APP_ID).await, true);
+        let half_lower_fee = lower_fee / U256::from(2);
+        assert_eq!(fee_estimator.is_valid_fee(sell_token, half_lower_fee, BALANCER_APP_ID).await, false);
     }
 }
