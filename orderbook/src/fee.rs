@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 // TODO - find out correct value and make it a config item.
-const BALANCER_APP_ID: [u8; 32] = [1u8;32];
+const BALANCER_APP_ID: [u8; 32] = [1u8; 32];
 
 pub type Measurement = (U256, DateTime<Utc>);
 
@@ -264,12 +264,11 @@ impl MinFeeCalculating for MinFeeCalculator {
 
     // Returns true if the fee satisfies a previous not yet expired estimate, or the fee is high enough given the current estimate.
     async fn is_valid_fee(&self, sell_token: H160, fee: U256, app_data: [u8; 32]) -> bool {
-
         let app_based_fee_factor = match app_data {
             BALANCER_APP_ID => U256::from(2),
             _ => U256::one(),
         };
-        let scaled_fee = fee.checked_mul(app_based_fee_factor).unwrap_or(U256::one());
+        let scaled_fee = fee.checked_mul(app_based_fee_factor).unwrap_or(fee);
 
         if let Ok(Some(past_fee)) = self
             .measurements
@@ -492,11 +491,19 @@ mod tests {
         let lower_fee = fee - U256::one();
 
         // slightly lower fee is not valid
-        assert!(!fee_estimator.is_valid_fee(token, lower_fee, [0u8; 32]).await);
+        assert!(
+            !fee_estimator
+                .is_valid_fee(token, lower_fee, [0u8; 32])
+                .await
+        );
 
         // Gas price reduces, and slightly lower fee is now valid
         *gas_price.lock().unwrap() /= 2.0;
-        assert!(fee_estimator.is_valid_fee(token, lower_fee, [0u8; 32]).await);
+        assert!(
+            fee_estimator
+                .is_valid_fee(token, lower_fee, [0u8; 32])
+                .await
+        );
     }
 
     #[tokio::test]
@@ -566,10 +573,23 @@ mod tests {
             fee_factor: 1.0,
             bad_token_detector: Arc::new(ListBasedDetector::deny_list(vec![])),
         };
-        let (fee, _) = fee_estimator.min_fee(sell_token, None, None, None).await.unwrap();
+        let (fee, _) = fee_estimator
+            .min_fee(sell_token, None, None, None)
+            .await
+            .unwrap();
         let lower_fee = fee - U256::one();
-        assert_eq!(fee_estimator.is_valid_fee(sell_token, lower_fee, BALANCER_APP_ID).await, true);
+        assert_eq!(
+            fee_estimator
+                .is_valid_fee(sell_token, lower_fee, BALANCER_APP_ID)
+                .await,
+            true
+        );
         let half_lower_fee = lower_fee / U256::from(2);
-        assert_eq!(fee_estimator.is_valid_fee(sell_token, half_lower_fee, BALANCER_APP_ID).await, false);
+        assert_eq!(
+            fee_estimator
+                .is_valid_fee(sell_token, half_lower_fee, BALANCER_APP_ID)
+                .await,
+            false
+        );
     }
 }
