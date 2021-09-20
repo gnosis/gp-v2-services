@@ -578,18 +578,16 @@ mod tests {
             .await
             .unwrap();
         let lower_fee = fee - U256::one();
-        assert_eq!(
+        assert!(
             fee_estimator
                 .is_valid_fee(sell_token, lower_fee, BALANCER_APP_ID)
-                .await,
-            true
+                .await
         );
         let half_lower_fee = lower_fee / U256::from(2);
-        assert_eq!(
-            fee_estimator
+        assert!(
+            !fee_estimator
                 .is_valid_fee(sell_token, half_lower_fee, BALANCER_APP_ID)
-                .await,
-            false
+                .await
         );
     }
 }
