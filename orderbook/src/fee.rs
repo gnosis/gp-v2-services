@@ -1,5 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
+use ethcontract::H256;
 use gas_estimation::GasPriceEstimating;
 use model::order::{OrderKind, BUY_ETH_ADDRESS};
 use primitive_types::{H160, U256};
@@ -7,7 +8,6 @@ use shared::price_estimate::{self, ensure_token_supported, PriceEstimationError}
 use shared::{bad_token::BadTokenDetecting, price_estimate::PriceEstimating};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use ethcontract::H256;
 
 pub type Measurement = (U256, DateTime<Utc>);
 
@@ -90,6 +90,7 @@ fn normalize_buy_token(buy_token: H160, weth: H160) -> H160 {
 }
 
 impl EthAwareMinFeeCalculator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         price_estimator: Arc<dyn PriceEstimating>,
         gas_estimator: Arc<dyn GasPriceEstimating>,
@@ -146,6 +147,7 @@ where
 }
 
 impl MinFeeCalculator {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         price_estimator: Arc<dyn PriceEstimating>,
         gas_estimator: Arc<dyn GasPriceEstimating>,
@@ -257,7 +259,10 @@ impl MinFeeCalculating for MinFeeCalculator {
 
     // Returns true if the fee satisfies a previous not yet expired estimate, or the fee is high enough given the current estimate.
     async fn is_valid_fee(&self, sell_token: H160, fee: U256, app_data: [u8; 32]) -> bool {
-        let app_based_fee_factor = self.partner_fee_factors.get(&H256::from(app_data)).unwrap_or(&1.0);
+        let app_based_fee_factor = self
+            .partner_fee_factors
+            .get(&H256::from(app_data))
+            .unwrap_or(&1.0);
         let scaled_fee = U256::from_f64_lossy(fee.to_f64_lossy() / app_based_fee_factor);
 
         if let Ok(Some(past_fee)) = self
@@ -568,6 +573,7 @@ mod tests {
             fee_factor: 1.0,
             bad_token_detector: Arc::new(ListBasedDetector::deny_list(vec![])),
             partner_fee_factors: hashmap! { H256::from(app_data) => 0.5 },
+            native_token_price_estimation_amount: 1.into(),
         };
         let (fee, _) = fee_estimator
             .min_fee(sell_token, None, None, None)

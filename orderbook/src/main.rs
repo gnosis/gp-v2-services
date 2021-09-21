@@ -1,4 +1,5 @@
 use contracts::{BalancerV2Vault, GPv2Settlement, WETH9};
+use ethcontract::H256;
 use model::{
     order::{OrderUid, BUY_ETH_ADDRESS},
     DomainSeparator,
@@ -23,10 +24,13 @@ use shared::{
             AmmPairProviderFinder, BalancerVaultFinder, TokenOwnerFinding, TraceCallDetector,
         },
     },
+    baseline_solver::BaseTokens,
     current_block::current_block_stream,
     maintenance::ServiceMaintenance,
+    metrics::setup_metrics_registry,
     paraswap_api::DefaultParaswapApi,
     paraswap_price_estimator::ParaswapPriceEstimator,
+    price_estimate::PriceEstimatorType,
     price_estimate::{BaselinePriceEstimator, PriceEstimating},
     recent_block_cache::CacheConfig,
     sources::{
@@ -41,18 +45,10 @@ use shared::{
     transport::create_instrumented_transport,
     transport::http::HttpTransport,
 };
-use std::collections::HashMap;
-use std::{
-    collections::HashSet, iter::FromIterator as _, net::SocketAddr, sync::Arc, time::Duration,
-use shared::{
-    baseline_solver::BaseTokens, metrics::setup_metrics_registry,
-    price_estimate::PriceEstimatorType,
-};
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 use structopt::StructOpt;
 use tokio::task;
 use url::Url;
-use ethcontract::H256;
 
 #[derive(Debug, StructOpt)]
 struct Arguments {
