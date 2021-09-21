@@ -24,8 +24,15 @@ pub fn convert_settlement(
     settled: SettledBatchAuctionModel,
     context: SettlementContext,
 ) -> Result<Settlement> {
-    let intermediate = IntermediateSettlement::new(settled, context)?;
-    intermediate.into_settlement()
+    match IntermediateSettlement::new(settled.clone(), context)
+        .and_then(|intermediate| intermediate.into_settlement())
+    {
+        Ok(settlement) => Ok(settlement),
+        Err(err) => {
+            tracing::debug!("failed to process HTTP solver result: {:?}", settled);
+            Err(err)
+        }
+    }
 }
 
 // An intermediate representation between SettledBatchAuctionModel and Settlement useful for doing
@@ -243,6 +250,7 @@ mod tests {
             partially_fillable: false,
             fee_amount: Default::default(),
             settlement_handling: limit_handler.clone(),
+            is_liquidity_order: false,
             id: "0".to_string(),
         };
         let orders = hashmap! { 0 => limit_order };
