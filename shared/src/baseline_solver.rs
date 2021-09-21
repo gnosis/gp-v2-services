@@ -520,4 +520,30 @@ mod tests {
         assert!(pairs.contains(&TokenPair::new(base_tokens[0], base_tokens[2]).unwrap()));
         assert!(pairs.contains(&TokenPair::new(base_tokens[1], base_tokens[2]).unwrap()));
     }
+
+    #[test]
+    fn relevant_pairs() {
+        let tokens: Vec<H160> = [0, 1, 2, 3, 4]
+            .iter()
+            .copied()
+            .map(H160::from_low_u64_le)
+            .collect();
+        let base = BaseTokens::new(tokens[0], &tokens[1..2]);
+
+        let pairs = base.relevant_pairs(&mut std::iter::empty());
+        assert!(pairs.is_empty());
+
+        let pairs = base.relevant_pairs(&mut TokenPair::new(tokens[0], tokens[1]).into_iter());
+        assert_eq!(pairs.len(), 1);
+        assert!(pairs.contains(&TokenPair::new(tokens[0], tokens[1]).unwrap()));
+
+        let pairs = base.relevant_pairs(&mut TokenPair::new(tokens[3], tokens[4]).into_iter());
+        assert_eq!(pairs.len(), 6);
+        assert!(pairs.contains(&TokenPair::new(tokens[0], tokens[1]).unwrap()));
+        assert!(pairs.contains(&TokenPair::new(tokens[0], tokens[3]).unwrap()));
+        assert!(pairs.contains(&TokenPair::new(tokens[0], tokens[4]).unwrap()));
+        assert!(pairs.contains(&TokenPair::new(tokens[1], tokens[3]).unwrap()));
+        assert!(pairs.contains(&TokenPair::new(tokens[1], tokens[4]).unwrap()));
+        assert!(pairs.contains(&TokenPair::new(tokens[3], tokens[4]).unwrap()));
+    }
 }
