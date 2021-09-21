@@ -294,6 +294,24 @@ impl HttpSolver {
     }
 }
 
+fn map_tokens_for_solver(orders: &[LimitOrder], liquidity: &[Liquidity]) -> Vec<H160> {
+    let mut token_set = HashSet::new();
+    token_set.extend(
+        orders
+            .iter()
+            .flat_map(|order| [order.sell_token, order.buy_token]),
+    );
+    for liquidity in liquidity.iter() {
+        match liquidity {
+            Liquidity::ConstantProduct(amm) => token_set.extend(amm.tokens),
+            Liquidity::BalancerWeighted(amm) => token_set.extend(amm.reserves.keys()),
+            Liquidity::BalancerStable(amm) => token_set.extend(amm.reserves.keys()),
+        }
+    }
+
+    Vec::from_iter(token_set)
+}
+
 struct GasModel {
     native_token: H160,
     gas_price: f64,
@@ -448,24 +466,6 @@ fn amm_models(liquidity: &[Liquidity], gas_model: &GasModel) -> BTreeMap<usize, 
         .enumerate()
         .filter(|(_, model)| model.has_sufficient_reserves())
         .collect()
-}
-
-fn map_tokens_for_solver(orders: &[LimitOrder], liquidity: &[Liquidity]) -> Vec<H160> {
-    let mut token_set = HashSet::new();
-    token_set.extend(
-        orders
-            .iter()
-            .flat_map(|order| [order.sell_token, order.buy_token]),
-    );
-    for liquidity in liquidity.iter() {
-        match liquidity {
-            Liquidity::ConstantProduct(amm) => token_set.extend(amm.tokens),
-            Liquidity::BalancerWeighted(amm) => token_set.extend(amm.reserves.keys()),
-            Liquidity::BalancerStable(amm) => token_set.extend(amm.reserves.keys()),
-        }
-    }
-
-    Vec::from_iter(token_set)
 }
 
 fn compute_fee_connected_tokens(liquidity: &[Liquidity], native_token: H160) -> HashSet<H160> {
