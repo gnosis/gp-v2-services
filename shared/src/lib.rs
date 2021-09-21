@@ -12,6 +12,8 @@ pub mod gas_price_estimation;
 pub mod maintenance;
 pub mod metrics;
 pub mod network;
+pub mod paraswap_api;
+pub mod paraswap_price_estimator;
 pub mod price_estimate;
 pub mod recent_block_cache;
 pub mod sources;
@@ -34,6 +36,7 @@ use std::{
     str::FromStr,
     time::{Duration, Instant},
 };
+use web3::types::Bytes;
 
 pub type Web3Transport = DynTransport;
 pub type Web3 = DynWeb3;
@@ -66,4 +69,11 @@ pub async fn measure_time<T>(future: impl Future<Output = T>, timer: impl FnOnce
     let result = future.await;
     timer(start.elapsed());
     result
+}
+
+pub fn debug_bytes(
+    bytes: &Bytes,
+    formatter: &mut std::fmt::Formatter,
+) -> Result<(), std::fmt::Error> {
+    formatter.write_fmt(format_args!("0x{}", hex::encode(&bytes.0)))
 }

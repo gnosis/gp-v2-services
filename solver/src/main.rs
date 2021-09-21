@@ -169,7 +169,7 @@ struct Arguments {
 
     /// The slippage tolerance we apply to the price quoted by Paraswap
     #[structopt(long, env, default_value = "10")]
-    paraswap_slippage_bps: usize,
+    paraswap_slippage_bps: u32,
 
     /// The list of disabled ParaSwap DEXs. By default, the `ParaSwapPool4`
     /// DEX (representing a private market maker) is disabled as it increases
@@ -179,7 +179,7 @@ struct Arguments {
 
     /// Special partner authentication for Paraswap API (allowing higher rater limits)
     #[structopt(long, env)]
-    paraswap_partner_header_value: Option<String>,
+    paraswap_partner: Option<String>,
 
     /// The authorization for the archer api.
     #[structopt(long, env)]
@@ -201,6 +201,11 @@ struct Arguments {
     /// The RPC endpoint to use for submitting private network transactions.
     #[structopt(long, env)]
     private_tx_network_url: Option<Url>,
+
+    /// The configured addresses whose orders should be considered liquidity
+    /// and not to be included in the objective function by the HTTP solver.
+    #[structopt(long, env)]
+    liquidity_order_owners: Vec<H160>,
 }
 
 arg_enum! {
@@ -251,12 +256,13 @@ async fn main() {
         args.orderbook_url,
         native_token_contract.clone(),
         client.clone(),
+        args.liquidity_order_owners.into_iter().collect(),
     );
     let mut base_tokens = HashSet::from_iter(args.shared.base_tokens);
     // We should always use the native token as a base token.
     base_tokens.insert(native_token_contract.address());
 
-    let amount_to_estimate_prices_with = args
+    let native_token_price_estimation_amount = args
         .shared
         .amount_to_estimate_prices_with
         .or_else(|| shared::arguments::default_amount_to_estimate_prices_with(&network_id))
@@ -353,7 +359,7 @@ async fn main() {
         // Order book already filters bad tokens
         Arc::new(ListBasedDetector::deny_list(Vec::new())),
         native_token_contract.address(),
-        amount_to_estimate_prices_with,
+        native_token_price_estimation_amount,
     ));
     let uniswap_like_liquidity = build_amm_artifacts(
         &pool_caches,
@@ -401,8 +407,9 @@ async fn main() {
         args.disabled_one_inch_protocols,
         args.paraswap_slippage_bps,
         args.disabled_paraswap_dexs,
-        args.paraswap_partner_header_value,
+        args.paraswap_partner,
         client.clone(),
+        native_token_price_estimation_amount,
     )
     .expect("failure creating solvers");
     let liquidity_collector = LiquidityCollector {
@@ -464,6 +471,7 @@ async fn main() {
         current_block_stream.clone(),
         args.shared.fee_factor,
         solution_submitter,
+        native_token_price_estimation_amount,
     );
 
     let maintainer = ServiceMaintenance {
