@@ -46,6 +46,7 @@ use std::{
 use structopt::StructOpt;
 use tokio::task;
 use url::Url;
+use ethcontract::H256;
 
 #[derive(Debug, StructOpt)]
 struct Arguments {
@@ -131,7 +132,7 @@ struct Arguments {
         default_value = "{}",
         parse(try_from_str = serde_json::from_str),
     )]
-    partner_additional_fee_factors: HashMap<[u8; 32], f64>, // '{"$BALANCER_APP_ID":0.5,"$METAMASK_APP_ID":0.7}'
+    partner_additional_fee_factors: HashMap<H256, f64>, // '{"$BALANCER_APP_ID":0.5,"$METAMASK_APP_ID":0.7}'
 }
 
 pub async fn database_metrics(metrics: Arc<Metrics>, database: Postgres) -> ! {

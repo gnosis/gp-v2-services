@@ -7,6 +7,7 @@ use shared::price_estimate::{self, PriceEstimationError};
 use shared::{bad_token::BadTokenDetecting, price_estimate::PriceEstimating};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use ethcontract::H256;
 
 pub type Measurement = (U256, DateTime<Utc>);
 
@@ -25,7 +26,7 @@ pub struct MinFeeCalculator {
     now: Box<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     fee_factor: f64,
     bad_token_detector: Arc<dyn BadTokenDetecting>,
-    partner_fee_factors: HashMap<[u8; 32], f64>,
+    partner_fee_factors: HashMap<H256, f64>,
 }
 
 #[cfg_attr(test, mockall::automock)]
@@ -95,7 +96,7 @@ impl EthAwareMinFeeCalculator {
         measurements: Arc<dyn MinFeeStoring>,
         fee_factor: f64,
         bad_token_detector: Arc<dyn BadTokenDetecting>,
-        partner_fee_factors: HashMap<[u8; 32], f64>,
+        partner_fee_factors: HashMap<H256, f64>,
     ) -> Self {
         Self {
             calculator: MinFeeCalculator::new(
@@ -149,7 +150,7 @@ impl MinFeeCalculator {
         measurements: Arc<dyn MinFeeStoring>,
         fee_factor: f64,
         bad_token_detector: Arc<dyn BadTokenDetecting>,
-        partner_fee_factors: HashMap<[u8; 32], f64>,
+        partner_fee_factors: HashMap<H256, f64>,
     ) -> Self {
         Self {
             price_estimator,
@@ -266,7 +267,7 @@ impl MinFeeCalculating for MinFeeCalculator {
 
     // Returns true if the fee satisfies a previous not yet expired estimate, or the fee is high enough given the current estimate.
     async fn is_valid_fee(&self, sell_token: H160, fee: U256, app_data: [u8; 32]) -> bool {
-        let app_based_fee_factor = self.partner_fee_factors.get(&app_data).unwrap_or(&1.0);
+        let app_based_fee_factor = self.partner_fee_factors.get(&H256::from(app_data)).unwrap_or(&1.0);
         let scaled_fee = U256::from_f64_lossy(fee.to_f64_lossy() / app_based_fee_factor);
 
         if let Ok(Some(past_fee)) = self
@@ -574,7 +575,7 @@ mod tests {
             now: Box::new(Utc::now),
             fee_factor: 1.0,
             bad_token_detector: Arc::new(ListBasedDetector::deny_list(vec![])),
-            partner_fee_factors: hashmap! { app_data => 0.5 },
+            partner_fee_factors: hashmap! { H256::from(app_data) => 0.5 },
         };
         let (fee, _) = fee_estimator
             .min_fee(sell_token, None, None, None)
