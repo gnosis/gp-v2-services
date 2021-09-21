@@ -39,6 +39,7 @@ use shared::{
     transport::create_instrumented_transport,
     transport::http::HttpTransport,
 };
+use std::collections::HashMap;
 use std::{
     collections::HashSet, iter::FromIterator as _, net::SocketAddr, sync::Arc, time::Duration,
 };
@@ -123,6 +124,14 @@ struct Arguments {
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
     solvable_orders_max_update_age: Duration,
+
+    #[structopt(
+        long,
+        env,
+        default_value = "{}",
+        parse(try_from_str = serde_json::from_str),
+    )]
+    partner_additional_fee_factors: HashMap<[u8; 32], f64>, // '{"$BALANCER_APP_ID":0.5,"$METAMASK_APP_ID":0.7}'
 }
 
 pub async fn database_metrics(metrics: Arc<Metrics>, database: Postgres) -> ! {
@@ -336,6 +345,7 @@ async fn main() {
         database.clone(),
         args.shared.fee_factor,
         bad_token_detector.clone(),
+        args.partner_additional_fee_factors,
     ));
 
     let solvable_orders_cache = SolvableOrdersCache::new(

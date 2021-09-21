@@ -8,9 +8,6 @@ use shared::{bad_token::BadTokenDetecting, price_estimate::PriceEstimating};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-// TODO - find out correct value and make it a config item.
-const BALANCER_APP_ID: [u8; 32] = [1u8; 32];
-
 pub type Measurement = (U256, DateTime<Utc>);
 
 pub type EthAwareMinFeeCalculator = EthAdapter<MinFeeCalculator>;
@@ -28,6 +25,7 @@ pub struct MinFeeCalculator {
     now: Box<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     fee_factor: f64,
     bad_token_detector: Arc<dyn BadTokenDetecting>,
+    partner_fee_factors: HashMap<[u8; 32], f64>,
 }
 
 #[cfg_attr(test, mockall::automock)]
@@ -97,6 +95,7 @@ impl EthAwareMinFeeCalculator {
         measurements: Arc<dyn MinFeeStoring>,
         fee_factor: f64,
         bad_token_detector: Arc<dyn BadTokenDetecting>,
+        partner_fee_factors: HashMap<[u8; 32], f64>,
     ) -> Self {
         Self {
             calculator: MinFeeCalculator::new(
@@ -106,6 +105,7 @@ impl EthAwareMinFeeCalculator {
                 measurements,
                 fee_factor,
                 bad_token_detector,
+                partner_fee_factors,
             ),
             weth: native_token,
         }
@@ -149,6 +149,7 @@ impl MinFeeCalculator {
         measurements: Arc<dyn MinFeeStoring>,
         fee_factor: f64,
         bad_token_detector: Arc<dyn BadTokenDetecting>,
+        partner_fee_factors: HashMap<[u8; 32], f64>,
     ) -> Self {
         Self {
             price_estimator,
@@ -158,6 +159,7 @@ impl MinFeeCalculator {
             now: Box::new(Utc::now),
             fee_factor,
             bad_token_detector,
+            partner_fee_factors,
         }
     }
 
@@ -264,11 +266,8 @@ impl MinFeeCalculating for MinFeeCalculator {
 
     // Returns true if the fee satisfies a previous not yet expired estimate, or the fee is high enough given the current estimate.
     async fn is_valid_fee(&self, sell_token: H160, fee: U256, app_data: [u8; 32]) -> bool {
-        let app_based_fee_factor = match app_data {
-            BALANCER_APP_ID => U256::from(2),
-            _ => U256::one(),
-        };
-        let scaled_fee = fee.checked_mul(app_based_fee_factor).unwrap_or(fee);
+        let app_based_fee_factor = self.partner_fee_factors.get(&app_data).unwrap_or(&1.0);
+        let scaled_fee = U256::from_f64_lossy(fee.to_f64_lossy() / app_based_fee_factor);
 
         if let Ok(Some(past_fee)) = self
             .measurements
@@ -354,6 +353,7 @@ impl MinFeeStoring for InMemoryFeeStore {
 #[cfg(test)]
 mod tests {
     use chrono::{Duration, NaiveDateTime};
+    use maplit::hashmap;
     use shared::{
         bad_token::list_based::ListBasedDetector, gas_price_estimation::FakeGasPriceEstimator,
         price_estimate::mocks::FakePriceEstimator,
@@ -424,6 +424,7 @@ mod tests {
                 now,
                 fee_factor: 1.0,
                 bad_token_detector: Arc::new(ListBasedDetector::deny_list(Vec::new())),
+                partner_fee_factors: hashmap! {},
             }
         }
     }
@@ -525,6 +526,7 @@ mod tests {
             now: Box::new(Utc::now),
             fee_factor: 1.0,
             bad_token_detector: Arc::new(ListBasedDetector::deny_list(vec![unsupported_token])),
+            partner_fee_factors: hashmap! {},
         };
 
         // Selling unsupported token
@@ -563,7 +565,7 @@ mod tests {
             out_amount: 1.into(),
             gas: 1000.into(),
         }));
-
+        let app_data = [1u8; 32];
         let fee_estimator = MinFeeCalculator {
             price_estimator,
             gas_estimator: gas_price_estimator,
@@ -572,6 +574,7 @@ mod tests {
             now: Box::new(Utc::now),
             fee_factor: 1.0,
             bad_token_detector: Arc::new(ListBasedDetector::deny_list(vec![])),
+            partner_fee_factors: hashmap! { app_data => 0.5 },
         };
         let (fee, _) = fee_estimator
             .min_fee(sell_token, None, None, None)
@@ -580,13 +583,13 @@ mod tests {
         let lower_fee = fee - U256::one();
         assert!(
             fee_estimator
-                .is_valid_fee(sell_token, lower_fee, BALANCER_APP_ID)
+                .is_valid_fee(sell_token, lower_fee, app_data)
                 .await
         );
         let half_lower_fee = lower_fee / U256::from(2);
         assert!(
             !fee_estimator
-                .is_valid_fee(sell_token, half_lower_fee, BALANCER_APP_ID)
+                .is_valid_fee(sell_token, half_lower_fee, app_data)
                 .await
         );
     }
