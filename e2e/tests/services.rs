@@ -2,7 +2,6 @@ use contracts::{
     BalancerV2Vault, ERC20Mintable, GPv2Settlement, UniswapV2Factory, UniswapV2Router02, WETH9,
 };
 use ethcontract::{prelude::U256, H160};
-use maplit::hashset;
 use model::DomainSeparator;
 use orderbook::{
     account_balances::Web3BalanceFetcher, database::Postgres, event_updater::EventUpdater,
@@ -12,6 +11,7 @@ use orderbook::{
 use reqwest::Client;
 use shared::{
     bad_token::list_based::ListBasedDetector,
+    baseline_solver::BaseTokens,
     current_block::{current_block_stream, CurrentBlockStream},
     maintenance::ServiceMaintenance,
     price_estimate::BaselinePriceEstimator,
@@ -133,6 +133,7 @@ pub struct OrderbookServices {
     pub maintenance: ServiceMaintenance,
     pub block_stream: CurrentBlockStream,
     pub solvable_orders_cache: Arc<SolvableOrdersCache>,
+    pub base_tokens: Arc<BaseTokens>,
 }
 
 impl OrderbookServices {
@@ -175,11 +176,11 @@ impl OrderbookServices {
         .unwrap();
         let gas_estimator = Arc::new(web3.clone());
         let bad_token_detector = Arc::new(ListBasedDetector::deny_list(Vec::new()));
-        let base_tokens = hashset![gpv2.native_token.address()];
+        let base_tokens = Arc::new(BaseTokens::new(gpv2.native_token.address(), &[]));
         let price_estimator = Arc::new(BaselinePriceEstimator::new(
             Arc::new(pool_fetcher),
             gas_estimator.clone(),
-            base_tokens,
+            base_tokens.clone(),
             bad_token_detector.clone(),
             gpv2.native_token.address(),
             1_000_000_000_000_000_000_u128.into(),
@@ -192,6 +193,7 @@ impl OrderbookServices {
             0.0,
             bad_token_detector.clone(),
             HashMap::default(),
+            1_000_000_000_000_000_000_u128.into(),
         ));
         let balance_fetcher = Arc::new(Web3BalanceFetcher::new(
             web3.clone(),
@@ -238,6 +240,7 @@ impl OrderbookServices {
             maintenance,
             block_stream: current_block_stream,
             solvable_orders_cache,
+            base_tokens,
         }
     }
 }

@@ -15,7 +15,6 @@ use orderbook::{
     verify_deployed_contract_constants,
 };
 use primitive_types::H160;
-use shared::metrics::setup_metrics_registry;
 use shared::{
     bad_token::{
         cache::CachingDetector,
@@ -26,7 +25,9 @@ use shared::{
     },
     current_block::current_block_stream,
     maintenance::ServiceMaintenance,
-    price_estimate::BaselinePriceEstimator,
+    paraswap_api::DefaultParaswapApi,
+    paraswap_price_estimator::ParaswapPriceEstimator,
+    price_estimate::{BaselinePriceEstimator, PriceEstimating},
     recent_block_cache::CacheConfig,
     sources::{
         self,
@@ -36,13 +37,18 @@ use shared::{
         },
         PoolAggregator,
     },
+    token_info::{CachedTokenInfoFetcher, TokenInfoFetcher},
     transport::create_instrumented_transport,
     transport::http::HttpTransport,
 };
 use std::collections::HashMap;
 use std::{
     collections::HashSet, iter::FromIterator as _, net::SocketAddr, sync::Arc, time::Duration,
+use shared::{
+    baseline_solver::BaseTokens, metrics::setup_metrics_registry,
+    price_estimate::PriceEstimatorType,
 };
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 use structopt::StructOpt;
 use tokio::task;
 use url::Url;
@@ -189,7 +195,7 @@ async fn main() {
         .await
         .expect("Failed to retrieve network version ID");
 
-    let amount_to_estimate_prices_with = args
+    let native_token_price_estimation_amount = args
         .shared
         .amount_to_estimate_prices_with
         .or_else(|| shared::arguments::default_amount_to_estimate_prices_with(&network))
@@ -259,11 +265,12 @@ async fn main() {
         .cloned()
         .collect::<Vec<_>>();
 
-    let mut base_tokens = HashSet::from_iter(args.shared.base_tokens);
-    // We should always use the native token as a base token.
-    base_tokens.insert(native_token.address());
+    let base_tokens = Arc::new(BaseTokens::new(
+        native_token.address(),
+        &args.shared.base_tokens,
+    ));
     let mut allowed_tokens = args.allowed_tokens;
-    allowed_tokens.extend(base_tokens.iter().copied());
+    allowed_tokens.extend(base_tokens.tokens().iter().copied());
     allowed_tokens.push(BUY_ETH_ADDRESS);
     let unsupported_tokens = args.unsupported_tokens;
 
@@ -272,7 +279,7 @@ async fn main() {
         .map(|provider| -> Arc<dyn TokenOwnerFinding> {
             Arc::new(AmmPairProviderFinder {
                 inner: provider.clone(),
-                base_tokens: base_tokens.iter().copied().collect(),
+                base_tokens: base_tokens.tokens().iter().copied().collect(),
             })
         })
         .collect();
@@ -282,7 +289,7 @@ async fn main() {
     let trace_call_detector = TraceCallDetector {
         web3: web3.clone(),
         finders,
-        base_tokens: base_tokens.clone(),
+        base_tokens: base_tokens.tokens().clone(),
         settlement_contract: settlement_contract.address(),
     };
     let caching_detector = CachingDetector::new(
@@ -330,15 +337,28 @@ async fn main() {
         )
         .expect("failed to create pool cache"),
     );
-
-    let price_estimator = Arc::new(BaselinePriceEstimator::new(
-        pool_fetcher.clone(),
-        gas_price_estimator.clone(),
-        base_tokens,
-        bad_token_detector.clone(),
-        native_token.address(),
-        amount_to_estimate_prices_with,
-    ));
+    let token_info_fetcher = Arc::new(CachedTokenInfoFetcher::new(Box::new(TokenInfoFetcher {
+        web3: web3.clone(),
+    })));
+    let price_estimator = match args.shared.price_estimator {
+        PriceEstimatorType::Baseline => Arc::new(BaselinePriceEstimator::new(
+            pool_fetcher.clone(),
+            gas_price_estimator.clone(),
+            base_tokens,
+            bad_token_detector.clone(),
+            native_token.address(),
+            native_token_price_estimation_amount,
+        )) as Arc<dyn PriceEstimating>,
+        PriceEstimatorType::Paraswap => Arc::new(ParaswapPriceEstimator {
+            paraswap: Arc::new(DefaultParaswapApi {
+                client: client.clone(),
+                partner: args.shared.paraswap_partner.unwrap_or_default(),
+            }),
+            token_info: token_info_fetcher,
+            bad_token_detector: bad_token_detector.clone(),
+            disabled_paraswap_dexs: args.shared.disabled_paraswap_dexs,
+        }),
+    };
     let fee_calculator = Arc::new(EthAwareMinFeeCalculator::new(
         price_estimator.clone(),
         gas_price_estimator,
@@ -347,6 +367,7 @@ async fn main() {
         args.shared.fee_factor,
         bad_token_detector.clone(),
         args.partner_additional_fee_factors,
+        native_token_price_estimation_amount,
     ));
 
     let solvable_orders_cache = SolvableOrdersCache::new(

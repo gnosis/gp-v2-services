@@ -3,7 +3,7 @@ use chrono::{DateTime, Duration, Utc};
 use gas_estimation::GasPriceEstimating;
 use model::order::{OrderKind, BUY_ETH_ADDRESS};
 use primitive_types::{H160, U256};
-use shared::price_estimate::{self, PriceEstimationError};
+use shared::price_estimate::{self, ensure_token_supported, PriceEstimationError};
 use shared::{bad_token::BadTokenDetecting, price_estimate::PriceEstimating};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -27,6 +27,7 @@ pub struct MinFeeCalculator {
     fee_factor: f64,
     bad_token_detector: Arc<dyn BadTokenDetecting>,
     partner_fee_factors: HashMap<H256, f64>,
+    native_token_price_estimation_amount: U256,
 }
 
 #[cfg_attr(test, mockall::automock)]
@@ -97,6 +98,7 @@ impl EthAwareMinFeeCalculator {
         fee_factor: f64,
         bad_token_detector: Arc<dyn BadTokenDetecting>,
         partner_fee_factors: HashMap<H256, f64>,
+        native_token_price_estimation_amount: U256,
     ) -> Self {
         Self {
             calculator: MinFeeCalculator::new(
@@ -107,6 +109,7 @@ impl EthAwareMinFeeCalculator {
                 fee_factor,
                 bad_token_detector,
                 partner_fee_factors,
+                native_token_price_estimation_amount,
             ),
             weth: native_token,
         }
@@ -151,6 +154,7 @@ impl MinFeeCalculator {
         fee_factor: f64,
         bad_token_detector: Arc<dyn BadTokenDetecting>,
         partner_fee_factors: HashMap<H256, f64>,
+        native_token_price_estimation_amount: U256,
     ) -> Self {
         Self {
             price_estimator,
@@ -161,6 +165,7 @@ impl MinFeeCalculator {
             fee_factor,
             bad_token_detector,
             partner_fee_factors,
+            native_token_price_estimation_amount,
         }
     }
 
@@ -193,27 +198,12 @@ impl MinFeeCalculator {
         let query = price_estimate::Query {
             sell_token,
             buy_token: self.native_token,
-            in_amount: self
-                .price_estimator
-                .native_token_amount_to_estimate_prices_with(),
+            in_amount: self.native_token_price_estimation_amount,
             kind: OrderKind::Buy,
         };
         let estimate = self.price_estimator.estimate(&query).await?;
         let price = estimate.price_in_sell_token_f64(&query);
         Ok(U256::from_f64_lossy(fee_in_eth * price))
-    }
-
-    async fn ensure_token_supported(&self, token: H160) -> Result<(), PriceEstimationError> {
-        match self.bad_token_detector.detect(token).await {
-            Ok(quality) => {
-                if quality.is_good() {
-                    Ok(())
-                } else {
-                    Err(PriceEstimationError::UnsupportedToken(token))
-                }
-            }
-            Err(err) => Err(PriceEstimationError::Other(err)),
-        }
     }
 }
 
@@ -230,9 +220,9 @@ impl MinFeeCalculating for MinFeeCalculator {
         amount: Option<U256>,
         kind: Option<OrderKind>,
     ) -> Result<Measurement, PriceEstimationError> {
-        self.ensure_token_supported(sell_token).await?;
+        ensure_token_supported(sell_token, self.bad_token_detector.as_ref()).await?;
         if let Some(buy_token) = buy_token {
-            self.ensure_token_supported(buy_token).await?;
+            ensure_token_supported(buy_token, self.bad_token_detector.as_ref()).await?;
         }
 
         let now = (self.now)();
@@ -426,6 +416,7 @@ mod tests {
                 fee_factor: 1.0,
                 bad_token_detector: Arc::new(ListBasedDetector::deny_list(Vec::new())),
                 partner_fee_factors: hashmap! {},
+                native_token_price_estimation_amount: 1.into(),
             }
         }
     }
@@ -528,6 +519,7 @@ mod tests {
             fee_factor: 1.0,
             bad_token_detector: Arc::new(ListBasedDetector::deny_list(vec![unsupported_token])),
             partner_fee_factors: hashmap! {},
+            native_token_price_estimation_amount: 1.into(),
         };
 
         // Selling unsupported token

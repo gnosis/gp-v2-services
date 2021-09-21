@@ -1,6 +1,7 @@
 use contracts::{IUniswapLikeRouter, WETH9};
 use ethcontract::{Account, PrivateKey, H160, U256};
 use reqwest::Url;
+use shared::baseline_solver::BaseTokens;
 use shared::metrics::setup_metrics_registry;
 use shared::{
     bad_token::list_based::ListBasedDetector,
@@ -32,8 +33,7 @@ use solver::{
     settlement_submission::{archer_api::ArcherApi, SolutionSubmitter, TransactionStrategy},
     solver::SolverType,
 };
-use std::{collections::HashMap, iter::FromIterator as _};
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use structopt::{clap::arg_enum, StructOpt};
 
 #[derive(Debug, StructOpt)]
@@ -171,16 +171,6 @@ struct Arguments {
     #[structopt(long, env, default_value = "10")]
     paraswap_slippage_bps: u32,
 
-    /// The list of disabled ParaSwap DEXs. By default, the `ParaSwapPool4`
-    /// DEX (representing a private market maker) is disabled as it increases
-    /// price by 1% if built transactions don't actually get executed.
-    #[structopt(long, env, default_value = "ParaSwapPool4", use_delimiter = true)]
-    disabled_paraswap_dexs: Vec<String>,
-
-    /// Special partner authentication for Paraswap API (allowing higher rater limits)
-    #[structopt(long, env)]
-    paraswap_partner: Option<String>,
-
     /// The authorization for the archer api.
     #[structopt(long, env)]
     archer_authorization: Option<String>,
@@ -258,11 +248,13 @@ async fn main() {
         client.clone(),
         args.liquidity_order_owners.into_iter().collect(),
     );
-    let mut base_tokens = HashSet::from_iter(args.shared.base_tokens);
-    // We should always use the native token as a base token.
-    base_tokens.insert(native_token_contract.address());
 
-    let amount_to_estimate_prices_with = args
+    let base_tokens = Arc::new(BaseTokens::new(
+        native_token_contract.address(),
+        &args.shared.base_tokens,
+    ));
+
+    let native_token_price_estimation_amount = args
         .shared
         .amount_to_estimate_prices_with
         .or_else(|| shared::arguments::default_amount_to_estimate_prices_with(&network_id))
@@ -359,7 +351,7 @@ async fn main() {
         // Order book already filters bad tokens
         Arc::new(ListBasedDetector::deny_list(Vec::new())),
         native_token_contract.address(),
-        amount_to_estimate_prices_with,
+        native_token_price_estimation_amount,
     ));
     let uniswap_like_liquidity = build_amm_artifacts(
         &pool_caches,
@@ -406,9 +398,10 @@ async fn main() {
         args.min_order_size_one_inch,
         args.disabled_one_inch_protocols,
         args.paraswap_slippage_bps,
-        args.disabled_paraswap_dexs,
-        args.paraswap_partner,
+        args.shared.disabled_paraswap_dexs,
+        args.shared.paraswap_partner,
         client.clone(),
+        native_token_price_estimation_amount,
     )
     .expect("failure creating solvers");
     let liquidity_collector = LiquidityCollector {
@@ -470,6 +463,7 @@ async fn main() {
         current_block_stream.clone(),
         args.shared.fee_factor,
         solution_submitter,
+        native_token_price_estimation_amount,
     );
 
     let maintainer = ServiceMaintenance {
@@ -488,7 +482,7 @@ async fn main() {
 async fn build_amm_artifacts(
     sources: &HashMap<BaselineSource, Arc<PoolCache>>,
     settlement_contract: contracts::GPv2Settlement,
-    base_tokens: HashSet<H160>,
+    base_tokens: Arc<BaseTokens>,
     web3: shared::Web3,
 ) -> Vec<UniswapLikeLiquidity> {
     let mut res = vec![];
