@@ -88,6 +88,7 @@ pub struct HttpSolver {
     chain_id: u64,
     instance_cache: InstanceCache,
     fee_factor: f64,
+    native_token_amount_to_estimate_prices_with: U256,
 }
 
 impl HttpSolver {
@@ -107,6 +108,7 @@ impl HttpSolver {
         fee_factor: f64,
         client: Client,
         instance_cache: InstanceCache,
+        native_token_amount_to_estimate_prices_with: U256,
     ) -> Self {
         Self {
             name,
@@ -123,6 +125,7 @@ impl HttpSolver {
             chain_id,
             instance_cache,
             fee_factor,
+            native_token_amount_to_estimate_prices_with,
         }
     }
 
@@ -197,6 +200,7 @@ impl HttpSolver {
                     amount: order_cost,
                     token: self.native_token,
                 },
+                is_liquidity_order: order.is_liquidity_order,
             };
             result.insert(*index, order);
         }
@@ -315,16 +319,13 @@ impl HttpSolver {
     ) -> Result<(BatchAuctionModel, SettlementContext)> {
         let tokens = self.map_tokens_for_solver(&orders, &liquidity);
 
-        let amount = self
-            .price_estimator
-            .native_token_amount_to_estimate_prices_with();
         let queries = tokens
             .iter()
             .filter(|token| !price_estimates.contains_key(token))
             .map(|token| price_estimate::Query {
                 sell_token: self.native_token,
                 buy_token: *token,
-                in_amount: amount,
+                in_amount: self.native_token_amount_to_estimate_prices_with,
                 kind: OrderKind::Sell,
             })
             .collect::<Vec<_>>();
@@ -698,6 +699,7 @@ mod tests {
             1.,
             Client::new(),
             Default::default(),
+            1.into(),
         );
         let base = |x: u128| x * 10u128.pow(18);
         let limit_orders = vec![LimitOrder {
@@ -709,6 +711,7 @@ mod tests {
             partially_fillable: false,
             fee_amount: Default::default(),
             settlement_handling: CapturingSettlementHandler::arc(),
+            is_liquidity_order: false,
             id: "0".to_string(),
         }];
         let liquidity = vec![Liquidity::ConstantProduct(ConstantProductOrder {
@@ -785,6 +788,7 @@ mod tests {
             partially_fillable: Default::default(),
             fee_amount: Default::default(),
             settlement_handling: limit_handling.clone(),
+            is_liquidity_order: false,
             id: "0".to_string(),
         })
         .collect::<Vec<_>>();

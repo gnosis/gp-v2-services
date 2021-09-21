@@ -148,10 +148,11 @@ pub fn create(
     fee_factor: f64,
     min_order_size_one_inch: U256,
     disabled_one_inch_protocols: Vec<String>,
-    paraswap_slippage_bps: usize,
+    paraswap_slippage_bps: u32,
     disabled_paraswap_dexs: Vec<String>,
-    paraswap_partner_header_value: Option<String>,
+    paraswap_partner: Option<String>,
     client: Client,
+    native_token_amount_to_estimate_prices_with: U256,
 ) -> Result<Solvers> {
     // Tiny helper function to help out with type inference. Otherwise, all
     // `Box::new(...)` expressions would have to be cast `as Box<dyn Solver>`.
@@ -184,6 +185,7 @@ pub fn create(
             fee_factor,
             client.clone(),
             http_solver_cache.clone(),
+            native_token_amount_to_estimate_prices_with,
         )
     };
 
@@ -237,7 +239,7 @@ pub fn create(
                     paraswap_slippage_bps,
                     disabled_paraswap_dexs.clone(),
                     client.clone(),
-                    paraswap_partner_header_value.clone(),
+                    paraswap_partner.clone(),
                 ))),
             };
 

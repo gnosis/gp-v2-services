@@ -55,6 +55,7 @@ pub fn create_orderbook_api(web3: &Web3, weth_address: H160) -> OrderBookApi {
         reqwest::Url::from_str(API_HOST).unwrap(),
         weth,
         Client::new(),
+        Default::default(),
     )
 }
 
@@ -189,6 +190,7 @@ impl OrderbookServices {
             db.clone(),
             0.0,
             bad_token_detector.clone(),
+            1_000_000_000_000_000_000_u128.into(),
         ));
         let balance_fetcher = Arc::new(Web3BalanceFetcher::new(
             web3.clone(),
