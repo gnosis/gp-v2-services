@@ -128,6 +128,13 @@ struct Arguments {
     )]
     solvable_orders_max_update_age: Duration,
 
+    /// Used to specify additional fee subsidy factor based on app_ids contained in orders.
+    /// Should take the form of a json string as shown in the following example:
+    /// '{"0x0000000000000000000000000000000000000000000000000000000000000000":0.5,"$PROJECT_APP_ID":0.7}'
+    ///
+    /// Furthermore, a value of
+    /// - 1 means no subsidy and is the default for all app_data not contained in this list.
+    /// - 0.5 means that this project pays only 50% of the estimated fees.
     #[structopt(
         long,
         env,

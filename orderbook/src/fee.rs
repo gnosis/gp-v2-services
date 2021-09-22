@@ -26,7 +26,7 @@ pub struct MinFeeCalculator {
     now: Box<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     fee_factor: f64,
     bad_token_detector: Arc<dyn BadTokenDetecting>,
-    partner_fee_factors: HashMap<H256, f64>,
+    partner_additional_fee_factors: HashMap<H256, f64>,
     native_token_price_estimation_amount: U256,
 }
 
@@ -98,7 +98,7 @@ impl EthAwareMinFeeCalculator {
         measurements: Arc<dyn MinFeeStoring>,
         fee_factor: f64,
         bad_token_detector: Arc<dyn BadTokenDetecting>,
-        partner_fee_factors: HashMap<H256, f64>,
+        partner_additional_fee_factors: HashMap<H256, f64>,
         native_token_price_estimation_amount: U256,
     ) -> Self {
         Self {
@@ -109,7 +109,7 @@ impl EthAwareMinFeeCalculator {
                 measurements,
                 fee_factor,
                 bad_token_detector,
-                partner_fee_factors,
+                partner_additional_fee_factors,
                 native_token_price_estimation_amount,
             ),
             weth: native_token,
@@ -155,7 +155,7 @@ impl MinFeeCalculator {
         measurements: Arc<dyn MinFeeStoring>,
         fee_factor: f64,
         bad_token_detector: Arc<dyn BadTokenDetecting>,
-        partner_fee_factors: HashMap<H256, f64>,
+        partner_additional_fee_factors: HashMap<H256, f64>,
         native_token_price_estimation_amount: U256,
     ) -> Self {
         Self {
@@ -166,7 +166,7 @@ impl MinFeeCalculator {
             now: Box::new(Utc::now),
             fee_factor,
             bad_token_detector,
-            partner_fee_factors,
+            partner_additional_fee_factors,
             native_token_price_estimation_amount,
         }
     }
@@ -260,22 +260,21 @@ impl MinFeeCalculating for MinFeeCalculator {
     // Returns true if the fee satisfies a previous not yet expired estimate, or the fee is high enough given the current estimate.
     async fn is_valid_fee(&self, sell_token: H160, fee: U256, app_data: [u8; 32]) -> bool {
         let app_based_fee_factor = self
-            .partner_fee_factors
+            .partner_additional_fee_factors
             .get(&H256::from(app_data))
             .unwrap_or(&1.0);
-        let scaled_fee = U256::from_f64_lossy(fee.to_f64_lossy() / app_based_fee_factor);
 
         if let Ok(Some(past_fee)) = self
             .measurements
             .get_min_fee(sell_token, None, None, None, (self.now)())
             .await
         {
-            if scaled_fee >= past_fee {
+            if fee >= U256::from_f64_lossy(past_fee.to_f64_lossy() * app_based_fee_factor) {
                 return true;
             }
         }
         if let Ok(current_fee) = self.compute_min_fee(sell_token, None, None, None).await {
-            return scaled_fee >= current_fee;
+            return fee >= U256::from_f64_lossy(current_fee.to_f64_lossy() * app_based_fee_factor);
         }
         false
     }
@@ -420,7 +419,7 @@ mod tests {
                 now,
                 fee_factor: 1.0,
                 bad_token_detector: Arc::new(ListBasedDetector::deny_list(Vec::new())),
-                partner_fee_factors: hashmap! {},
+                partner_additional_fee_factors: hashmap! {},
                 native_token_price_estimation_amount: 1.into(),
             }
         }
@@ -523,7 +522,7 @@ mod tests {
             now: Box::new(Utc::now),
             fee_factor: 1.0,
             bad_token_detector: Arc::new(ListBasedDetector::deny_list(vec![unsupported_token])),
-            partner_fee_factors: hashmap! {},
+            partner_additional_fee_factors: hashmap! {},
             native_token_price_estimation_amount: 1.into(),
         };
 
@@ -572,7 +571,7 @@ mod tests {
             now: Box::new(Utc::now),
             fee_factor: 1.0,
             bad_token_detector: Arc::new(ListBasedDetector::deny_list(vec![])),
-            partner_fee_factors: hashmap! { H256::from(app_data) => 0.5 },
+            partner_additional_fee_factors: hashmap! { H256::from(app_data) => 0.5 },
             native_token_price_estimation_amount: 1.into(),
         };
         let (fee, _) = fee_estimator
