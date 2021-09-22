@@ -262,22 +262,27 @@ impl MinFeeCalculating for MinFeeCalculator {
         let app_based_fee_factor = self
             .partner_additional_fee_factors
             .get(&H256::from(app_data))
-            .unwrap_or(&1.0);
+            .unwrap_or(&1.0)
+            .clone();
 
         if let Ok(Some(past_fee)) = self
             .measurements
             .get_min_fee(sell_token, None, None, None, (self.now)())
             .await
         {
-            if fee >= U256::from_f64_lossy(past_fee.to_f64_lossy() * app_based_fee_factor) {
+            if fee >= apply_fee_factor(past_fee, app_based_fee_factor) {
                 return true;
             }
         }
         if let Ok(current_fee) = self.compute_min_fee(sell_token, None, None, None).await {
-            return fee >= U256::from_f64_lossy(current_fee.to_f64_lossy() * app_based_fee_factor);
+            return fee >= apply_fee_factor(current_fee, app_based_fee_factor);
         }
         false
     }
+}
+
+fn apply_fee_factor(fee: U256, factor: f64) -> U256 {
+    U256::from_f64_lossy(fee.to_f64_lossy() * factor)
 }
 
 struct FeeMeasurement {
@@ -397,7 +402,9 @@ mod tests {
         let mut calculator = MockMinFeeCalculating::default();
         calculator
             .expect_is_valid_fee()
-            .withf(move |&sell_token, &fee, &_| sell_token == token && fee == 42.into())
+            .withf(move |&sell_token, &fee, &app_data| {
+                sell_token == token && fee == 42.into() && app_data == [0; 32]
+            })
             .times(1)
             .returning(|_, _, _| true);
 
