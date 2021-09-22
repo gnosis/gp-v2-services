@@ -425,15 +425,6 @@ paths:
         a price estimate for the order. It returns a full order that can be used
         directly for signing, and with an included signature, passed directly to
         the order creation endpoint.
-      parameters:
-        - in: header
-          name: X-AppData
-          description: |
-            The front-end specific application data. This allows the backend to
-            differentiate the front-end used to quote the order even in the presence
-            of a referral.
-          $ref: "#/components/schemas/AppData"
-          required: false
       requestBody:
         description: The order parameters to compute a quote for.
         required: true
@@ -823,31 +814,43 @@ components:
       description: The buy or sell side when quoting an order.
       oneOf:
         - type: object
+          description: Quote a sell order given the final total sell amount including fees
           properties:
             kind:
-              description: "A sell order"
               type: string
               enum: [sell]
-            totalSellAmount:
+            sellAmountBeforeFee:
               description: |
-                The total sell amount for the quoted order. The sell amount for the
-                returned orders will have fees deducted from this value.
+                The total amount that is available for the order. From this value, the fee
+                is deducted and the buy amount is calculated.
               $ref: "#/components/schemas/TokenAmount"
           required:
             - kind
-            - totalSellAmount
+            - sellAmountBeforeFee
         - type: object
+          description: Quote a sell order given the sell amount.
           properties:
             kind:
-              description: "A buy order"
+              type: string
+              enum: [sell]
+            sellAmountAfterFee:
+              description: The sell amount for the order.
+              $ref: "#/components/schemas/TokenAmount"
+          required:
+            - kind
+            - sellAmountAfterFee
+        - type: object
+          description: Quote a buy order given an exact buy amount.
+          properties:
+            kind:
               type: string
               enum: [buy]
-            buyAmount:
+            buyAmountAfterFee:
               description: The buy amount for the order.
               $ref: "#/components/schemas/TokenAmount"
           required:
             - kind
-            - buyAmount
+            - buyAmountAfterFee
     OrderQuoteRequest:
       description: Request for generating a fee and price quote.
       allOf:
@@ -898,7 +901,8 @@ components:
         - $ref: "#/components/schemas/OrderParameters"
         - type: object
           properties:
-            - from: The expected address of the signer
+            from:
+              description: The expected address of the signer
               $ref: "#/components/schemas/Address"
           required:
             - from

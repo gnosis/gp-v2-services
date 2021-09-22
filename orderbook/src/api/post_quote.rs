@@ -35,13 +35,26 @@ struct OrderQuoteRequest {
 enum OrderQuoteSide {
     #[serde(rename_all = "camelCase")]
     Sell {
-        #[serde(with = "u256_decimal")]
-        total_sell_amount: U256,
+        #[serde(flatten)]
+        sell_amount: SellAmount,
     },
     #[serde(rename_all = "camelCase")]
     Buy {
         #[serde(with = "u256_decimal")]
-        buy_amount: U256,
+        buy_amount_after_fee: U256,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum SellAmount {
+    BeforeFee {
+        #[serde(rename = "sell_amount_before_fee")]
+        value: U256,
+    },
+    AfterFee {
+        #[serde(rename = "sell_amount_after_fee")]
+        value: U256,
     },
 }
 
