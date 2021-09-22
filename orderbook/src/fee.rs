@@ -1,11 +1,10 @@
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
-use ethcontract::H256;
 use gas_estimation::GasPriceEstimating;
 use model::order::{OrderKind, BUY_ETH_ADDRESS};
 use primitive_types::{H160, U256};
 use shared::price_estimate::{self, ensure_token_supported, PriceEstimationError};
-use shared::{bad_token::BadTokenDetecting, price_estimate::PriceEstimating};
+use shared::{bad_token::BadTokenDetecting, price_estimate::PriceEstimating, AppId};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -26,7 +25,7 @@ pub struct MinFeeCalculator {
     now: Box<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     fee_factor: f64,
     bad_token_detector: Arc<dyn BadTokenDetecting>,
-    partner_additional_fee_factors: HashMap<H256, f64>,
+    partner_additional_fee_factors: HashMap<AppId, f64>,
     native_token_price_estimation_amount: U256,
 }
 
@@ -98,7 +97,7 @@ impl EthAwareMinFeeCalculator {
         measurements: Arc<dyn MinFeeStoring>,
         fee_factor: f64,
         bad_token_detector: Arc<dyn BadTokenDetecting>,
-        partner_additional_fee_factors: HashMap<H256, f64>,
+        partner_additional_fee_factors: HashMap<AppId, f64>,
         native_token_price_estimation_amount: U256,
     ) -> Self {
         Self {
@@ -155,7 +154,7 @@ impl MinFeeCalculator {
         measurements: Arc<dyn MinFeeStoring>,
         fee_factor: f64,
         bad_token_detector: Arc<dyn BadTokenDetecting>,
-        partner_additional_fee_factors: HashMap<H256, f64>,
+        partner_additional_fee_factors: HashMap<AppId, f64>,
         native_token_price_estimation_amount: U256,
     ) -> Self {
         Self {
@@ -261,7 +260,7 @@ impl MinFeeCalculating for MinFeeCalculator {
     async fn is_valid_fee(&self, sell_token: H160, fee: U256, app_data: [u8; 32]) -> bool {
         let app_based_fee_factor = *self
             .partner_additional_fee_factors
-            .get(&H256::from(app_data))
+            .get(&AppId(app_data))
             .unwrap_or(&1.0);
 
         if let Ok(Some(past_fee)) = self
@@ -577,7 +576,7 @@ mod tests {
             now: Box::new(Utc::now),
             fee_factor: 1.0,
             bad_token_detector: Arc::new(ListBasedDetector::deny_list(vec![])),
-            partner_additional_fee_factors: hashmap! { H256::from(app_data) => 0.5 },
+            partner_additional_fee_factors: hashmap! { AppId(app_data) => 0.5 },
             native_token_price_estimation_amount: 1.into(),
         };
         let (fee, _) = fee_estimator
