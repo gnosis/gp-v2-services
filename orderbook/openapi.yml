@@ -417,6 +417,49 @@ paths:
                   $ref: "#/components/schemas/Order"
         400:
           description: Problem with parameters like limit being too large.
+  /api/v1/quote:
+    post:
+      summary: Quotes a price and fee for the specified order parameters.
+      description: |
+        This API endpoint accepts a partial order and computes the minimum fee and
+        a price estimate for the order. It returns a full order that can be used
+        directly for signing, and with an included signature, passed directly to
+        the order creation endpoint.
+      parameters:
+        - in: header
+          name: X-AppData
+          description: |
+            The front-end specific application data. This allows the backend to
+            differentiate the front-end used to quote the order even in the presence
+            of a referral.
+          $ref: "#/components/schemas/AppData"
+          required: false
+      requestBody:
+        description: The order parameters to compute a quote for.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderQuoteRequest"
+      responses:
+        200:
+          description: Quoted order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderQuote"
+        400:
+          description: Error quoting order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeeAndQuoteError"
+        403:
+          description: Forbidden, your account is deny-listed
+        429:
+          description: Too many order placements
+        500:
+          description: Error quoting an order
 components:
   schemas:
     TransactionHash:
@@ -493,8 +536,8 @@ components:
       description: The current order status
       type: string
       enum: [presignaturePending, open, fulfilled, cancelled, expired]
-    OrderCreation:
-      description: Data a user provides when creating a new order.
+    OrderParameters:
+      description: Order parameters.
       type: object
       properties:
         sellToken:
@@ -533,24 +576,12 @@ components:
         partiallyFillable:
           description: Is this a fill-or-kill order or a partially fillable order?
           type: boolean
-        signature:
-          $ref: "#/components/schemas/Signature"
-        signingScheme:
-          $ref: "#/components/schemas/SigningScheme"
         sellTokenBalance:
           $ref: "#/components/schemas/SellTokenSource"
           default: "erc20"
         buyTokenBalance:
           $ref: "#/components/schemas/BuyTokenDestination"
           default: "erc20"
-        from:
-          description: |
-            If set, the backend enforces that this address matches what is decoded as the signer of
-            the signature. This helps catch errors with invalid signature encodings as the backend
-            might otherwise silently work with an unexpected address that for example does not have
-            any balance.
-          $ref: "#/components/schemas/Address"
-          nullable: true
       required:
         - sellToken
         - buyToken
@@ -561,8 +592,27 @@ components:
         - feeAmount
         - kind
         - partiallyFillable
-        - signature
-        - signingScheme
+    OrderCreation:
+      description: Data a user provides when creating a new order.
+      allOf:
+        - $ref: "#/components/schemas/OrderParameters"
+        - type: object
+          properties:
+            signingScheme:
+              $ref: "#/components/schemas/SigningScheme"
+            signature:
+              $ref: "#/components/schemas/Signature"
+            from:
+              description: |
+                If set, the backend enforces that this address matches what is decoded as the signer of
+                the signature. This helps catch errors with invalid signature encodings as the backend
+                might otherwise silently work with an unexpected address that for example does not have
+                any balance.
+              $ref: "#/components/schemas/Address"
+              nullable: true
+          required:
+            - signingScheme
+            - signature
     OrderMetaData:
       description: |
         Extra order data that is returned to users when querying orders
@@ -769,3 +819,86 @@ components:
       required:
         - errorType
         - description
+    OrderQuoteSide:
+      description: The buy or sell side when quoting an order.
+      oneOf:
+        - type: object
+          properties:
+            kind:
+              description: "A sell order"
+              type: string
+              enum: [sell]
+            totalSellAmount:
+              description: |
+                The total sell amount for the quoted order. The sell amount for the
+                returned orders will have fees deducted from this value.
+              $ref: "#/components/schemas/TokenAmount"
+          required:
+            - kind
+            - totalSellAmount
+        - type: object
+          properties:
+            kind:
+              description: "A buy order"
+              type: string
+              enum: [buy]
+            buyAmount:
+              description: The buy amount for the order.
+              $ref: "#/components/schemas/TokenAmount"
+          required:
+            - kind
+            - buyAmount
+    OrderQuoteRequest:
+      description: Request for generating a fee and price quote.
+      allOf:
+        - $ref: "#/components/schemas/OrderQuoteSide"
+        - type: object
+          properties:
+            sellToken:
+              description: "ERC20 token to be sold"
+              $ref: "#/components/schemas/Address"
+            buyToken:
+              description: "ERC20 token to be bought"
+              $ref: "#/components/schemas/Address"
+            receiver:
+              description: |
+                An optional address to receive the proceeds of the trade instead of the
+                owner (i.e. the order signer).
+              $ref: "#/components/schemas/Address"
+              nullable: true
+            validTo:
+              description: Unix timestamp until the order is valid. uint32.
+              type: integer
+            appData:
+              description: |
+                Arbitrary application specific data that can be added to an order. This can
+                also be used to ensure uniqueness between two orders with otherwise the
+                exact same parameters.
+              $ref: "#/components/schemas/AppData"
+            partiallyFillable:
+              description: Is this a fill-or-kill order or a partially fillable order?
+              type: boolean
+            sellTokenBalance:
+              $ref: "#/components/schemas/SellTokenSource"
+              default: "erc20"
+            buyTokenBalance:
+              $ref: "#/components/schemas/BuyTokenDestination"
+              default: "erc20"
+          required:
+            - sellToken
+            - buyToken
+            - validTo
+            - appData
+            - partiallyFillable
+    OrderQuote:
+      description: |
+        An order quoted by the back end that can be directly signed and
+        submitted to the order creation backend.
+      allOf:
+        - $ref: "#/components/schemas/OrderParameters"
+        - type: object
+          properties:
+            - from: The expected address of the signer
+              $ref: "#/components/schemas/Address"
+          required:
+            - from
