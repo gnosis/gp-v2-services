@@ -259,11 +259,10 @@ impl MinFeeCalculating for MinFeeCalculator {
 
     // Returns true if the fee satisfies a previous not yet expired estimate, or the fee is high enough given the current estimate.
     async fn is_valid_fee(&self, sell_token: H160, fee: U256, app_data: [u8; 32]) -> bool {
-        let app_based_fee_factor = self
+        let app_based_fee_factor = *self
             .partner_additional_fee_factors
             .get(&H256::from(app_data))
-            .unwrap_or(&1.0)
-            .clone();
+            .unwrap_or(&1.0);
 
         if let Ok(Some(past_fee)) = self
             .measurements
