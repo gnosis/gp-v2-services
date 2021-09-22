@@ -3,8 +3,10 @@ use chrono::{DateTime, Duration, Utc};
 use gas_estimation::GasPriceEstimating;
 use model::order::{OrderKind, BUY_ETH_ADDRESS};
 use primitive_types::{H160, U256};
-use shared::price_estimate::{self, ensure_token_supported, PriceEstimationError};
-use shared::{bad_token::BadTokenDetecting, price_estimate::PriceEstimating};
+use shared::bad_token::BadTokenDetecting;
+use shared::price_estimation::{
+    self, ensure_token_supported, PriceEstimating, PriceEstimationError,
+};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -173,7 +175,7 @@ impl MinFeeCalculator {
             if let (Some(buy_token), Some(amount), Some(kind)) = (buy_token, amount, kind) {
                 // We only apply the discount to the more sophisticated fee estimation, as the legacy one is already very favorable to the user in most cases
                 self.price_estimator
-                    .estimate(&price_estimate::Query {
+                    .estimate(&price_estimation::Query {
                         sell_token,
                         buy_token,
                         in_amount: amount,
@@ -187,7 +189,7 @@ impl MinFeeCalculator {
                 GAS_PER_ORDER
             };
         let fee_in_eth = gas_price * gas_amount;
-        let query = price_estimate::Query {
+        let query = price_estimation::Query {
             sell_token,
             buy_token: self.native_token,
             in_amount: self.native_token_price_estimation_amount,
@@ -335,7 +337,7 @@ mod tests {
     use chrono::{Duration, NaiveDateTime};
     use shared::{
         bad_token::list_based::ListBasedDetector, gas_price_estimation::FakeGasPriceEstimator,
-        price_estimate::mocks::FakePriceEstimator,
+        price_estimation::mocks::FakePriceEstimator,
     };
     use std::sync::Arc;
 
@@ -414,7 +416,7 @@ mod tests {
         let time = Arc::new(Mutex::new(Utc::now()));
 
         let gas_price_estimator = Arc::new(FakeGasPriceEstimator(gas_price.clone()));
-        let price_estimator = FakePriceEstimator(price_estimate::Estimate {
+        let price_estimator = FakePriceEstimator(price_estimation::Estimate {
             out_amount: 1.into(),
             gas: 1.into(),
         });
@@ -450,7 +452,7 @@ mod tests {
         let gas_price = Arc::new(Mutex::new(100.0));
 
         let gas_price_estimator = Arc::new(FakeGasPriceEstimator(gas_price.clone()));
-        let price_estimator = FakePriceEstimator(price_estimate::Estimate {
+        let price_estimator = FakePriceEstimator(price_estimation::Estimate {
             out_amount: 1.into(),
             gas: 1.into(),
         });
@@ -484,7 +486,7 @@ mod tests {
         let supported_token = H160::from_low_u64_be(2);
 
         let gas_price_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(100.0))));
-        let price_estimator = Arc::new(FakePriceEstimator(price_estimate::Estimate {
+        let price_estimator = Arc::new(FakePriceEstimator(price_estimation::Estimate {
             out_amount: 1.into(),
             gas: 1000.into(),
         }));

@@ -26,8 +26,9 @@ use shared::{
     current_block::current_block_stream,
     maintenance::ServiceMaintenance,
     paraswap_api::DefaultParaswapApi,
-    paraswap_price_estimator::ParaswapPriceEstimator,
-    price_estimate::{BaselinePriceEstimator, PriceEstimating},
+    price_estimation::{
+        baseline::BaselinePriceEstimator, paraswap::ParaswapPriceEstimator, PriceEstimating,
+    },
     recent_block_cache::CacheConfig,
     sources::{
         self,
@@ -43,7 +44,7 @@ use shared::{
 };
 use shared::{
     baseline_solver::BaseTokens, metrics::setup_metrics_registry,
-    price_estimate::PriceEstimatorType,
+    price_estimation::PriceEstimatorType,
 };
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use structopt::StructOpt;
