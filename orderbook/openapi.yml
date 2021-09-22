@@ -852,7 +852,7 @@ components:
             - kind
             - buyAmountAfterFee
     OrderQuoteRequest:
-      description: Request for generating a fee and price quote.
+      description: Request fee and price quote.
       allOf:
         - $ref: "#/components/schemas/OrderQuoteSide"
         - type: object
