@@ -89,7 +89,7 @@ pub fn clone_anyhow_error(err: &anyhow::Error) -> anyhow::Error {
 pub struct AppId(pub [u8; 32]);
 
 impl Debug for AppId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "0x{}", hex::encode(self.0))
     }
 }
