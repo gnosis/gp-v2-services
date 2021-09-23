@@ -1,6 +1,6 @@
 //! Contains command line arguments and related helpers that are shared between the binaries.
 use crate::{
-    gas_price_estimation::GasEstimatorType, price_estimate::PriceEstimatorType,
+    gas_price_estimation::GasEstimatorType, price_estimation::PriceEstimatorType,
     sources::BaselineSource,
 };
 use anyhow::{ensure, Result};
@@ -119,8 +119,9 @@ pub struct Arguments {
         long,
         default_value = "Baseline",
         possible_values = &PriceEstimatorType::variants(),
+        use_delimiter = true
     )]
-    pub price_estimator: PriceEstimatorType,
+    pub price_estimators: Vec<PriceEstimatorType>,
 }
 
 fn parse_fee_factor(s: &str) -> Result<f64> {

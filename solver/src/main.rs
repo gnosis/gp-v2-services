@@ -9,7 +9,7 @@ use shared::{
     maintenance::{Maintaining, ServiceMaintenance},
     metrics::serve_metrics,
     network::network_name,
-    price_estimate::BaselinePriceEstimator,
+    price_estimation::baseline::BaselinePriceEstimator,
     recent_block_cache::CacheConfig,
     sources::{
         self,
@@ -194,7 +194,7 @@ struct Arguments {
 
     /// The configured addresses whose orders should be considered liquidity
     /// and not to be included in the objective function by the HTTP solver.
-    #[structopt(long, env)]
+    #[structopt(long, env, use_delimiter = true)]
     liquidity_order_owners: Vec<H160>,
 }
 
