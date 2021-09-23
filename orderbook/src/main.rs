@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use contracts::{BalancerV2Vault, GPv2Settlement, WETH9};
 use model::{
     order::{OrderUid, BUY_ETH_ADDRESS},
@@ -437,11 +437,26 @@ async fn check_database_connection(orderbook: &Orderbook) {
         .expect("failed to connect to database");
 }
 
+/// Parses a comma separated list of colon separated values representing fee factors for AppIds.
+///
+/// # Examples
+///
+/// ```rust
+/// let s = "0x0000000000000000000000000000000000000000000000000000000000000000:0.5,0x0101010101010101010101010101010101010101010101010101010101010101:0.7";
+/// assert_eq!(parse_partner_fee_factor(s).unwrap(), hashmap! { AppId([0u8; 32]) => 0.5, AppId([1u8; 32]) => 0.7 });
+/// ```
 fn parse_partner_fee_factor(s: &str) -> Result<HashMap<AppId, f64>> {
     let mut res = HashMap::default();
     for pair_str in s.split(',').into_iter().collect::<Vec<&str>>() {
-        let split_pair = pair_str.split(':').into_iter().collect::<Vec<&str>>();
-        assert_eq!(split_pair.len(), 2, "Failed to parse partner fee factors");
+        let split_pair = pair_str
+            .trim()
+            .split(':')
+            .into_iter()
+            .map(|x| x.trim())
+            .collect::<Vec<&str>>();
+        if split_pair.len() != 2 {
+            return Err(anyhow!("Invalid pair lengths"));
+        }
         let mut key_bytes = [0u8; 32];
         hex::decode_to_slice(
             split_pair[0].strip_prefix("0x").unwrap_or(split_pair[0]),
@@ -451,4 +466,61 @@ fn parse_partner_fee_factor(s: &str) -> Result<HashMap<AppId, f64>> {
         res.insert(AppId(key_bytes), value);
     }
     Ok(res)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use maplit::hashmap;
+
+    #[test]
+    fn parse_partner_fee_factor_ok() {
+        let x = "0x0000000000000000000000000000000000000000000000000000000000000000";
+        let y = "0x0101010101010101010101010101010101010101010101010101010101010101";
+        // without spaces
+        assert_eq!(
+            parse_partner_fee_factor(&format!("{}:0.5,{}:0.7", x, y)).unwrap(),
+            hashmap! { AppId([0u8; 32]) => 0.5, AppId([1u8; 32]) => 0.7 }
+        );
+        // with spaces
+        assert_eq!(
+            parse_partner_fee_factor(&format!("{}: 0.5, {}: 0.7", x, y)).unwrap(),
+            hashmap! { AppId([0u8; 32]) => 0.5, AppId([1u8; 32]) => 0.7 }
+        );
+        // whole numbers
+        assert_eq!(
+            parse_partner_fee_factor(&format!("{}: 1, {}: 2", x, y)).unwrap(),
+            hashmap! { AppId([0u8; 32]) => 1., AppId([1u8; 32]) => 2. }
+        );
+    }
+
+    #[test]
+    fn parse_partner_fee_factor_err() {
+        assert_eq!(
+            parse_partner_fee_factor("0x1:0.5,0x2:0.7")
+                .unwrap_err()
+                .to_string(),
+            "Odd number of digits"
+        );
+        assert_eq!(
+            parse_partner_fee_factor("0x12:0.5,0x22:0.7")
+                .unwrap_err()
+                .to_string(),
+            "Invalid string length"
+        );
+        assert_eq!(
+            parse_partner_fee_factor("0x1:0.5:3,0x2:0.7")
+                .unwrap_err()
+                .to_string(),
+            "Invalid pair lengths"
+        );
+        assert_eq!(
+            parse_partner_fee_factor(
+                "0x0000000000000000000000000000000000000000000000000000000000000000:word"
+            )
+            .unwrap_err()
+            .to_string(),
+            "invalid float literal"
+        );
+    }
 }
