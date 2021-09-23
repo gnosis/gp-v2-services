@@ -438,13 +438,6 @@ async fn check_database_connection(orderbook: &Orderbook) {
 }
 
 /// Parses a comma separated list of colon separated values representing fee factors for AppIds.
-///
-/// # Examples
-///
-/// ```rust
-/// let s = "0x0000000000000000000000000000000000000000000000000000000000000000:0.5,0x0101010101010101010101010101010101010101010101010101010101010101:0.7";
-/// assert_eq!(parse_partner_fee_factor(s).unwrap(), hashmap! { AppId([0u8; 32]) => 0.5, AppId([1u8; 32]) => 0.7 });
-/// ```
 fn parse_partner_fee_factor(s: &str) -> Result<HashMap<AppId, f64>> {
     let mut res = HashMap::default();
     for pair_str in s.split(',').into_iter().collect::<Vec<&str>>() {
