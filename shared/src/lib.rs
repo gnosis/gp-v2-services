@@ -93,3 +93,12 @@ impl Debug for AppId {
         write!(f, "0x{}", hex::encode(self.0))
     }
 }
+
+impl FromStr for AppId {
+    type Err = hex::FromHexError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut bytes = [0u8; 32];
+        hex::decode_to_slice(s.strip_prefix("0x").unwrap_or(s), &mut bytes)?;
+        Ok(Self(bytes))
+    }
+}

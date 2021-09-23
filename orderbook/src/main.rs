@@ -440,23 +440,22 @@ async fn check_database_connection(orderbook: &Orderbook) {
 /// Parses a comma separated list of colon separated values representing fee factors for AppIds.
 fn parse_partner_fee_factor(s: &str) -> Result<HashMap<AppId, f64>> {
     let mut res = HashMap::default();
-    for pair_str in s.split(',').into_iter().collect::<Vec<&str>>() {
-        let split_pair = pair_str
+    for pair_str in s.split(',').into_iter() {
+        let mut split = pair_str.trim().split(':');
+        let key = split
+            .next()
+            .ok_or_else(|| anyhow!("missing AppId"))?
             .trim()
-            .split(':')
-            .into_iter()
-            .map(|x| x.trim())
-            .collect::<Vec<&str>>();
-        if split_pair.len() != 2 {
+            .parse()?;
+        let value = split
+            .next()
+            .ok_or_else(|| anyhow!("missing value"))?
+            .trim()
+            .parse::<f64>()?;
+        if split.next().is_some() {
             return Err(anyhow!("Invalid pair lengths"));
         }
-        let mut key_bytes = [0u8; 32];
-        hex::decode_to_slice(
-            split_pair[0].strip_prefix("0x").unwrap_or(split_pair[0]),
-            &mut key_bytes,
-        )?;
-        let value = split_pair[1].parse::<f64>()?;
-        res.insert(AppId(key_bytes), value);
+        res.insert(key, value);
     }
     Ok(res)
 }
@@ -502,9 +501,11 @@ mod tests {
             "Invalid string length"
         );
         assert_eq!(
-            parse_partner_fee_factor("0x1:0.5:3,0x2:0.7")
-                .unwrap_err()
-                .to_string(),
+            parse_partner_fee_factor(
+                "0x0000000000000000000000000000000000000000000000000000000000000000:0.5:3"
+            )
+            .unwrap_err()
+            .to_string(),
             "Invalid pair lengths"
         );
         assert_eq!(
