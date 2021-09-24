@@ -320,7 +320,7 @@ mod tests {
             parameters: AmmParameters::Stable(StablePoolParameters {
                 reserves: btreemap! {
                     sell_token => U256::from(1000),
-                    buy_token => U256::from(1001_000_000),
+                    buy_token => U256::from(1_001_000_000),
                 },
                 scaling_rates: btreemap! {
                     sell_token => U256::from(1),
