@@ -1,5 +1,5 @@
+use anyhow::{anyhow, Context, Result};
 use contracts::{BalancerV2Vault, GPv2Settlement, WETH9};
-use ethcontract::H256;
 use model::{
     order::{OrderUid, BUY_ETH_ADDRESS},
     DomainSeparator,
@@ -29,9 +29,10 @@ use shared::{
     maintenance::ServiceMaintenance,
     metrics::setup_metrics_registry,
     paraswap_api::DefaultParaswapApi,
-    paraswap_price_estimator::ParaswapPriceEstimator,
-    price_estimate::PriceEstimatorType,
-    price_estimate::{BaselinePriceEstimator, PriceEstimating},
+    price_estimation::{
+        baseline::BaselinePriceEstimator, paraswap::ParaswapPriceEstimator,
+        priority::PriorityPriceEstimator, PriceEstimating, PriceEstimatorType,
+    },
     recent_block_cache::CacheConfig,
     sources::{
         self,
@@ -44,6 +45,7 @@ use shared::{
     token_info::{CachedTokenInfoFetcher, TokenInfoFetcher},
     transport::create_instrumented_transport,
     transport::http::HttpTransport,
+    AppId,
 };
 use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 use structopt::StructOpt;
@@ -130,7 +132,8 @@ struct Arguments {
 
     /// Used to specify additional fee subsidy factor based on app_ids contained in orders.
     /// Should take the form of a json string as shown in the following example:
-    /// '{"0x0000000000000000000000000000000000000000000000000000000000000000":0.5,"$PROJECT_APP_ID":0.7}'
+    ///
+    /// '0x0000000000000000000000000000000000000000000000000000000000000000:0.5,$PROJECT_APP_ID:0.7'
     ///
     /// Furthermore, a value of
     /// - 1 means no subsidy and is the default for all app_data not contained in this list.
@@ -138,10 +141,10 @@ struct Arguments {
     #[structopt(
         long,
         env,
-        default_value = "{}",
-        parse(try_from_str = serde_json::from_str),
+        default_value = "",
+        parse(try_from_str = parse_partner_fee_factor),
     )]
-    partner_additional_fee_factors: HashMap<H256, f64>, // '{"$BALANCER_APP_ID":0.5,"$METAMASK_APP_ID":0.7}'
+    partner_additional_fee_factors: HashMap<AppId, f64>,
 }
 
 pub async fn database_metrics(metrics: Arc<Metrics>, database: Postgres) -> ! {
@@ -170,7 +173,7 @@ async fn main() {
     let client = shared::http_client(args.shared.http_timeout);
 
     let transport = create_instrumented_transport(
-        HttpTransport::new(client.clone(), args.shared.node_url),
+        HttpTransport::new(client.clone(), args.shared.node_url.clone()),
         metrics.clone(),
     );
     let web3 = web3::Web3::new(transport);
@@ -272,10 +275,10 @@ async fn main() {
         native_token.address(),
         &args.shared.base_tokens,
     ));
-    let mut allowed_tokens = args.allowed_tokens;
+    let mut allowed_tokens = args.allowed_tokens.clone();
     allowed_tokens.extend(base_tokens.tokens().iter().copied());
     allowed_tokens.push(BUY_ETH_ADDRESS);
-    let unsupported_tokens = args.unsupported_tokens;
+    let unsupported_tokens = args.unsupported_tokens.clone();
 
     let mut finders: Vec<Arc<dyn TokenOwnerFinding>> = pair_providers
         .iter()
@@ -343,25 +346,31 @@ async fn main() {
     let token_info_fetcher = Arc::new(CachedTokenInfoFetcher::new(Box::new(TokenInfoFetcher {
         web3: web3.clone(),
     })));
-    let price_estimator = match args.shared.price_estimator {
-        PriceEstimatorType::Baseline => Arc::new(BaselinePriceEstimator::new(
-            pool_fetcher.clone(),
-            gas_price_estimator.clone(),
-            base_tokens,
-            bad_token_detector.clone(),
-            native_token.address(),
-            native_token_price_estimation_amount,
-        )) as Arc<dyn PriceEstimating>,
-        PriceEstimatorType::Paraswap => Arc::new(ParaswapPriceEstimator {
-            paraswap: Arc::new(DefaultParaswapApi {
-                client: client.clone(),
-                partner: args.shared.paraswap_partner.unwrap_or_default(),
+    let price_estimators = args
+        .shared
+        .price_estimators
+        .iter()
+        .map(|estimator| match estimator {
+            PriceEstimatorType::Baseline => Box::new(BaselinePriceEstimator::new(
+                pool_fetcher.clone(),
+                gas_price_estimator.clone(),
+                base_tokens.clone(),
+                bad_token_detector.clone(),
+                native_token.address(),
+                native_token_price_estimation_amount,
+            )) as Box<dyn PriceEstimating>,
+            PriceEstimatorType::Paraswap => Box::new(ParaswapPriceEstimator {
+                paraswap: Arc::new(DefaultParaswapApi {
+                    client: client.clone(),
+                    partner: args.shared.paraswap_partner.clone().unwrap_or_default(),
+                }),
+                token_info: token_info_fetcher.clone(),
+                bad_token_detector: bad_token_detector.clone(),
+                disabled_paraswap_dexs: args.shared.disabled_paraswap_dexs.clone(),
             }),
-            token_info: token_info_fetcher,
-            bad_token_detector: bad_token_detector.clone(),
-            disabled_paraswap_dexs: args.shared.disabled_paraswap_dexs,
-        }),
-    };
+        })
+        .collect::<Vec<_>>();
+    let price_estimator = Arc::new(PriorityPriceEstimator::new(price_estimators));
     let fee_calculator = Arc::new(EthAwareMinFeeCalculator::new(
         price_estimator.clone(),
         gas_price_estimator,
@@ -433,4 +442,78 @@ async fn check_database_connection(orderbook: &Orderbook) {
         })
         .await
         .expect("failed to connect to database");
+}
+
+/// Parses a comma separated list of colon separated values representing fee factors for AppIds.
+fn parse_partner_fee_factor(s: &str) -> Result<HashMap<AppId, f64>> {
+    let mut res = HashMap::default();
+    if s.is_empty() {
+        return Ok(res);
+    }
+    for pair_str in s.split(',').into_iter() {
+        let mut split = pair_str.trim().split(':');
+        let key = split
+            .next()
+            .ok_or_else(|| anyhow!("missing AppId"))?
+            .trim()
+            .parse()
+            .context("failed to parse address")?;
+        let value = split
+            .next()
+            .ok_or_else(|| anyhow!("missing value"))?
+            .trim()
+            .parse::<f64>()
+            .context("failed to parse fee factor")?;
+        if split.next().is_some() {
+            return Err(anyhow!("Invalid pair lengths"));
+        }
+        res.insert(key, value);
+    }
+    Ok(res)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use maplit::hashmap;
+
+    #[test]
+    fn parse_partner_fee_factor_ok() {
+        let x = "0x0000000000000000000000000000000000000000000000000000000000000000";
+        let y = "0x0101010101010101010101010101010101010101010101010101010101010101";
+        // without spaces
+        assert_eq!(
+            parse_partner_fee_factor(&format!("{}:0.5,{}:0.7", x, y)).unwrap(),
+            hashmap! { AppId([0u8; 32]) => 0.5, AppId([1u8; 32]) => 0.7 }
+        );
+        // with spaces
+        assert_eq!(
+            parse_partner_fee_factor(&format!("{}: 0.5, {}: 0.7", x, y)).unwrap(),
+            hashmap! { AppId([0u8; 32]) => 0.5, AppId([1u8; 32]) => 0.7 }
+        );
+        // whole numbers
+        assert_eq!(
+            parse_partner_fee_factor(&format!("{}: 1, {}: 2", x, y)).unwrap(),
+            hashmap! { AppId([0u8; 32]) => 1., AppId([1u8; 32]) => 2. }
+        );
+    }
+
+    #[test]
+    fn parse_partner_fee_factor_err() {
+        assert!(parse_partner_fee_factor("0x1:0.5,0x2:0.7").is_err());
+        assert!(parse_partner_fee_factor("0x12:0.5,0x22:0.7").is_err());
+        assert!(parse_partner_fee_factor(
+            "0x0000000000000000000000000000000000000000000000000000000000000000:0.5:3"
+        )
+        .is_err());
+        assert!(parse_partner_fee_factor(
+            "0x0000000000000000000000000000000000000000000000000000000000000000:word"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn parse_partner_fee_factor_ok_on_empty() {
+        assert!(parse_partner_fee_factor("").unwrap().is_empty());
+    }
 }

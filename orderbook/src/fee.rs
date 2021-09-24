@@ -1,11 +1,13 @@
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
-use ethcontract::H256;
 use gas_estimation::GasPriceEstimating;
 use model::order::{OrderKind, BUY_ETH_ADDRESS};
 use primitive_types::{H160, U256};
-use shared::price_estimate::{self, ensure_token_supported, PriceEstimationError};
-use shared::{bad_token::BadTokenDetecting, price_estimate::PriceEstimating};
+use shared::{
+    bad_token::BadTokenDetecting,
+    price_estimation::{self, ensure_token_supported, PriceEstimating, PriceEstimationError},
+    AppId,
+};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -26,7 +28,7 @@ pub struct MinFeeCalculator {
     now: Box<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     fee_factor: f64,
     bad_token_detector: Arc<dyn BadTokenDetecting>,
-    partner_additional_fee_factors: HashMap<H256, f64>,
+    partner_additional_fee_factors: HashMap<AppId, f64>,
     native_token_price_estimation_amount: U256,
 }
 
@@ -98,7 +100,7 @@ impl EthAwareMinFeeCalculator {
         measurements: Arc<dyn MinFeeStoring>,
         fee_factor: f64,
         bad_token_detector: Arc<dyn BadTokenDetecting>,
-        partner_additional_fee_factors: HashMap<H256, f64>,
+        partner_additional_fee_factors: HashMap<AppId, f64>,
         native_token_price_estimation_amount: U256,
     ) -> Self {
         Self {
@@ -155,7 +157,7 @@ impl MinFeeCalculator {
         measurements: Arc<dyn MinFeeStoring>,
         fee_factor: f64,
         bad_token_detector: Arc<dyn BadTokenDetecting>,
-        partner_additional_fee_factors: HashMap<H256, f64>,
+        partner_additional_fee_factors: HashMap<AppId, f64>,
         native_token_price_estimation_amount: U256,
     ) -> Self {
         Self {
@@ -183,7 +185,7 @@ impl MinFeeCalculator {
             if let (Some(buy_token), Some(amount), Some(kind)) = (buy_token, amount, kind) {
                 // We only apply the discount to the more sophisticated fee estimation, as the legacy one is already very favorable to the user in most cases
                 self.price_estimator
-                    .estimate(&price_estimate::Query {
+                    .estimate(&price_estimation::Query {
                         sell_token,
                         buy_token,
                         in_amount: amount,
@@ -197,7 +199,7 @@ impl MinFeeCalculator {
                 GAS_PER_ORDER
             };
         let fee_in_eth = gas_price * gas_amount;
-        let query = price_estimate::Query {
+        let query = price_estimation::Query {
             sell_token,
             buy_token: self.native_token,
             in_amount: self.native_token_price_estimation_amount,
@@ -261,7 +263,7 @@ impl MinFeeCalculating for MinFeeCalculator {
     async fn is_valid_fee(&self, sell_token: H160, fee: U256, app_data: [u8; 32]) -> bool {
         let app_based_fee_factor = *self
             .partner_additional_fee_factors
-            .get(&H256::from(app_data))
+            .get(&AppId(app_data))
             .unwrap_or(&1.0);
 
         if let Ok(Some(past_fee)) = self
@@ -355,7 +357,7 @@ mod tests {
     use maplit::hashmap;
     use shared::{
         bad_token::list_based::ListBasedDetector, gas_price_estimation::FakeGasPriceEstimator,
-        price_estimate::mocks::FakePriceEstimator,
+        price_estimation::mocks::FakePriceEstimator,
     };
     use std::sync::Arc;
 
@@ -437,7 +439,7 @@ mod tests {
         let time = Arc::new(Mutex::new(Utc::now()));
 
         let gas_price_estimator = Arc::new(FakeGasPriceEstimator(gas_price.clone()));
-        let price_estimator = FakePriceEstimator(price_estimate::Estimate {
+        let price_estimator = FakePriceEstimator(price_estimation::Estimate {
             out_amount: 1.into(),
             gas: 1.into(),
         });
@@ -473,7 +475,7 @@ mod tests {
         let gas_price = Arc::new(Mutex::new(100.0));
 
         let gas_price_estimator = Arc::new(FakeGasPriceEstimator(gas_price.clone()));
-        let price_estimator = FakePriceEstimator(price_estimate::Estimate {
+        let price_estimator = FakePriceEstimator(price_estimation::Estimate {
             out_amount: 1.into(),
             gas: 1.into(),
         });
@@ -515,7 +517,7 @@ mod tests {
         let supported_token = H160::from_low_u64_be(2);
 
         let gas_price_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(100.0))));
-        let price_estimator = Arc::new(FakePriceEstimator(price_estimate::Estimate {
+        let price_estimator = Arc::new(FakePriceEstimator(price_estimation::Estimate {
             out_amount: 1.into(),
             gas: 1000.into(),
         }));
@@ -564,7 +566,7 @@ mod tests {
         let sell_token = H160::from_low_u64_be(1);
 
         let gas_price_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(100.0))));
-        let price_estimator = Arc::new(FakePriceEstimator(price_estimate::Estimate {
+        let price_estimator = Arc::new(FakePriceEstimator(price_estimation::Estimate {
             out_amount: 1.into(),
             gas: 1000.into(),
         }));
@@ -577,7 +579,7 @@ mod tests {
             now: Box::new(Utc::now),
             fee_factor: 1.0,
             bad_token_detector: Arc::new(ListBasedDetector::deny_list(vec![])),
-            partner_additional_fee_factors: hashmap! { H256::from(app_data) => 0.5 },
+            partner_additional_fee_factors: hashmap! { AppId(app_data) => 0.5 },
             native_token_price_estimation_amount: 1.into(),
         };
         let (fee, _) = fee_estimator
