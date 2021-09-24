@@ -478,7 +478,8 @@ fn amm_models(liquidity: &[Liquidity], gas_model: &GasModel) -> BTreeMap<usize, 
         .enumerate()
         .filter_map(|(index, result)| {
             let model = match result {
-                Ok(value) => value,
+                Ok(value) if value.has_sufficient_reserves() => value,
+                Ok(_) => return None,
                 Err(err) => {
                     tracing::error!(?err, "error converting liquidity to solver model");
                     return None;
@@ -486,7 +487,6 @@ fn amm_models(liquidity: &[Liquidity], gas_model: &GasModel) -> BTreeMap<usize, 
             };
             Some((index, model))
         })
-        .filter(|(_, model)| model.has_sufficient_reserves())
         .collect()
 }
 
