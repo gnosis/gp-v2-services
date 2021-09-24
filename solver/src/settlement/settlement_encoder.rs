@@ -263,9 +263,8 @@ impl SettlementEncoder {
     pub fn merge(mut self, mut other: Self) -> Result<Self> {
         let scaling_factor = self.price_scaling_factor(&other);
         for (key, value) in other.clearing_prices {
-            let scaled_price =
-                big_rational_to_u256(&(value.to_big_rational() * scaling_factor.clone()))
-                    .context("Invalid price scaling factor")?;
+            let scaled_price = big_rational_to_u256(&(value.to_big_rational() * &scaling_factor))
+                .context("Invalid price scaling factor")?;
             match self.clearing_prices.entry(key) {
                 Entry::Occupied(entry) => ensure!(
                     *entry.get() == scaled_price,
