@@ -448,9 +448,9 @@ paths:
         403:
           description: Forbidden, your account is deny-listed
         429:
-          description: Too many order placements
+          description: Too many order quotes
         500:
-          description: Error quoting an order
+          description: Unexpected error quoting an order
 components:
   schemas:
     TransactionHash:
