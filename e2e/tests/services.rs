@@ -14,7 +14,7 @@ use shared::{
     baseline_solver::BaseTokens,
     current_block::{current_block_stream, CurrentBlockStream},
     maintenance::ServiceMaintenance,
-    price_estimate::BaselinePriceEstimator,
+    price_estimation::baseline::BaselinePriceEstimator,
     recent_block_cache::CacheConfig,
     sources::uniswap::{
         pair_provider::UniswapPairProvider, pool_cache::PoolCache, pool_fetching::PoolFetcher,
@@ -22,6 +22,7 @@ use shared::{
     Web3,
 };
 use solver::orderbook::OrderBookApi;
+use std::collections::HashMap;
 use std::{num::NonZeroU64, str::FromStr, sync::Arc, time::Duration};
 
 pub const API_HOST: &str = "http://127.0.0.1:8080";
@@ -191,6 +192,7 @@ impl OrderbookServices {
             db.clone(),
             0.0,
             bad_token_detector.clone(),
+            HashMap::default(),
             1_000_000_000_000_000_000_u128.into(),
         ));
         let balance_fetcher = Arc::new(Web3BalanceFetcher::new(
