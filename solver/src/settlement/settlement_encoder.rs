@@ -2,7 +2,7 @@ use super::{Interaction, Trade, TradeExecution};
 use crate::{encoding::EncodedSettlement, interactions::UnwrapWethInteraction};
 use anyhow::{bail, ensure, Context as _, Result};
 use model::order::{Order, OrderKind};
-use num::{BigRational, Zero};
+use num::{BigRational, One, Zero};
 use primitive_types::{H160, U256};
 use shared::conversions::{big_rational_to_u256, U256Ext};
 use std::{
@@ -263,7 +263,7 @@ impl SettlementEncoder {
     pub fn merge(mut self, mut other: Self) -> Result<Self> {
         let scaling_factor = self.price_scaling_factor(&other);
         // Make sure we always scale prices up to avoid precision issues
-        if scaling_factor < BigRational::from_integer(1.into()) {
+        if scaling_factor < BigRational::one() {
             return other.merge(self);
         }
         for (key, value) in other.clearing_prices {
