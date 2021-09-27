@@ -43,7 +43,7 @@ impl<'de> Deserialize<'de> for AppId {
     where
         D: Deserializer<'de>,
     {
-        let s = String::deserialize(deserializer)?;
+        let s = Cow::<str>::deserialize(deserializer)?;
         let value = s.parse().map_err(|err| {
             de::Error::custom(format!(
                 "failed to decode {:?} as hex appdata 32 bytes: {}",
