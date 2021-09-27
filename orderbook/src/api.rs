@@ -96,7 +96,6 @@ struct ApiMetrics {
     requests_complete: prometheus::CounterVec,
 
     /// Execution time for each API request.
-    #[metric(labels())]
     requests_duration_seconds: prometheus::Histogram,
 }
 
