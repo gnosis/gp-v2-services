@@ -88,9 +88,7 @@ mod tests {
 
     #[test]
     fn deserialize_app_id() {
-        let value = Value::String(
-            "0x0ddeb6e4a814908832cc25d11311c514e7efe6af3c9bafeb0d241129cf7f4d83".to_string(),
-        );
+        let value = json!("0x0ddeb6e4a814908832cc25d11311c514e7efe6af3c9bafeb0d241129cf7f4d83");
         assert!(AppId::deserialize(value).is_ok());
         assert!(AppId::deserialize(Value::String("00".to_string())).is_err());
         assert!(AppId::deserialize(Value::String("asdf".to_string())).is_err());
