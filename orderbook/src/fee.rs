@@ -168,7 +168,7 @@ impl MinFeeCalculator {
         amount: Option<U256>,
         kind: Option<OrderKind>,
     ) -> Result<U256, PriceEstimationError> {
-        let gas_price = self.gas_estimator.estimate().await?;
+        let gas_price = self.gas_estimator.estimate().await?.estimate();
         let gas_amount =
             if let (Some(buy_token), Some(amount), Some(kind)) = (buy_token, amount, kind) {
                 // We only apply the discount to the more sophisticated fee estimation, as the legacy one is already very favorable to the user in most cases

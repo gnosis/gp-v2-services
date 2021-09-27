@@ -268,6 +268,7 @@ async fn main() {
             client.clone(),
             &web3,
             args.shared.gas_estimators.as_slice(),
+            args.shared.gas_estimator_api_key.as_slice(),
         )
         .await
         .expect("failed to create gas price estimator"),

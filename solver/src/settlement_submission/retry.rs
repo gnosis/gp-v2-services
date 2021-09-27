@@ -7,8 +7,9 @@ use ethcontract::{
     jsonrpc::types::Error as RpcError,
     transaction::{confirm::ConfirmParams, ResolveCondition},
     web3::error::Error as Web3Error,
-    Account, GasPrice, TransactionHash,
+    Account, GasPrice, TransactionHash, TypedGasPrice,
 };
+use gas_estimation::EstimatedGasPrice;
 use primitive_types::U256;
 use transaction_retry::{TransactionResult, TransactionSending};
 
@@ -65,12 +66,23 @@ pub struct SettlementSender<'a> {
 impl<'a> TransactionSending for SettlementSender<'a> {
     type Output = SettleResult;
 
-    async fn send(&self, gas_price: f64) -> Self::Output {
-        tracing::info!("submitting solution transaction at gas price {}", gas_price);
+    async fn send(&self, gas_price: EstimatedGasPrice) -> Self::Output {
+        tracing::info!(
+            "submitting solution transaction at gas price {:?}",
+            gas_price
+        );
+        let gas_price = if let Some(eip1559) = gas_price.eip1559 {
+            TypedGasPrice::Eip1559((
+                U256::from_f64_lossy(eip1559.max_fee_per_gas),
+                U256::from_f64_lossy(eip1559.max_priority_fee_per_gas),
+            ))
+        } else {
+            TypedGasPrice::Legacy(GasPrice::Value(U256::from_f64_lossy(gas_price.legacy)))
+        };
         let mut method =
             settle_method_builder(self.contract, self.settlement.clone(), self.account.clone())
                 .nonce(self.nonce)
-                .gas_price(GasPrice::Value(U256::from_f64_lossy(gas_price)))
+                .gas_price(gas_price)
                 .gas(U256::from_f64_lossy(self.gas_limit));
         method.tx.resolve = Some(ResolveCondition::Confirmed(ConfirmParams::mined()));
         let result = method.send().await.map(|tx| tx.hash());
@@ -105,7 +117,7 @@ pub struct CancelSender;
 #[async_trait::async_trait]
 impl TransactionSending for CancelSender {
     type Output = CancelResult;
-    async fn send(&self, _gas_price: f64) -> Self::Output {
+    async fn send(&self, _gas_price: EstimatedGasPrice) -> Self::Output {
         unreachable!()
     }
 }

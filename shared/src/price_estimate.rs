@@ -137,7 +137,7 @@ impl PriceEstimating for BaselinePriceEstimator {
             vec![Err(PriceEstimationError::Other(crate::clone_anyhow_error(&err))); queries.len()]
         };
         let gas_price = match self.gas_estimator.estimate().await {
-            Ok(gas_price) => gas_price,
+            Ok(gas_price) => gas_price.estimate(),
             Err(err) => return repeat_same_error(err),
         };
         let unsupported_tokens = match self.unsupported_tokens(queries).await {

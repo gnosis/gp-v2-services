@@ -3,10 +3,11 @@ use crate::solver::Solver;
 use anyhow::{Error, Result};
 use contracts::GPv2Settlement;
 use ethcontract::{
-    batch::CallBatch, dyns::DynTransport, transaction::TransactionBuilder, GasPrice,
+    batch::CallBatch, dyns::DynTransport, transaction::TransactionBuilder, GasPrice, TypedGasPrice,
 };
 use futures::FutureExt;
 use primitive_types::U256;
+use gas_estimation::EstimatedGasPrice;
 use shared::Web3;
 use std::sync::Arc;
 use web3::types::{BlockId, BlockNumber};
@@ -46,7 +47,7 @@ pub async fn simulate_settlements(
     web3: &Web3,
     network_id: &str,
     block: Block,
-    gas_price: f64,
+    gas_price: EstimatedGasPrice,
 ) -> Result<Vec<Result<()>>> {
     let mut batch = CallBatch::new(web3.transport());
     let futures = settlements
@@ -55,8 +56,15 @@ pub async fn simulate_settlements(
             // is done because the between retrieving the gas price and executing the simulation,
             // a block may have been mined that increases the base gas fee and causes the
             // `eth_call` simulation to fail with `max fee per gas less than block base fee`.
-            let gas_price =
-                GasPrice::Value(U256::from_f64_lossy(gas_price * MAX_BASE_GAS_FEE_INCREASE));
+            let gas_price = gas_price.bump_cap(MAX_BASE_GAS_FEE_INCREASE);
+            let gas_price = if let Some(eip1559) = gas_price.eip1559 {
+                TypedGasPrice::Eip1559((
+                    U256::from_f64_lossy(eip1559.max_fee_per_gas),
+                    U256::from_f64_lossy(eip1559.max_priority_fee_per_gas),
+                ))
+            } else {
+                TypedGasPrice::Legacy(GasPrice::Value(U256::from_f64_lossy(gas_price.legacy)))
+            };
             // TODO: can we get rid of this settlement clone?
             let method = crate::settlement_submission::retry::settle_method_builder(
                 contract,
@@ -75,7 +83,7 @@ pub async fn simulate_settlements(
                 // set a gas limit so we don't get failed simulations because of insufficient
                 // solver balance for the default ~150M gas limit. Limit to around the
                 // block gas limit (since we can't fit more anyway).
-                .gas(15_000_000.into());
+                .gas(30_000_000.into());
             (view.batch_call(&mut batch), transaction_builder)
         })
         .collect::<Vec<_>>();
@@ -145,7 +153,7 @@ mod tests {
             &web3,
             network_id.as_str(),
             Block::FixedWithTenderly(block),
-            0.0,
+            Default::default(),
         )
         .await;
         let _ = dbg!(result);

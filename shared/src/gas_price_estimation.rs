@@ -1,8 +1,8 @@
 use crate::Web3;
 use anyhow::{anyhow, Context, Result};
 use gas_estimation::{
-    EthGasStation, GasNowWebSocketGasStation, GasPriceEstimating, GnosisSafeGasStation,
-    PriorityGasPriceEstimating, Transport,
+    blocknative::BlockNative, EthGasStation, GasNowWebSocketGasStation, EstimatedGasPrice,
+    GasPriceEstimating, GnosisSafeGasStation, PriorityGasPriceEstimating, Transport,
 };
 use serde::de::DeserializeOwned;
 use std::{
@@ -18,6 +18,7 @@ arg_enum! {
         GasNow,
         GnosisSafe,
         Web3,
+        BlockNative,
     }
 }
 
@@ -26,9 +27,14 @@ pub struct Client(pub reqwest::Client);
 
 #[async_trait::async_trait]
 impl Transport for Client {
-    async fn get_json<T: DeserializeOwned>(&self, url: &str) -> Result<T> {
+    async fn get_json<T: DeserializeOwned>(
+        &self,
+        url: &str,
+        header: http::header::HeaderMap,
+    ) -> Result<T> {
         self.0
             .get(url)
+            .headers(header)
             .send()
             .await
             .context("failed to make request")?
@@ -44,12 +50,32 @@ pub async fn create_priority_estimator(
     client: reqwest::Client,
     web3: &Web3,
     estimator_types: &[GasEstimatorType],
+    estimator_api_key: &[String],
 ) -> Result<impl GasPriceEstimating> {
+    if estimator_types.len() != estimator_api_key.len() {
+        return Err(anyhow!("Invalid input for gas price estimators"));
+    }
     let client = Client(client);
     let network_id = web3.net().version().await?;
     let mut estimators = Vec::<Box<dyn GasPriceEstimating>>::new();
-    for estimator_type in estimator_types {
+    for (estimator_type, estimator_api_key) in estimator_types.iter().zip(estimator_api_key.iter())
+    {
         match estimator_type {
+            GasEstimatorType::BlockNative => {
+                if !is_mainnet(&network_id) {
+                    return Err(anyhow!("BlockNative only supports mainnet"));
+                }
+                let api_key = http::header::HeaderValue::from_str(estimator_api_key);
+                let headers = if let Ok(mut api_key) = api_key {
+                    let mut headers = http::header::HeaderMap::new();
+                    api_key.set_sensitive(true);
+                    headers.insert(http::header::AUTHORIZATION, api_key);
+                    headers
+                } else {
+                    http::header::HeaderMap::new()
+                };
+                estimators.push(Box::new(BlockNative::new(client.clone(), headers).await?))
+            }
             GasEstimatorType::EthGasStation => {
                 if !is_mainnet(&network_id) {
                     return Err(anyhow!("EthGasStation only supports mainnet"));
@@ -84,10 +110,10 @@ fn is_mainnet(network_id: &str) -> bool {
 }
 
 #[derive(Default)]
-pub struct FakeGasPriceEstimator(pub Arc<Mutex<f64>>);
+pub struct FakeGasPriceEstimator(pub Arc<Mutex<EstimatedGasPrice>>);
 #[async_trait::async_trait]
 impl GasPriceEstimating for FakeGasPriceEstimator {
-    async fn estimate_with_limits(&self, _: f64, _: std::time::Duration) -> Result<f64> {
+    async fn estimate_with_limits(&self, _: f64, _: std::time::Duration) -> Result<EstimatedGasPrice> {
         Ok(*self.0.lock().unwrap())
     }
 }

@@ -49,6 +49,9 @@ pub struct Arguments {
     )]
     pub gas_estimators: Vec<GasEstimatorType>,
 
+    #[structopt(long, env)]
+    pub gas_estimator_api_key: Vec<String>,
+
     /// Base tokens used for finding multi-hop paths between multiple AMMs
     /// Should be the most liquid tokens of the given network.
     #[structopt(long, env = "BASE_TOKENS", use_delimiter = true)]

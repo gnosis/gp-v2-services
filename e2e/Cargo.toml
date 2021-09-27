@@ -12,7 +12,7 @@ harness = false
 [dev-dependencies]
 contracts = { path = "../contracts" }
 criterion = "0.3"
-ethcontract = { version = "0.15.1",  default-features = false }
+ethcontract = { path = "../../../ethcontract/ethcontract-rs/ethcontract" }
 hex-literal = "0.3"
 lazy_static = "1.4"
 maplit = "1.0"
@@ -26,4 +26,4 @@ serde_json = "1.0"
 shared = { path = "../shared" }
 solver = { path = "../solver" }
 tokio = { version = "1.11", features = ["macros"] }
-web3 = { version = "0.17", default-features = false }
+web3 = { git = "https://github.com/tomusdrw/rust-web3.git" }
