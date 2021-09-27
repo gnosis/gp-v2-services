@@ -13,7 +13,7 @@ use maplit::hashmap;
 use model::order::OrderKind;
 use reqwest::Client;
 use shared::paraswap_api::{
-    DefaultParaswapApi, ParaswapApi, ParaswapResponseError, PriceQuery, PriceResponse, Side,
+    DefaultParaswapApi, ParaswapApi, ParaswapResponseError, PriceQuery, PriceResponse, Root, Side,
     TradeAmount, TransactionBuilderQuery, TransactionBuilderResponse,
 };
 use shared::token_info::TokenInfo;
@@ -30,7 +30,7 @@ pub struct ParaswapSolver {
     account: Account,
     settlement_contract: GPv2Settlement,
     #[derivative(Debug = "ignore")]
-    token_info: Arc<dyn TokenInfoFetching>,
+    pub token_info: Arc<dyn TokenInfoFetching>,
     #[derivative(Debug = "ignore")]
     allowance_fetcher: Box<dyn AllowanceManaging>,
     #[derivative(Debug = "ignore")]
@@ -152,7 +152,27 @@ impl ParaswapSolver {
         let price_response = self.client.price(price_query).await?;
         Ok((price_response, amount))
     }
-
+    pub async fn get_full_price_info_for_order(
+        &self,
+        order: &LimitOrder,
+        token_info: &HashMap<H160, TokenInfo>,
+    ) -> Result<(Root, U256)> {
+        let (amount, side) = match order.kind {
+            model::order::OrderKind::Buy => (order.buy_amount, Side::Buy),
+            model::order::OrderKind::Sell => (order.sell_amount, Side::Sell),
+        };
+        let price_query = PriceQuery {
+            src_token: order.sell_token,
+            dest_token: order.buy_token,
+            src_decimals: decimals(token_info, &order.sell_token)?,
+            dest_decimals: decimals(token_info, &order.buy_token)?,
+            amount,
+            side,
+            exclude_dexs: Some(self.disabled_paraswap_dexs.clone()),
+        };
+        let price_response = self.client.get_full_price_info(price_query).await?;
+        Ok((price_response, amount))
+    }
     fn transaction_query_from(
         &self,
         order: &LimitOrder,
@@ -561,7 +581,6 @@ mod tests {
         let web3 = Web3::new(create_env_test_transport());
         let settlement = GPv2Settlement::deployed(&web3).await.unwrap();
         let token_info_fetcher = Arc::new(TokenInfoFetcher { web3: web3.clone() });
-
         let weth = WETH9::deployed(&web3).await.unwrap();
         let gno = shared::addr!("6810e776880c02933d47db1b9fc05908e5386b96");
 

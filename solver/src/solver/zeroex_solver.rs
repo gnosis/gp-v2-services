@@ -46,8 +46,8 @@ pub const STANDARD_ZEROEX_SLIPPAGE_BPS: u16 = 5;
 /// A GPv2 solver that matches GP orders to direct 0x swaps.
 pub struct ZeroExSolver {
     account: Account,
-    client: Box<dyn ZeroExApi + Send + Sync>,
-    allowance_fetcher: Box<dyn AllowanceManaging>,
+    pub client: Box<dyn ZeroExApi + Send + Sync>,
+    pub allowance_fetcher: Box<dyn AllowanceManaging>,
 }
 
 /// Chain ID for Mainnet.
@@ -176,7 +176,7 @@ mod tests {
     use shared::transport::{create_env_test_transport, create_test_transport};
 
     #[tokio::test]
-    #[ignore]
+    // #[ignore]
     async fn solve_sell_order_on_zeroex() {
         let web3 = Web3::new(create_env_test_transport());
         let chain_id = web3.eth().chain_id().await.unwrap().as_u64();

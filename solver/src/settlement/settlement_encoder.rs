@@ -83,6 +83,14 @@ impl SettlementEncoder {
         &self.clearing_prices
     }
 
+    pub fn insert_new_clearing_price(&mut self, price: U256, token: H160) {
+        self.clearing_prices.insert(token, price);
+    }
+    pub fn insert_new_token(&mut self, token: H160) {
+        self.tokens.push(token);
+        self.sort_tokens_and_update_indices()
+    }
+
     pub fn trades(&self) -> &[Trade] {
         &self.trades
     }

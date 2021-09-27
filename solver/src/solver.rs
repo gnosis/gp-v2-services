@@ -5,6 +5,7 @@ use crate::{
 use anyhow::Result;
 use baseline_solver::BaselineSolver;
 use contracts::GPv2Settlement;
+use cow_dex_ag_solver::CowDexAgSolver;
 use ethcontract::{Account, H160, U256};
 use http_solver::{buffers::BufferRetriever, HttpSolver, SolverConfig};
 use naive_solver::NaiveSolver;
@@ -26,6 +27,7 @@ use structopt::clap::arg_enum;
 use zeroex_solver::ZeroExSolver;
 
 mod baseline_solver;
+mod cow_dex_ag_solver;
 mod http_solver;
 mod naive_solver;
 mod oneinch_solver;
@@ -130,6 +132,7 @@ arg_enum! {
         Paraswap,
         ZeroEx,
         Quasimodo,
+        CowDexAgSolver,
     }
 }
 
@@ -242,6 +245,17 @@ pub fn create(
                     client.clone(),
                     paraswap_partner.clone(),
                 ))),
+                SolverType::CowDexAgSolver => shared(CowDexAgSolver::new(
+                    account,
+                    web3.clone(),
+                    settlement_contract.clone(),
+                    token_info_fetcher.clone(),
+                    paraswap_slippage_bps,
+                    disabled_paraswap_dexs.clone(),
+                    client.clone(),
+                    paraswap_partner.clone(),
+                    chain_id,
+                )),
             };
 
             if let Ok(solver) = &solver {

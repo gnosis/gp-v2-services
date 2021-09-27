@@ -2,6 +2,7 @@ use crate::debug_bytes;
 use anyhow::Result;
 use derivative::Derivative;
 use ethcontract::{H160, U256};
+use model::h160_hexadecimal;
 use model::u256_decimal;
 use reqwest::{Client, RequestBuilder, Url};
 use serde::{de::Error, Deserialize, Deserializer, Serialize};
@@ -20,6 +21,7 @@ pub trait ParaswapApi: Send + Sync {
         &self,
         query: TransactionBuilderQuery,
     ) -> Result<TransactionBuilderResponse, ParaswapResponseError>;
+    async fn get_full_price_info(&self, query: PriceQuery) -> Result<Root>;
 }
 
 pub struct DefaultParaswapApi {
@@ -64,6 +66,27 @@ impl ParaswapApi for DefaultParaswapApi {
             },
         }
     }
+    async fn get_full_price_info(&self, query: PriceQuery) -> Result<Root> {
+        let url = query.into_url(&self.partner);
+        tracing::debug!("Querying Paraswap API (price) for url {}", url);
+        println!("Querying Paraswap API (price) for url {}", url);
+
+        let response_text = self
+            .client
+            .get(url)
+            .send()
+            .await
+            .map_err(ParaswapResponseError::Send)?
+            .text()
+            .await
+            .map_err(ParaswapResponseError::TextFetch)?;
+        tracing::debug!("Response from Paraswap API (price): {}", response_text);
+        println!("Response from Paraswap API (price): {}", response_text);
+
+        let raw_response = serde_json::from_str::<Root>(&response_text)
+            .map_err(ParaswapResponseError::DeserializeError)?;
+        Ok(raw_response)
+    }
     async fn transaction(
         &self,
         query: TransactionBuilderQuery,
@@ -84,6 +107,76 @@ impl ParaswapApi for DefaultParaswapApi {
             .map_err(ParaswapResponseError::TextFetch)?;
         parse_paraswap_response_text(&response_text, &query_str)
     }
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Root {
+    pub price_route: PriceRoute,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PriceRoute {
+    pub best_route: Vec<BestRoute>,
+    pub block_number: i64,
+    pub contract_address: String,
+    pub contract_method: String,
+    #[serde(with = "u256_decimal")]
+    pub dest_amount: U256,
+    pub dest_decimals: i64,
+    #[serde(with = "h160_hexadecimal")]
+    pub dest_token: H160,
+    #[serde(rename = "destUSD")]
+    pub dest_usd: String,
+    pub gas_cost: String,
+    #[serde(rename = "gasCostUSD")]
+    pub gas_cost_usd: String,
+    pub hmac: String,
+    pub max_impact_reached: bool,
+    pub network: i64,
+    pub partner: String,
+    pub partner_fee: i64,
+    pub side: String,
+    #[serde(with = "u256_decimal")]
+    pub src_amount: U256,
+    pub src_decimals: i64,
+    #[serde(with = "h160_hexadecimal")]
+    pub src_token: H160,
+    #[serde(rename = "srcUSD")]
+    pub src_usd: String,
+    pub token_transfer_proxy: String,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BestRoute {
+    pub percent: i64,
+    pub swaps: Vec<Swap>,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Swap {
+    pub dest_decimals: i64,
+    #[serde(with = "h160_hexadecimal")]
+    pub dest_token: H160,
+    pub src_decimals: i64,
+    #[serde(with = "h160_hexadecimal")]
+    pub src_token: H160,
+    pub swap_exchanges: Vec<SwapExchange>,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwapExchange {
+    #[serde(with = "u256_decimal")]
+    pub dest_amount: U256,
+    pub exchange: String,
+    pub percent: i64,
+    pub pool_addresses: Vec<String>,
+    #[serde(with = "u256_decimal")]
+    pub src_amount: U256,
 }
 
 #[derive(Deserialize)]
