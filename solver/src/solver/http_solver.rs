@@ -62,7 +62,7 @@ impl SolverConfig {
             self.max_nr_exec_orders.to_string().as_str(),
         );
         if self.uniform_clearing_prices_enforced_via_flag {
-            url.query_pairs_mut().append_pair("ucp_policy", "Enforced");
+            url.query_pairs_mut().append_pair("ucp_policy", "Enforce");
         }
     }
 }
