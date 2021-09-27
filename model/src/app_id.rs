@@ -1,6 +1,7 @@
 use serde::{de, Deserializer, Serializer};
 use serde_with::serde::{Deserialize, Serialize};
 use std::{
+    borrow::Cow,
     fmt::{self, Debug, Formatter},
     str::FromStr,
 };
@@ -57,7 +58,7 @@ impl<'de> Deserialize<'de> for AppId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Value;
+    use serde_json::json;
 
     #[test]
     fn works_on_32_byte_string_with_or_without_0x() {
