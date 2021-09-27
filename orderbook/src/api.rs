@@ -38,7 +38,7 @@ pub fn handle_all_routes(
     let get_order = get_order_by_uid::get_order_by_uid(orderbook.clone());
     let get_solvable_orders = get_solvable_orders::get_solvable_orders(orderbook.clone());
     let get_trades = get_trades::get_trades(database);
-    let cancel_order = cancel_order::cancel_order(orderbook);
+    let cancel_order = cancel_order::cancel_order(orderbook.clone());
     let get_amount_estimate = get_markets::get_amount_estimate(price_estimator.clone());
     let get_fee_and_quote_sell =
         get_fee_and_quote::get_fee_and_quote_sell(fee_calculator.clone(), price_estimator.clone());
