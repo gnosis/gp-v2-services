@@ -63,7 +63,7 @@ pub fn handle_all_routes(
             .or(get_fee_and_quote_sell.with(handle_metrics("get_fee_and_quote_sell")))
             .or(get_fee_and_quote_buy.with(handle_metrics("get_fee_and_quote_buy")))
             .or(get_user_orders.with(handle_metrics("get_user_orders")))
-            .or(post_quote.with(handle_metrics("get_user_orders")))
+            .or(post_quote.with(handle_metrics("get_user_orders"))),
     );
 
     routes_with_labels.recover(handle_rejection).with(cors)

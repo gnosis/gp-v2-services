@@ -28,12 +28,8 @@ pub fn serve_task(
     price_estimator: Arc<dyn PriceEstimating>,
     address: SocketAddr,
 ) -> JoinHandle<()> {
-    let filter = api::handle_all_routes(
-        database,
-        orderbook.clone(),
-        fee_calculator,
-        price_estimator,
-    );
+    let filter =
+        api::handle_all_routes(database, orderbook.clone(), fee_calculator, price_estimator);
     let mut metrics_address = address;
     tracing::info!(%address, "serving order book");
     task::spawn(warp::serve(filter).bind(address));
