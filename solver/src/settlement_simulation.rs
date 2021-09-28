@@ -2,11 +2,8 @@ use crate::settlement::Settlement;
 use crate::solver::Solver;
 use anyhow::{Error, Result};
 use contracts::GPv2Settlement;
-use ethcontract::{
-    batch::CallBatch, dyns::DynTransport, transaction::TransactionBuilder, GasPrice, TypedGasPrice,
-};
+use ethcontract::{batch::CallBatch, dyns::DynTransport, transaction::TransactionBuilder};
 use futures::FutureExt;
-use primitive_types::U256;
 use gas_estimation::EstimatedGasPrice;
 use shared::Web3;
 use std::sync::Arc;
@@ -58,12 +55,9 @@ pub async fn simulate_settlements(
             // `eth_call` simulation to fail with `max fee per gas less than block base fee`.
             let gas_price = gas_price.bump_cap(MAX_BASE_GAS_FEE_INCREASE);
             let gas_price = if let Some(eip1559) = gas_price.eip1559 {
-                TypedGasPrice::Eip1559((
-                    U256::from_f64_lossy(eip1559.max_fee_per_gas),
-                    U256::from_f64_lossy(eip1559.max_priority_fee_per_gas),
-                ))
+                (eip1559.max_fee_per_gas, eip1559.max_priority_fee_per_gas).into()
             } else {
-                TypedGasPrice::Legacy(GasPrice::Value(U256::from_f64_lossy(gas_price.legacy)))
+                gas_price.legacy.into()
             };
             // TODO: can we get rid of this settlement clone?
             let method = crate::settlement_submission::retry::settle_method_builder(

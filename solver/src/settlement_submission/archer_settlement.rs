@@ -31,9 +31,7 @@ use crate::{interactions::block_coinbase, settlement::Settlement};
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
 use contracts::GPv2Settlement;
-use ethcontract::{
-    errors::MethodError, transaction::Transaction, Account, GasPrice, TypedGasPrice,
-};
+use ethcontract::{errors::MethodError, transaction::Transaction, Account};
 use futures::FutureExt;
 use gas_estimation::{EstimatedGasPrice, GasPriceEstimating};
 use primitive_types::{H256, U256};
@@ -223,7 +221,7 @@ impl<'a> ArcherSolutionSubmitter<'a> {
             // Wouldn't work because the function isn't payable.
             // .value(tx_gas_cost_in_ether_wei)
             .gas(U256::from_f64_lossy(gas_limit))
-            .gas_price(TypedGasPrice::Legacy(GasPrice::Value(U256::zero())));
+            .gas_price(Default::default());
 
             // simulate transaction
 

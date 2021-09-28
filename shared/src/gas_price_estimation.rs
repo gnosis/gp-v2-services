@@ -1,7 +1,7 @@
 use crate::Web3;
 use anyhow::{anyhow, Context, Result};
 use gas_estimation::{
-    blocknative::BlockNative, EthGasStation, GasNowWebSocketGasStation, EstimatedGasPrice,
+    blocknative::BlockNative, EstimatedGasPrice, EthGasStation, GasNowWebSocketGasStation,
     GasPriceEstimating, GnosisSafeGasStation, PriorityGasPriceEstimating, Transport,
 };
 use serde::de::DeserializeOwned;
@@ -113,7 +113,11 @@ fn is_mainnet(network_id: &str) -> bool {
 pub struct FakeGasPriceEstimator(pub Arc<Mutex<EstimatedGasPrice>>);
 #[async_trait::async_trait]
 impl GasPriceEstimating for FakeGasPriceEstimator {
-    async fn estimate_with_limits(&self, _: f64, _: std::time::Duration) -> Result<EstimatedGasPrice> {
+    async fn estimate_with_limits(
+        &self,
+        _: f64,
+        _: std::time::Duration,
+    ) -> Result<EstimatedGasPrice> {
         Ok(*self.0.lock().unwrap())
     }
 }
