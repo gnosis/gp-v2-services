@@ -176,7 +176,7 @@ mod tests {
     use shared::transport::{create_env_test_transport, create_test_transport};
 
     #[tokio::test]
-    // #[ignore]
+    #[ignore]
     async fn solve_sell_order_on_zeroex() {
         let web3 = Web3::new(create_env_test_transport());
         let chain_id = web3.eth().chain_id().await.unwrap().as_u64();
