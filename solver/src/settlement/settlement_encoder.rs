@@ -24,7 +24,7 @@ pub struct SettlementEncoder {
     // Make sure to update the `merge` method when adding new fields.
 
     // Invariant: tokens is all keys in clearing_prices sorted.
-    tokens: Vec<H160>,
+    pub tokens: Vec<H160>,
     clearing_prices: HashMap<H160, U256>,
     // Invariant: Every trade's buy and sell token has an entry in clearing_prices.
     trades: Vec<Trade>,

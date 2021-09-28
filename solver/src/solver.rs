@@ -5,7 +5,7 @@ use crate::{
 use anyhow::Result;
 use baseline_solver::BaselineSolver;
 use contracts::GPv2Settlement;
-use cow_dex_ag_solver::CowDexAgSolver;
+use cow_dex_ag_solver::{CowDexAgSolver, CowDexAgSolverParameters};
 use ethcontract::{Account, H160, U256};
 use http_solver::{buffers::BufferRetriever, HttpSolver, SolverConfig};
 use naive_solver::NaiveSolver;
@@ -245,17 +245,19 @@ pub fn create(
                     client.clone(),
                     paraswap_partner.clone(),
                 ))),
-                SolverType::CowDexAgSolver => shared(CowDexAgSolver::new(
-                    account,
-                    web3.clone(),
-                    settlement_contract.clone(),
-                    token_info_fetcher.clone(),
-                    paraswap_slippage_bps,
-                    disabled_paraswap_dexs.clone(),
-                    client.clone(),
-                    paraswap_partner.clone(),
-                    chain_id,
-                )),
+                SolverType::CowDexAgSolver => {
+                    shared(CowDexAgSolver::new(CowDexAgSolverParameters {
+                        account,
+                        web3: web3.clone(),
+                        settlement_contract: settlement_contract.clone(),
+                        token_info: token_info_fetcher.clone(),
+                        slippage_bps: paraswap_slippage_bps,
+                        disabled_paraswap_dexs: disabled_paraswap_dexs.clone(),
+                        client: client.clone(),
+                        partner: paraswap_partner.clone(),
+                        chain_id,
+                    }))
+                }
             };
 
             if let Ok(solver) = &solver {

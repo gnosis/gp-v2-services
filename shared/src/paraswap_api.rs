@@ -174,7 +174,6 @@ pub struct SwapExchange {
     pub dest_amount: U256,
     pub exchange: String,
     pub percent: i64,
-    pub pool_addresses: Vec<String>,
     #[serde(with = "u256_decimal")]
     pub src_amount: U256,
 }
