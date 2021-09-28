@@ -221,7 +221,7 @@ impl<'a> ArcherSolutionSubmitter<'a> {
             // Wouldn't work because the function isn't payable.
             // .value(tx_gas_cost_in_ether_wei)
             .gas(U256::from_f64_lossy(gas_limit))
-            .gas_price(Default::default());
+            .gas_price(0.0.into());
 
             // simulate transaction
 
