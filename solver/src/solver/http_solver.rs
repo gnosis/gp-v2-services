@@ -52,7 +52,7 @@ lazy_static! {
 #[derive(Debug, Default)]
 pub struct SolverConfig {
     pub max_nr_exec_orders: u32,
-    pub uniform_clearing_prices_enforced_via_flag: bool,
+    pub enforce_uniform_clearing_prices: bool,
 }
 
 impl SolverConfig {
@@ -61,7 +61,7 @@ impl SolverConfig {
             "max_nr_exec_orders",
             self.max_nr_exec_orders.to_string().as_str(),
         );
-        if self.uniform_clearing_prices_enforced_via_flag {
+        if self.enforce_uniform_clearing_prices {
             url.query_pairs_mut().append_pair("ucp_policy", "Enforce");
         }
     }
@@ -661,7 +661,7 @@ mod tests {
             None,
             SolverConfig {
                 max_nr_exec_orders: 100,
-                uniform_clearing_prices_enforced_via_flag: false,
+                enforce_uniform_clearing_prices: false,
             },
             H160::zero(),
             mock_token_info_fetcher,
