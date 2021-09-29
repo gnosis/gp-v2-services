@@ -50,7 +50,10 @@ use shared::{
 };
 use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 use structopt::StructOpt;
-use tokio::{signal::unix::{SignalKind, signal}, task};
+use tokio::{
+    signal::unix::{signal, SignalKind},
+    task,
+};
 use url::Url;
 
 #[derive(Debug, StructOpt)]
@@ -438,18 +441,13 @@ async fn main() {
 
     // Intercept main signals for graceful shutdown
     // Kubernetes sends sigterm, whereas locally sigint (ctrl-c) is most common
-    let sigterm = async {
-        signal(SignalKind::terminate()).unwrap().recv().await
-    };
+    let sigterm = async { signal(SignalKind::terminate()).unwrap().recv().await };
     let sigint = async {
         signal(SignalKind::interrupt()).unwrap().recv().await;
     };
     futures::pin_mut!(sigint);
     futures::pin_mut!(sigterm);
-    let shutdown = future::select(
-            sigterm,
-            sigint,
-    );
+    let shutdown = future::select(sigterm, sigint);
 
     futures::pin_mut!(serve_api);
     tokio::select! {
