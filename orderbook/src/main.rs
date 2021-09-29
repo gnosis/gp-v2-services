@@ -424,7 +424,7 @@ async fn main() {
         args.bind_address,
         async {
             let _ = shutdown_receiver.await;
-        }
+        },
     );
     let maintenance_task =
         task::spawn(service_maintainer.run_maintenance_on_new_block(current_block_stream));
@@ -444,7 +444,10 @@ async fn main() {
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("Gracefully shutting down API");
             shutdown_sender.send(()).expect("failed to send shutdown signal");
-            serve_api.await.expect("API failed during shutdown");
+            match tokio::time::timeout(Duration::from_secs(10), serve_api).await {
+                Ok(inner) => inner.expect("API failed during shutdown"),
+                Err(_) => tracing::error!("API shutdown exceeded timeout"),
+            }
         }
     };
 }
