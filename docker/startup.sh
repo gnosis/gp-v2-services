@@ -8,7 +8,7 @@
 ( "$@" & echo $! > main_pid ) | (trap '' TERM INT; regex-stream-split '^\d+-\d+-\d+T\d+:\d+:\d+\.\d+Z\s+(TRACE|DEBUG|INFO|WARN)' '^\d+-\d+-\d+T\d+:\d+:\d+\.\d+Z\s+ERROR') &
 
 pid=$(cat main_pid)
-trap 'echo foo; kill -15 $pid' TERM
-trap 'echo bar; kill -2 $pid' INT
+trap 'kill -15 $pid' TERM
+trap 'kill -2 $pid' INT
 
 wait
