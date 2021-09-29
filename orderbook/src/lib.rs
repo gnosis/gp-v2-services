@@ -29,9 +29,7 @@ pub fn serve_api(
 ) -> JoinHandle<()> {
     let filter = api::handle_all_routes(database, orderbook, fee_calculator, price_estimator);
     tracing::info!(%address, "serving order book");
-    let (_, server) = warp::serve(filter).bind_with_graceful_shutdown(address, async {
-        shutdown_receiver.await;
-    });
+    let (_, server) = warp::serve(filter).bind_with_graceful_shutdown(address, shutdown_receiver);
     task::spawn(server)
 }
 
