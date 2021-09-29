@@ -422,7 +422,9 @@ async fn main() {
         fee_calculator,
         price_estimator,
         args.bind_address,
-        shutdown_receiver,
+        async {
+            let _ = shutdown_receiver.await;
+        }
     );
     let maintenance_task =
         task::spawn(service_maintainer.run_maintenance_on_new_block(current_block_stream));

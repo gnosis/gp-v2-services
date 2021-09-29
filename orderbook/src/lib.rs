@@ -19,13 +19,13 @@ use shared::price_estimation::PriceEstimating;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{task, task::JoinHandle};
 
-pub fn serve_api<T>(
+pub fn serve_api(
     database: Arc<dyn TradeRetrieving>,
     orderbook: Arc<Orderbook>,
     fee_calculator: Arc<EthAwareMinFeeCalculator>,
     price_estimator: Arc<dyn PriceEstimating>,
     address: SocketAddr,
-    shutdown_receiver: impl Future<Output = T> + Send + 'static,
+    shutdown_receiver: impl Future<Output = ()> + Send + 'static,
 ) -> JoinHandle<()> {
     let filter = api::handle_all_routes(database, orderbook, fee_calculator, price_estimator);
     tracing::info!(%address, "serving order book");
