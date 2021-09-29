@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use contracts::{BalancerV2Vault, GPv2Settlement, WETH9};
+use futures::future;
 use model::{
     app_id::AppId,
     order::{OrderUid, BUY_ETH_ADDRESS},
@@ -49,7 +50,7 @@ use shared::{
 };
 use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 use structopt::StructOpt;
-use tokio::task;
+use tokio::{signal::unix::{SignalKind, signal}, task};
 use url::Url;
 
 #[derive(Debug, StructOpt)]
@@ -435,13 +436,28 @@ async fn main() {
     tracing::info!(%metrics_address, "serving metrics");
     let metrics_task = serve_metrics(orderbook, metrics_address);
 
+    // Intercept main signals for graceful shutdown
+    // Kubernetes sends sigterm, whereas locally sigint (ctrl-c) is most common
+    let sigterm = async {
+        signal(SignalKind::terminate()).unwrap().recv().await
+    };
+    let sigint = async {
+        signal(SignalKind::interrupt()).unwrap().recv().await;
+    };
+    futures::pin_mut!(sigint);
+    futures::pin_mut!(sigterm);
+    let shutdown = future::select(
+            sigterm,
+            sigint,
+    );
+
     futures::pin_mut!(serve_api);
     tokio::select! {
         result = &mut serve_api => tracing::error!(?result, "API task exited"),
         result = maintenance_task => tracing::error!(?result, "maintenance task exited"),
         result = db_metrics_task => tracing::error!(?result, "database metrics task exited"),
         result = metrics_task => tracing::error!(?result, "metrics task exited"),
-        _ = tokio::signal::ctrl_c() => {
+        _ = shutdown => {
             tracing::info!("Gracefully shutting down API");
             shutdown_sender.send(()).expect("failed to send shutdown signal");
             match tokio::time::timeout(Duration::from_secs(10), serve_api).await {
