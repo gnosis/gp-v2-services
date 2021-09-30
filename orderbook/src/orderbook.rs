@@ -94,7 +94,7 @@ impl Orderbook {
         };
         if let Err(validation_err) = self
             .pre_order_validator
-            .validate_partial_order(order.clone().into())
+            .validate(order.clone().into())
             .await
         {
             return Ok(AddOrderResult::PreValidationError(validation_err));

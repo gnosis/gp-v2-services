@@ -1,12 +1,9 @@
-use crate::account_balances::BalanceFetching;
-use crate::fee::{EthAwareMinFeeCalculator, MinFeeCalculating};
+use crate::{account_balances::BalanceFetching, fee::MinFeeCalculating};
 use contracts::WETH9;
 use ethcontract::{H160, U256};
 use model::order::{BuyTokenDestination, Order, SellTokenSource, BUY_ETH_ADDRESS};
-use shared::bad_token::BadTokenDetecting;
-use shared::web3_traits::CodeFetching;
-use std::sync::Arc;
-use std::time::Duration;
+use shared::{bad_token::BadTokenDetecting, web3_traits::CodeFetching};
+use std::{sync::Arc, time::Duration};
 use warp::{http::StatusCode, reply::Json};
 
 pub trait WarpReplyConverting {
@@ -159,10 +156,7 @@ impl PreOrderValidator {
         }
     }
 
-    pub async fn validate_partial_order(
-        &self,
-        order: PreOrderData,
-    ) -> Result<(), PreValidationError> {
+    pub async fn validate(&self, order: PreOrderData) -> Result<(), PreValidationError> {
         if self.banned_users.contains(&order.owner) {
             return Err(PreValidationError::Forbidden);
         }
@@ -202,14 +196,14 @@ impl PreOrderValidator {
 }
 
 pub struct PostOrderValidator {
-    fee_validator: Arc<EthAwareMinFeeCalculator>,
+    fee_validator: Arc<dyn MinFeeCalculating>,
     pub bad_token_detector: Arc<dyn BadTokenDetecting>,
     balance_fetcher: Arc<dyn BalanceFetching>,
 }
 
 impl PostOrderValidator {
     pub fn new(
-        fee_validator: Arc<EthAwareMinFeeCalculator>,
+        fee_validator: Arc<dyn MinFeeCalculating>,
         bad_token_detector: Arc<dyn BadTokenDetecting>,
         balance_fetcher: Arc<dyn BalanceFetching>,
     ) -> Self {
@@ -257,6 +251,7 @@ impl PostOrderValidator {
         let min_balance = match minimum_balance(&order) {
             Some(amount) => amount,
             // TODO - None happens when checked_add overflows - not insufficient funds...
+            //  This error should be changed to SellAmountOverflow.
             None => return Err(PostValidationError::InsufficientFunds),
         };
         if !self
@@ -299,9 +294,47 @@ fn minimum_balance(order: &Order) -> Option<U256> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{account_balances::MockBalanceFetching, fee::MockMinFeeCalculating};
     use anyhow::anyhow;
-    use shared::dummy_contract;
-    use shared::web3_traits::MockCodeFetching;
+    use model::order::OrderCreation;
+    use shared::{
+        bad_token::{MockBadTokenDetecting, TokenQuality},
+        dummy_contract,
+        web3_traits::MockCodeFetching,
+    };
+
+    #[test]
+    fn minimum_balance_() {
+        let partially_fillable_order = Order {
+            order_creation: OrderCreation {
+                partially_fillable: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            minimum_balance(&partially_fillable_order),
+            Some(U256::from(1))
+        );
+        let order = Order {
+            order_creation: OrderCreation {
+                sell_amount: U256::MAX,
+                fee_amount: U256::from(1),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(minimum_balance(&order), None);
+        let order = Order {
+            order_creation: OrderCreation {
+                sell_amount: U256::from(1),
+                fee_amount: U256::from(1),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(minimum_balance(&order), Some(U256::from(2)));
+    }
 
     #[test]
     fn detects_orders_with_same_buy_and_sell_token() {
@@ -365,7 +398,7 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .validate_partial_order(PreOrderData {
+                    .validate(PreOrderData {
                         owner: H160::from_low_u64_be(1),
                         ..Default::default()
                     })
@@ -378,7 +411,7 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .validate_partial_order(PreOrderData {
+                    .validate(PreOrderData {
                         buy_token_balance: BuyTokenDestination::Internal,
                         ..Default::default()
                     })
@@ -391,7 +424,7 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .validate_partial_order(PreOrderData {
+                    .validate(PreOrderData {
                         sell_token_balance: SellTokenSource::Internal,
                         ..Default::default()
                     })
@@ -404,7 +437,7 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .validate_partial_order(PreOrderData {
+                    .validate(PreOrderData {
                         valid_to: 0,
                         ..Default::default()
                     })
@@ -417,7 +450,7 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .validate_partial_order(PreOrderData {
+                    .validate(PreOrderData {
                         valid_to: legit_valid_to,
                         buy_token: H160::from_low_u64_be(2),
                         sell_token: H160::from_low_u64_be(2),
@@ -432,7 +465,7 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .validate_partial_order(PreOrderData {
+                    .validate(PreOrderData {
                         valid_to: legit_valid_to,
                         buy_token: BUY_ETH_ADDRESS,
                         ..Default::default()
@@ -458,7 +491,7 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .validate_partial_order(PreOrderData {
+                    .validate(PreOrderData {
                         valid_to: legit_valid_to,
                         buy_token: BUY_ETH_ADDRESS,
                         ..Default::default()
@@ -481,7 +514,7 @@ mod tests {
             min_order_validity_period: Duration::from_secs(1),
         };
         assert!(validator
-            .validate_partial_order(PreOrderData {
+            .validate(PreOrderData {
                 valid_to: shared::time::now_in_epoch_seconds()
                     + min_order_validity_period.as_secs() as u32
                     + 2,
@@ -491,5 +524,124 @@ mod tests {
             })
             .await
             .is_ok());
+    }
+
+    #[tokio::test]
+    async fn post_validate_order_err() {
+        let mut fee_calculator = MockMinFeeCalculating::new();
+        let mut bad_token_detector = MockBadTokenDetecting::new();
+        let mut balance_fetcher = MockBalanceFetching::new();
+        fee_calculator
+            .expect_is_valid_fee()
+            .times(1)
+            .returning(|_, _, _| false);
+        fee_calculator
+            .expect_is_valid_fee()
+            .returning(|_, _, _| true);
+        bad_token_detector
+            .expect_detect()
+            .times(1)
+            .returning(|_| Err(anyhow!("failed to detect token")));
+        bad_token_detector.expect_detect().times(1).returning(|_| {
+            Ok(TokenQuality::Bad {
+                reason: "iz Sh%tCoin".to_string(),
+            })
+        });
+        bad_token_detector
+            .expect_detect()
+            .returning(|_| Ok(TokenQuality::Good));
+        balance_fetcher
+            .expect_can_transfer()
+            .returning(|_, _, _, _| Ok(false));
+        let validator = PostOrderValidator::new(
+            Arc::new(fee_calculator),
+            Arc::new(bad_token_detector),
+            Arc::new(balance_fetcher),
+        );
+        let mut order = Order::default();
+        assert_eq!(
+            format!(
+                "{:?}",
+                validator.validate(order.clone(), None).await.unwrap_err()
+            ),
+            "ZeroAmount"
+        );
+        order.order_creation.buy_amount = U256::from(1);
+        order.order_creation.sell_amount = U256::from(1);
+        assert_eq!(
+            format!(
+                "{:?}",
+                validator
+                    .validate(order.clone(), Some(H160::from_low_u64_be(1)))
+                    .await
+                    .unwrap_err()
+            ),
+            "WrongOwner(0x7e5f4552091a69125d5dfcb7b8c2659029395bdf)"
+        );
+        assert_eq!(
+            format!(
+                "{:?}",
+                validator.validate(order.clone(), None).await.unwrap_err()
+            ),
+            "InsufficientFee"
+        );
+        assert_eq!(
+            format!(
+                "{:?}",
+                validator.validate(order.clone(), None).await.unwrap_err()
+            ),
+            "Other(failed to detect token)"
+        );
+        assert_eq!(
+            format!(
+                "{:?}",
+                validator.validate(order.clone(), None).await.unwrap_err()
+            ),
+            "UnsupportedToken(0x0000000000000000000000000000000000000000)"
+        );
+        order.order_creation.sell_amount = U256::MAX;
+        order.order_creation.fee_amount = U256::from(1);
+        assert_eq!(
+            format!(
+                "{:?}",
+                validator.validate(order.clone(), None).await.unwrap_err()
+            ),
+            "InsufficientFunds"
+        );
+        order.order_creation.sell_amount = U256::from(1);
+        assert_eq!(
+            format!("{:?}", validator.validate(order, None).await.unwrap_err()),
+            "InsufficientFunds"
+        );
+    }
+
+    #[tokio::test]
+    async fn post_validate_order_ok() {
+        let mut fee_calculator = MockMinFeeCalculating::new();
+        let mut bad_token_detector = MockBadTokenDetecting::new();
+        let mut balance_fetcher = MockBalanceFetching::new();
+        fee_calculator
+            .expect_is_valid_fee()
+            .returning(|_, _, _| true);
+        bad_token_detector
+            .expect_detect()
+            .returning(|_| Ok(TokenQuality::Good));
+        balance_fetcher
+            .expect_can_transfer()
+            .returning(|_, _, _, _| Ok(true));
+        let validator = PostOrderValidator::new(
+            Arc::new(fee_calculator),
+            Arc::new(bad_token_detector),
+            Arc::new(balance_fetcher),
+        );
+        let order = Order {
+            order_creation: OrderCreation {
+                buy_amount: U256::from(1),
+                sell_amount: U256::from(1),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(validator.validate(order, None).await.is_ok());
     }
 }
