@@ -42,13 +42,6 @@ pub fn create_order_response(result: Result<AddOrderResult>) -> impl Reply {
             super::error("UnsupportedSignature", "signing scheme is not supported"),
             StatusCode::BAD_REQUEST,
         ),
-        Ok(AddOrderResult::MissingOrderData) => (
-            super::error(
-                "MissingOrderData",
-                "at least 1 field of orderCreation is missing, please check the field",
-            ),
-            StatusCode::BAD_REQUEST,
-        ),
         Ok(AddOrderResult::InsufficientFunds) => (
             super::error(
                 "InsufficientFunds",

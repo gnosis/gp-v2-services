@@ -23,7 +23,6 @@ pub enum AddOrderResult {
     DuplicatedOrder,
     InvalidSignature,
     UnsupportedSignature,
-    MissingOrderData,
     InsufficientFunds,
     InsufficientFee,
     UnsupportedToken(H160),

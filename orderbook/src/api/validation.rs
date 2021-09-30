@@ -66,13 +66,13 @@ pub struct PreOrderValidator {
 
 #[derive(Default)]
 pub struct PreOrderData {
-    owner: H160,
-    sell_token: H160,
-    buy_token: H160,
-    receiver: H160,
-    valid_to: u32,
-    buy_token_balance: BuyTokenDestination,
-    sell_token_balance: SellTokenSource,
+    pub owner: H160,
+    pub sell_token: H160,
+    pub buy_token: H160,
+    pub receiver: H160,
+    pub valid_to: u32,
+    pub buy_token_balance: BuyTokenDestination,
+    pub sell_token_balance: SellTokenSource,
 }
 
 impl From<Order> for PreOrderData {
@@ -121,17 +121,14 @@ impl PreOrderValidator {
                 order.sell_token_balance,
             ));
         }
-
         if order.valid_to
             < shared::time::now_in_epoch_seconds() + self.min_order_validity_period.as_secs() as u32
         {
             return Err(ValidationError::InsufficientValidTo);
         }
-
         if has_same_buy_and_sell_token(&order, &self.native_token) {
             return Err(ValidationError::SameBuyAndSellToken);
         }
-
         if order.buy_token == BUY_ETH_ADDRESS {
             let code_size = self
                 .code_fetcher
