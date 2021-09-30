@@ -5,10 +5,10 @@
 # Run both commands in the background, so that we can receive signals and forward it to the main process (for this we capture the pid).
 # The stream-split command deliberately ignores interrupts (otherwise we may lose logs on teardown). It terminates automatically
 # once the main command (stdin) terminates.
-( "$@" & echo $! > main_pid ) | (trap '' TERM INT; regex-stream-split '^\d+-\d+-\d+T\d+:\d+:\d+\.\d+Z\s+(TRACE|DEBUG|INFO|WARN)' '^\d+-\d+-\d+T\d+:\d+:\d+\.\d+Z\s+ERROR') &
+( "$@" & echo $! > main_pid ) | regex-stream-split '^\d+-\d+-\d+T\d+:\d+:\d+\.\d+Z\s+(TRACE|DEBUG|INFO|WARN)' '^\d+-\d+-\d+T\d+:\d+:\d+\.\d+Z\s+ERROR' &
 
-pid=$(cat main_pid)
-trap 'kill -15 $pid' TERM
-trap 'kill -2 $pid' INT
+# Forward signal to main pid. Sync after killing to make sure the stdout is flushed
+trap 'kill -SIGTERM $(cat main_pid); sync' SIGTERM
+trap 'kill -SIGINT $(cat main_pid); sync' SIGINT
 
 wait
