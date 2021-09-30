@@ -12,7 +12,10 @@ use model::order::Order;
 use model::{order::OrderKind, TokenPair};
 use num::{rational::Ratio, BigRational};
 use primitive_types::{H160, U256};
-use shared::sources::balancer::pool_fetching::{TokenState, WeightedTokenState};
+use shared::sources::balancer::{
+    pool_fetching::{TokenState, WeightedTokenState},
+    swap::fixed_point::Bfp,
+};
 #[cfg(test)]
 use shared::sources::uniswap::pool_fetching::Pool;
 use std::collections::HashMap;
@@ -162,7 +165,7 @@ impl From<Pool> for ConstantProductOrder {
 #[cfg_attr(test, derivative(PartialEq))]
 pub struct WeightedProductOrder {
     pub reserves: HashMap<H160, WeightedTokenState>,
-    pub fee: BigRational,
+    pub fee: Bfp,
     #[cfg_attr(test, derivative(PartialEq = "ignore"))]
     pub settlement_handling: Arc<dyn SettlementHandling<Self>>,
 }
@@ -260,7 +263,7 @@ impl Default for WeightedProductOrder {
     fn default() -> Self {
         WeightedProductOrder {
             reserves: Default::default(),
-            fee: num::Zero::zero(),
+            fee: Bfp::zero(),
             settlement_handling: tests::CapturingSettlementHandler::arc(),
         }
     }
