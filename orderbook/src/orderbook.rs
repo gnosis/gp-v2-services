@@ -82,10 +82,29 @@ impl Orderbook {
         ) {
             return Ok(AddOrderResult::UnsupportedSignature);
         }
+
+        if order_creation.buy_amount.is_zero() || order_creation.sell_amount.is_zero() {
+            return Ok(AddOrderResult::ZeroAmount);
+        }
+
+        let full_fee_amount = match self
+            .fee_validator
+            .get_unsubsidized_min_fee(
+                order_creation.sell_token,
+                order_creation.fee_amount,
+                Some(order_creation.app_data),
+            )
+            .await
+        {
+            Ok(full_fee_amount) => full_fee_amount,
+            Err(()) => return Ok(AddOrderResult::InsufficientFee),
+        };
+
         let order = match Order::from_order_creation(
             order_creation.clone(),
             &self.domain_separator,
             self.settlement_contract,
+            full_fee_amount,
         ) {
             Some(order) => order,
             None => return Ok(AddOrderResult::InvalidSignature),
