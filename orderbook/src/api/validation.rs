@@ -1,12 +1,20 @@
+use crate::account_balances::BalanceFetching;
+use crate::fee::{EthAwareMinFeeCalculator, MinFeeCalculating};
 use contracts::WETH9;
-use ethcontract::H160;
+use ethcontract::{H160, U256};
 use model::order::{BuyTokenDestination, Order, SellTokenSource, BUY_ETH_ADDRESS};
+use shared::bad_token::BadTokenDetecting;
 use shared::web3_traits::CodeFetching;
+use std::sync::Arc;
 use std::time::Duration;
 use warp::{http::StatusCode, reply::Json};
 
+pub trait WarpReplyConverting {
+    fn to_warp_reply(&self) -> (Json, StatusCode);
+}
+
 #[derive(Debug)]
-pub enum ValidationError {
+pub enum PreValidationError {
     Forbidden,
     InsufficientValidTo,
     TransferEthToContract,
@@ -16,8 +24,8 @@ pub enum ValidationError {
     Other(anyhow::Error),
 }
 
-impl ValidationError {
-    pub fn to_warp_reply(&self) -> (Json, StatusCode) {
+impl WarpReplyConverting for PreValidationError {
+    fn to_warp_reply(&self) -> (Json, StatusCode) {
         match self {
             Self::UnsupportedBuyTokenDestination(dest) => (
                 super::error("UnsupportedBuyTokenDestination", format!("Type {:?}", dest)),
@@ -50,6 +58,53 @@ impl ValidationError {
                     "SameBuyAndSellToken",
                     "Buy token is the same as the sell token.",
                 ),
+                StatusCode::BAD_REQUEST,
+            ),
+            Self::Other(_) => (super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum PostValidationError {
+    InsufficientFee,
+    InsufficientFunds,
+    UnsupportedToken(H160),
+    WrongOwner(H160),
+    ZeroAmount,
+    Other(anyhow::Error),
+}
+
+impl WarpReplyConverting for PostValidationError {
+    fn to_warp_reply(&self) -> (Json, StatusCode) {
+        match self {
+            Self::UnsupportedToken(token) => (
+                super::error("UnsupportedToken", format!("Token address {}", token)),
+                StatusCode::BAD_REQUEST,
+            ),
+            Self::WrongOwner(owner) => (
+                super::error(
+                    "WrongOwner",
+                    format!(
+                        "Address recovered from signature {} does not match from address",
+                        owner
+                    ),
+                ),
+                StatusCode::BAD_REQUEST,
+            ),
+            Self::InsufficientFunds => (
+                super::error(
+                    "InsufficientFunds",
+                    "order owner must have funds worth at least x in his account",
+                ),
+                StatusCode::BAD_REQUEST,
+            ),
+            Self::InsufficientFee => (
+                super::error("InsufficientFee", "Order does not include sufficient fee"),
+                StatusCode::BAD_REQUEST,
+            ),
+            Self::ZeroAmount => (
+                super::error("ZeroAmount", "Buy or sell amount is zero."),
                 StatusCode::BAD_REQUEST,
             ),
             Self::Other(_) => (super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
@@ -104,12 +159,15 @@ impl PreOrderValidator {
         }
     }
 
-    pub async fn validate_partial_order(&self, order: PreOrderData) -> Result<(), ValidationError> {
+    pub async fn validate_partial_order(
+        &self,
+        order: PreOrderData,
+    ) -> Result<(), PreValidationError> {
         if self.banned_users.contains(&order.owner) {
-            return Err(ValidationError::Forbidden);
+            return Err(PreValidationError::Forbidden);
         }
         if order.buy_token_balance != BuyTokenDestination::Erc20 {
-            return Err(ValidationError::UnsupportedBuyTokenDestination(
+            return Err(PreValidationError::UnsupportedBuyTokenDestination(
                 order.buy_token_balance,
             ));
         }
@@ -117,27 +175,102 @@ impl PreOrderValidator {
             order.sell_token_balance,
             SellTokenSource::Erc20 | SellTokenSource::External
         ) {
-            return Err(ValidationError::UnsupportedSellTokenSource(
+            return Err(PreValidationError::UnsupportedSellTokenSource(
                 order.sell_token_balance,
             ));
         }
         if order.valid_to
             < shared::time::now_in_epoch_seconds() + self.min_order_validity_period.as_secs() as u32
         {
-            return Err(ValidationError::InsufficientValidTo);
+            return Err(PreValidationError::InsufficientValidTo);
         }
         if has_same_buy_and_sell_token(&order, &self.native_token) {
-            return Err(ValidationError::SameBuyAndSellToken);
+            return Err(PreValidationError::SameBuyAndSellToken);
         }
         if order.buy_token == BUY_ETH_ADDRESS {
             let code_size = self
                 .code_fetcher
                 .code_size(order.receiver)
                 .await
-                .map_err(ValidationError::Other)?;
+                .map_err(PreValidationError::Other)?;
             if code_size != 0 {
-                return Err(ValidationError::TransferEthToContract);
+                return Err(PreValidationError::TransferEthToContract);
             }
+        }
+        Ok(())
+    }
+}
+
+pub struct PostOrderValidator {
+    fee_validator: Arc<EthAwareMinFeeCalculator>,
+    pub bad_token_detector: Arc<dyn BadTokenDetecting>,
+    balance_fetcher: Arc<dyn BalanceFetching>,
+}
+
+impl PostOrderValidator {
+    pub fn new(
+        fee_validator: Arc<EthAwareMinFeeCalculator>,
+        bad_token_detector: Arc<dyn BadTokenDetecting>,
+        balance_fetcher: Arc<dyn BalanceFetching>,
+    ) -> Self {
+        Self {
+            fee_validator,
+            bad_token_detector,
+            balance_fetcher,
+        }
+    }
+    pub async fn validate(
+        &self,
+        order: Order,
+        sender: Option<H160>,
+    ) -> Result<(), PostValidationError> {
+        let order_creation = &order.order_creation;
+        if order_creation.buy_amount.is_zero() || order_creation.sell_amount.is_zero() {
+            return Err(PostValidationError::ZeroAmount);
+        }
+        let owner = order.order_meta_data.owner;
+        if matches!(sender, Some(from) if from != owner) {
+            return Err(PostValidationError::WrongOwner(owner));
+        }
+        if !self
+            .fee_validator
+            .is_valid_fee(
+                order_creation.sell_token,
+                order_creation.fee_amount,
+                order_creation.app_data,
+            )
+            .await
+        {
+            return Err(PostValidationError::InsufficientFee);
+        }
+        for &token in &[order_creation.sell_token, order_creation.buy_token] {
+            if !self
+                .bad_token_detector
+                .detect(token)
+                .await
+                .map_err(PostValidationError::Other)?
+                .is_good()
+            {
+                return Err(PostValidationError::UnsupportedToken(token));
+            }
+        }
+        let min_balance = match minimum_balance(&order) {
+            Some(amount) => amount,
+            // TODO - None happens when checked_add overflows - not insufficient funds...
+            None => return Err(PostValidationError::InsufficientFunds),
+        };
+        if !self
+            .balance_fetcher
+            .can_transfer(
+                order_creation.sell_token,
+                owner,
+                min_balance,
+                order_creation.sell_token_balance,
+            )
+            .await
+            .unwrap_or(false)
+        {
+            return Err(PostValidationError::InsufficientFunds);
         }
         Ok(())
     }
@@ -149,6 +282,18 @@ impl PreOrderValidator {
 fn has_same_buy_and_sell_token(order: &PreOrderData, native_token: &WETH9) -> bool {
     order.sell_token == order.buy_token
         || (order.sell_token == native_token.address() && order.buy_token == BUY_ETH_ADDRESS)
+}
+
+// Min balance user must have in sell token for order to be accepted. None when addition overflows.
+fn minimum_balance(order: &Order) -> Option<U256> {
+    if order.order_creation.partially_fillable {
+        Some(U256::from(1))
+    } else {
+        order
+            .order_creation
+            .sell_amount
+            .checked_add(order.order_creation.fee_amount)
+    }
 }
 
 #[cfg(test)]

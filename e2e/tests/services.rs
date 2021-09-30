@@ -3,7 +3,7 @@ use contracts::{
 };
 use ethcontract::{prelude::U256, H160};
 use model::DomainSeparator;
-use orderbook::api::validation::PreOrderValidator;
+use orderbook::api::validation::{PostOrderValidator, PreOrderValidator};
 use orderbook::{
     account_balances::Web3BalanceFetcher, database::Postgres, event_updater::EventUpdater,
     fee::EthAwareMinFeeCalculator, metrics::Metrics, orderbook::Orderbook,
@@ -215,17 +215,20 @@ impl OrderbookServices {
             vec![],
             Duration::from_secs(120),
         ));
+        let post_order_validator = Arc::new(PostOrderValidator::new(
+            fee_calculator.clone(),
+            bad_token_detector,
+            balance_fetcher,
+        ));
         let orderbook = Arc::new(Orderbook::new(
             gpv2.domain_separator,
             gpv2.settlement.address(),
             db.clone(),
-            balance_fetcher,
-            fee_calculator.clone(),
-            bad_token_detector,
             true,
             solvable_orders_cache.clone(),
             Duration::from_secs(600),
             pre_order_validator,
+            post_order_validator,
         ));
         let maintenance = ServiceMaintenance {
             maintainers: vec![db.clone(), event_updater],
