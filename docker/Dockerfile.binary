@@ -16,7 +16,7 @@ RUN \
 FROM docker.io/alpine:latest
 
 # Handle signal handlers properly
-RUN apk add --no-cache tini ca-certificates && apk add ca-certificates
+RUN apk add --no-cache tini ca-certificates && update-ca-certificates
 
 # Remove outdated certificates
 RUN rm etc/ssl/certs/ca-certificates.crt etc/ssl/certs/ca-cert-DST_Root_CA_X3.pem
