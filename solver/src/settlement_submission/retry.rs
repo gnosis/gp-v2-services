@@ -68,7 +68,7 @@ impl<'a> TransactionSending for SettlementSender<'a> {
     async fn send(&self, gas_price: f64) -> Self::Output {
         tracing::info!(
             "submitting solution transaction at gas price {:.2} GWei",
-            gas_price / 1_000_000_000.
+            gas_price / 1e9
         );
         let mut method =
             settle_method_builder(self.contract, self.settlement.clone(), self.account.clone())
