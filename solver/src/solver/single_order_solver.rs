@@ -58,10 +58,12 @@ impl<I: SingleOrderSolving + Send + Sync + 'static> Solver for SingleOrderSolver
                     Err(err) => {
                         let name = self.inner.name();
                         if err.retryable {
-                            tracing::warn!("Solver {} benign error: {:?}", name, &err);
+                            tracing::warn!("Solver {} retryable error: {:?}", name, &err);
                             orders.push_back(order);
-                        } else {
+                        } else if err.should_alert {
                             tracing::error!("Solver {} hard error: {:?}", name, &err);
+                        } else {
+                            tracing::warn!("Solver {} soft error: {:?}", name, &err);
                         }
                     }
                 }
