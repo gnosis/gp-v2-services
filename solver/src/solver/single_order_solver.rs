@@ -86,6 +86,8 @@ impl<I: SingleOrderSolving + Send + Sync + 'static> Solver for SingleOrderSolver
 pub struct SettlementError {
     pub inner: anyhow::Error,
     pub retryable: bool,
+    // Whether or not this error should be logged as an error
+    pub should_alert: bool,
 }
 
 impl From<anyhow::Error> for SettlementError {
@@ -93,6 +95,7 @@ impl From<anyhow::Error> for SettlementError {
         SettlementError {
             inner: err,
             retryable: false,
+            should_alert: true,
         }
     }
 }
@@ -161,6 +164,7 @@ mod tests {
                     0 => Err(SettlementError {
                         inner: anyhow!(""),
                         retryable: true,
+                        should_alert: true,
                     }),
                     1 => Ok(None),
                     _ => unreachable!(),
@@ -200,6 +204,7 @@ mod tests {
             Err(SettlementError {
                 inner: anyhow!(""),
                 retryable: false,
+                should_alert: true,
             })
         });
 
