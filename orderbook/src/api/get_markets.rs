@@ -78,17 +78,9 @@ fn get_amount_estimate_response(
             }),
             StatusCode::OK,
         ),
-        Err(PriceEstimationError::UnsupportedToken(token)) => reply::with_status(
-            super::error("UnsupportedToken", format!("Token address {:?}", token)),
-            StatusCode::BAD_REQUEST,
-        ),
-        Err(PriceEstimationError::NoLiquidity) => reply::with_status(
-            super::error("NoLiquidity", "not enough liquidity"),
-            StatusCode::NOT_FOUND,
-        ),
-        Err(PriceEstimationError::Other(err)) => {
-            tracing::error!(?err, "get_market error");
-            reply::with_status(super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
+        Err(price_estimation_error) => {
+            let (json, status_code) = price_estimation_error.to_warp_reply();
+            reply::with_status(json, status_code)
         }
     }
 }

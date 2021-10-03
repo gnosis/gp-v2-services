@@ -1,8 +1,8 @@
-use crate::{api::internal_error, orderbook::Orderbook};
+use crate::orderbook::Orderbook;
 use anyhow::Result;
 use model::order::Order;
 use serde::Deserialize;
-use shared::H160Wrapper;
+use shared::{internal_error, H160Wrapper};
 use std::{convert::Infallible, sync::Arc};
 use warp::{
     hyper::StatusCode,
@@ -46,7 +46,7 @@ pub fn get_user_orders(
             let limit = query.limit.unwrap_or(DEFAULT_LIMIT);
             if !(MIN_LIMIT..=MAX_LIMIT).contains(&limit) {
                 return Ok(with_status(
-                    super::error(
+                    shared::error(
                         "LIMIT_OUT_OF_BOUNDS",
                         &format!("The pagination limit is [{},{}].", MIN_LIMIT, MAX_LIMIT),
                     ),

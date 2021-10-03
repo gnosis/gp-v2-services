@@ -16,13 +16,12 @@ use crate::{
 };
 use anyhow::Error as anyhowError;
 use serde::de::DeserializeOwned;
-use serde::Serialize;
 use shared::metrics::get_metric_storage_registry;
 use shared::price_estimation::PriceEstimating;
 use std::{convert::Infallible, sync::Arc};
 use warp::{
     hyper::StatusCode,
-    reply::{json, with_status, Json, WithStatus},
+    reply::{with_status, Json, WithStatus},
     Filter, Rejection, Reply,
 };
 
@@ -100,35 +99,14 @@ struct ApiMetrics {
     requests_duration_seconds: prometheus::Histogram,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Error<'a> {
-    error_type: &'a str,
-    description: &'a str,
-}
-
-fn error(error_type: &str, description: impl AsRef<str>) -> Json {
-    json(&Error {
-        error_type,
-        description: description.as_ref(),
-    })
-}
-
-fn internal_error() -> Json {
-    json(&Error {
-        error_type: "InternalServerError",
-        description: "",
-    })
-}
-
 pub fn convert_get_orders_error_to_reply(err: anyhowError) -> WithStatus<Json> {
     tracing::error!(?err, "get_orders error");
-    with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
+    with_status(shared::internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 pub fn convert_get_trades_error_to_reply(err: anyhowError) -> WithStatus<Json> {
     tracing::error!(?err, "get_trades error");
-    with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
+    with_status(shared::internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 #[cfg(test)]

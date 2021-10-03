@@ -29,13 +29,14 @@ use ethcontract::dyns::{DynTransport, DynWeb3};
 use ethcontract::H160;
 use hex::{FromHex, FromHexError};
 use model::h160_hexadecimal;
-use serde::Deserialize;
-use std::fmt::Debug;
+use serde::{Deserialize, Serialize};
 use std::{
+    fmt::Debug,
     future::Future,
     str::FromStr,
     time::{Duration, Instant},
 };
+use warp::reply::{json, Json};
 use web3::types::Bytes;
 
 pub type Web3Transport = DynTransport;
@@ -82,4 +83,25 @@ pub fn debug_bytes(
 /// based on formatting the error with its inner sources without backtrace.
 pub fn clone_anyhow_error(err: &anyhow::Error) -> anyhow::Error {
     anyhow::anyhow!("{:#}", err)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Error<'a> {
+    error_type: &'a str,
+    description: &'a str,
+}
+
+pub fn error(error_type: &str, description: impl AsRef<str>) -> Json {
+    json(&Error {
+        error_type,
+        description: description.as_ref(),
+    })
+}
+
+pub fn internal_error() -> Json {
+    json(&Error {
+        error_type: "InternalServerError",
+        description: "",
+    })
 }

@@ -19,7 +19,7 @@ pub fn get_order_by_uid_response(result: Result<Option<Order>>) -> impl Reply {
     Ok(match order {
         Some(order) => reply::with_status(reply::json(&order), StatusCode::OK),
         None => reply::with_status(
-            super::error("NotFound", "Order was not found"),
+            shared::error("NotFound", "Order was not found"),
             StatusCode::NOT_FOUND,
         ),
     })

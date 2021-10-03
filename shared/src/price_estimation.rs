@@ -9,6 +9,8 @@ use model::order::OrderKind;
 use num::BigRational;
 use structopt::clap::arg_enum;
 use thiserror::Error;
+use warp::http::StatusCode;
+use warp::reply::Json;
 
 arg_enum! {
     #[derive(Debug)]
@@ -26,6 +28,9 @@ pub enum PriceEstimationError {
     #[error("No liquidity")]
     NoLiquidity,
 
+    #[error("Zero Amount")]
+    ZeroAmount,
+
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -35,7 +40,31 @@ impl Clone for PriceEstimationError {
         match self {
             Self::UnsupportedToken(token) => Self::UnsupportedToken(*token),
             Self::NoLiquidity => Self::NoLiquidity,
+            Self::ZeroAmount => Self::ZeroAmount,
             Self::Other(err) => Self::Other(crate::clone_anyhow_error(err)),
+        }
+    }
+}
+
+impl PriceEstimationError {
+    pub fn to_warp_reply(&self) -> (Json, StatusCode) {
+        match self {
+            PriceEstimationError::UnsupportedToken(token) => (
+                super::error("UnsupportedToken", format!("Token address {:?}", token)),
+                StatusCode::BAD_REQUEST,
+            ),
+            PriceEstimationError::NoLiquidity => (
+                super::error("NoLiquidity", "not enough liquidity"),
+                StatusCode::NOT_FOUND,
+            ),
+            PriceEstimationError::ZeroAmount => (
+                super::error("ZeroAmount", "Please use non-zero amount field"),
+                StatusCode::BAD_REQUEST,
+            ),
+            PriceEstimationError::Other(err) => {
+                tracing::error!(?err, "get_market error");
+                (super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
+            }
         }
     }
 }

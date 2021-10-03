@@ -20,39 +20,39 @@ impl ValidationError {
     pub fn to_warp_reply(&self) -> (Json, StatusCode) {
         match self {
             Self::UnsupportedBuyTokenDestination(dest) => (
-                super::error("UnsupportedBuyTokenDestination", format!("Type {:?}", dest)),
+                shared::error("UnsupportedBuyTokenDestination", format!("Type {:?}", dest)),
                 StatusCode::BAD_REQUEST,
             ),
             Self::UnsupportedSellTokenSource(src) => (
-                super::error("UnsupportedSellTokenSource", format!("Type {:?}", src)),
+                shared::error("UnsupportedSellTokenSource", format!("Type {:?}", src)),
                 StatusCode::BAD_REQUEST,
             ),
             Self::Forbidden => (
-                super::error("Forbidden", "Forbidden, your account is deny-listed"),
+                shared::error("Forbidden", "Forbidden, your account is deny-listed"),
                 StatusCode::FORBIDDEN,
             ),
             Self::InsufficientValidTo => (
-                super::error(
+                shared::error(
                     "InsufficientValidTo",
                     "validTo is not far enough in the future",
                 ),
                 StatusCode::BAD_REQUEST,
             ),
             Self::TransferEthToContract => (
-                super::error(
+                shared::error(
                     "TransferEthToContract",
                     "Sending Ether to smart contract wallets is currently not supported",
                 ),
                 StatusCode::BAD_REQUEST,
             ),
             Self::SameBuyAndSellToken => (
-                super::error(
+                shared::error(
                     "SameBuyAndSellToken",
                     "Buy token is the same as the sell token.",
                 ),
                 StatusCode::BAD_REQUEST,
             ),
-            Self::Other(_) => (super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
+            Self::Other(_) => (shared::internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
         }
     }
 }

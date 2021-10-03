@@ -17,11 +17,11 @@ pub fn create_order_response(result: Result<AddOrderResult>) -> impl Reply {
         Ok(AddOrderResult::Added(uid)) => (warp::reply::json(&uid), StatusCode::CREATED),
         Ok(AddOrderResult::PreValidationError(err)) => err.to_warp_reply(),
         Ok(AddOrderResult::UnsupportedToken(token)) => (
-            super::error("UnsupportedToken", format!("Token address {}", token)),
+            shared::error("UnsupportedToken", format!("Token address {}", token)),
             StatusCode::BAD_REQUEST,
         ),
         Ok(AddOrderResult::WrongOwner(owner)) => (
-            super::error(
+            shared::error(
                 "WrongOwner",
                 format!(
                     "Address recovered from signature {} does not match from address",
@@ -31,33 +31,33 @@ pub fn create_order_response(result: Result<AddOrderResult>) -> impl Reply {
             StatusCode::BAD_REQUEST,
         ),
         Ok(AddOrderResult::DuplicatedOrder) => (
-            super::error("DuplicatedOrder", "order already exists"),
+            shared::error("DuplicatedOrder", "order already exists"),
             StatusCode::BAD_REQUEST,
         ),
         Ok(AddOrderResult::InvalidSignature) => (
-            super::error("InvalidSignature", "invalid signature"),
+            shared::error("InvalidSignature", "invalid signature"),
             StatusCode::BAD_REQUEST,
         ),
         Ok(AddOrderResult::UnsupportedSignature) => (
-            super::error("UnsupportedSignature", "signing scheme is not supported"),
+            shared::error("UnsupportedSignature", "signing scheme is not supported"),
             StatusCode::BAD_REQUEST,
         ),
         Ok(AddOrderResult::InsufficientFunds) => (
-            super::error(
+            shared::error(
                 "InsufficientFunds",
                 "order owner must have funds worth at least x in his account",
             ),
             StatusCode::BAD_REQUEST,
         ),
         Ok(AddOrderResult::InsufficientFee) => (
-            super::error("InsufficientFee", "Order does not include sufficient fee"),
+            shared::error("InsufficientFee", "Order does not include sufficient fee"),
             StatusCode::BAD_REQUEST,
         ),
         Ok(AddOrderResult::ZeroAmount) => (
-            super::error("ZeroAmount", "Buy or sell amount is zero."),
+            shared::error("ZeroAmount", "Buy or sell amount is zero."),
             StatusCode::BAD_REQUEST,
         ),
-        Err(_) => (super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
+        Err(_) => (shared::internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
     };
     warp::reply::with_status(body, status_code)
 }

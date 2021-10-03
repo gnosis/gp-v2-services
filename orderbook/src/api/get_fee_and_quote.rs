@@ -77,6 +77,7 @@ impl From<PriceEstimationError> for Error {
         match other {
             PriceEstimationError::NoLiquidity => Error::NoLiquidity,
             PriceEstimationError::UnsupportedToken(token) => Error::UnsupportedToken(token),
+            PriceEstimationError::ZeroAmount => Error::AmountIsZero,
             PriceEstimationError::Other(error) => Error::Other(error),
         }
     }
@@ -180,22 +181,22 @@ fn response<T: Serialize>(result: Result<T, Error>) -> impl Reply {
     match result {
         Ok(response) => reply::with_status(reply::json(&response), StatusCode::OK),
         Err(Error::NoLiquidity) => reply::with_status(
-            super::error("NoLiquidity", "not enough liquidity"),
+            shared::error("NoLiquidity", "not enough liquidity"),
             StatusCode::NOT_FOUND,
         ),
         Err(Error::UnsupportedToken(token)) => reply::with_status(
-            super::error("UnsupportedToken", format!("Token address {:?}", token)),
+            shared::error("UnsupportedToken", format!("Token address {:?}", token)),
             StatusCode::BAD_REQUEST,
         ),
         Err(Error::AmountIsZero) => reply::with_status(
-            super::error(
+            shared::error(
                 "AmountIsZero",
                 "The input amount must be greater than zero.".to_string(),
             ),
             StatusCode::BAD_REQUEST,
         ),
         Err(Error::SellAmountDoesNotCoverFee) => reply::with_status(
-            super::error(
+            shared::error(
                 "SellAmountDoesNotCoverFee",
                 "The sell amount for the sell order is lower than the fee.".to_string(),
             ),
@@ -203,7 +204,7 @@ fn response<T: Serialize>(result: Result<T, Error>) -> impl Reply {
         ),
         Err(Error::Other(err)) => {
             tracing::error!(?err, "get_fee_and_price error");
-            reply::with_status(super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
+            reply::with_status(shared::internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
 }
