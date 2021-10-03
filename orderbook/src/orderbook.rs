@@ -1,6 +1,5 @@
-use crate::api::validation::{PostOrderValidator, PostValidationError};
 use crate::{
-    api::validation::{PreOrderValidator, PreValidationError},
+    api::order_validation::{OrderValidator, ValidationError},
     database::orders::{InsertionError, OrderFilter, OrderStoring},
     solvable_orders::SolvableOrdersCache,
 };
@@ -20,8 +19,7 @@ pub enum AddOrderResult {
     Added(OrderUid),
     DuplicatedOrder,
     InvalidSignature,
-    PreValidationError(PreValidationError),
-    PostValidationError(PostValidationError),
+    OrderValidation(ValidationError),
     UnsupportedSignature,
 }
 
@@ -45,8 +43,7 @@ pub struct Orderbook {
     enable_presign_orders: bool,
     solvable_orders: Arc<SolvableOrdersCache>,
     solvable_orders_max_update_age: Duration,
-    pre_order_validator: Arc<PreOrderValidator>,
-    post_order_validator: Arc<PostOrderValidator>,
+    order_validator: Arc<OrderValidator>,
 }
 
 impl Orderbook {
@@ -59,8 +56,7 @@ impl Orderbook {
         enable_presign_orders: bool,
         solvable_orders: Arc<SolvableOrdersCache>,
         solvable_orders_max_update_age: Duration,
-        pre_order_validator: Arc<PreOrderValidator>,
-        post_order_validator: Arc<PostOrderValidator>,
+        order_validator: Arc<OrderValidator>,
     ) -> Self {
         Self {
             domain_separator,
@@ -70,8 +66,7 @@ impl Orderbook {
             enable_presign_orders,
             solvable_orders,
             solvable_orders_max_update_age,
-            pre_order_validator,
-            post_order_validator,
+            order_validator,
         }
     }
 
@@ -95,20 +90,13 @@ impl Orderbook {
             Some(order) => order,
             None => return Ok(AddOrderResult::InvalidSignature),
         };
-        if let Err(validation_err) = self
-            .pre_order_validator
-            .validate(order.clone().into())
-            .await
-        {
-            return Ok(AddOrderResult::PreValidationError(validation_err));
-        }
 
         if let Err(validation_err) = self
-            .post_order_validator
-            .validate(order.clone(), payload.from)
+            .order_validator
+            .post_validate(order.clone(), payload.from)
             .await
         {
-            return Ok(AddOrderResult::PostValidationError(validation_err));
+            return Ok(AddOrderResult::OrderValidation(validation_err));
         }
 
         match self.database.insert_order(&order).await {

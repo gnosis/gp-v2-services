@@ -5,9 +5,9 @@ use model::{
     order::{OrderUid, BUY_ETH_ADDRESS},
     DomainSeparator,
 };
-use orderbook::api::validation::{PostOrderValidator, PreOrderValidator};
 use orderbook::{
     account_balances::Web3BalanceFetcher,
+    api::order_validation::OrderValidator,
     database::{self, orders::OrderFilter, Postgres},
     event_updater::EventUpdater,
     fee::EthAwareMinFeeCalculator,
@@ -395,13 +395,11 @@ async fn main() {
         .update(block)
         .await
         .expect("failed to perform initial solvable orders update");
-    let pre_order_validator = Arc::new(PreOrderValidator::new(
+    let order_validator = Arc::new(OrderValidator::new(
         Box::new(web3.clone()),
         native_token.clone(),
         args.banned_users,
         args.min_order_validity_period,
-    ));
-    let post_order_validator = Arc::new(PostOrderValidator::new(
         fee_calculator.clone(),
         bad_token_detector.clone(),
         balance_fetcher,
@@ -414,8 +412,7 @@ async fn main() {
         args.enable_presign_orders,
         solvable_orders_cache,
         args.solvable_orders_max_update_age,
-        pre_order_validator,
-        post_order_validator,
+        order_validator,
     ));
     let service_maintainer = ServiceMaintenance {
         maintainers: vec![database.clone(), Arc::new(event_updater), pool_fetcher],

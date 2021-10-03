@@ -72,6 +72,21 @@ pub enum PostValidationError {
     Other(anyhow::Error),
 }
 
+#[derive(Debug)]
+pub enum ValidationError {
+    Pre(PreValidationError),
+    Post(PostValidationError),
+}
+
+impl WarpReplyConverting for ValidationError {
+    fn to_warp_reply(&self) -> (Json, StatusCode) {
+        match self {
+            ValidationError::Pre(pre) => pre.to_warp_reply(),
+            ValidationError::Post(post) => post.to_warp_reply(),
+        }
+    }
+}
+
 impl WarpReplyConverting for PostValidationError {
     fn to_warp_reply(&self) -> (Json, StatusCode) {
         match self {
@@ -109,11 +124,38 @@ impl WarpReplyConverting for PostValidationError {
     }
 }
 
-pub struct PreOrderValidator {
+/// Order validator plays the role of order validation over two phases.
+/// 1. Pre-Validation:
+///     This validation is aimed at catching malformed order data during the fee & quote phase
+///     before the order is signed. Thus, pre-validation doesn't verify signatures,
+///     user sell balances or fee sufficiency.
+///     Specifically, pre-validation verifies
+///     - if buy token is native asset, receiver is not a smart contract,
+///     - the sender is not a banned user,
+///     - the order validity is appropriate,
+///     - buy_token is not the same as sell_token,
+///     - buy and sell token destination and source are supported.
+/// 2. Post-Validation:
+///     This is the additional validation performed at the time of order placement
+///     (i.e. once all the required fields on an Order are provided). Specifically, verifying that
+///     - buy & sell amounts are non-zero,
+///     - order's owner matches the from field (if specified),
+///     - fee is sufficient,
+///     - buy & sell tokens passed "bad token" detection,
+///     - user has sufficient (transferable) funds to execute the order.
+///
+///     Furthermore, Post-order validation also calls pre-validate to ensure that
+///     other aspects of the order are not malformed.
+pub struct OrderValidator {
+    /// For Pre-Validation: performed during fee & quote phase
     code_fetcher: Box<dyn CodeFetching>,
     native_token: WETH9,
     banned_users: Vec<H160>,
     min_order_validity_period: Duration,
+    /// For Post-Validation: performed time of order placement
+    fee_validator: Arc<dyn MinFeeCalculating>,
+    bad_token_detector: Arc<dyn BadTokenDetecting>,
+    balance_fetcher: Arc<dyn BalanceFetching>,
 }
 
 #[derive(Default)]
@@ -141,22 +183,28 @@ impl From<Order> for PreOrderData {
     }
 }
 
-impl PreOrderValidator {
+impl OrderValidator {
     pub fn new(
         code_fetcher: Box<dyn CodeFetching>,
         native_token: WETH9,
         banned_users: Vec<H160>,
         min_order_validity_period: Duration,
+        fee_validator: Arc<dyn MinFeeCalculating>,
+        bad_token_detector: Arc<dyn BadTokenDetecting>,
+        balance_fetcher: Arc<dyn BalanceFetching>,
     ) -> Self {
         Self {
             code_fetcher,
             native_token,
             banned_users,
             min_order_validity_period,
+            fee_validator,
+            bad_token_detector,
+            balance_fetcher,
         }
     }
 
-    pub async fn validate(&self, order: PreOrderData) -> Result<(), PreValidationError> {
+    pub async fn pre_validate(&self, order: PreOrderData) -> Result<(), PreValidationError> {
         if self.banned_users.contains(&order.owner) {
             return Err(PreValidationError::Forbidden);
         }
@@ -193,38 +241,24 @@ impl PreOrderValidator {
         }
         Ok(())
     }
-}
 
-pub struct PostOrderValidator {
-    fee_validator: Arc<dyn MinFeeCalculating>,
-    bad_token_detector: Arc<dyn BadTokenDetecting>,
-    balance_fetcher: Arc<dyn BalanceFetching>,
-}
-
-impl PostOrderValidator {
-    pub fn new(
-        fee_validator: Arc<dyn MinFeeCalculating>,
-        bad_token_detector: Arc<dyn BadTokenDetecting>,
-        balance_fetcher: Arc<dyn BalanceFetching>,
-    ) -> Self {
-        Self {
-            fee_validator,
-            bad_token_detector,
-            balance_fetcher,
-        }
-    }
-    pub async fn validate(
+    pub async fn post_validate(
         &self,
         order: Order,
         sender: Option<H160>,
-    ) -> Result<(), PostValidationError> {
+    ) -> Result<(), ValidationError> {
+        self.pre_validate(PreOrderData::from(order.clone()))
+            .await
+            .map_err(ValidationError::Pre)?;
         let order_creation = &order.order_creation;
         if order_creation.buy_amount.is_zero() || order_creation.sell_amount.is_zero() {
-            return Err(PostValidationError::ZeroAmount);
+            return Err(ValidationError::Post(PostValidationError::ZeroAmount));
         }
         let owner = order.order_meta_data.owner;
         if matches!(sender, Some(from) if from != owner) {
-            return Err(PostValidationError::WrongOwner(owner));
+            return Err(ValidationError::Post(PostValidationError::WrongOwner(
+                owner,
+            )));
         }
         if !self
             .fee_validator
@@ -235,24 +269,30 @@ impl PostOrderValidator {
             )
             .await
         {
-            return Err(PostValidationError::InsufficientFee);
+            return Err(ValidationError::Post(PostValidationError::InsufficientFee));
         }
         for &token in &[order_creation.sell_token, order_creation.buy_token] {
             if !self
                 .bad_token_detector
                 .detect(token)
                 .await
-                .map_err(PostValidationError::Other)?
+                .map_err(|err| ValidationError::Post(PostValidationError::Other(err)))?
                 .is_good()
             {
-                return Err(PostValidationError::UnsupportedToken(token));
+                return Err(ValidationError::Post(
+                    PostValidationError::UnsupportedToken(token),
+                ));
             }
         }
         let min_balance = match minimum_balance(&order) {
             Some(amount) => amount,
             // TODO - None happens when checked_add overflows - not insufficient funds...
             //  This error should be changed to SellAmountOverflow.
-            None => return Err(PostValidationError::InsufficientFunds),
+            None => {
+                return Err(ValidationError::Post(
+                    PostValidationError::InsufficientFunds,
+                ))
+            }
         };
         if !self
             .balance_fetcher
@@ -265,7 +305,9 @@ impl PostOrderValidator {
             .await
             .unwrap_or(false)
         {
-            return Err(PostValidationError::InsufficientFunds);
+            return Err(ValidationError::Post(
+                PostValidationError::InsufficientFunds,
+            ));
         }
         Ok(())
     }
@@ -279,7 +321,7 @@ fn has_same_buy_and_sell_token(order: &PreOrderData, native_token: &WETH9) -> bo
         || (order.sell_token == native_token.address() && order.buy_token == BUY_ETH_ADDRESS)
 }
 
-// Min balance user must have in sell token for order to be accepted. None when addition overflows.
+/// Min balance user must have in sell token for order to be accepted. None when addition overflows.
 fn minimum_balance(order: &Order) -> Option<U256> {
     if order.order_creation.partially_fillable {
         Some(U256::from(1))
@@ -377,7 +419,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn validate_partial_order_err() {
+    async fn pre_validate_err() {
         let mut code_fetcher = Box::new(MockCodeFetching::new());
         let native_token = dummy_contract!(WETH9, [0xef; 20]);
         let min_order_validity_period = Duration::from_secs(1);
@@ -388,17 +430,20 @@ mod tests {
             .expect_code_size()
             .times(1)
             .return_once(|_| Ok(1));
-        let validator = PreOrderValidator {
+        let validator = OrderValidator::new(
             code_fetcher,
             native_token,
             banned_users,
             min_order_validity_period,
-        };
+            Arc::new(MockMinFeeCalculating::new()),
+            Arc::new(MockBadTokenDetecting::new()),
+            Arc::new(MockBalanceFetching::new()),
+        );
         assert_eq!(
             format!(
                 "{:?}",
                 validator
-                    .validate(PreOrderData {
+                    .pre_validate(PreOrderData {
                         owner: H160::from_low_u64_be(1),
                         ..Default::default()
                     })
@@ -411,7 +456,7 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .validate(PreOrderData {
+                    .pre_validate(PreOrderData {
                         buy_token_balance: BuyTokenDestination::Internal,
                         ..Default::default()
                     })
@@ -424,7 +469,7 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .validate(PreOrderData {
+                    .pre_validate(PreOrderData {
                         sell_token_balance: SellTokenSource::Internal,
                         ..Default::default()
                     })
@@ -437,7 +482,7 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .validate(PreOrderData {
+                    .pre_validate(PreOrderData {
                         valid_to: 0,
                         ..Default::default()
                     })
@@ -450,7 +495,7 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .validate(PreOrderData {
+                    .pre_validate(PreOrderData {
                         valid_to: legit_valid_to,
                         buy_token: H160::from_low_u64_be(2),
                         sell_token: H160::from_low_u64_be(2),
@@ -465,7 +510,7 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .validate(PreOrderData {
+                    .pre_validate(PreOrderData {
                         valid_to: legit_valid_to,
                         buy_token: BUY_ETH_ADDRESS,
                         ..Default::default()
@@ -481,17 +526,20 @@ mod tests {
             .expect_code_size()
             .times(1)
             .return_once(|_| Err(anyhow!("Failed to fetch Code Size!")));
-        let validator = PreOrderValidator {
+        let validator = OrderValidator::new(
             code_fetcher,
-            native_token: dummy_contract!(WETH9, [0xef; 20]),
-            banned_users: vec![],
-            min_order_validity_period: Duration::from_secs(1),
-        };
+            dummy_contract!(WETH9, [0xef; 20]),
+            vec![],
+            Duration::from_secs(1),
+            Arc::new(MockMinFeeCalculating::new()),
+            Arc::new(MockBadTokenDetecting::new()),
+            Arc::new(MockBalanceFetching::new()),
+        );
         assert_eq!(
             format!(
                 "{:?}",
                 validator
-                    .validate(PreOrderData {
+                    .pre_validate(PreOrderData {
                         valid_to: legit_valid_to,
                         buy_token: BUY_ETH_ADDRESS,
                         ..Default::default()
@@ -504,17 +552,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn validate_partial_order_ok() {
-        let code_fetcher = Box::new(MockCodeFetching::new());
+    async fn pre_validate_ok() {
         let min_order_validity_period = Duration::from_secs(1);
-        let validator = PreOrderValidator {
-            code_fetcher,
-            native_token: dummy_contract!(WETH9, [0xef; 20]),
-            banned_users: vec![],
-            min_order_validity_period: Duration::from_secs(1),
-        };
+        let validator = OrderValidator::new(
+            Box::new(MockCodeFetching::new()),
+            dummy_contract!(WETH9, [0xef; 20]),
+            vec![],
+            Duration::from_secs(1),
+            Arc::new(MockMinFeeCalculating::new()),
+            Arc::new(MockBadTokenDetecting::new()),
+            Arc::new(MockBalanceFetching::new()),
+        );
         assert!(validator
-            .validate(PreOrderData {
+            .pre_validate(PreOrderData {
                 valid_to: shared::time::now_in_epoch_seconds()
                     + min_order_validity_period.as_secs() as u32
                     + 2,
@@ -527,7 +577,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn post_validate_order_err() {
+    async fn post_validate_err() {
         let mut fee_calculator = MockMinFeeCalculating::new();
         let mut bad_token_detector = MockBadTokenDetecting::new();
         let mut balance_fetcher = MockBalanceFetching::new();
@@ -553,18 +603,33 @@ mod tests {
         balance_fetcher
             .expect_can_transfer()
             .returning(|_, _, _, _| Ok(false));
-        let validator = PostOrderValidator::new(
+        let validator = OrderValidator::new(
+            Box::new(MockCodeFetching::new()),
+            dummy_contract!(WETH9, [0xef; 20]),
+            vec![],
+            Duration::from_secs(1),
             Arc::new(fee_calculator),
             Arc::new(bad_token_detector),
             Arc::new(balance_fetcher),
         );
-        let mut order = Order::default();
+        let mut order = Order {
+            order_creation: OrderCreation {
+                valid_to: shared::time::now_in_epoch_seconds() + 2,
+                sell_token: H160::from_low_u64_be(1),
+                buy_token: H160::from_low_u64_be(2),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         assert_eq!(
             format!(
                 "{:?}",
-                validator.validate(order.clone(), None).await.unwrap_err()
+                validator
+                    .post_validate(order.clone(), None)
+                    .await
+                    .unwrap_err()
             ),
-            "ZeroAmount"
+            "Post(ZeroAmount)"
         );
         order.order_creation.buy_amount = U256::from(1);
         order.order_creation.sell_amount = U256::from(1);
@@ -572,51 +637,66 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .validate(order.clone(), Some(H160::from_low_u64_be(1)))
+                    .post_validate(order.clone(), Some(H160::from_low_u64_be(1)))
                     .await
                     .unwrap_err()
             ),
-            "WrongOwner(0x7e5f4552091a69125d5dfcb7b8c2659029395bdf)"
+            "Post(WrongOwner(0x7e5f4552091a69125d5dfcb7b8c2659029395bdf))"
         );
         assert_eq!(
             format!(
                 "{:?}",
-                validator.validate(order.clone(), None).await.unwrap_err()
+                validator
+                    .post_validate(order.clone(), None)
+                    .await
+                    .unwrap_err()
             ),
-            "InsufficientFee"
+            "Post(InsufficientFee)"
         );
         assert_eq!(
             format!(
                 "{:?}",
-                validator.validate(order.clone(), None).await.unwrap_err()
+                validator
+                    .post_validate(order.clone(), None)
+                    .await
+                    .unwrap_err()
             ),
-            "Other(failed to detect token)"
+            "Post(Other(failed to detect token))"
         );
         assert_eq!(
             format!(
                 "{:?}",
-                validator.validate(order.clone(), None).await.unwrap_err()
+                validator
+                    .post_validate(order.clone(), None)
+                    .await
+                    .unwrap_err()
             ),
-            "UnsupportedToken(0x0000000000000000000000000000000000000000)"
+            "Post(UnsupportedToken(0x0000000000000000000000000000000000000001))"
         );
         order.order_creation.sell_amount = U256::MAX;
         order.order_creation.fee_amount = U256::from(1);
         assert_eq!(
             format!(
                 "{:?}",
-                validator.validate(order.clone(), None).await.unwrap_err()
+                validator
+                    .post_validate(order.clone(), None)
+                    .await
+                    .unwrap_err()
             ),
-            "InsufficientFunds"
+            "Post(InsufficientFunds)"
         );
         order.order_creation.sell_amount = U256::from(1);
         assert_eq!(
-            format!("{:?}", validator.validate(order, None).await.unwrap_err()),
-            "InsufficientFunds"
+            format!(
+                "{:?}",
+                validator.post_validate(order, None).await.unwrap_err()
+            ),
+            "Post(InsufficientFunds)"
         );
     }
 
     #[tokio::test]
-    async fn post_validate_order_ok() {
+    async fn post_validate_ok() {
         let mut fee_calculator = MockMinFeeCalculating::new();
         let mut bad_token_detector = MockBadTokenDetecting::new();
         let mut balance_fetcher = MockBalanceFetching::new();
@@ -629,19 +709,26 @@ mod tests {
         balance_fetcher
             .expect_can_transfer()
             .returning(|_, _, _, _| Ok(true));
-        let validator = PostOrderValidator::new(
+        let validator = OrderValidator::new(
+            Box::new(MockCodeFetching::new()),
+            dummy_contract!(WETH9, [0xef; 20]),
+            vec![],
+            Duration::from_secs(1),
             Arc::new(fee_calculator),
             Arc::new(bad_token_detector),
             Arc::new(balance_fetcher),
         );
         let order = Order {
             order_creation: OrderCreation {
+                valid_to: shared::time::now_in_epoch_seconds() + 2,
+                sell_token: H160::from_low_u64_be(1),
+                buy_token: H160::from_low_u64_be(2),
                 buy_amount: U256::from(1),
                 sell_amount: U256::from(1),
                 ..Default::default()
             },
             ..Default::default()
         };
-        assert!(validator.validate(order, None).await.is_ok());
+        assert!(validator.post_validate(order, None).await.is_ok());
     }
 }
