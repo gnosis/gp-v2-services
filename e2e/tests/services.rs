@@ -217,13 +217,14 @@ impl OrderbookServices {
         ));
         let post_order_validator = Arc::new(PostOrderValidator::new(
             fee_calculator.clone(),
-            bad_token_detector,
+            bad_token_detector.clone(),
             balance_fetcher,
         ));
         let orderbook = Arc::new(Orderbook::new(
             gpv2.domain_separator,
             gpv2.settlement.address(),
             db.clone(),
+            bad_token_detector,
             true,
             solvable_orders_cache.clone(),
             Duration::from_secs(600),

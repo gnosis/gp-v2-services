@@ -197,7 +197,7 @@ impl PreOrderValidator {
 
 pub struct PostOrderValidator {
     fee_validator: Arc<dyn MinFeeCalculating>,
-    pub bad_token_detector: Arc<dyn BadTokenDetecting>,
+    bad_token_detector: Arc<dyn BadTokenDetecting>,
     balance_fetcher: Arc<dyn BalanceFetching>,
 }
 

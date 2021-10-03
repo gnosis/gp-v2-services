@@ -41,6 +41,7 @@ pub struct Orderbook {
     domain_separator: DomainSeparator,
     settlement_contract: H160,
     database: Arc<dyn OrderStoring>,
+    bad_token_detector: Arc<dyn BadTokenDetecting>,
     enable_presign_orders: bool,
     solvable_orders: Arc<SolvableOrdersCache>,
     solvable_orders_max_update_age: Duration,
@@ -54,6 +55,7 @@ impl Orderbook {
         domain_separator: DomainSeparator,
         settlement_contract: H160,
         database: Arc<dyn OrderStoring>,
+        bad_token_detector: Arc<dyn BadTokenDetecting>,
         enable_presign_orders: bool,
         solvable_orders: Arc<SolvableOrdersCache>,
         solvable_orders_max_update_age: Duration,
@@ -64,6 +66,7 @@ impl Orderbook {
             domain_separator,
             settlement_contract,
             database,
+            bad_token_detector,
             enable_presign_orders,
             solvable_orders,
             solvable_orders_max_update_age,
@@ -176,7 +179,7 @@ impl Orderbook {
         }
         set_available_balances(orders.as_mut_slice(), &self.solvable_orders);
         if filter.exclude_unsupported_tokens {
-            orders = filter_unsupported_tokens(orders, self.bad_token_detector()).await?;
+            orders = filter_unsupported_tokens(orders, self.bad_token_detector.as_ref()).await?;
         }
         Ok(orders)
     }
@@ -211,10 +214,6 @@ impl Orderbook {
             .await?;
         set_available_balances(orders.as_mut_slice(), &self.solvable_orders);
         Ok(orders)
-    }
-
-    fn bad_token_detector(&self) -> &dyn BadTokenDetecting {
-        self.post_order_validator.bad_token_detector.as_ref()
     }
 }
 

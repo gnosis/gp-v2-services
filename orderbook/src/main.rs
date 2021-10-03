@@ -403,13 +403,14 @@ async fn main() {
     ));
     let post_order_validator = Arc::new(PostOrderValidator::new(
         fee_calculator.clone(),
-        bad_token_detector,
+        bad_token_detector.clone(),
         balance_fetcher,
     ));
     let orderbook = Arc::new(Orderbook::new(
         domain_separator,
         settlement_contract.address(),
         database.clone(),
+        bad_token_detector,
         args.enable_presign_orders,
         solvable_orders_cache,
         args.solvable_orders_max_update_age,
