@@ -1,5 +1,5 @@
 use crate::{
-    api::validation::{OrderValidator, ValidationError},
+    api::order_validation::{OrderValidator, ValidationError},
     database::orders::{InsertionError, OrderFilter, OrderStoring},
     solvable_orders::SolvableOrdersCache,
 };
