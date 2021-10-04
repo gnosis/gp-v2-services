@@ -50,20 +50,22 @@ pub async fn create_priority_estimator(
     client: reqwest::Client,
     web3: &Web3,
     estimator_types: &[GasEstimatorType],
-    estimator_api_key: &[String],
+    blocknative_api_key: Option<String>,
 ) -> Result<impl GasPriceEstimating> {
-    if estimator_types.len() != estimator_api_key.len() {
-        return Err(anyhow!("Invalid input for gas price estimators"));
-    }
     let client = Client(client);
     let network_id = web3.net().version().await?;
     let mut estimators = Vec::<Box<dyn GasPriceEstimating>>::new();
-    for (estimator_type, estimator_api_key) in estimator_types.iter().zip(estimator_api_key.iter())
-    {
+
+    for estimator_type in estimator_types {
         match estimator_type {
             GasEstimatorType::BlockNative => {
                 ensure!(is_mainnet(&network_id), "BlockNative only supports mainnet");
-                let api_key = http::header::HeaderValue::from_str(estimator_api_key);
+                ensure!(
+                    blocknative_api_key.is_some(),
+                    "BlockNative api key is empty"
+                );
+                let api_key =
+                    http::header::HeaderValue::from_str(&blocknative_api_key.clone().unwrap());
                 let headers = if let Ok(mut api_key) = api_key {
                     let mut headers = http::header::HeaderMap::new();
                     api_key.set_sensitive(true);
