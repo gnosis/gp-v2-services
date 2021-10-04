@@ -7,7 +7,7 @@ use std::{sync::Arc, time::Duration};
 use warp::{http::StatusCode, reply::Json};
 
 #[derive(Debug)]
-pub enum PreValidationError {
+pub enum PartialValidationError {
     Forbidden,
     InsufficientValidTo,
     TransferEthToContract,
@@ -17,7 +17,7 @@ pub enum PreValidationError {
     Other(anyhow::Error),
 }
 
-impl WarpReplyConverting for PreValidationError {
+impl WarpReplyConverting for PartialValidationError {
     fn to_warp_reply(&self) -> (Json, StatusCode) {
         match self {
             Self::UnsupportedBuyTokenDestination(dest) => (
@@ -59,7 +59,8 @@ impl WarpReplyConverting for PreValidationError {
 }
 
 #[derive(Debug)]
-pub enum PostValidationError {
+pub enum ValidationError {
+    Partial(PartialValidationError),
     InsufficientFee,
     InsufficientFunds,
     UnsupportedToken(H160),
@@ -68,24 +69,10 @@ pub enum PostValidationError {
     Other(anyhow::Error),
 }
 
-#[derive(Debug)]
-pub enum ValidationError {
-    Pre(PreValidationError),
-    Post(PostValidationError),
-}
-
 impl WarpReplyConverting for ValidationError {
     fn to_warp_reply(&self) -> (Json, StatusCode) {
         match self {
-            ValidationError::Pre(pre) => pre.to_warp_reply(),
-            ValidationError::Post(post) => post.to_warp_reply(),
-        }
-    }
-}
-
-impl WarpReplyConverting for PostValidationError {
-    fn to_warp_reply(&self) -> (Json, StatusCode) {
-        match self {
+            ValidationError::Partial(pre) => pre.to_warp_reply(),
             Self::UnsupportedToken(token) => (
                 super::error("UnsupportedToken", format!("Token address {}", token)),
                 StatusCode::BAD_REQUEST,
@@ -191,12 +178,12 @@ impl OrderValidator {
     ///     - the order validity is appropriate,
     ///     - buy_token is not the same as sell_token,
     ///     - buy and sell token destination and source are supported.
-    async fn partial_validate(&self, order: PreOrderData) -> Result<(), PreValidationError> {
+    async fn partial_validate(&self, order: PreOrderData) -> Result<(), PartialValidationError> {
         if self.banned_users.contains(&order.owner) {
-            return Err(PreValidationError::Forbidden);
+            return Err(PartialValidationError::Forbidden);
         }
         if order.buy_token_balance != BuyTokenDestination::Erc20 {
-            return Err(PreValidationError::UnsupportedBuyTokenDestination(
+            return Err(PartialValidationError::UnsupportedBuyTokenDestination(
                 order.buy_token_balance,
             ));
         }
@@ -204,26 +191,26 @@ impl OrderValidator {
             order.sell_token_balance,
             SellTokenSource::Erc20 | SellTokenSource::External
         ) {
-            return Err(PreValidationError::UnsupportedSellTokenSource(
+            return Err(PartialValidationError::UnsupportedSellTokenSource(
                 order.sell_token_balance,
             ));
         }
         if order.valid_to
             < shared::time::now_in_epoch_seconds() + self.min_order_validity_period.as_secs() as u32
         {
-            return Err(PreValidationError::InsufficientValidTo);
+            return Err(PartialValidationError::InsufficientValidTo);
         }
         if has_same_buy_and_sell_token(&order, &self.native_token) {
-            return Err(PreValidationError::SameBuyAndSellToken);
+            return Err(PartialValidationError::SameBuyAndSellToken);
         }
         if order.buy_token == BUY_ETH_ADDRESS {
             let code_size = self
                 .code_fetcher
                 .code_size(order.receiver)
                 .await
-                .map_err(PreValidationError::Other)?;
+                .map_err(PartialValidationError::Other)?;
             if code_size != 0 {
-                return Err(PreValidationError::TransferEthToContract);
+                return Err(PartialValidationError::TransferEthToContract);
             }
         }
         Ok(())
@@ -246,16 +233,14 @@ impl OrderValidator {
     ) -> Result<(), ValidationError> {
         self.partial_validate(PreOrderData::from(order.clone()))
             .await
-            .map_err(ValidationError::Pre)?;
+            .map_err(ValidationError::Partial)?;
         let order_creation = &order.order_creation;
         if order_creation.buy_amount.is_zero() || order_creation.sell_amount.is_zero() {
-            return Err(ValidationError::Post(PostValidationError::ZeroAmount));
+            return Err(ValidationError::ZeroAmount);
         }
         let owner = order.order_meta_data.owner;
         if matches!(sender, Some(from) if from != owner) {
-            return Err(ValidationError::Post(PostValidationError::WrongOwner(
-                owner,
-            )));
+            return Err(ValidationError::WrongOwner(owner));
         }
         if !self
             .fee_validator
@@ -266,30 +251,24 @@ impl OrderValidator {
             )
             .await
         {
-            return Err(ValidationError::Post(PostValidationError::InsufficientFee));
+            return Err(ValidationError::InsufficientFee);
         }
         for &token in &[order_creation.sell_token, order_creation.buy_token] {
             if !self
                 .bad_token_detector
                 .detect(token)
                 .await
-                .map_err(|err| ValidationError::Post(PostValidationError::Other(err)))?
+                .map_err(ValidationError::Other)?
                 .is_good()
             {
-                return Err(ValidationError::Post(
-                    PostValidationError::UnsupportedToken(token),
-                ));
+                return Err(ValidationError::UnsupportedToken(token));
             }
         }
         let min_balance = match minimum_balance(&order) {
             Some(amount) => amount,
             // TODO - None happens when checked_add overflows - not insufficient funds...
             //  This error should be changed to SellAmountOverflow.
-            None => {
-                return Err(ValidationError::Post(
-                    PostValidationError::InsufficientFunds,
-                ))
-            }
+            None => return Err(ValidationError::InsufficientFunds),
         };
         if !self
             .balance_fetcher
@@ -302,9 +281,7 @@ impl OrderValidator {
             .await
             .unwrap_or(false)
         {
-            return Err(ValidationError::Post(
-                PostValidationError::InsufficientFunds,
-            ));
+            return Err(ValidationError::InsufficientFunds);
         }
         Ok(())
     }
@@ -623,7 +600,7 @@ mod tests {
                 "{:?}",
                 validator.validate(order.clone(), None).await.unwrap_err()
             ),
-            "Post(ZeroAmount)"
+            "ZeroAmount"
         );
         order.order_creation.buy_amount = U256::from(1);
         order.order_creation.sell_amount = U256::from(1);
@@ -635,28 +612,28 @@ mod tests {
                     .await
                     .unwrap_err()
             ),
-            "Post(WrongOwner(0x7e5f4552091a69125d5dfcb7b8c2659029395bdf))"
+            "WrongOwner(0x7e5f4552091a69125d5dfcb7b8c2659029395bdf)"
         );
         assert_eq!(
             format!(
                 "{:?}",
                 validator.validate(order.clone(), None).await.unwrap_err()
             ),
-            "Post(InsufficientFee)"
+            "InsufficientFee"
         );
         assert_eq!(
             format!(
                 "{:?}",
                 validator.validate(order.clone(), None).await.unwrap_err()
             ),
-            "Post(Other(failed to detect token))"
+            "Other(failed to detect token)"
         );
         assert_eq!(
             format!(
                 "{:?}",
                 validator.validate(order.clone(), None).await.unwrap_err()
             ),
-            "Post(UnsupportedToken(0x0000000000000000000000000000000000000001))"
+            "UnsupportedToken(0x0000000000000000000000000000000000000001)"
         );
         order.order_creation.sell_amount = U256::MAX;
         order.order_creation.fee_amount = U256::from(1);
@@ -665,12 +642,12 @@ mod tests {
                 "{:?}",
                 validator.validate(order.clone(), None).await.unwrap_err()
             ),
-            "Post(InsufficientFunds)"
+            "InsufficientFunds"
         );
         order.order_creation.sell_amount = U256::from(1);
         assert_eq!(
             format!("{:?}", validator.validate(order, None).await.unwrap_err()),
-            "Post(InsufficientFunds)"
+            "InsufficientFunds"
         );
     }
 
