@@ -1,14 +1,10 @@
-use crate::{account_balances::BalanceFetching, fee::MinFeeCalculating};
+use crate::{account_balances::BalanceFetching, api::WarpReplyConverting, fee::MinFeeCalculating};
 use contracts::WETH9;
 use ethcontract::{H160, U256};
 use model::order::{BuyTokenDestination, Order, SellTokenSource, BUY_ETH_ADDRESS};
 use shared::{bad_token::BadTokenDetecting, web3_traits::CodeFetching};
 use std::{sync::Arc, time::Duration};
 use warp::{http::StatusCode, reply::Json};
-
-pub trait WarpReplyConverting {
-    fn to_warp_reply(&self) -> (Json, StatusCode);
-}
 
 #[derive(Debug)]
 pub enum PreValidationError {

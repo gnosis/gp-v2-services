@@ -1,6 +1,7 @@
-use crate::api::extract_payload;
-use crate::api::validation::WarpReplyConverting;
-use crate::orderbook::{AddOrderResult, Orderbook};
+use crate::{
+    api::{extract_payload, WarpReplyConverting},
+    orderbook::{AddOrderResult, Orderbook},
+};
 use anyhow::Result;
 use model::order::OrderCreationPayload;
 use std::{convert::Infallible, sync::Arc};

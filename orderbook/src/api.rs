@@ -121,6 +121,10 @@ fn internal_error() -> Json {
     })
 }
 
+pub trait WarpReplyConverting {
+    fn to_warp_reply(&self) -> (Json, StatusCode);
+}
+
 pub fn convert_get_orders_error_to_reply(err: anyhowError) -> WithStatus<Json> {
     tracing::error!(?err, "get_orders error");
     with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
