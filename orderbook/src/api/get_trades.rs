@@ -69,7 +69,7 @@ pub fn get_trades(
                     Result::<_, Infallible>::Ok(get_trades_response(result))
                 }
                 Err(TradeFilterError::InvalidFilter(msg)) => {
-                    let err = shared::error("InvalidTradeFilter", msg);
+                    let err = super::error("InvalidTradeFilter", msg);
                     Ok(warp::reply::with_status(err, StatusCode::BAD_REQUEST))
                 }
             }

@@ -2,7 +2,7 @@ use crate::orderbook::Orderbook;
 use anyhow::Result;
 use model::order::Order;
 use serde::Deserialize;
-use shared::{internal_error, H160Wrapper};
+use shared::H160Wrapper;
 use std::{convert::Infallible, sync::Arc};
 use warp::{
     hyper::StatusCode,
@@ -27,7 +27,7 @@ fn response(result: Result<Vec<Order>>) -> WithStatus<Json> {
         Ok(orders) => reply::with_status(reply::json(&orders), StatusCode::OK),
         Err(err) => {
             tracing::error!(?err, "get_user_orders error");
-            with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
+            with_status(super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
 }
@@ -46,7 +46,7 @@ pub fn get_user_orders(
             let limit = query.limit.unwrap_or(DEFAULT_LIMIT);
             if !(MIN_LIMIT..=MAX_LIMIT).contains(&limit) {
                 return Ok(with_status(
-                    shared::error(
+                    super::error(
                         "LIMIT_OUT_OF_BOUNDS",
                         &format!("The pagination limit is [{},{}].", MIN_LIMIT, MAX_LIMIT),
                     ),

@@ -1,3 +1,4 @@
+use crate::api::price_estimation_error_to_warp_reply;
 use crate::fee::{EthAwareMinFeeCalculator, MinFeeCalculating};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -44,8 +45,8 @@ pub fn get_fee_info_response(
             };
             Ok(reply::with_status(reply::json(&fee_info), StatusCode::OK))
         }
-        Err(price_estimation_error) => {
-            let (json, status_code) = price_estimation_error.to_warp_reply();
+        Err(err) => {
+            let (json, status_code) = price_estimation_error_to_warp_reply(err);
             Ok(reply::with_status(json, status_code))
         }
     }
@@ -100,8 +101,8 @@ pub fn legacy_get_fee_info_response(
             };
             Ok(reply::with_status(reply::json(&fee_info), StatusCode::OK))
         }
-        Err(price_estimation_error) => {
-            let (json, status_code) = price_estimation_error.to_warp_reply();
+        Err(err) => {
+            let (json, status_code) = price_estimation_error_to_warp_reply(err);
             Ok(reply::with_status(json, status_code))
         }
     }

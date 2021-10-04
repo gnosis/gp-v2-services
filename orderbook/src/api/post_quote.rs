@@ -89,7 +89,7 @@ fn post_order_response(result: Result<OrderQuote>) -> impl Reply {
     match result {
         Ok(response) => reply::with_status(reply::json(&response), StatusCode::OK),
         Err(err) => reply::with_status(
-            shared::error("InternalServerError", err.to_string()),
+            super::error("InternalServerError", err.to_string()),
             StatusCode::INTERNAL_SERVER_ERROR,
         ),
     }

@@ -78,7 +78,7 @@ pub fn get_orders(
             let order_filter = match order_filter {
                 Ok(order_filter) => order_filter,
                 Err(err) => {
-                    let err = shared::error("InvalidOrderFilter", err);
+                    let err = super::error("InvalidOrderFilter", err);
                     return Ok(warp::reply::with_status(err, StatusCode::BAD_REQUEST));
                 }
             };

@@ -33,37 +33,37 @@ pub fn cancel_order_response(result: Result<OrderCancellationResult>) -> impl Re
     let (body, status_code) = match result {
         Ok(OrderCancellationResult::Cancelled) => (warp::reply::json(&"Cancelled"), StatusCode::OK),
         Ok(OrderCancellationResult::InvalidSignature) => (
-            shared::error("InvalidSignature", "Likely malformed signature"),
+            super::error("InvalidSignature", "Likely malformed signature"),
             StatusCode::BAD_REQUEST,
         ),
         Ok(OrderCancellationResult::AlreadyCancelled) => (
-            shared::error("AlreadyCancelled", "Order is already cancelled"),
+            super::error("AlreadyCancelled", "Order is already cancelled"),
             StatusCode::BAD_REQUEST,
         ),
         Ok(OrderCancellationResult::OrderFullyExecuted) => (
-            shared::error("OrderFullyExecuted", "Order is fully executed"),
+            super::error("OrderFullyExecuted", "Order is fully executed"),
             StatusCode::BAD_REQUEST,
         ),
         Ok(OrderCancellationResult::OrderExpired) => (
-            shared::error("OrderExpired", "Order is expired"),
+            super::error("OrderExpired", "Order is expired"),
             StatusCode::BAD_REQUEST,
         ),
         Ok(OrderCancellationResult::OrderNotFound) => (
-            shared::error("OrderNotFound", "Order not located in database"),
+            super::error("OrderNotFound", "Order not located in database"),
             StatusCode::NOT_FOUND,
         ),
         Ok(OrderCancellationResult::WrongOwner) => (
-            shared::error(
+            super::error(
                 "WrongOwner",
                 "Signature recovery's owner doesn't match order's",
             ),
             StatusCode::UNAUTHORIZED,
         ),
         Ok(OrderCancellationResult::OnChainOrder) => (
-            shared::error("OnChainOrder", "On-chain orders must be cancelled on-chain"),
+            super::error("OnChainOrder", "On-chain orders must be cancelled on-chain"),
             StatusCode::BAD_REQUEST,
         ),
-        Err(_) => (shared::internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
+        Err(_) => (super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
     };
     warp::reply::with_status(body, status_code)
 }
