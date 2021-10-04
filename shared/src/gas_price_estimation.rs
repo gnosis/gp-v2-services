@@ -1,5 +1,5 @@
 use crate::Web3;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 use gas_estimation::{
     blocknative::BlockNative, EstimatedGasPrice, EthGasStation, GasNowWebSocketGasStation,
     GasPriceEstimating, GnosisSafeGasStation, PriorityGasPriceEstimating, Transport,
@@ -62,9 +62,7 @@ pub async fn create_priority_estimator(
     {
         match estimator_type {
             GasEstimatorType::BlockNative => {
-                if !is_mainnet(&network_id) {
-                    return Err(anyhow!("BlockNative only supports mainnet"));
-                }
+                ensure!(is_mainnet(&network_id), "BlockNative only supports mainnet");
                 let api_key = http::header::HeaderValue::from_str(estimator_api_key);
                 let headers = if let Ok(mut api_key) = api_key {
                     let mut headers = http::header::HeaderMap::new();
@@ -77,15 +75,14 @@ pub async fn create_priority_estimator(
                 estimators.push(Box::new(BlockNative::new(client.clone(), headers).await?))
             }
             GasEstimatorType::EthGasStation => {
-                if !is_mainnet(&network_id) {
-                    return Err(anyhow!("EthGasStation only supports mainnet"));
-                }
+                ensure!(
+                    is_mainnet(&network_id),
+                    "EthGasStation only supports mainnet"
+                );
                 estimators.push(Box::new(EthGasStation::new(client.clone())))
             }
             GasEstimatorType::GasNow => {
-                if !is_mainnet(&network_id) {
-                    return Err(anyhow!("GasNow only supports mainnet"));
-                }
+                ensure!(is_mainnet(&network_id), "GasNow only supports mainnet");
                 let max_update_age = Duration::from_secs(30);
                 let mut estimator = GasNowWebSocketGasStation::new(max_update_age);
                 if tokio::time::timeout(Duration::from_secs(15), estimator.wait_for_first_update())

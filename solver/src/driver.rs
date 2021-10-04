@@ -404,7 +404,7 @@ impl Driver {
             id: self.next_auction_id(),
             orders,
             liquidity,
-            gas_price: gas_price.estimate(),
+            gas_price: gas_price.effective_gas_price(),
             deadline: Instant::now() + self.solver_time_limit,
             price_estimates: estimated_prices.clone(),
         };
@@ -459,7 +459,11 @@ impl Driver {
         }
 
         let rated_settlements = self
-            .rate_settlements(settlements, &estimated_prices, gas_price.estimate())
+            .rate_settlements(
+                settlements,
+                &estimated_prices,
+                gas_price.effective_gas_price(),
+            )
             .await;
 
         self.inflight_trades.clear();

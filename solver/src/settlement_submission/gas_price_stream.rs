@@ -47,8 +47,15 @@ mod tests {
 
     #[async_trait::async_trait]
     impl GasPriceEstimating for TestEstimator {
-        async fn estimate_with_limits(&self, _: f64, time_limit: Duration) -> anyhow::Result<f64> {
-            Ok(20. - time_limit.as_secs_f64())
+        async fn estimate_with_limits(
+            &self,
+            _: f64,
+            time_limit: Duration,
+        ) -> anyhow::Result<EstimatedGasPrice> {
+            Ok(EstimatedGasPrice {
+                legacy: 20. - time_limit.as_secs_f64(),
+                eip1559: None,
+            })
         }
     }
 }
