@@ -2,6 +2,7 @@
 //! when given a collection of `TokenPair`. Each of these pools are then queried for
 //! their `token_balances` and the `PoolFetcher` returns all up-to-date `Weighted` and `Stable`
 //! pools to be consumed by external users (e.g. Price Estimators and Solvers).
+use crate::conversions::U256Ext;
 use crate::sources::balancer::pool_cache::{StablePoolReserveCache, WeightedPoolReserveCache};
 use crate::{
     current_block::CurrentBlockStream,
@@ -105,11 +106,33 @@ impl BalancerPoolEvaluating for WeightedPool {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct AmplificationParameter {
+    factor: U256,
+    precision: U256,
+}
+
+impl AmplificationParameter {
+    pub fn new(factor: U256, precision: U256) -> Self {
+        Self { factor, precision }
+    }
+
+    /// This is the format used to pass into smart contracts.
+    pub fn as_u256(&self) -> Option<U256> {
+        self.factor.checked_mul(self.precision)
+    }
+
+    /// This is the format used to pass along to HTTP solver.
+    pub fn as_big_rational(&self) -> BigRational {
+        BigRational::new(self.factor.to_big_int(), self.precision.to_big_int())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct StablePool {
     pub common: CommonPoolState,
     pub reserves: HashMap<H160, TokenState>,
-    pub amplification_parameter: BigRational,
+    pub amplification_parameter: AmplificationParameter,
 }
 
 impl StablePool {
@@ -117,7 +140,8 @@ impl StablePool {
         pool_data: RegisteredStablePool,
         balances: Vec<U256>,
         swap_fee_percentage: Bfp,
-        amplification_parameter: BigRational,
+        amplification_factor: U256,
+        amplification_precision: U256,
         paused: bool,
     ) -> Self {
         let mut reserves = HashMap::new();
@@ -145,7 +169,10 @@ impl StablePool {
                 paused,
             },
             reserves,
-            amplification_parameter,
+            amplification_parameter: AmplificationParameter {
+                factor: amplification_factor,
+                precision: amplification_precision,
+            },
         }
     }
 }

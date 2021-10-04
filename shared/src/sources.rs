@@ -16,6 +16,8 @@ use std::{
 };
 use structopt::clap::arg_enum;
 
+pub const MAX_BATCH_SIZE: usize = 100;
+
 arg_enum! {
     #[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
     pub enum BaselineSource {
