@@ -30,8 +30,8 @@ use ethcontract::H160;
 use hex::{FromHex, FromHexError};
 use model::h160_hexadecimal;
 use serde::Deserialize;
+use std::fmt::Debug;
 use std::{
-    fmt::Debug,
     future::Future,
     str::FromStr,
     time::{Duration, Instant},

@@ -20,10 +20,9 @@ use serde::Serialize;
 use shared::metrics::get_metric_storage_registry;
 use shared::price_estimation::{PriceEstimating, PriceEstimationError};
 use std::{convert::Infallible, sync::Arc};
-use warp::reply::json;
 use warp::{
     hyper::StatusCode,
-    reply::{with_status, Json, WithStatus},
+    reply::{json, with_status, Json, WithStatus},
     Filter, Rejection, Reply,
 };
 
@@ -108,14 +107,14 @@ struct Error<'a> {
     description: &'a str,
 }
 
-pub fn error(error_type: &str, description: impl AsRef<str>) -> Json {
+fn error(error_type: &str, description: impl AsRef<str>) -> Json {
     json(&Error {
         error_type,
         description: description.as_ref(),
     })
 }
 
-pub fn internal_error() -> Json {
+fn internal_error() -> Json {
     json(&Error {
         error_type: "InternalServerError",
         description: "",

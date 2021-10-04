@@ -1,4 +1,4 @@
-use crate::orderbook::Orderbook;
+use crate::{api::internal_error, orderbook::Orderbook};
 use anyhow::Result;
 use model::order::Order;
 use serde::Deserialize;
@@ -27,7 +27,7 @@ fn response(result: Result<Vec<Order>>) -> WithStatus<Json> {
         Ok(orders) => reply::with_status(reply::json(&orders), StatusCode::OK),
         Err(err) => {
             tracing::error!(?err, "get_user_orders error");
-            with_status(super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
+            with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
 }
