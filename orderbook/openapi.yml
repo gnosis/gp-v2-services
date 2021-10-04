@@ -569,10 +569,8 @@ components:
           type: boolean
         sellTokenBalance:
           $ref: "#/components/schemas/SellTokenSource"
-          default: "erc20"
         buyTokenBalance:
           $ref: "#/components/schemas/BuyTokenDestination"
-          default: "erc20"
       required:
         - sellToken
         - buyToken
@@ -583,6 +581,8 @@ components:
         - feeAmount
         - kind
         - partiallyFillable
+        - sellTokenBalance
+        - buyTokenBalance
     OrderCreation:
       description: Data a user provides when creating a new order.
       allOf:
@@ -882,16 +882,16 @@ components:
               type: boolean
             sellTokenBalance:
               $ref: "#/components/schemas/SellTokenSource"
-              default: "erc20"
             buyTokenBalance:
               $ref: "#/components/schemas/BuyTokenDestination"
-              default: "erc20"
           required:
             - sellToken
             - buyToken
             - validTo
             - appData
             - partiallyFillable
+            - sellTokenBalance
+            - buyTokenBalance
     OrderQuote:
       description: |
         An order quoted by the back end that can be directly signed and
