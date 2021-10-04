@@ -204,7 +204,7 @@ impl OrderValidator {
         }
     }
 
-    pub async fn pre_validate(&self, order: PreOrderData) -> Result<(), PreValidationError> {
+    async fn pre_validate(&self, order: PreOrderData) -> Result<(), PreValidationError> {
         if self.banned_users.contains(&order.owner) {
             return Err(PreValidationError::Forbidden);
         }
