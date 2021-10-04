@@ -1,5 +1,5 @@
 use crate::{
-    api::order_validation::{OrderValidator, ValidationError},
+    api::validation::{OrderValidator, ValidationError},
     database::orders::{InsertionError, OrderFilter, OrderStoring},
     solvable_orders::SolvableOrdersCache,
 };
@@ -93,7 +93,7 @@ impl Orderbook {
 
         if let Err(validation_err) = self
             .order_validator
-            .post_validate(order.clone(), payload.from)
+            .validate(order.clone(), payload.from)
             .await
         {
             return Ok(AddOrderResult::OrderValidation(validation_err));
