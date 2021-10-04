@@ -649,7 +649,7 @@ dependencies = [
  "maplit",
  "model",
  "orderbook",
- "prometheus",
+ "prometheus 0.13.0",
  "rand",
  "reqwest",
  "secp256k1",
@@ -1844,7 +1844,7 @@ dependencies = [
  "num",
  "num-bigint 0.3.3",
  "primitive-types",
- "prometheus",
+ "prometheus 0.13.0",
  "prometheus-metric-storage",
  "reqwest",
  "secp256k1",
@@ -2113,13 +2113,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "prometheus"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7f64969ffd5dd8f39bd57a68ac53c163a095ed9d0fb707146da1b27025a3504"
+dependencies = [
+ "cfg-if",
+ "fnv",
+ "lazy_static",
+ "memchr",
+ "parking_lot",
+ "protobuf",
+ "thiserror",
+]
+
+[[package]]
 name = "prometheus-metric-storage"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46063c7c7e9054bfca94b0aa77e6f70d33c04bb96b8cac6332f95230c34bc6c2"
 dependencies = [
  "lazy_static",
- "prometheus",
+ "prometheus 0.12.0",
  "prometheus-metric-storage-derive",
 ]
 
@@ -2629,7 +2644,7 @@ dependencies = [
  "num-bigint 0.3.3",
  "once_cell",
  "primitive-types",
- "prometheus",
+ "prometheus 0.13.0",
  "prometheus-metric-storage",
  "regex",
  "reqwest",
@@ -2719,7 +2734,7 @@ dependencies = [
  "model",
  "num",
  "primitive-types",
- "prometheus",
+ "prometheus 0.13.0",
  "rand",
  "reqwest",
  "serde",
