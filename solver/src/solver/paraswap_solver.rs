@@ -77,7 +77,18 @@ impl From<ParaswapResponseError> for SettlementError {
                 err,
                 ParaswapResponseError::PriceChange
                     | ParaswapResponseError::BuildingTransaction(_)
-                    | ParaswapResponseError::GetParaswapPool(_),
+                    | ParaswapResponseError::GetParaswapPool(_)
+                    | ParaswapResponseError::ServerBusy
+                    | ParaswapResponseError::Send(_),
+            ),
+            should_alert: !matches!(
+                err,
+                ParaswapResponseError::PriceChange
+                    | ParaswapResponseError::BuildingTransaction(_)
+                    | ParaswapResponseError::ComputePrice(_)
+                    | ParaswapResponseError::InsufficientLiquidity
+                    | ParaswapResponseError::TooMuchSlippageOnQuote
+                    | ParaswapResponseError::ServerBusy,
             ),
         }
     }
