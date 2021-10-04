@@ -80,7 +80,6 @@ impl From<ParaswapResponseError> for SettlementError {
                     | ParaswapResponseError::GetParaswapPool(_)
                     | ParaswapResponseError::ServerBusy
                     | ParaswapResponseError::Send(_),
-            ),
             should_alert: !matches!(
                 err,
                 ParaswapResponseError::PriceChange
