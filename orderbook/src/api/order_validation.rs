@@ -206,7 +206,7 @@ impl OrderValidator {
         {
             return Err(PartialValidationError::InsufficientValidTo);
         }
-        if has_same_buy_and_sell_token(&order, &self.native_token) {
+        if has_same_buy_and_sell_token(order, &self.native_token) {
             return Err(PartialValidationError::SameBuyAndSellToken);
         }
         if order.buy_token == BUY_ETH_ADDRESS {
