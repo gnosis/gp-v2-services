@@ -53,7 +53,7 @@ impl FromStr for H160Wrapper {
     }
 }
 
-/// Wraps H160 with FromStr and Deserialize that can handle a `0x` prefix.
+/// Wraps H256 with FromStr and Deserialize that can handle a `0x` prefix.
 #[derive(Debug, Deserialize)]
 #[serde(transparent)]
 pub struct H256Wrapper(#[serde(with = "h256_hexadecimal")] pub H256);
