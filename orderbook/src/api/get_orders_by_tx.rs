@@ -37,17 +37,17 @@ mod tests {
     use super::*;
     use crate::api::response_body;
     use std::str::FromStr;
-    use warp::test::request;
 
     #[tokio::test]
     async fn request_ok() {
-        let hash = H256Wrapper::from_str("0x0191dbb560e936bd3320d5a505c9c05580a0ebb7e12fe117551ac26e484f295e").unwrap();
-        let request = request()
-            .path(&format!("/orders/{:?}", hash))
-            .method("GET");
-        let filter = get_orders_by_tx_request();
-        let result = request.filter(&filter).await.unwrap();
-        assert_eq!(result.0, hash.0);
+        let hash_str = "0x0191dbb560e936bd3320d5a505c9c05580a0ebb7e12fe117551ac26e484f295e";
+        let result = warp::test::request()
+            .path(&format!("/orders/{:}", hash_str))
+            .method("GET")
+            .filter(&get_orders_by_tx_request())
+            .await
+            .unwrap();
+        assert_eq!(result.0, H256Wrapper::from_str(hash_str).unwrap().0);
     }
 
     #[tokio::test]
