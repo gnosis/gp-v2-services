@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use web3::Transport;
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Block {
-    #[serde(rename = "camelCase")]
     base_fee_per_gas: U256,
     transactions: Vec<Transaction>,
 }
