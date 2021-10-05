@@ -332,7 +332,7 @@ impl OrderStoring for Postgres {
                 ON t.order_uid = o.uid \
              JOIN settlements s \
                 ON s.block_number = t.block_number \
-             WHERE t.tx_hash = $1 ",
+             WHERE s.tx_hash = $1 ",
         );
         sqlx::query_as(QUERY)
             .bind(tx_hash.0.as_ref())
