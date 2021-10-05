@@ -137,7 +137,7 @@ impl BaselinePriceEstimator {
             return Ok((Vec::new(), query.in_amount));
         }
         if query.in_amount.is_zero() {
-            return Ok((Vec::new(), U256::zero()));
+            return Err(PriceEstimationError::ZeroAmount);
         }
         match query.kind {
             OrderKind::Buy => {
