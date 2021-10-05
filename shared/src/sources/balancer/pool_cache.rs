@@ -8,8 +8,8 @@ use crate::{
             swap::fixed_point::Bfp,
         },
         uniswap::pool_fetching::handle_contract_error,
-        MAX_BATCH_SIZE,
     },
+    transport::MAX_BATCH_SIZE,
     Web3,
 };
 use anyhow::Result;

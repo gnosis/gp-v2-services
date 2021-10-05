@@ -1,9 +1,8 @@
 //! Responsible for conversion of a `pool_address` into `WeightedPoolInfo` which is used by the
 //! event handler to construct a `RegisteredWeightedPool`.
 use crate::{
-    sources::{balancer::swap::fixed_point::Bfp, MAX_BATCH_SIZE},
-    token_info::TokenInfoFetching,
-    Web3,
+    sources::balancer::swap::fixed_point::Bfp, token_info::TokenInfoFetching,
+    transport::MAX_BATCH_SIZE, Web3,
 };
 use anyhow::{anyhow, Result};
 use contracts::{BalancerV2StablePool, BalancerV2Vault, BalancerV2WeightedPool};

@@ -1,7 +1,7 @@
 use super::pair_provider::AmmPairProvider;
 use crate::{
     baseline_solver::BaselineSolvable, ethcontract_error::EthcontractErrorType,
-    recent_block_cache::Block, sources::MAX_BATCH_SIZE, Web3,
+    recent_block_cache::Block, transport::MAX_BATCH_SIZE, Web3,
 };
 use anyhow::Result;
 use contracts::{IUniswapLikePair, ERC20};
