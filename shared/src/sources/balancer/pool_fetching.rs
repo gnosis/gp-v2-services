@@ -115,7 +115,8 @@ pub struct AmplificationParameter {
 }
 
 impl AmplificationParameter {
-    pub fn new(factor: U256, precision: U256) -> Self {
+    pub fn new(factor: U256, precision: U256) -> Result<Self> {
+        ensure!(!precision.is_zero(), "Zero precision not allowed");
         Self { factor, precision }
     }
 
@@ -125,10 +126,11 @@ impl AmplificationParameter {
     }
 
     /// This is the format used to pass along to HTTP solver.
-    pub fn as_big_rational(&self) -> Result<BigRational> {
-        // In order to circumvent the possibility of panic from BigRational::new,
-        // we check for zero denominator and return result
-        ensure!(!self.precision.is_zero(), "Zero precision not allowed");
+    pub fn as_big_rational(&self) -> BigRational {
+        // We can assert that the precision is non-zero as we check when constructing
+        // new `AmplificationParameter` instances that this invariant holds, and we don't
+        // allow modifications of `self.precision` such that it could become 0.
+        debug_assert!(!self.precision.is_zero());
         Ok(BigRational::new(
             self.factor.to_big_int(),
             self.precision.to_big_int(),
@@ -177,10 +179,10 @@ impl StablePool {
                 paused,
             },
             reserves,
-            amplification_parameter: AmplificationParameter {
-                factor: amplification_factor,
-                precision: amplification_precision,
-            },
+            amplification_parameter: AmplificationParameter::new(
+                amplification_factor,
+                amplification_precision,
+            )?,
         }
     }
 }
