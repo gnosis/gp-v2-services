@@ -624,7 +624,12 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .validate_and_construct_order(order.clone(), None, &Default::default(), Default::default())
+                    .validate_and_construct_order(
+                        order.clone(),
+                        None,
+                        &Default::default(),
+                        Default::default()
+                    )
                     .await
                     .unwrap_err()
             ),
@@ -651,7 +656,12 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .validate_and_construct_order(order.clone(), None, &Default::default(), Default::default())
+                    .validate_and_construct_order(
+                        order.clone(),
+                        None,
+                        &Default::default(),
+                        Default::default()
+                    )
                     .await
                     .unwrap_err()
             ),
@@ -661,7 +671,12 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .validate_and_construct_order(order.clone(), None, &Default::default(), Default::default())
+                    .validate_and_construct_order(
+                        order.clone(),
+                        None,
+                        &Default::default(),
+                        Default::default()
+                    )
                     .await
                     .unwrap_err()
             ),
@@ -671,7 +686,12 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .validate_and_construct_order(order.clone(), None, &Default::default(), Default::default())
+                    .validate_and_construct_order(
+                        order.clone(),
+                        None,
+                        &Default::default(),
+                        Default::default()
+                    )
                     .await
                     .unwrap_err()
             ),
@@ -683,7 +703,12 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .validate_and_construct_order(order.clone(), None, &Default::default(), Default::default())
+                    .validate_and_construct_order(
+                        order.clone(),
+                        None,
+                        &Default::default(),
+                        Default::default()
+                    )
                     .await
                     .unwrap_err()
             ),
@@ -694,7 +719,12 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .validate_and_construct_order(order, None, &Default::default(), Default::default())
+                    .validate_and_construct_order(
+                        order,
+                        None,
+                        &Default::default(),
+                        Default::default()
+                    )
                     .await
                     .unwrap_err()
             ),
