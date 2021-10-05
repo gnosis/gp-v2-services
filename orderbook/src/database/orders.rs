@@ -4,6 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use bigdecimal::{BigDecimal, Zero};
 use chrono::{DateTime, Utc};
 use const_format::concatcp;
+use ethcontract::H256;
 use futures::stream::TryStreamExt;
 use model::{
     app_id::AppId,
@@ -23,6 +24,7 @@ pub trait OrderStoring: Send + Sync {
     async fn cancel_order(&self, order_uid: &OrderUid, now: DateTime<Utc>) -> Result<()>;
     // Legacy generic orders route that we are phasing out.
     async fn orders(&self, filter: &OrderFilter) -> Result<Vec<Order>>;
+    async fn orders_for_tx(&self, tx_hash: &H256) -> Result<Vec<Order>>;
     async fn single_order(&self, uid: &OrderUid) -> Result<Option<Order>>;
     /// Orders that are solvable: minimum valid to, not fully executed, not invalidated.
     async fn solvable_orders(&self, min_valid_to: u32) -> Result<Vec<Order>>;
@@ -314,6 +316,26 @@ impl OrderStoring for Postgres {
             .bind(!filter.exclude_fully_executed)
             .bind(!filter.exclude_invalidated)
             .bind(!filter.exclude_presignature_pending)
+            .fetch(&self.pool)
+            .err_into()
+            .and_then(|row: OrdersQueryRow| async move { row.into_order() })
+            .try_collect()
+            .await
+    }
+
+    async fn orders_for_tx(&self, tx_hash: &H256) -> Result<Vec<Order>> {
+        #[rustfmt::skip]
+        const QUERY: &str = concatcp!(
+            "SELECT ", ORDERS_SELECT,
+            "FROM ", ORDERS_FROM,
+            "JOIN trades t \
+                ON t.order_uid = o.uid \
+             JOIN settlements s \
+                ON s.block_number = t.block_number \
+             WHERE t.tx_hash = $1 ",
+        );
+        sqlx::query_as(QUERY)
+            .bind(tx_hash.0.as_ref())
             .fetch(&self.pool)
             .err_into()
             .and_then(|row: OrdersQueryRow| async move { row.into_order() })
