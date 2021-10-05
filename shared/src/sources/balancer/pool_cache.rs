@@ -260,14 +260,15 @@ impl FetchedBalancerPoolConverting<StablePool> for FetchedStablePool {
                 Some((factor, _, precision)) => (factor, precision),
                 None => return Ok(None),
             };
-        Ok(Some(StablePool::new(
+        let result = StablePool::new(
             self.registered_pool,
             balances,
             Bfp::from_wei(swap_fee_percentage),
             amplification_factor,
             amplification_precision,
             paused,
-        )))
+        )?;
+        Ok(Some(result))
     }
 }
 

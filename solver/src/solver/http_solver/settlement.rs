@@ -244,7 +244,7 @@ mod tests {
                     },
                 },
                 fee: BigRational::new(3.into(), 1.into()),
-                amplification_parameter: AmplificationParameter::new(1.into(), 1.into()),
+                amplification_parameter: AmplificationParameter::new(1.into(), 1.into()).unwrap(),
                 settlement_handling: sp_amm_handler.clone(),
             }),
         ];
@@ -380,7 +380,7 @@ mod tests {
                 },
             },
             fee: BigRational::new(1.into(), 1000.into()),
-            amplification_parameter: AmplificationParameter::new(1.into(), 1.into()),
+            amplification_parameter: AmplificationParameter::new(1.into(), 1.into()).unwrap(),
             settlement_handling: CapturingSettlementHandler::arc(),
         };
 

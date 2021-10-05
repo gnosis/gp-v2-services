@@ -274,7 +274,7 @@ impl Default for StablePoolOrder {
         StablePoolOrder {
             reserves: Default::default(),
             fee: num::Zero::zero(),
-            amplification_parameter: AmplificationParameter::new(1.into(), 1.into()),
+            amplification_parameter: AmplificationParameter::new(1.into(), 1.into()).unwrap(),
             settlement_handling: tests::CapturingSettlementHandler::arc(),
         }
     }

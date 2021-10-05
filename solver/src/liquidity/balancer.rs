@@ -261,7 +261,7 @@ mod tests {
                 swap_fee_percentage: "0.002".parse().unwrap(),
                 paused: true,
             },
-            amplification_parameter: AmplificationParameter::new(1.into(), 1.into()),
+            amplification_parameter: AmplificationParameter::new(1.into(), 1.into()).unwrap(),
             reserves: hashmap! {
                 H160([0x73; 20]) => TokenState {
                         balance: 1_000_000_000_000_000_000u128.into(),

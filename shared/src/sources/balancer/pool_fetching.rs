@@ -117,7 +117,7 @@ pub struct AmplificationParameter {
 impl AmplificationParameter {
     pub fn new(factor: U256, precision: U256) -> Result<Self> {
         ensure!(!precision.is_zero(), "Zero precision not allowed");
-        Self { factor, precision }
+        Ok(Self { factor, precision })
     }
 
     /// This is the format used to pass into smart contracts.
@@ -131,10 +131,7 @@ impl AmplificationParameter {
         // new `AmplificationParameter` instances that this invariant holds, and we don't
         // allow modifications of `self.precision` such that it could become 0.
         debug_assert!(!self.precision.is_zero());
-        Ok(BigRational::new(
-            self.factor.to_big_int(),
-            self.precision.to_big_int(),
-        ))
+        BigRational::new(self.factor.to_big_int(), self.precision.to_big_int())
     }
 }
 
@@ -153,7 +150,7 @@ impl StablePool {
         amplification_factor: U256,
         amplification_precision: U256,
         paused: bool,
-    ) -> Self {
+    ) -> Result<Self> {
         let mut reserves = HashMap::new();
         // We expect the weight and token indices are aligned with balances returned from EVM query.
         // If necessary we would also pass the tokens along with the query result,
@@ -171,7 +168,9 @@ impl StablePool {
                 },
             );
         }
-        StablePool {
+        let amplification_parameter =
+            AmplificationParameter::new(amplification_factor, amplification_precision)?;
+        Ok(StablePool {
             common: CommonPoolState {
                 pool_id: pool_data.common.pool_id,
                 pool_address: pool_data.common.pool_address,
@@ -179,11 +178,8 @@ impl StablePool {
                 paused,
             },
             reserves,
-            amplification_parameter: AmplificationParameter::new(
-                amplification_factor,
-                amplification_precision,
-            )?,
-        }
+            amplification_parameter,
+        })
     }
 }
 
@@ -351,19 +347,20 @@ mod tests {
     #[test]
     fn amplification_parameter_conversions() {
         assert_eq!(
-            AmplificationParameter::new(1.into(), 2.into()).as_u256(),
+            AmplificationParameter::new(1.into(), 2.into())
+                .unwrap()
+                .as_u256(),
             1.into()
         );
         assert_eq!(
             AmplificationParameter::new(1.into(), 2.into())
-                .as_big_rational()
-                .unwrap(),
+                .unwrap()
+                .as_big_rational(),
             BigRational::new(1.into(), 2.into())
         );
 
         assert_eq!(
             AmplificationParameter::new(1.into(), 0.into())
-                .as_big_rational()
                 .unwrap_err()
                 .to_string(),
             "Zero precision not allowed"
