@@ -18,7 +18,6 @@ use std::{collections::HashSet, sync::Arc, time::Duration};
 pub enum AddOrderResult {
     Added(OrderUid),
     DuplicatedOrder,
-    InvalidSignature,
     OrderValidation(ValidationError),
     UnsupportedSignature,
 }
@@ -83,40 +82,19 @@ impl Orderbook {
             return Ok(AddOrderResult::UnsupportedSignature);
         }
 
-        if order_creation.buy_amount.is_zero() || order_creation.sell_amount.is_zero() {
-            return Ok(AddOrderResult::ZeroAmount);
-        }
-
-        let full_fee_amount = match self
-            .fee_validator
-            .get_unsubsidized_min_fee(
-                order_creation.sell_token,
-                order_creation.fee_amount,
-                Some(order_creation.app_data),
+        let order = match self
+            .order_validator
+            .validate(
+                order_creation,
+                payload.from,
+                &self.domain_separator,
+                self.settlement_contract,
             )
             .await
         {
-            Ok(full_fee_amount) => full_fee_amount,
-            Err(()) => return Ok(AddOrderResult::InsufficientFee),
+            Ok(order) => order,
+            Err(validation_err) => return Ok(AddOrderResult::OrderValidation(validation_err)),
         };
-
-        let order = match Order::from_order_creation(
-            order_creation.clone(),
-            &self.domain_separator,
-            self.settlement_contract,
-            full_fee_amount,
-        ) {
-            Some(order) => order,
-            None => return Ok(AddOrderResult::InvalidSignature),
-        };
-
-        if let Err(validation_err) = self
-            .order_validator
-            .validate(order.clone(), payload.from)
-            .await
-        {
-            return Ok(AddOrderResult::OrderValidation(validation_err));
-        }
 
         match self.database.insert_order(&order).await {
             Err(InsertionError::DuplicatedRecord) => return Ok(AddOrderResult::DuplicatedOrder),
