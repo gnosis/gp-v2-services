@@ -60,12 +60,11 @@ pub fn get_fee_info(
         async move {
             Result::<_, Infallible>::Ok(get_fee_info_response(
                 fee_calculator
-                    .compute_unsubsidized_min_fee(
+                    .min_fee(
                         query.sell_token.0,
                         Some(query.buy_token.0),
                         Some(query.amount),
                         Some(query.kind),
-                        None,
                     )
                     .await,
             ))
@@ -116,9 +115,7 @@ pub fn legacy_get_fee_info(
         let fee_calculator = fee_calculator.clone();
         async move {
             Result::<_, Infallible>::Ok(legacy_get_fee_info_response(
-                fee_calculator
-                    .compute_unsubsidized_min_fee(token, None, None, None, None)
-                    .await,
+                fee_calculator.min_fee(token, None, None, None).await,
             ))
         }
     })

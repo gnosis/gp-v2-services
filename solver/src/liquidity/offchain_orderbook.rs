@@ -291,7 +291,6 @@ pub mod tests {
             },
             &DomainSeparator::default(),
             H160::default(),
-            U256::default(),
         )
         .unwrap();
         assert!(inflight_order_filter(
@@ -310,7 +309,6 @@ pub mod tests {
             },
             &DomainSeparator::default(),
             H160::default(),
-            U256::default(),
         )
         .unwrap();
         let adjusted_order = inflight_order_filter(
