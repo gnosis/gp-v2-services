@@ -2,16 +2,18 @@
 //! when given a collection of `TokenPair`. Each of these pools are then queried for
 //! their `token_balances` and the `PoolFetcher` returns all up-to-date `Weighted` and `Stable`
 //! pools to be consumed by external users (e.g. Price Estimators and Solvers).
-use crate::conversions::U256Ext;
-use crate::sources::balancer::pool_cache::{StablePoolReserveCache, WeightedPoolReserveCache};
 use crate::{
+    conversions::U256Ext,
     current_block::CurrentBlockStream,
     maintenance::Maintaining,
     recent_block_cache::{Block, CacheConfig, RecentBlockCache},
     sources::balancer::{
         event_handler::BalancerPoolRegistry,
         info_fetching::PoolInfoFetcher,
-        pool_cache::{BalancerPoolCacheMetrics, PoolReserveFetcher},
+        pool_cache::{
+            BalancerPoolCacheMetrics, PoolReserveFetcher, StablePoolReserveCache,
+            WeightedPoolReserveCache,
+        },
         pool_init::DefaultPoolInitializer,
         pool_storage::{RegisteredStablePool, RegisteredWeightedPool},
         swap::fixed_point::Bfp,
@@ -19,7 +21,7 @@ use crate::{
     token_info::TokenInfoFetching,
     Web3,
 };
-use anyhow::Result;
+use anyhow::{ensure, Result};
 use contracts::BalancerV2Vault;
 use ethcontract::{H160, H256, U256};
 use model::TokenPair;
@@ -118,13 +120,19 @@ impl AmplificationParameter {
     }
 
     /// This is the format used to pass into smart contracts.
-    pub fn as_u256(&self) -> Option<U256> {
-        self.factor.checked_mul(self.precision)
+    pub fn as_u256(&self) -> U256 {
+        self.factor
     }
 
     /// This is the format used to pass along to HTTP solver.
-    pub fn as_big_rational(&self) -> BigRational {
-        BigRational::new(self.factor.to_big_int(), self.precision.to_big_int())
+    pub fn as_big_rational(&self) -> Result<BigRational> {
+        // In order to circumvent the possibility of panic from BigRational::new,
+        // we check for zero denominator and return result
+        ensure!(!self.precision.is_zero(), "Zero precision not allowed");
+        Ok(BigRational::new(
+            self.factor.to_big_int(),
+            self.precision.to_big_int(),
+        ))
     }
 }
 
@@ -336,5 +344,27 @@ mod tests {
         let filtered_pools = filter_paused(pools.clone());
         assert_eq!(filtered_pools.len(), 1);
         assert_eq!(filtered_pools[0].common.pool_id, pools[1].common.pool_id);
+    }
+
+    #[test]
+    fn amplification_parameter_conversions() {
+        assert_eq!(
+            AmplificationParameter::new(1.into(), 2.into()).as_u256(),
+            1.into()
+        );
+        assert_eq!(
+            AmplificationParameter::new(1.into(), 2.into())
+                .as_big_rational()
+                .unwrap(),
+            BigRational::new(1.into(), 2.into())
+        );
+
+        assert_eq!(
+            AmplificationParameter::new(1.into(), 0.into())
+                .as_big_rational()
+                .unwrap_err()
+                .to_string(),
+            "Zero precision not allowed"
+        );
     }
 }
