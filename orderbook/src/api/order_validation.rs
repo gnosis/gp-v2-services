@@ -7,7 +7,7 @@ use shared::{bad_token::BadTokenDetecting, web3_traits::CodeFetching};
 use std::{sync::Arc, time::Duration};
 use warp::{http::StatusCode, reply::Json};
 
-#[mockall::automock]
+#[cfg_attr(test, mockall::automock)]
 #[async_trait::async_trait]
 pub trait OrderValidating {
     /// Partial (aka Pre-) Validation is aimed at catching malformed order data during the

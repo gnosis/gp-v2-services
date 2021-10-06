@@ -28,7 +28,6 @@ gas-estimation = { git = "https://github.com/gnosis/gp-gas-estimation.git", tag 
 hex = { version = "0.4", default-features = false }
 hex-literal = "0.3"
 maplit = "1.0"
-mockall = "0.10"
 model = { path = "../model" }
 num = "0.4"
 num-bigint = "0.3"
