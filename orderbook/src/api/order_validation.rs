@@ -211,7 +211,6 @@ impl OrderValidator {
 
 #[async_trait::async_trait]
 impl OrderValidating for OrderValidator {
-
     async fn partial_validate(&self, order: &PreOrderData) -> Result<(), PartialValidationError> {
         if self.banned_users.contains(&order.owner) {
             return Err(PartialValidationError::Forbidden);
