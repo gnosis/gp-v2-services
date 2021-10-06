@@ -194,11 +194,12 @@ impl OrderQuoteRequest {
                     Err(FeeError::PriceEstimate(PriceEstimationError::ZeroAmount))
                 } else {
                     let (fee, expiration) = fee_calculator
-                        .min_fee(
+                        .compute_unsubsidized_min_fee(
                             self.sell_token,
                             Some(self.buy_token),
                             Some(sell_amount_before_fee),
                             Some(OrderKind::Sell),
+                            Some(self.app_data),
                         )
                         .await
                         .map_err(FeeError::PriceEstimate)?;
@@ -239,11 +240,12 @@ impl OrderQuoteRequest {
                     Err(FeeError::PriceEstimate(PriceEstimationError::ZeroAmount))
                 } else {
                     let (fee, expiration) = fee_calculator
-                        .min_fee(
+                        .compute_unsubsidized_min_fee(
                             self.sell_token,
                             Some(self.buy_token),
                             Some(buy_amount_after_fee),
                             Some(OrderKind::Buy),
+                            Some(self.app_data),
                         )
                         .await
                         .map_err(FeeError::PriceEstimate)?;
@@ -317,7 +319,7 @@ mod tests {
     use super::*;
     use crate::api::response_body;
     use crate::fee::MockMinFeeCalculating;
-    use chrono::{DateTime, NaiveDateTime, Utc};
+    use chrono::Utc;
     use futures::FutureExt;
     use serde_json::json;
     use shared::price_estimation::mocks::FakePriceEstimator;
@@ -475,8 +477,8 @@ mod tests {
 
         let expiration = Utc::now();
         fee_calculator
-            .expect_min_fee()
-            .returning(move |_, _, _, _| Ok((U256::from(3), expiration)));
+            .expect_compute_unsubsidized_min_fee()
+            .returning(move |_, _, _, _, _| Ok((U256::from(3), expiration)));
 
         let fee_calculator = Arc::new(fee_calculator);
         let price_estimator = FakePriceEstimator(price_estimation::Estimate {
@@ -513,8 +515,8 @@ mod tests {
     fn calculate_fee_sell_after_fees_quote_request() {
         let mut fee_calculator = MockMinFeeCalculating::new();
         fee_calculator
-            .expect_min_fee()
-            .returning(|_, _, _, _| Ok((U256::from(3), Utc::now())));
+            .expect_compute_unsubsidized_min_fee()
+            .returning(|_, _, _, _, _| Ok((U256::from(3), Utc::now())));
 
         let fee_calculator = Arc::new(fee_calculator);
         let price_estimator = FakePriceEstimator(price_estimation::Estimate {
@@ -545,8 +547,8 @@ mod tests {
         let mut fee_calculator = MockMinFeeCalculating::new();
         let expiration = Utc::now();
         fee_calculator
-            .expect_min_fee()
-            .returning(move |_, _, _, _| Ok((U256::from(3), expiration)));
+            .expect_compute_unsubsidized_min_fee()
+            .returning(move |_, _, _, _, _| Ok((U256::from(3), expiration)));
 
         let fee_calculator = Arc::new(fee_calculator);
         let price_estimator = FakePriceEstimator(price_estimation::Estimate {

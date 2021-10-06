@@ -209,7 +209,7 @@ impl OrderValidator {
         {
             return Err(PartialValidationError::InsufficientValidTo);
         }
-        if has_same_buy_and_sell_token(order, &self.native_token) {
+        if has_same_buy_and_sell_token(&order, &self.native_token) {
             return Err(PartialValidationError::SameBuyAndSellToken);
         }
         if order.buy_token == BUY_ETH_ADDRESS {
@@ -265,7 +265,7 @@ impl OrderValidator {
             None => return Err(ValidationError::InvalidSignature),
         };
 
-        self.partial_validate(&PreOrderData::from(order.clone()))
+        self.partial_validate(PreOrderData::from(order.clone()))
             .await
             .map_err(ValidationError::Partial)?;
         let order_creation = &order.order_creation;
@@ -441,7 +441,7 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .partial_validate(&PreOrderData {
+                    .partial_validate(PreOrderData {
                         owner: H160::from_low_u64_be(1),
                         ..Default::default()
                     })
@@ -454,7 +454,7 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .partial_validate(&PreOrderData {
+                    .partial_validate(PreOrderData {
                         buy_token_balance: BuyTokenDestination::Internal,
                         ..Default::default()
                     })
@@ -467,7 +467,7 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .partial_validate(&PreOrderData {
+                    .partial_validate(PreOrderData {
                         sell_token_balance: SellTokenSource::Internal,
                         ..Default::default()
                     })
@@ -480,7 +480,7 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .partial_validate(&PreOrderData {
+                    .partial_validate(PreOrderData {
                         valid_to: 0,
                         ..Default::default()
                     })
@@ -493,7 +493,7 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .partial_validate(&PreOrderData {
+                    .partial_validate(PreOrderData {
                         valid_to: legit_valid_to,
                         buy_token: H160::from_low_u64_be(2),
                         sell_token: H160::from_low_u64_be(2),
@@ -508,7 +508,7 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .partial_validate(&PreOrderData {
+                    .partial_validate(PreOrderData {
                         valid_to: legit_valid_to,
                         buy_token: BUY_ETH_ADDRESS,
                         ..Default::default()
@@ -537,7 +537,7 @@ mod tests {
             format!(
                 "{:?}",
                 validator
-                    .partial_validate(&PreOrderData {
+                    .partial_validate(PreOrderData {
                         valid_to: legit_valid_to,
                         buy_token: BUY_ETH_ADDRESS,
                         ..Default::default()
@@ -562,7 +562,7 @@ mod tests {
             Arc::new(MockBalanceFetching::new()),
         );
         assert!(validator
-            .partial_validate(&PreOrderData {
+            .partial_validate(PreOrderData {
                 valid_to: shared::time::now_in_epoch_seconds()
                     + min_order_validity_period.as_secs() as u32
                     + 2,
