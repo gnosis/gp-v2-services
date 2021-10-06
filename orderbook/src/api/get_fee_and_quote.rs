@@ -1,21 +1,59 @@
-use crate::{api::price_estimation_error_to_warp_reply, fee::MinFeeCalculating};
-use anyhow::{anyhow, Result};
+use crate::api::price_estimation_error_to_warp_reply;
+use crate::{
+    api::post_quote::{OrderQuoteRequest, OrderQuoteSide, SellAmount},
+    fee::MinFeeCalculating,
+};
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use ethcontract::{H160, U256};
-use model::h160_hexadecimal;
-use model::{order::OrderKind, u256_decimal};
+use model::order::OrderKind;
+use model::{h160_hexadecimal, u256_decimal};
 use serde::{Deserialize, Serialize};
-use shared::price_estimation::{self, PriceEstimating, PriceEstimationError};
-use std::convert::Infallible;
-use std::sync::Arc;
-use warp::{hyper::StatusCode, reply, Filter, Rejection, Reply};
+use shared::price_estimation::{PriceEstimating, PriceEstimationError};
+use std::{convert::Infallible, sync::Arc};
+use warp::{
+    hyper::StatusCode,
+    reply::{self, Json},
+    Filter, Rejection, Reply,
+};
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Fee {
+pub struct Fee {
     #[serde(with = "u256_decimal")]
-    amount: U256,
-    expiration_date: DateTime<Utc>,
+    pub amount: U256,
+    pub expiration_date: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FeeParameters {
+    pub buy_amount: U256,
+    pub sell_amount: U256,
+    pub fee_amount: U256,
+    pub expiration: DateTime<Utc>,
+    pub kind: OrderKind,
+}
+
+#[derive(Debug)]
+pub enum FeeError {
+    SellAmountDoesNotCoverFee,
+    PriceEstimate(PriceEstimationError),
+}
+
+impl FeeError {
+    pub fn to_warp_reply(&self) -> (Json, StatusCode) {
+        match self {
+            FeeError::PriceEstimate(err) => price_estimation_error_to_warp_reply(err.clone()),
+            FeeError::SellAmountDoesNotCoverFee => (
+                super::error(
+                    "SellAmountDoesNotCoverFee",
+                    "The sell amount for the sell order is lower than the fee.".to_string(),
+                ),
+                StatusCode::BAD_REQUEST,
+            ),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -30,6 +68,17 @@ struct SellQuery {
     sell_amount_before_fee: U256,
 }
 
+impl From<SellQuery> for OrderQuoteRequest {
+    fn from(query: SellQuery) -> Self {
+        let side = OrderQuoteSide::Sell {
+            sell_amount: SellAmount::BeforeFee {
+                value: query.sell_amount_before_fee,
+            },
+        };
+        OrderQuoteRequest::new(query.sell_token, query.buy_token, side)
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SellResponse {
@@ -40,6 +89,19 @@ struct SellResponse {
     #[serde(with = "u256_decimal")]
     buy_amount_after_fee: U256,
 }
+
+// TODO - figure out why we aren't using these.
+// impl From<FeeParameters> for SellResponse {
+//     fn from(fee_parameters: FeeParameters) -> Self {
+//         Self {
+//             fee: Fee {
+//                 amount: fee_parameters.fee_amount,
+//                 expiration_date: fee_parameters.expiration,
+//             },
+//             buy_amount_after_fee: fee_parameters.buy_amount,
+//         }
+//     }
+// }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,6 +115,15 @@ struct BuyQuery {
     buy_amount_after_fee: U256,
 }
 
+impl From<BuyQuery> for OrderQuoteRequest {
+    fn from(query: BuyQuery) -> Self {
+        let side = OrderQuoteSide::Buy {
+            buy_amount_after_fee: query.buy_amount_after_fee,
+        };
+        OrderQuoteRequest::new(query.sell_token, query.buy_token, side)
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BuyResponse {
@@ -63,100 +134,17 @@ struct BuyResponse {
     sell_amount_before_fee: U256,
 }
 
-#[derive(Debug)]
-enum Error {
-    SellAmountDoesNotCoverFee,
-    PriceEstimate(PriceEstimationError),
-}
-
-async fn calculate_sell(
-    fee_calculator: Arc<dyn MinFeeCalculating>,
-    price_estimator: Arc<dyn PriceEstimating>,
-    query: SellQuery,
-) -> Result<SellResponse, Error> {
-    if query.sell_amount_before_fee.is_zero() {
-        return Err(Error::PriceEstimate(PriceEstimationError::ZeroAmount));
-    }
-
-    // TODO: would be nice to use true sell amount after the fee but that is more complicated.
-    let (fee, expiration_date) = fee_calculator
-        .compute_unsubsidized_min_fee(
-            query.sell_token,
-            Some(query.buy_token),
-            Some(query.sell_amount_before_fee),
-            Some(OrderKind::Sell),
-            None,
-        )
-        .await
-        .map_err(Error::PriceEstimate)?;
-    let sell_amount_after_fee = query
-        .sell_amount_before_fee
-        .checked_sub(fee)
-        .ok_or(Error::SellAmountDoesNotCoverFee)?
-        .max(U256::one());
-
-    let estimate = price_estimator
-        .estimate(&price_estimation::Query {
-            sell_token: query.sell_token,
-            buy_token: query.buy_token,
-            in_amount: sell_amount_after_fee,
-            kind: OrderKind::Sell,
-        })
-        .await
-        .map_err(Error::PriceEstimate)?;
-
-    Ok(SellResponse {
-        fee: Fee {
-            expiration_date,
-            amount: fee,
-        },
-        buy_amount_after_fee: estimate.out_amount,
-    })
-}
-
-async fn calculate_buy(
-    fee_calculator: Arc<dyn MinFeeCalculating>,
-    price_estimator: Arc<dyn PriceEstimating>,
-    query: BuyQuery,
-) -> Result<BuyResponse, Error> {
-    if query.buy_amount_after_fee.is_zero() {
-        return Err(Error::PriceEstimate(PriceEstimationError::ZeroAmount));
-    }
-
-    let (fee, expiration_date) = fee_calculator
-        .compute_unsubsidized_min_fee(
-            query.sell_token,
-            Some(query.buy_token),
-            Some(query.buy_amount_after_fee),
-            Some(OrderKind::Buy),
-            None,
-        )
-        .await
-        .map_err(Error::PriceEstimate)?;
-
-    let estimate = price_estimator
-        .estimate(&price_estimation::Query {
-            sell_token: query.sell_token,
-            buy_token: query.buy_token,
-            in_amount: query.buy_amount_after_fee,
-            kind: OrderKind::Buy,
-        })
-        .await
-        .map_err(Error::PriceEstimate)?;
-    let sell_amount_before_fee = estimate.out_amount.checked_add(fee).ok_or_else(|| {
-        Error::PriceEstimate(PriceEstimationError::Other(anyhow!(
-            "overflow in sell_amount_before_fee"
-        )))
-    })?;
-
-    Ok(BuyResponse {
-        fee: Fee {
-            expiration_date,
-            amount: fee,
-        },
-        sell_amount_before_fee,
-    })
-}
+// impl From<FeeParameters> for BuyResponse {
+//     fn from(fee_parameters: FeeParameters) -> Self {
+//         Self {
+//             fee: Fee {
+//                 amount: fee_parameters.fee_amount,
+//                 expiration_date: fee_parameters.expiration,
+//             },
+//             sell_amount_before_fee: fee_parameters.sell_amount,
+//         }
+//     }
+// }
 
 fn sell_request() -> impl Filter<Extract = (SellQuery,), Error = Rejection> + Clone {
     warp::path!("feeAndQuote" / "sell")
@@ -170,17 +158,17 @@ fn buy_request() -> impl Filter<Extract = (BuyQuery,), Error = Rejection> + Clon
         .and(warp::query::<BuyQuery>())
 }
 
-fn response<T: Serialize>(result: Result<T, Error>) -> impl Reply {
+fn response<T: Serialize>(result: Result<T, FeeError>) -> impl Reply {
     match result {
         Ok(response) => reply::with_status(reply::json(&response), StatusCode::OK),
-        Err(Error::SellAmountDoesNotCoverFee) => reply::with_status(
+        Err(FeeError::SellAmountDoesNotCoverFee) => reply::with_status(
             super::error(
                 "SellAmountDoesNotCoverFee",
                 "The sell amount for the sell order is lower than the fee.".to_string(),
             ),
             StatusCode::BAD_REQUEST,
         ),
-        Err(Error::PriceEstimate(err)) => {
+        Err(FeeError::PriceEstimate(err)) => {
             let (json, status_code) = price_estimation_error_to_warp_reply(err);
             reply::with_status(json, status_code)
         }
@@ -196,7 +184,9 @@ pub fn get_fee_and_quote_sell(
         let price_estimator = price_estimator.clone();
         async move {
             Result::<_, Infallible>::Ok(response(
-                calculate_sell(fee_calculator, price_estimator, query).await,
+                OrderQuoteRequest::from(query)
+                    .calculate_fee_parameters(fee_calculator, price_estimator)
+                    .await,
             ))
         }
     })
@@ -211,7 +201,9 @@ pub fn get_fee_and_quote_buy(
         let price_estimator = price_estimator.clone();
         async move {
             Result::<_, Infallible>::Ok(response(
-                calculate_buy(fee_calculator, price_estimator, query).await,
+                OrderQuoteRequest::from(query)
+                    .calculate_fee_parameters(fee_calculator, price_estimator)
+                    .await,
             ))
         }
     })
@@ -220,66 +212,9 @@ pub fn get_fee_and_quote_buy(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fee::MockMinFeeCalculating;
     use futures::FutureExt;
     use hex_literal::hex;
-    use shared::price_estimation::mocks::FakePriceEstimator;
     use warp::test::request;
-
-    #[test]
-    fn calculate_sell_() {
-        let mut fee_calculator = MockMinFeeCalculating::new();
-        fee_calculator
-            .expect_compute_unsubsidized_min_fee()
-            .returning(|_, _, _, _, _| Ok((U256::from(3), Utc::now())));
-        let price_estimator = FakePriceEstimator(price_estimation::Estimate {
-            out_amount: 14.into(),
-            gas: 1000.into(),
-        });
-        let result = calculate_sell(
-            Arc::new(fee_calculator),
-            Arc::new(price_estimator),
-            SellQuery {
-                sell_token: H160::from_low_u64_ne(0),
-                buy_token: H160::from_low_u64_ne(1),
-                sell_amount_before_fee: 10.into(),
-            },
-        )
-        .now_or_never()
-        .unwrap()
-        .unwrap();
-        assert_eq!(result.fee.amount, 3.into());
-        // After the deducting the fee 10 - 3 = 7 units of sell token are being sold.
-        assert_eq!(result.buy_amount_after_fee, 14.into());
-    }
-
-    #[test]
-    fn calculate_buy_() {
-        let mut fee_calculator = MockMinFeeCalculating::new();
-        fee_calculator
-            .expect_compute_unsubsidized_min_fee()
-            .returning(|_, _, _, _, _| Ok((U256::from(3), Utc::now())));
-        let price_estimator = FakePriceEstimator(price_estimation::Estimate {
-            out_amount: 20.into(),
-            gas: 1000.into(),
-        });
-        let result = calculate_buy(
-            Arc::new(fee_calculator),
-            Arc::new(price_estimator),
-            BuyQuery {
-                sell_token: H160::from_low_u64_ne(0),
-                buy_token: H160::from_low_u64_ne(1),
-                buy_amount_after_fee: 10.into(),
-            },
-        )
-        .now_or_never()
-        .unwrap()
-        .unwrap();
-        assert_eq!(result.fee.amount, 3.into());
-        // To buy 10 units of buy_token the fee in sell_token must be at least 3 and at least 20
-        // units of sell_token must be sold.
-        assert_eq!(result.sell_amount_before_fee, 23.into());
-    }
 
     #[test]
     fn sell_query() {

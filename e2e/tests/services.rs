@@ -225,7 +225,7 @@ impl OrderbookServices {
             true,
             solvable_orders_cache.clone(),
             Duration::from_secs(600),
-            order_validator,
+            order_validator.clone(),
         ));
         let maintenance = ServiceMaintenance {
             maintainers: vec![db.clone(), event_updater],
@@ -236,6 +236,7 @@ impl OrderbookServices {
             fee_calculator,
             price_estimator.clone(),
             API_HOST[7..].parse().expect("Couldn't parse API address"),
+            order_validator,
             pending(),
         );
 

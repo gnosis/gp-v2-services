@@ -126,7 +126,7 @@ pub struct OrderValidator {
     balance_fetcher: Arc<dyn BalanceFetching>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, PartialEq)]
 pub struct PreOrderData {
     pub owner: H160,
     pub sell_token: H160,
@@ -184,7 +184,10 @@ impl OrderValidator {
     ///     - the order validity is appropriate,
     ///     - buy_token is not the same as sell_token,
     ///     - buy and sell token destination and source are supported.
-    async fn partial_validate(&self, order: &PreOrderData) -> Result<(), PartialValidationError> {
+    pub async fn partial_validate(
+        &self,
+        order: PreOrderData,
+    ) -> Result<(), PartialValidationError> {
         if self.banned_users.contains(&order.owner) {
             return Err(PartialValidationError::Forbidden);
         }

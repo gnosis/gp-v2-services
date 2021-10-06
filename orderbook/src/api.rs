@@ -12,7 +12,8 @@ pub mod order_validation;
 mod post_quote;
 
 use crate::{
-    database::trades::TradeRetrieving, fee::EthAwareMinFeeCalculator, orderbook::Orderbook,
+    api::order_validation::OrderValidator, database::trades::TradeRetrieving,
+    fee::EthAwareMinFeeCalculator, orderbook::Orderbook,
 };
 use anyhow::Error as anyhowError;
 use serde::de::DeserializeOwned;
@@ -31,6 +32,7 @@ pub fn handle_all_routes(
     orderbook: Arc<Orderbook>,
     fee_calculator: Arc<EthAwareMinFeeCalculator>,
     price_estimator: Arc<dyn PriceEstimating>,
+    order_validator: Arc<OrderValidator>,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
     let create_order = create_order::create_order(orderbook.clone());
     let get_orders = get_orders::get_orders(orderbook.clone());
@@ -44,9 +46,10 @@ pub fn handle_all_routes(
     let get_fee_and_quote_sell =
         get_fee_and_quote::get_fee_and_quote_sell(fee_calculator.clone(), price_estimator.clone());
     let get_fee_and_quote_buy =
-        get_fee_and_quote::get_fee_and_quote_buy(fee_calculator, price_estimator.clone());
+        get_fee_and_quote::get_fee_and_quote_buy(fee_calculator.clone(), price_estimator.clone());
     let get_user_orders = get_user_orders::get_user_orders(orderbook);
-    let post_quote = post_quote::post_quote();
+    let post_quote =
+        post_quote::post_quote(fee_calculator, price_estimator.clone(), order_validator);
     let cors = warp::cors()
         .allow_any_origin()
         .allow_methods(vec!["GET", "POST", "DELETE", "OPTIONS", "PUT", "PATCH"])

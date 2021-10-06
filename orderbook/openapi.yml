@@ -886,12 +886,15 @@ components:
             buyTokenBalance:
               $ref: "#/components/schemas/BuyTokenDestination"
               default: "erc20"
+            from:
+              $ref: "#/components/schemas/Address"
           required:
             - sellToken
             - buyToken
             - validTo
             - appData
             - partiallyFillable
+            - from
     OrderQuote:
       description: |
         An order quoted by the back end that can be directly signed and

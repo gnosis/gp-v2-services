@@ -412,7 +412,7 @@ async fn main() {
         args.enable_presign_orders,
         solvable_orders_cache,
         args.solvable_orders_max_update_age,
-        order_validator,
+        order_validator.clone(),
     ));
     let service_maintainer = ServiceMaintenance {
         maintainers: vec![database.clone(), Arc::new(event_updater), pool_fetcher],
@@ -426,6 +426,7 @@ async fn main() {
         fee_calculator,
         price_estimator,
         args.bind_address,
+        order_validator,
         async {
             let _ = shutdown_receiver.await;
         },

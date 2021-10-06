@@ -8,7 +8,7 @@ pub mod metrics;
 pub mod orderbook;
 pub mod solvable_orders;
 
-use crate::orderbook::Orderbook;
+use crate::{api::order_validation::OrderValidator, orderbook::Orderbook};
 use anyhow::{anyhow, Context as _, Result};
 use contracts::GPv2Settlement;
 use database::trades::TradeRetrieving;
@@ -25,9 +25,16 @@ pub fn serve_api(
     fee_calculator: Arc<EthAwareMinFeeCalculator>,
     price_estimator: Arc<dyn PriceEstimating>,
     address: SocketAddr,
+    order_validator: Arc<OrderValidator>,
     shutdown_receiver: impl Future<Output = ()> + Send + 'static,
 ) -> JoinHandle<()> {
-    let filter = api::handle_all_routes(database, orderbook, fee_calculator, price_estimator);
+    let filter = api::handle_all_routes(
+        database,
+        orderbook,
+        fee_calculator,
+        price_estimator,
+        order_validator,
+    );
     tracing::info!(%address, "serving order book");
     let (_, server) = warp::serve(filter).bind_with_graceful_shutdown(address, shutdown_receiver);
     task::spawn(server)
