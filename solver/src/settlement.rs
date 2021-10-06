@@ -236,7 +236,10 @@ impl Settlement {
             .sum()
     }
 
-    pub fn total_unsubsidized_fees(&self, external_prices: &HashMap<H160, BigRational>) -> BigRational {
+    pub fn total_unsubsidized_fees(
+        &self,
+        external_prices: &HashMap<H160, BigRational>,
+    ) -> BigRational {
         self.encoder
             .trades()
             .iter()
