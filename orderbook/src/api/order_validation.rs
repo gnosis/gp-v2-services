@@ -9,7 +9,7 @@ use warp::{http::StatusCode, reply::Json};
 
 #[cfg_attr(test, mockall::automock)]
 #[async_trait::async_trait]
-pub trait OrderValidating {
+pub trait OrderValidating: Send + Sync {
     /// Partial (aka Pre-) Validation is aimed at catching malformed order data during the
     /// fee & quote phase (i.e. before the order is signed).
     /// Thus, partial validation *doesn't* verify:

@@ -1,9 +1,9 @@
-use crate::api::get_fee_and_quote::{FeeError, FeeParameters};
-use crate::api::WarpReplyConverting;
 use crate::{
     api::{
         self,
-        order_validation::{OrderValidator, PreOrderData, ValidationError},
+        get_fee_and_quote::{FeeError, FeeParameters},
+        order_validation::{OrderValidating, PreOrderData, ValidationError},
+        WarpReplyConverting,
     },
     fee::MinFeeCalculating,
 };
@@ -22,7 +22,6 @@ use warp::{
     reply::{self, Json},
     Filter, Rejection, Reply,
 };
-use crate::api::order_validation::OrderValidating;
 
 /// The order parameters to quote a price and fee for.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -151,7 +150,7 @@ impl OrderQuoteRequest {
         &self,
         fee_calculator: Arc<dyn MinFeeCalculating>,
         price_estimator: Arc<dyn PriceEstimating>,
-        order_validator: Arc<OrderValidator>,
+        order_validator: Arc<dyn OrderValidating>,
     ) -> Result<OrderQuote, OrderQuoteError> {
         tracing::debug!("Received quote request {:?}", self);
         order_validator
@@ -297,7 +296,7 @@ fn post_quote_response(result: Result<OrderQuote, OrderQuoteError>) -> impl Repl
 pub fn post_quote(
     fee_calculator: Arc<dyn MinFeeCalculating>,
     price_estimator: Arc<dyn PriceEstimating>,
-    order_validator: Arc<OrderValidator>,
+    order_validator: Arc<dyn OrderValidating>,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
     post_quote_request().and_then(move |request: OrderQuoteRequest| {
         let fee_calculator = fee_calculator.clone();
@@ -318,8 +317,10 @@ pub fn post_quote(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::response_body;
-    use crate::fee::MockMinFeeCalculating;
+    use crate::{
+        api::{order_validation::MockOrderValidating, response_body},
+        fee::MockMinFeeCalculating,
+    };
     use chrono::Utc;
     use futures::FutureExt;
     use serde_json::json;
@@ -590,41 +591,48 @@ mod tests {
         assert_eq!(result, expected);
     }
 
-    // #[test]
-    // fn calculate_quote() {
-    //     let buy_request = OrderQuoteRequest {
-    //         sell_token: H160::from_low_u64_be(1),
-    //         buy_token: H160::from_low_u64_be(2),
-    //         side: OrderQuoteSide::Buy {
-    //             buy_amount_after_fee: 2.into(),
-    //         },
-    //         ..Default::default()
-    //     };
-    //
-    //     let mut fee_calculator = MockMinFeeCalculating::new();
-    //     fee_calculator
-    //         .expect_min_fee()
-    //         .returning(move |_, _, _, _| Ok((U256::from(3), Utc::now())));
-    //     let fee_calculator = Arc::new(fee_calculator);
-    //     let price_estimator = Arc::new(FakePriceEstimator(price_estimation::Estimate {
-    //         out_amount: 14.into(),
-    //         gas: 1000.into(),
-    //     }));
-    //
-    //     // TODO - mock Order Validator
+    #[tokio::test]
+    async fn calculate_quote() {
+        let buy_request = OrderQuoteRequest {
+            sell_token: H160::from_low_u64_be(1),
+            buy_token: H160::from_low_u64_be(2),
+            side: OrderQuoteSide::Buy {
+                buy_amount_after_fee: 2.into(),
+            },
+            ..Default::default()
+        };
 
-    //     let result = buy_request
-    //         .build_quote_from_fee_response(fee_response)
-    //         .unwrap();
-    //     let expected = OrderQuote {
-    //         sell_token: H160::from_low_u64_be(1),
-    //         buy_token: H160::from_low_u64_be(2),
-    //         sell_amount: 3.into(),
-    //         kind: OrderKind::Buy,
-    //         buy_amount: 2.into(),
-    //         fee_amount: 1.into(),
-    //         ..Default::default()
-    //     };
-    //     assert_eq!(result, expected);
-    // }
+        let mut fee_calculator = MockMinFeeCalculating::new();
+        fee_calculator
+            .expect_compute_unsubsidized_min_fee()
+            .returning(move |_, _, _, _, _| Ok((U256::from(3), Utc::now())));
+        let price_estimator = FakePriceEstimator(price_estimation::Estimate {
+            out_amount: 14.into(),
+            gas: 1000.into(),
+        });
+        let mut order_validator = MockOrderValidating::new();
+        order_validator
+            .expect_partial_validate()
+            .returning(|_| Ok(()));
+
+        let result = buy_request
+            .calculate_quote(
+                Arc::new(fee_calculator),
+                Arc::new(price_estimator),
+                Arc::new(order_validator),
+            )
+            .await
+            .unwrap();
+
+        let expected = OrderQuote {
+            sell_token: H160::from_low_u64_be(1),
+            buy_token: H160::from_low_u64_be(2),
+            sell_amount: 17.into(), // TODO - verify that this is indeed correct.
+            kind: OrderKind::Buy,
+            buy_amount: 2.into(),
+            fee_amount: 3.into(),
+            ..Default::default()
+        };
+        assert_eq!(result, expected);
+    }
 }
