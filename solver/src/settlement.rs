@@ -239,16 +239,27 @@ impl Settlement {
     pub fn total_unsubsidized_fees(
         &self,
         external_prices: &HashMap<H160, BigRational>,
-    ) -> BigRational {
-        self.encoder
+    ) -> Option<BigRational> {
+        if self
+            .encoder
             .trades()
             .iter()
-            .filter_map(|trade| {
-                let fee_token_price =
-                    external_prices.get(&trade.order.order_creation.sell_token)?;
-                Some(trade.executed_unsubsidized_fee()?.to_big_rational() * fee_token_price)
-            })
-            .sum()
+            .any(|trade| trade.order.order_meta_data.full_fee_amount.is_zero())
+        {
+            return None;
+        }
+
+        Some(
+            self.encoder
+                .trades()
+                .iter()
+                .filter_map(|trade| {
+                    let fee_token_price =
+                        external_prices.get(&trade.order.order_creation.sell_token)?;
+                    Some(trade.executed_unsubsidized_fee()?.to_big_rational() * fee_token_price)
+                })
+                .sum(),
+        )
     }
 
     /// See SettlementEncoder::merge

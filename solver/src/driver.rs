@@ -328,13 +328,13 @@ impl Driver {
         futures::stream::iter(settlements)
             .filter_map(|(solver, settlement)| async {
                 let surplus = settlement.total_surplus(prices);
-                let mut unsubsidized_solver_fees = settlement.total_unsubsidized_fees(prices);
                 // Old orders don't have unsubsidized fees set, so we use the old logic
                 // of restoring the unsubsidized fee from the subsidized one by reversing the fee factor.
                 // This logic will be removed in the future.
-                if unsubsidized_solver_fees.is_zero() {
-                    unsubsidized_solver_fees = settlement.total_fees(prices) / BigRational::from_float(self.fee_factor).expect("Discount factor is not a rational");
-                }
+                let unsubsidized_solver_fees = match settlement.total_unsubsidized_fees(prices) {
+                    Some(unsubsidized_solver_fees) => unsubsidized_solver_fees,
+                    None => settlement.total_fees(prices) / BigRational::from_float(self.fee_factor).expect("Discount factor is not a rational")
+                };
                 let gas_estimate = settlement_submission::estimate_gas(
                     &self.settlement_contract,
                     &settlement.clone().into(),
