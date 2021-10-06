@@ -8,8 +8,8 @@ mod get_orders;
 mod get_solvable_orders;
 mod get_trades;
 mod get_user_orders;
+pub mod order_validation;
 mod post_quote;
-pub mod validation;
 
 use crate::{
     database::trades::TradeRetrieving, fee::EthAwareMinFeeCalculator, orderbook::Orderbook,
@@ -18,7 +18,7 @@ use anyhow::Error as anyhowError;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use shared::metrics::get_metric_storage_registry;
-use shared::price_estimation::PriceEstimating;
+use shared::price_estimation::{PriceEstimating, PriceEstimationError};
 use std::{convert::Infallible, sync::Arc};
 use warp::{
     hyper::StatusCode,
@@ -121,6 +121,10 @@ fn internal_error() -> Json {
     })
 }
 
+pub trait WarpReplyConverting {
+    fn to_warp_reply(&self) -> (Json, StatusCode);
+}
+
 pub fn convert_get_orders_error_to_reply(err: anyhowError) -> WithStatus<Json> {
     tracing::error!(?err, "get_orders error");
     with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
@@ -129,6 +133,27 @@ pub fn convert_get_orders_error_to_reply(err: anyhowError) -> WithStatus<Json> {
 pub fn convert_get_trades_error_to_reply(err: anyhowError) -> WithStatus<Json> {
     tracing::error!(?err, "get_trades error");
     with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+pub fn price_estimation_error_to_warp_reply(err: PriceEstimationError) -> (Json, StatusCode) {
+    match err {
+        PriceEstimationError::UnsupportedToken(token) => (
+            error("UnsupportedToken", format!("Token address {:?}", token)),
+            StatusCode::BAD_REQUEST,
+        ),
+        PriceEstimationError::NoLiquidity => (
+            error("NoLiquidity", "not enough liquidity"),
+            StatusCode::NOT_FOUND,
+        ),
+        PriceEstimationError::ZeroAmount => (
+            error("ZeroAmount", "Please use non-zero amount field"),
+            StatusCode::BAD_REQUEST,
+        ),
+        PriceEstimationError::Other(err) => {
+            tracing::error!(?err, "get_market error");
+            (internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
 }
 
 #[cfg(test)]

@@ -7,9 +7,11 @@
 //!     contains only the `pool_address` as this is the only information known about the pool
 //!     at the time of event emission from the pool's factory contract.
 //!
-//! 2. `RegisteredWeightedPool`:
+//! 2. `RegisteredWeightedPool` & `RegisteredStablePool`:
 //!     contains all constant/static information about the pool (that which is not block-sensitive).
-//!     That is, `pool_id`, `address`, `tokens`, `normalized_weights`, `scaling_exponents` and `block_created`.
+//!     That is,
+//!     `pool_id`, `address`, `tokens`, `scaling_exponents`, `block_created` (i.e. `CommonPoolData`)
+//!     and `normalized_weights` (specific to weighted pools).
 //!     When the `PoolCreated` event is received by the event handler, an instance of this type is
 //!     constructed by fetching all additional information about the pool via `PoolInfoFetching`.
 //!
@@ -20,12 +22,6 @@
 //!     information in data structures that provide efficient lookup for the `PoolFetcher`.
 //!
 //!     Pool Storage implements all the CRUD methods expected of such a database.
-//!
-//! 4. `WeightedPool`:
-//!     This is the public facing pool structure returned by the `PoolFetcher` consisting of all
-//!     the pool's most recent information (both static and dynamic).
-//!     Essentially, this is all the relevant data from `RegisteredWeightedPool` along with the
-//!     current balances of each of the pool's tokens (aka the pool's "reserves").
 //!
 //! Tests included here are those pertaining to the expected functionality of `PoolStorage`
 use crate::{
@@ -93,11 +89,6 @@ impl PoolEvaluating for RegisteredStablePool {
 pub enum PoolType {
     Stable,
     Weighted,
-}
-
-pub enum RegisteredPool {
-    Weighted(RegisteredWeightedPool),
-    Stable(RegisteredStablePool),
 }
 
 #[derive(Copy, Debug, Clone, Eq, PartialEq)]
@@ -372,7 +363,6 @@ mod tests {
     };
     use maplit::{hashmap, hashset};
     use mockall::predicate::eq;
-    use num::BigRational;
 
     pub type PoolInitData = (Vec<H256>, Vec<H160>, Vec<H160>, Vec<Bfp>, Vec<PoolCreated>);
     fn pool_init_data(start: usize, end: usize, pool_type: PoolType) -> PoolInitData {
@@ -536,7 +526,6 @@ mod tests {
                     tokens: vec![tokens[i], tokens[i + 1]],
                     scaling_exponents: vec![0, 0],
                 },
-                amplification_parameter: BigRational::from_integer(1.into()),
             };
             dummy_data_fetcher
                 .expect_get_stable_pool_data()
@@ -722,7 +711,6 @@ mod tests {
                     tokens: vec![tokens[i], tokens[i + 1]],
                     scaling_exponents: vec![0, 0],
                 },
-                amplification_parameter: BigRational::from_integer(1.into()),
             };
             dummy_data_fetcher
                 .expect_get_stable_pool_data()
@@ -749,7 +737,6 @@ mod tests {
                         tokens: vec![new_token],
                         scaling_exponents: vec![0],
                     },
-                    amplification_parameter: BigRational::from_integer(1.into()),
                 })
             });
 
