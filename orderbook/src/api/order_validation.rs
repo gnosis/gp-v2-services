@@ -22,7 +22,7 @@ pub trait OrderValidating {
     ///     - the order validity is appropriate,
     ///     - buy_token is not the same as sell_token,
     ///     - buy and sell token destination and source are supported.
-    async fn partial_validate(&self, order: &PreOrderData) -> Result<(), PartialValidationError>;
+    async fn partial_validate(&self, order: PreOrderData) -> Result<(), PartialValidationError>;
 
     /// This is the full order validation performed at the time of order placement
     /// (i.e. once all the required fields on an Order are provided). Specifically, verifying that
@@ -211,7 +211,7 @@ impl OrderValidator {
 
 #[async_trait::async_trait]
 impl OrderValidating for OrderValidator {
-    async fn partial_validate(&self, order: &PreOrderData) -> Result<(), PartialValidationError> {
+    async fn partial_validate(&self, order: PreOrderData) -> Result<(), PartialValidationError> {
         if self.banned_users.contains(&order.owner) {
             return Err(PartialValidationError::Forbidden);
         }

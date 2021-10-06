@@ -22,6 +22,7 @@ use warp::{
     reply::{self, Json},
     Filter, Rejection, Reply,
 };
+use crate::api::order_validation::OrderValidating;
 
 /// The order parameters to quote a price and fee for.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
