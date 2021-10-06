@@ -12,7 +12,6 @@ use crate::{
     solver::{Auction, SettlementWithSolver, Solvers},
 };
 use anyhow::{anyhow, Context, Error, Result};
-use bigdecimal::Zero;
 use contracts::GPv2Settlement;
 use ethcontract::errors::MethodError;
 use futures::future::join_all;
