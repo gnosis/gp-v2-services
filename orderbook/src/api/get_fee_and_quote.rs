@@ -90,18 +90,17 @@ struct SellResponse {
     buy_amount_after_fee: U256,
 }
 
-// TODO - figure out why we aren't using these.
-// impl From<FeeParameters> for SellResponse {
-//     fn from(fee_parameters: FeeParameters) -> Self {
-//         Self {
-//             fee: Fee {
-//                 amount: fee_parameters.fee_amount,
-//                 expiration_date: fee_parameters.expiration,
-//             },
-//             buy_amount_after_fee: fee_parameters.buy_amount,
-//         }
-//     }
-// }
+impl From<FeeParameters> for SellResponse {
+    fn from(fee_parameters: FeeParameters) -> Self {
+        Self {
+            fee: Fee {
+                amount: fee_parameters.fee_amount,
+                expiration_date: fee_parameters.expiration,
+            },
+            buy_amount_after_fee: fee_parameters.buy_amount,
+        }
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -134,17 +133,17 @@ struct BuyResponse {
     sell_amount_before_fee: U256,
 }
 
-// impl From<FeeParameters> for BuyResponse {
-//     fn from(fee_parameters: FeeParameters) -> Self {
-//         Self {
-//             fee: Fee {
-//                 amount: fee_parameters.fee_amount,
-//                 expiration_date: fee_parameters.expiration,
-//             },
-//             sell_amount_before_fee: fee_parameters.sell_amount,
-//         }
-//     }
-// }
+impl From<FeeParameters> for BuyResponse {
+    fn from(fee_parameters: FeeParameters) -> Self {
+        Self {
+            fee: Fee {
+                amount: fee_parameters.fee_amount,
+                expiration_date: fee_parameters.expiration,
+            },
+            sell_amount_before_fee: fee_parameters.sell_amount,
+        }
+    }
+}
 
 fn sell_request() -> impl Filter<Extract = (SellQuery,), Error = Rejection> + Clone {
     warp::path!("feeAndQuote" / "sell")
@@ -186,7 +185,8 @@ pub fn get_fee_and_quote_sell(
             Result::<_, Infallible>::Ok(response(
                 OrderQuoteRequest::from(query)
                     .calculate_fee_parameters(fee_calculator, price_estimator)
-                    .await,
+                    .await
+                    .map(SellResponse::from),
             ))
         }
     })
@@ -203,7 +203,8 @@ pub fn get_fee_and_quote_buy(
             Result::<_, Infallible>::Ok(response(
                 OrderQuoteRequest::from(query)
                     .calculate_fee_parameters(fee_calculator, price_estimator)
-                    .await,
+                    .await
+                    .map(BuyResponse::from),
             ))
         }
     })
