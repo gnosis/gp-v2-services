@@ -1,13 +1,14 @@
 use crate::{
     api::{
         self,
-        get_fee_and_quote::{FeeError, FeeParameters},
+        get_fee_and_quote::FeeError,
         order_validation::{OrderValidating, PreOrderData, ValidationError},
         WarpReplyConverting,
     },
     fee::MinFeeCalculating,
 };
 use anyhow::{anyhow, Result};
+use chrono::{DateTime, Utc};
 use ethcontract::{H160, U256};
 use model::{
     app_id::AppId,
@@ -102,24 +103,30 @@ pub struct OrderQuote {
     buy_token: H160,
     receiver: Option<H160>,
     #[serde(with = "u256_decimal")]
-    sell_amount: U256,
+    pub sell_amount: U256,
     #[serde(with = "u256_decimal")]
-    buy_amount: U256,
+    pub buy_amount: U256,
     valid_to: u32,
     app_data: AppId,
     #[serde(with = "u256_decimal")]
-    fee_amount: U256,
+    pub fee_amount: U256,
     kind: OrderKind,
     partially_fillable: bool,
     sell_token_balance: SellTokenSource,
     buy_token_balance: BuyTokenDestination,
 }
 
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderQuoteResponse {
+    pub quote: OrderQuote,
+    pub expiration: DateTime<Utc>,
+}
+
 #[derive(Debug)]
 pub enum OrderQuoteError {
     Fee(FeeError),
     Order(ValidationError),
-    // RateLimit, // TODO - use this.
 }
 
 impl OrderQuoteError {
@@ -127,12 +134,17 @@ impl OrderQuoteError {
         match self {
             OrderQuoteError::Fee(err) => err.to_warp_reply(),
             OrderQuoteError::Order(err) => err.to_warp_reply(),
-            // FeeAndQuoteError::RateLimit => (
-            //     super::error("RateLimit", "Too many order quotes"),
-            //     StatusCode::TOO_MANY_REQUESTS,
-            // ),
         }
     }
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+struct FeeParameters {
+    buy_amount: U256,
+    sell_amount: U256,
+    fee_amount: U256,
+    expiration: DateTime<Utc>,
+    kind: OrderKind,
 }
 
 impl OrderQuoteRequest {
@@ -146,12 +158,12 @@ impl OrderQuoteRequest {
         }
     }
 
-    async fn calculate_quote(
+    pub async fn calculate_quote(
         &self,
         fee_calculator: Arc<dyn MinFeeCalculating>,
         price_estimator: Arc<dyn PriceEstimating>,
         order_validator: Arc<dyn OrderValidating>,
-    ) -> Result<OrderQuote, OrderQuoteError> {
+    ) -> Result<OrderQuoteResponse, OrderQuoteError> {
         tracing::debug!("Received quote request {:?}", self);
         order_validator
             .partial_validate(self.into())
@@ -161,24 +173,27 @@ impl OrderQuoteRequest {
             .calculate_fee_parameters(fee_calculator, price_estimator)
             .await
             .map_err(OrderQuoteError::Fee)?;
-        Ok(OrderQuote {
-            from: self.from,
-            sell_token: self.sell_token,
-            buy_token: self.buy_token,
-            receiver: self.receiver,
-            sell_amount: fee_parameters.sell_amount,
-            buy_amount: fee_parameters.buy_amount,
-            valid_to: self.valid_to,
-            app_data: self.app_data,
-            fee_amount: fee_parameters.fee_amount,
-            kind: fee_parameters.kind,
-            partially_fillable: self.partially_fillable,
-            sell_token_balance: self.sell_token_balance,
-            buy_token_balance: self.buy_token_balance,
+        Ok(OrderQuoteResponse {
+            quote: OrderQuote {
+                from: self.from,
+                sell_token: self.sell_token,
+                buy_token: self.buy_token,
+                receiver: self.receiver,
+                sell_amount: fee_parameters.sell_amount,
+                buy_amount: fee_parameters.buy_amount,
+                valid_to: self.valid_to,
+                app_data: self.app_data,
+                fee_amount: fee_parameters.fee_amount,
+                kind: fee_parameters.kind,
+                partially_fillable: self.partially_fillable,
+                sell_token_balance: self.sell_token_balance,
+                buy_token_balance: self.buy_token_balance,
+            },
+            expiration: fee_parameters.expiration,
         })
     }
 
-    pub async fn calculate_fee_parameters(
+    async fn calculate_fee_parameters(
         &self,
         fee_calculator: Arc<dyn MinFeeCalculating>,
         price_estimator: Arc<dyn PriceEstimating>,
@@ -283,9 +298,9 @@ fn post_quote_request() -> impl Filter<Extract = (OrderQuoteRequest,), Error = R
         .and(api::extract_payload())
 }
 
-fn post_quote_response(result: Result<OrderQuote, OrderQuoteError>) -> impl Reply {
+pub fn response<T: Serialize>(result: Result<T, OrderQuoteError>) -> impl Reply {
     match result {
-        Ok(quote) => reply::with_status(reply::json(&quote), StatusCode::OK),
+        Ok(response) => reply::with_status(reply::json(&response), StatusCode::OK),
         Err(err) => {
             let (reply, status) = err.convert_to_reply();
             reply::with_status(reply, status)
@@ -309,7 +324,7 @@ pub fn post_quote(
             if let Err(err) = &result {
                 tracing::error!(?err, ?request, "post_quote error");
             }
-            Result::<_, Infallible>::Ok(post_quote_response(result))
+            Result::<_, Infallible>::Ok(response(result))
         }
     })
 }
@@ -451,7 +466,7 @@ mod tests {
 
     #[tokio::test]
     async fn post_quote_response_ok() {
-        let response = post_quote_response(Ok(OrderQuote::default())).into_response();
+        let response = response(Ok(OrderQuote::default())).into_response();
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_body(response).await;
         let body: serde_json::Value = serde_json::from_slice(body.as_slice()).unwrap();
@@ -461,7 +476,7 @@ mod tests {
 
     #[tokio::test]
     async fn post_quote_response_err() {
-        let response = post_quote_response(Err(OrderQuoteError::Order(ValidationError::Other(
+        let response = response::<OrderQuoteResponse>(Err(OrderQuoteError::Order(ValidationError::Other(
             anyhow!("Uh oh - error"),
         ))))
         .into_response();
@@ -633,6 +648,6 @@ mod tests {
             fee_amount: 3.into(),
             ..Default::default()
         };
-        assert_eq!(result, expected);
+        assert_eq!(result.quote, expected);
     }
 }

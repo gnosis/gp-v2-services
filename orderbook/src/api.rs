@@ -43,10 +43,16 @@ pub fn handle_all_routes(
     let get_trades = get_trades::get_trades(database);
     let cancel_order = cancel_order::cancel_order(orderbook.clone());
     let get_amount_estimate = get_markets::get_amount_estimate(price_estimator.clone());
-    let get_fee_and_quote_sell =
-        get_fee_and_quote::get_fee_and_quote_sell(fee_calculator.clone(), price_estimator.clone());
-    let get_fee_and_quote_buy =
-        get_fee_and_quote::get_fee_and_quote_buy(fee_calculator.clone(), price_estimator.clone());
+    let get_fee_and_quote_sell = get_fee_and_quote::get_fee_and_quote_sell(
+        fee_calculator.clone(),
+        price_estimator.clone(),
+        order_validator.clone(),
+    );
+    let get_fee_and_quote_buy = get_fee_and_quote::get_fee_and_quote_buy(
+        fee_calculator.clone(),
+        price_estimator.clone(),
+        order_validator.clone(),
+    );
     let get_user_orders = get_user_orders::get_user_orders(orderbook);
     let post_quote =
         post_quote::post_quote(fee_calculator, price_estimator.clone(), order_validator);

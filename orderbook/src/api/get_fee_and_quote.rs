@@ -1,21 +1,19 @@
 use crate::api::price_estimation_error_to_warp_reply;
 use crate::{
-    api::post_quote::{OrderQuoteRequest, OrderQuoteSide, SellAmount},
+    api::{
+        order_validation::OrderValidating,
+        post_quote::{response, OrderQuoteRequest, OrderQuoteResponse, OrderQuoteSide, SellAmount},
+    },
     fee::MinFeeCalculating,
 };
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use ethcontract::{H160, U256};
-use model::order::OrderKind;
 use model::{h160_hexadecimal, u256_decimal};
 use serde::{Deserialize, Serialize};
 use shared::price_estimation::{PriceEstimating, PriceEstimationError};
 use std::{convert::Infallible, sync::Arc};
-use warp::{
-    hyper::StatusCode,
-    reply::{self, Json},
-    Filter, Rejection, Reply,
-};
+use warp::{hyper::StatusCode, reply::Json, Filter, Rejection, Reply};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,16 +21,6 @@ pub struct Fee {
     #[serde(with = "u256_decimal")]
     pub amount: U256,
     pub expiration_date: DateTime<Utc>,
-}
-
-#[derive(Debug, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct FeeParameters {
-    pub buy_amount: U256,
-    pub sell_amount: U256,
-    pub fee_amount: U256,
-    pub expiration: DateTime<Utc>,
-    pub kind: OrderKind,
 }
 
 #[derive(Debug)]
@@ -90,14 +78,14 @@ struct SellResponse {
     buy_amount_after_fee: U256,
 }
 
-impl From<FeeParameters> for SellResponse {
-    fn from(fee_parameters: FeeParameters) -> Self {
+impl From<OrderQuoteResponse> for SellResponse {
+    fn from(response: OrderQuoteResponse) -> Self {
         Self {
             fee: Fee {
-                amount: fee_parameters.fee_amount,
-                expiration_date: fee_parameters.expiration,
+                amount: response.quote.fee_amount,
+                expiration_date: response.expiration,
             },
-            buy_amount_after_fee: fee_parameters.buy_amount,
+            buy_amount_after_fee: response.quote.buy_amount,
         }
     }
 }
@@ -133,14 +121,14 @@ struct BuyResponse {
     sell_amount_before_fee: U256,
 }
 
-impl From<FeeParameters> for BuyResponse {
-    fn from(fee_parameters: FeeParameters) -> Self {
+impl From<OrderQuoteResponse> for BuyResponse {
+    fn from(response: OrderQuoteResponse) -> Self {
         Self {
             fee: Fee {
-                amount: fee_parameters.fee_amount,
-                expiration_date: fee_parameters.expiration,
+                amount: response.quote.fee_amount,
+                expiration_date: response.expiration,
             },
-            sell_amount_before_fee: fee_parameters.sell_amount,
+            sell_amount_before_fee: response.quote.sell_amount,
         }
     }
 }
@@ -157,34 +145,19 @@ fn buy_request() -> impl Filter<Extract = (BuyQuery,), Error = Rejection> + Clon
         .and(warp::query::<BuyQuery>())
 }
 
-fn response<T: Serialize>(result: Result<T, FeeError>) -> impl Reply {
-    match result {
-        Ok(response) => reply::with_status(reply::json(&response), StatusCode::OK),
-        Err(FeeError::SellAmountDoesNotCoverFee) => reply::with_status(
-            super::error(
-                "SellAmountDoesNotCoverFee",
-                "The sell amount for the sell order is lower than the fee.".to_string(),
-            ),
-            StatusCode::BAD_REQUEST,
-        ),
-        Err(FeeError::PriceEstimate(err)) => {
-            let (json, status_code) = price_estimation_error_to_warp_reply(err);
-            reply::with_status(json, status_code)
-        }
-    }
-}
-
 pub fn get_fee_and_quote_sell(
     fee_calculator: Arc<dyn MinFeeCalculating>,
     price_estimator: Arc<dyn PriceEstimating>,
+    order_validator: Arc<dyn OrderValidating>,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
     sell_request().and_then(move |query| {
         let fee_calculator = fee_calculator.clone();
         let price_estimator = price_estimator.clone();
+        let order_validator = order_validator.clone();
         async move {
             Result::<_, Infallible>::Ok(response(
                 OrderQuoteRequest::from(query)
-                    .calculate_fee_parameters(fee_calculator, price_estimator)
+                    .calculate_quote(fee_calculator, price_estimator, order_validator)
                     .await
                     .map(SellResponse::from),
             ))
@@ -195,14 +168,16 @@ pub fn get_fee_and_quote_sell(
 pub fn get_fee_and_quote_buy(
     fee_calculator: Arc<dyn MinFeeCalculating>,
     price_estimator: Arc<dyn PriceEstimating>,
+    order_validator: Arc<dyn OrderValidating>,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
     buy_request().and_then(move |query| {
         let fee_calculator = fee_calculator.clone();
         let price_estimator = price_estimator.clone();
+        let order_validator = order_validator.clone();
         async move {
             Result::<_, Infallible>::Ok(response(
                 OrderQuoteRequest::from(query)
-                    .calculate_fee_parameters(fee_calculator, price_estimator)
+                    .calculate_quote(fee_calculator, price_estimator, order_validator)
                     .await
                     .map(BuyResponse::from),
             ))
