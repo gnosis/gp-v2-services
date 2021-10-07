@@ -1,7 +1,7 @@
+use crate::api::price_estimation_error_to_warp_reply;
 use crate::{
     api::{
         self,
-        get_fee_and_quote::FeeError,
         order_validation::{OrderValidating, PreOrderData, ValidationError},
         WarpReplyConverting,
     },
@@ -95,10 +95,9 @@ pub enum SellAmount {
 }
 
 /// The quoted order by the service.
-#[derive(Default, Debug, PartialEq, Serialize)]
+#[derive(Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderQuote {
-    from: H160,
     sell_token: H160,
     buy_token: H160,
     receiver: Option<H160>,
@@ -120,7 +119,29 @@ pub struct OrderQuote {
 #[serde(rename_all = "camelCase")]
 pub struct OrderQuoteResponse {
     pub quote: OrderQuote,
+    pub from: H160,
     pub expiration: DateTime<Utc>,
+}
+
+#[derive(Debug)]
+pub enum FeeError {
+    SellAmountDoesNotCoverFee,
+    PriceEstimate(PriceEstimationError),
+}
+
+impl WarpReplyConverting for FeeError {
+    fn into_warp_reply(self) -> (Json, StatusCode) {
+        match self {
+            FeeError::PriceEstimate(err) => price_estimation_error_to_warp_reply(err),
+            FeeError::SellAmountDoesNotCoverFee => (
+                super::error(
+                    "SellAmountDoesNotCoverFee",
+                    "The sell amount for the sell order is lower than the fee.".to_string(),
+                ),
+                StatusCode::BAD_REQUEST,
+            ),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -132,8 +153,8 @@ pub enum OrderQuoteError {
 impl OrderQuoteError {
     pub fn convert_to_reply(self) -> (Json, StatusCode) {
         match self {
-            OrderQuoteError::Fee(err) => err.to_warp_reply(),
-            OrderQuoteError::Order(err) => err.to_warp_reply(),
+            OrderQuoteError::Fee(err) => err.into_warp_reply(),
+            OrderQuoteError::Order(err) => err.into_warp_reply(),
         }
     }
 }
@@ -176,7 +197,6 @@ impl OrderQuoteRequest {
             .map_err(OrderQuoteError::Fee)?;
         Ok(OrderQuoteResponse {
             quote: OrderQuote {
-                from: self.from,
                 sell_token: self.sell_token,
                 buy_token: self.buy_token,
                 receiver: self.receiver,
@@ -190,6 +210,7 @@ impl OrderQuoteRequest {
                 sell_token_balance: self.sell_token_balance,
                 buy_token_balance: self.buy_token_balance,
             },
+            from: self.from,
             expiration: fee_parameters.expiration,
         })
     }
@@ -467,11 +488,25 @@ mod tests {
 
     #[tokio::test]
     async fn post_quote_response_ok() {
-        let response = response(Ok(OrderQuote::default())).into_response();
+        let order_quote = OrderQuote {
+            sell_token: Default::default(),
+            buy_token: Default::default(),
+            receiver: None,
+            sell_amount: Default::default(),
+            buy_amount: Default::default(),
+            valid_to: 0,
+            app_data: Default::default(),
+            fee_amount: Default::default(),
+            kind: Default::default(),
+            partially_fillable: false,
+            sell_token_balance: Default::default(),
+            buy_token_balance: Default::default(),
+        };
+        let response = response(Ok(&order_quote)).into_response();
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_body(response).await;
         let body: serde_json::Value = serde_json::from_slice(body.as_slice()).unwrap();
-        let expected = serde_json::to_value(OrderQuote::default()).unwrap();
+        let expected = serde_json::to_value(order_quote).unwrap();
         assert_eq!(body, expected);
     }
 
@@ -643,11 +678,16 @@ mod tests {
         let expected = OrderQuote {
             sell_token: H160::from_low_u64_be(1),
             buy_token: H160::from_low_u64_be(2),
+            receiver: None,
             sell_amount: 17.into(), // TODO - verify that this is indeed correct.
             kind: OrderKind::Buy,
+            partially_fillable: false,
+            sell_token_balance: Default::default(),
             buy_amount: 2.into(),
+            valid_to: 0,
+            app_data: Default::default(),
             fee_amount: 3.into(),
-            ..Default::default()
+            buy_token_balance: Default::default(),
         };
         assert_eq!(result.quote, expected);
     }

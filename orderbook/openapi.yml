@@ -902,17 +902,13 @@ components:
       allOf:
         - $ref: "#/components/schemas/OrderParameters"
         - type: object
-          properties:
-            from:
-              description: The expected address of the signer
-              $ref: "#/components/schemas/Address"
-          required:
-            - from
     OrderQuoteResponse:
       type: object
       properties:
         quote:
           $ref: "#/components/schemas/OrderQuote"
+        from:
+          $ref: "#/components/schemas/Address"
         expirationDate:
           description: |
             Expiration date of the offered fee. Order service might not accept

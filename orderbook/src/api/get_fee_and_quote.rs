@@ -1,4 +1,3 @@
-use crate::api::{price_estimation_error_to_warp_reply, WarpReplyConverting};
 use crate::{
     api::{
         order_validation::OrderValidating,
@@ -11,37 +10,16 @@ use chrono::{DateTime, Utc};
 use ethcontract::{H160, U256};
 use model::{h160_hexadecimal, u256_decimal};
 use serde::{Deserialize, Serialize};
-use shared::price_estimation::{PriceEstimating, PriceEstimationError};
+use shared::price_estimation::PriceEstimating;
 use std::{convert::Infallible, sync::Arc};
-use warp::{hyper::StatusCode, reply::Json, Filter, Rejection, Reply};
+use warp::{Filter, Rejection, Reply};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Fee {
+struct Fee {
     #[serde(with = "u256_decimal")]
     pub amount: U256,
     pub expiration_date: DateTime<Utc>,
-}
-
-#[derive(Debug)]
-pub enum FeeError {
-    SellAmountDoesNotCoverFee,
-    PriceEstimate(PriceEstimationError),
-}
-
-impl WarpReplyConverting for FeeError {
-    fn to_warp_reply(self) -> (Json, StatusCode) {
-        match self {
-            FeeError::PriceEstimate(err) => price_estimation_error_to_warp_reply(err),
-            FeeError::SellAmountDoesNotCoverFee => (
-                super::error(
-                    "SellAmountDoesNotCoverFee",
-                    "The sell amount for the sell order is lower than the fee.".to_string(),
-                ),
-                StatusCode::BAD_REQUEST,
-            ),
-        }
-    }
 }
 
 #[derive(Deserialize)]
