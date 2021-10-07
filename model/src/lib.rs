@@ -2,7 +2,6 @@
 
 pub mod app_id;
 pub mod h160_hexadecimal;
-pub mod h256_hexadecimal;
 pub mod order;
 pub mod ratio_as_decimal;
 pub mod signature;

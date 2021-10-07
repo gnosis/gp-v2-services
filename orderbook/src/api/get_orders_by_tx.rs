@@ -1,13 +1,12 @@
 use crate::orderbook::Orderbook;
 use anyhow::Result;
+use ethcontract::H256;
 use model::order::Order;
-use shared::H256Wrapper;
 use std::{convert::Infallible, sync::Arc};
 use warp::{hyper::StatusCode, reply, Filter, Rejection, Reply};
 
-pub fn get_orders_by_tx_request() -> impl Filter<Extract = (H256Wrapper,), Error = Rejection> + Clone
-{
-    warp::path!("orders" / H256Wrapper).and(warp::get())
+pub fn get_orders_by_tx_request() -> impl Filter<Extract = (H256,), Error = Rejection> + Clone {
+    warp::path!("orders" / H256).and(warp::get())
 }
 
 pub fn get_orders_by_tx_response(result: Result<Vec<Order>>) -> impl Reply {
@@ -23,10 +22,10 @@ pub fn get_orders_by_tx_response(result: Result<Vec<Order>>) -> impl Reply {
 pub fn get_orders_by_tx(
     orderbook: Arc<Orderbook>,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
-    get_orders_by_tx_request().and_then(move |hash: H256Wrapper| {
+    get_orders_by_tx_request().and_then(move |hash: H256| {
         let orderbook = orderbook.clone();
         async move {
-            let result = orderbook.get_orders_for_tx(&hash.0).await;
+            let result = orderbook.get_orders_for_tx(&hash).await;
             Result::<_, Infallible>::Ok(get_orders_by_tx_response(result))
         }
     })
@@ -47,7 +46,7 @@ mod tests {
             .filter(&get_orders_by_tx_request())
             .await
             .unwrap();
-        assert_eq!(result.0, H256Wrapper::from_str(hash_str).unwrap().0);
+        assert_eq!(result.0, H256::from_str(hash_str).unwrap().0);
     }
 
     #[tokio::test]
