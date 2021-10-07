@@ -402,7 +402,9 @@ async fn main() {
         if let Some(solver_accounts) = args.solver_accounts {
             assert!(
                 solver_accounts.len() == args.solvers.len(),
-                "number of solver does not match the number of private keys"
+                "number of solvers ({}) does not match the number of accounts ({})",
+                args.solvers.len(),
+                solver_accounts.len()
             );
 
             solver_accounts
