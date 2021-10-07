@@ -92,8 +92,8 @@ mod tests {
                 transaction_hash: H256::from_low_u64_be(1),
             }),
         )])
-            .await
-            .unwrap();
+        .await
+        .unwrap();
         // Each order was traded in the same block.
         for (i, order) in orders.clone().iter().enumerate() {
             db.insert_order(&order).await.unwrap();
