@@ -55,7 +55,7 @@ pub enum PartialValidationError {
 }
 
 impl WarpReplyConverting for PartialValidationError {
-    fn to_warp_reply(&self) -> (Json, StatusCode) {
+    fn to_warp_reply(self) -> (Json, StatusCode) {
         match self {
             Self::UnsupportedBuyTokenDestination(dest) => (
                 super::error("UnsupportedBuyTokenDestination", format!("Type {:?}", dest)),
@@ -108,7 +108,7 @@ pub enum ValidationError {
 }
 
 impl WarpReplyConverting for ValidationError {
-    fn to_warp_reply(&self) -> (Json, StatusCode) {
+    fn to_warp_reply(self) -> (Json, StatusCode) {
         match self {
             ValidationError::Partial(pre) => pre.to_warp_reply(),
             Self::UnsupportedToken(token) => (

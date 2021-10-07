@@ -1,4 +1,4 @@
-use crate::api::price_estimation_error_to_warp_reply;
+use crate::api::{price_estimation_error_to_warp_reply, WarpReplyConverting};
 use crate::{
     api::{
         order_validation::OrderValidating,
@@ -29,10 +29,10 @@ pub enum FeeError {
     PriceEstimate(PriceEstimationError),
 }
 
-impl FeeError {
-    pub fn to_warp_reply(&self) -> (Json, StatusCode) {
+impl WarpReplyConverting for FeeError {
+    fn to_warp_reply(self) -> (Json, StatusCode) {
         match self {
-            FeeError::PriceEstimate(err) => price_estimation_error_to_warp_reply(err.clone()),
+            FeeError::PriceEstimate(err) => price_estimation_error_to_warp_reply(err),
             FeeError::SellAmountDoesNotCoverFee => (
                 super::error(
                     "SellAmountDoesNotCoverFee",
