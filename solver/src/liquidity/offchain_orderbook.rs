@@ -175,7 +175,7 @@ pub mod tests {
     use ethcontract::H160;
     use maplit::{hashmap, hashset};
     use model::{
-        order::{OrderCreation, OrderKind},
+        order::{OrderCreation, OrderKind, OrderMetaData},
         DomainSeparator,
     };
     use shared::dummy_contract;
@@ -197,6 +197,7 @@ pub mod tests {
             native_token,
         );
     }
+
     #[test]
     fn non_eth_buy_liquidity_stays_put() {
         let buy_token = H160([0x21; 20]);
@@ -210,6 +211,81 @@ pub mod tests {
         };
 
         assert_eq!(converter.normalize_limit_order(order).buy_token, buy_token);
+    }
+
+    #[test]
+    fn computes_full_fee_amount_if_missing() {
+        let converter = OrderConverter {
+            fee_factor: 0.5,
+            ..OrderConverter::test(H160::default())
+        };
+
+        assert_eq!(
+            converter
+                .normalize_limit_order(Order {
+                    order_creation: OrderCreation {
+                        fee_amount: 10.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .scaled_fee_amount,
+            20.into(),
+        );
+
+        assert_eq!(
+            converter
+                .normalize_limit_order(Order {
+                    order_creation: OrderCreation {
+                        fee_amount: 10.into(),
+                        ..Default::default()
+                    },
+                    order_meta_data: OrderMetaData {
+                        full_fee_amount: 50.into(),
+                        ..Default::default()
+                    },
+                })
+                .scaled_fee_amount,
+            50.into(),
+        );
+    }
+
+    #[test]
+    fn applies_objective_scaling_factor() {
+        let converter = OrderConverter {
+            fee_factor: 0.5,
+            fee_objective_scaling_factor: 1.5,
+            ..OrderConverter::test(H160::default())
+        };
+
+        assert_eq!(
+            converter
+                .normalize_limit_order(Order {
+                    order_creation: OrderCreation {
+                        fee_amount: 10.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .scaled_fee_amount,
+            30.into(),
+        );
+
+        assert_eq!(
+            converter
+                .normalize_limit_order(Order {
+                    order_creation: OrderCreation {
+                        fee_amount: 10.into(),
+                        ..Default::default()
+                    },
+                    order_meta_data: OrderMetaData {
+                        full_fee_amount: 50.into(),
+                        ..Default::default()
+                    },
+                },)
+                .scaled_fee_amount,
+            75.into(),
+        );
     }
 
     #[test]
