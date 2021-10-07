@@ -154,6 +154,7 @@ impl OrderQuoteRequest {
             sell_token,
             buy_token,
             side,
+            valid_to: u32::MAX,
             ..Default::default()
         }
     }
