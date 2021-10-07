@@ -343,9 +343,14 @@ impl GasModel {
     }
 
     fn order_fee(&self, order: &LimitOrder) -> FeeModel {
-        let ceiled_div = (order.fee_amount.to_f64_lossy() / self.fee_factor).ceil();
+        let amount = if order.full_fee_amount.is_zero() {
+            U256::from_f64_lossy((order.fee_amount.to_f64_lossy() / self.fee_factor).ceil())
+        } else {
+            order.full_fee_amount
+        };
+
         FeeModel {
-            amount: U256::from_f64_lossy(ceiled_div),
+            amount,
             token: order.sell_token,
         }
     }
@@ -368,6 +373,7 @@ fn token_models(
                 *address,
                 TokenInfoModel {
                     decimals: token_info.decimals,
+                    alias: token_info.symbol.clone(),
                     external_price,
                     normalize_priority: Some(if &gas_model.native_token == address {
                         1
@@ -629,8 +635,8 @@ mod tests {
             .expect_get_token_infos()
             .return_once(move |_| {
                 hashmap! {
-                    buy_token => TokenInfo { decimals: Some(18)},
-                    sell_token => TokenInfo { decimals: Some(18)},
+                    buy_token => TokenInfo { decimals: Some(18), symbol: Some("CAT".to_string()) },
+                    sell_token => TokenInfo { decimals: Some(18), symbol: Some("CAT".to_string()) },
                 }
             });
         let mock_token_info_fetcher: Arc<dyn TokenInfoFetching> = Arc::new(mock_token_info_fetcher);
@@ -683,6 +689,7 @@ mod tests {
             kind: OrderKind::Sell,
             partially_fillable: false,
             fee_amount: Default::default(),
+            full_fee_amount: Default::default(),
             settlement_handling: CapturingSettlementHandler::arc(),
             is_liquidity_order: false,
             id: "0".to_string(),
@@ -768,6 +775,7 @@ mod tests {
             kind: OrderKind::Sell,
             partially_fillable: Default::default(),
             fee_amount: Default::default(),
+            full_fee_amount: Default::default(),
             settlement_handling: limit_handling.clone(),
             is_liquidity_order: false,
             id: "0".to_string(),
