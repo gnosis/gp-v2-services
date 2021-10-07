@@ -16,13 +16,13 @@ use url::Url;
 pub struct Arguments {
     #[structopt(
         long,
-        env = "LOG_FILTER",
+        env,
         default_value = "warn,orderbook=debug,solver=debug,shared=debug,shared::transport::http=info,archerapi=info"
     )]
     pub log_filter: String,
 
     /// The Ethereum node URL to connect to.
-    #[structopt(long, env = "NODE_URL", default_value = "http://localhost:8545")]
+    #[structopt(long, env, default_value = "http://localhost:8545")]
     pub node_url: Url,
 
     /// Timeout for all http requests.
@@ -41,7 +41,7 @@ pub struct Arguments {
     /// `Web3`: supports every network.
     #[structopt(
         long,
-        env = "GAS_ESTIMATORS",
+        env,
         default_value = "Web3",
         possible_values = &GasEstimatorType::variants(),
         case_insensitive = true,
@@ -51,7 +51,7 @@ pub struct Arguments {
 
     /// Base tokens used for finding multi-hop paths between multiple AMMs
     /// Should be the most liquid tokens of the given network.
-    #[structopt(long, env = "BASE_TOKENS", use_delimiter = true)]
+    #[structopt(long, env, use_delimiter = true)]
     pub base_tokens: Vec<H160>,
 
     /// Gas Fee Factor: 1.0 means cost is forwarded to users alteration, 0.9 means there is a 10%
@@ -62,7 +62,7 @@ pub struct Arguments {
     /// Which Liquidity sources to be used by Price Estimator.
     #[structopt(
         long,
-        env = "BASELINE_SOURCES",
+        env,
         default_value = "Uniswap,Sushiswap",
         possible_values = &BaselineSource::variants(),
         case_insensitive = true,

@@ -42,29 +42,25 @@ struct Arguments {
     shared: shared::arguments::Arguments,
 
     /// The API endpoint to fetch the orderbook
-    #[structopt(long, env = "ORDERBOOK_URL", default_value = "http://localhost:8080")]
+    #[structopt(long, env, default_value = "http://localhost:8080")]
     orderbook_url: Url,
 
     /// The API endpoint to call the mip solver
-    #[structopt(long, env = "MIP_SOLVER_URL", default_value = "http://localhost:8000")]
+    #[structopt(long, env, default_value = "http://localhost:8000")]
     mip_solver_url: Url,
 
     /// The API endpoint to call the mip v2 solver
-    #[structopt(
-        long,
-        env = "QUASIMODO_SOLVER_URL",
-        default_value = "http://localhost:8000"
-    )]
+    #[structopt(long, env, default_value = "http://localhost:8000")]
     quasimodo_solver_url: Url,
 
     /// The private key used by the driver to sign transactions.
-    #[structopt(short = "k", long, env = "PRIVATE_KEY", hide_env_values = true)]
+    #[structopt(short = "k", long, env, hide_env_values = true)]
     private_key: Option<PrivateKey>,
 
     /// The target confirmation time for settlement transactions used to estimate gas price.
     #[structopt(
         long,
-        env = "TARGET_CONFIRM_TIME",
+        env,
         default_value = "30",
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
@@ -73,7 +69,7 @@ struct Arguments {
     /// Every how often we should execute the driver's run loop
     #[structopt(
         long,
-        env = "SETTLE_INTERVAL",
+        env,
         default_value = "10",
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
@@ -82,7 +78,7 @@ struct Arguments {
     /// Which type of solver to use
     #[structopt(
         long,
-        env = "SOLVER_TYPE",
+        env,
         default_value = "Naive,Baseline",
         possible_values = &SolverType::variants(),
         case_insensitive = true,
@@ -93,7 +89,7 @@ struct Arguments {
     /// Individual private keys for each solver
     #[structopt(
         long,
-        env = "SOLVER_PRIVATE_KEYS",
+        env,
         case_insensitive = true,
         use_delimiter = true,
         hide_env_values = true
@@ -105,29 +101,24 @@ struct Arguments {
     /// chance.
     #[structopt(
         long,
-        env = "MIN_ORDER_AGE",
+        env,
         default_value = "30",
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
     min_order_age: Duration,
 
     /// The port at which we serve our metrics
-    #[structopt(
-        long,
-        env = "METRICS_PORT",
-        default_value = "9587",
-        case_insensitive = true
-    )]
+    #[structopt(long, env, default_value = "9587", case_insensitive = true)]
     metrics_port: u16,
 
     /// The port at which we serve our metrics
-    #[structopt(long, env = "MAX_MERGED_SETTLEMENTS", default_value = "5")]
+    #[structopt(long, env, default_value = "5")]
     max_merged_settlements: usize,
 
     /// The maximum amount of time a solver is allowed to take.
     #[structopt(
         long,
-        env = "SOLVER_TIME_LIMIT",
+        env,
         default_value = "30",
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
@@ -137,7 +128,7 @@ struct Arguments {
     /// traded in order to use the 1Inch solver.
     #[structopt(
         long,
-        env = "MIN_ORDER_SIZE_ONE_INCH",
+        env,
         default_value = "5",
         parse(try_from_str = shared::arguments::wei_from_base_unit)
     )]
@@ -153,7 +144,7 @@ struct Arguments {
     /// without external liquidity
     #[structopt(
         long,
-        env = "MARKET_MAKABLE_TOKEN_LIST",
+        env,
         default_value = "https://tokens.coingecko.com/uniswap/all.json"
     )]
     market_makable_token_list: String,
@@ -161,7 +152,7 @@ struct Arguments {
     /// The maximum gas price the solver is willing to pay in a settlement
     #[structopt(
         long,
-        env = "GAS_PRICE_CAP_GWEI",
+        env,
         default_value = "1500",
         parse(try_from_str = shared::arguments::wei_from_gwei)
     )]
