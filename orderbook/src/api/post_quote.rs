@@ -476,9 +476,9 @@ mod tests {
 
     #[tokio::test]
     async fn post_quote_response_err() {
-        let response = response::<OrderQuoteResponse>(Err(OrderQuoteError::Order(ValidationError::Other(
-            anyhow!("Uh oh - error"),
-        ))))
+        let response = response::<OrderQuoteResponse>(Err(OrderQuoteError::Order(
+            ValidationError::Other(anyhow!("Uh oh - error")),
+        )))
         .into_response();
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
         let body = response_body(response).await;
