@@ -57,7 +57,7 @@ struct Arguments {
     #[structopt(short = "k", long, env, hide_env_values = true)]
     private_key: Option<PrivateKey>,
 
-    /// The target confirmation time for settlement transactions used to estimate gas price.
+    /// The target confirmation time in seconds for settlement transactions used to estimate gas price.
     #[structopt(
         long,
         env,
@@ -66,7 +66,7 @@ struct Arguments {
     )]
     target_confirm_time: Duration,
 
-    /// Every how often we should execute the driver's run loop
+    /// Every how often in seconds we should execute the driver's run loop
     #[structopt(
         long,
         env,
@@ -96,9 +96,9 @@ struct Arguments {
     )]
     solver_private_keys: Option<Vec<PrivateKey>>,
 
-    /// A settlement must contain at least one order older than this duration for it to be applied.
-    /// Larger values delay individual settlements more but have a higher coincidence of wants
-    /// chance.
+    /// A settlement must contain at least one order older than this duration in seconds for it
+    /// to be applied.  Larger values delay individual settlements more but have a higher
+    /// coincidence of wants chance.
     #[structopt(
         long,
         env,
@@ -115,7 +115,7 @@ struct Arguments {
     #[structopt(long, env, default_value = "5")]
     max_merged_settlements: usize,
 
-    /// The maximum amount of time a solver is allowed to take.
+    /// The maximum amount of time in seconds a solver is allowed to take.
     #[structopt(
         long,
         env,
@@ -149,7 +149,7 @@ struct Arguments {
     )]
     market_makable_token_list: String,
 
-    /// The maximum gas price the solver is willing to pay in a settlement
+    /// The maximum gas price in Gwei the solver is willing to pay in a settlement.
     #[structopt(
         long,
         env,
@@ -170,8 +170,8 @@ struct Arguments {
     #[structopt(long, env, default_value = "PublicMempool")]
     transaction_strategy: TransactionStrategyArg,
 
-    /// The maximum time we spend trying to settle a transaction through the archer network before
-    /// going to back to solving.
+    /// The maximum time in seconds we spend trying to settle a transaction through the archer
+    /// network before going to back to solving.
     #[structopt(
         long,
         default_value = "60",

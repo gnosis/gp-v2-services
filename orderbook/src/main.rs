@@ -69,7 +69,7 @@ struct Arguments {
     #[structopt(long)]
     skip_event_sync: bool,
 
-    /// The minimum amount of time an order has to be valid for.
+    /// The minimum amount of time in seconds an order has to be valid for.
     #[structopt(
         long,
         env,
@@ -84,7 +84,7 @@ struct Arguments {
     #[structopt(long, env, parse(try_from_str), default_value = "false")]
     skip_trace_api: bool,
 
-    /// The amount of time a classification of a token into good or bad is valid for.
+    /// The amount of time in seconds a classification of a token into good or bad is valid for.
     #[structopt(
         long,
         env,
@@ -117,8 +117,8 @@ struct Arguments {
     #[structopt(long, env, parse(try_from_str), default_value = "false")]
     pub enable_presign_orders: bool,
 
-    /// If solvable orders haven't been successfully update in this time attempting to get them
-    /// errors and our liveness check fails.
+    /// If solvable orders haven't been successfully update in this time in seconds attempting
+    /// to get them errors and our liveness check fails.
     #[structopt(
         long,
         default_value = "300",

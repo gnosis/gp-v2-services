@@ -25,7 +25,7 @@ pub struct Arguments {
     #[structopt(long, env, default_value = "http://localhost:8545")]
     pub node_url: Url,
 
-    /// Timeout for all http requests.
+    /// Timeout in seconds for all http requests.
     #[structopt(
             long,
             default_value = "10",
@@ -82,11 +82,11 @@ pub struct Arguments {
     #[structopt(long, env, default_value = "5")]
     pub pool_cache_maximum_retries: u32,
 
-    /// How long to sleep between retries in the pool cache.
+    /// How long to sleep in seconds between retries in the pool cache.
     #[structopt(long, env, default_value = "1", parse(try_from_str = duration_from_seconds))]
     pub pool_cache_delay_between_retries_seconds: Duration,
 
-    /// How often we poll the node to check if the current block has changed.
+    /// How often in seconds we poll the node to check if the current block has changed.
     #[structopt(
         long,
         env,
