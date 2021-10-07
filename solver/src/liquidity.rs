@@ -12,7 +12,9 @@ use model::order::Order;
 use model::{order::OrderKind, TokenPair};
 use num::{rational::Ratio, BigRational};
 use primitive_types::{H160, U256};
-use shared::sources::balancer::pool_fetching::{TokenState, WeightedTokenState};
+use shared::sources::balancer::pool_fetching::{
+    AmplificationParameter, TokenState, WeightedTokenState,
+};
 #[cfg(test)]
 use shared::sources::uniswap::pool_fetching::Pool;
 use std::collections::HashMap;
@@ -68,6 +70,7 @@ pub struct LimitOrder {
     pub kind: OrderKind,
     pub partially_fillable: bool,
     pub fee_amount: U256,
+    pub full_fee_amount: U256,
     pub is_liquidity_order: bool,
     pub settlement_handling: Arc<dyn SettlementHandling<Self>>,
 }
@@ -119,6 +122,7 @@ impl Default for LimitOrder {
             kind: Default::default(),
             partially_fillable: Default::default(),
             fee_amount: Default::default(),
+            full_fee_amount: Default::default(),
             settlement_handling: tests::CapturingSettlementHandler::arc(),
             is_liquidity_order: false,
             id: Default::default(),
@@ -179,7 +183,7 @@ impl std::fmt::Debug for WeightedProductOrder {
 pub struct StablePoolOrder {
     pub reserves: HashMap<H160, TokenState>,
     pub fee: BigRational,
-    pub amplification_parameter: BigRational,
+    pub amplification_parameter: AmplificationParameter,
     #[cfg_attr(test, derivative(PartialEq = "ignore"))]
     pub settlement_handling: Arc<dyn SettlementHandling<Self>>,
 }
@@ -272,7 +276,7 @@ impl Default for StablePoolOrder {
         StablePoolOrder {
             reserves: Default::default(),
             fee: num::Zero::zero(),
-            amplification_parameter: BigRational::from_integer(1.into()),
+            amplification_parameter: AmplificationParameter::new(1.into(), 1.into()).unwrap(),
             settlement_handling: tests::CapturingSettlementHandler::arc(),
         }
     }
@@ -345,6 +349,7 @@ pub mod tests {
                 kind,
                 partially_fillable: Default::default(),
                 fee_amount: Default::default(),
+                full_fee_amount: Default::default(),
                 settlement_handling: CapturingSettlementHandler::arc(),
                 is_liquidity_order: false,
             }

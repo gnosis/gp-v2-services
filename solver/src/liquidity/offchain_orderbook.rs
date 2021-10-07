@@ -75,6 +75,7 @@ pub fn normalize_limit_order(
         kind: order.order_creation.kind,
         partially_fillable: order.order_creation.partially_fillable,
         fee_amount: order.order_creation.fee_amount,
+        full_fee_amount: order.order_meta_data.full_fee_amount,
         is_liquidity_order: liquidity_order_owners.contains(&order.order_meta_data.owner),
         settlement_handling: Arc::new(OrderSettlementHandler {
             native_token,
@@ -291,6 +292,7 @@ pub mod tests {
             },
             &DomainSeparator::default(),
             H160::default(),
+            U256::default(),
         )
         .unwrap();
         assert!(inflight_order_filter(
@@ -309,6 +311,7 @@ pub mod tests {
             },
             &DomainSeparator::default(),
             H160::default(),
+            U256::default(),
         )
         .unwrap();
         let adjusted_order = inflight_order_filter(

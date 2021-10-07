@@ -177,6 +177,7 @@ mod tests {
     use model::TokenPair;
     use num::rational::Ratio;
     use num::BigRational;
+    use shared::sources::balancer::pool_fetching::AmplificationParameter;
     use shared::sources::balancer::{
         pool_fetching::{TokenState, WeightedTokenState},
         swap::fixed_point::Bfp,
@@ -196,6 +197,7 @@ mod tests {
             kind: OrderKind::Sell,
             partially_fillable: false,
             fee_amount: Default::default(),
+            full_fee_amount: Default::default(),
             settlement_handling: limit_handler.clone(),
             is_liquidity_order: false,
             id: "0".to_string(),
@@ -243,7 +245,7 @@ mod tests {
                     },
                 },
                 fee: BigRational::new(3.into(), 1.into()),
-                amplification_parameter: BigRational::from_integer(1.into()),
+                amplification_parameter: AmplificationParameter::new(1.into(), 1.into()).unwrap(),
                 settlement_handling: sp_amm_handler.clone(),
             }),
         ];
@@ -379,7 +381,7 @@ mod tests {
                 },
             },
             fee: BigRational::new(1.into(), 1000.into()),
-            amplification_parameter: BigRational::from_integer(1.into()),
+            amplification_parameter: AmplificationParameter::new(1.into(), 1.into()).unwrap(),
             settlement_handling: CapturingSettlementHandler::arc(),
         };
 
