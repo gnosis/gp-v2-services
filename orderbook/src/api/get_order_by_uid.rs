@@ -31,7 +31,7 @@ pub fn get_order_by_uid(
     get_order_by_uid_request().and_then(move |uid| {
         let orderbook = orderbook.clone();
         async move {
-            let result = orderbook.get_order_for_uid(&uid).await;
+            let result = orderbook.get_order(&uid).await;
             Result::<_, Infallible>::Ok(get_order_by_uid_response(result))
         }
     })

@@ -173,7 +173,7 @@ impl Orderbook {
         Ok(orders)
     }
 
-    pub async fn get_order_for_uid(&self, uid: &OrderUid) -> Result<Option<Order>> {
+    pub async fn get_order(&self, uid: &OrderUid) -> Result<Option<Order>> {
         let mut order = match self.database.single_order(uid).await? {
             Some(order) => order,
             None => return Ok(None),
