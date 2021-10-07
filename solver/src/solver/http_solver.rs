@@ -373,7 +373,7 @@ fn token_models(
                 *address,
                 TokenInfoModel {
                     decimals: token_info.decimals,
-                    symbol: token_info.symbol.clone(),
+                    alias: token_info.symbol.clone(),
                     external_price,
                     normalize_priority: Some(if &gas_model.native_token == address {
                         1
