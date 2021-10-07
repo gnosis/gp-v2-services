@@ -370,12 +370,14 @@ mod tests {
           "tokens": {
             "0x0000000000000000000000000000000000000539": {
               "decimals": 6,
+              "symbol": "CAT",
               "external_price": 1.2,
               "normalize_priority": 1,
               "internal_buffer": "1337",
             },
             "0x000000000000000000000000000000000000a866": {
               "decimals": 18,
+              "symbol": "DOG",
               "external_price": 2345.0,
               "normalize_priority": 0,
               "internal_buffer": "42",
