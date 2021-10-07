@@ -6,7 +6,7 @@ use std::{convert::Infallible, sync::Arc};
 use warp::{hyper::StatusCode, reply, Filter, Rejection, Reply};
 
 pub fn get_orders_by_tx_request() -> impl Filter<Extract = (H256,), Error = Rejection> + Clone {
-    warp::path!("orders" / H256).and(warp::get())
+    warp::path!("transactions" / H256 / "orders").and(warp::get())
 }
 
 pub fn get_orders_by_tx_response(result: Result<Vec<Order>>) -> impl Reply {
@@ -41,7 +41,7 @@ mod tests {
     async fn request_ok() {
         let hash_str = "0x0191dbb560e936bd3320d5a505c9c05580a0ebb7e12fe117551ac26e484f295e";
         let result = warp::test::request()
-            .path(&format!("/orders/{:}", hash_str))
+            .path(&format!("/transactions/{:}/orders", hash_str))
             .method("GET")
             .filter(&get_orders_by_tx_request())
             .await

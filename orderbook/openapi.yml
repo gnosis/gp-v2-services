@@ -161,7 +161,7 @@ paths:
           description: Invalid signature
         404:
           description: Order was not found
-  /api/v1/orders/{txHash}:
+  /api/v1/transactions/{txHash}/orders:
     get:
       summary: Get orders by settlement transaction hash.
       parameters:
