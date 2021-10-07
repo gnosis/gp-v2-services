@@ -81,22 +81,7 @@ mod tests {
                 order_creation: Default::default(),
             })
             .collect();
-        // Each order was traded in the same block.
-        for order in orders.clone() {
-            db.insert_order(&order).await.unwrap();
-            db.append_events_(vec![(
-                EventIndex {
-                    block_number: 0,
-                    log_index: 0,
-                },
-                Event::Trade(Trade {
-                    order_uid: order.order_meta_data.uid,
-                    ..Default::default()
-                }),
-            )])
-            .await
-            .unwrap();
-        }
+        // Add settlement
         db.append_events_(vec![(
             EventIndex {
                 block_number: 0,
@@ -107,8 +92,24 @@ mod tests {
                 transaction_hash: H256::from_low_u64_be(1),
             }),
         )])
-        .await
-        .unwrap();
+            .await
+            .unwrap();
+        // Each order was traded in the same block.
+        for (i, order) in orders.clone().iter().enumerate() {
+            db.insert_order(&order).await.unwrap();
+            db.append_events_(vec![(
+                EventIndex {
+                    block_number: 0,
+                    log_index: i as u64 + 1,
+                },
+                Event::Trade(Trade {
+                    order_uid: order.order_meta_data.uid,
+                    ..Default::default()
+                }),
+            )])
+            .await
+            .unwrap();
+        }
 
         let res = db.orders_for_tx(&H256::from_low_u64_be(1)).await.unwrap();
         assert_eq!(res, orders);

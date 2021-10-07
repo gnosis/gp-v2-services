@@ -325,6 +325,30 @@ impl OrderStoring for Postgres {
     }
 
     async fn orders_for_tx(&self, tx_hash: &H256) -> Result<Vec<Order>> {
+        // TODO - This query assumes there is only one settlement per block.
+        //  when there are two, we would want all trades for which the log index is between
+        //  that of the correct settlement and the next. For this we would have to
+        //  - fetch all settlements for the block containing the specified txHash
+        //  - sort them by log index
+        //  - pick out the target settlement and get all trades with log index between target's and next.
+        //  I believe this would require a string of queries something like
+        // with target_block_number as (
+        //     SELECT block_number from settlements where tx_hash = $1
+        // ),
+        // with next_log_index as (
+        //     SELECT log_index from settlements
+        //     WHERE block_number > target_block_number
+        //     ORDER BY block_number asc
+        //     LIMIT 1
+        // )
+        // "SELECT ", ORDERS_SELECT,
+        // "FROM ", ORDERS_FROM,
+        // "JOIN trades t \
+        //     ON t.order_uid = o.uid \
+        //  JOIN settlements s \
+        //     ON s.block_number = t.block_number \
+        //  WHERE s.tx_hash = $1 \
+        //  AND t.log_index BETWEEN s.log_index AND next_log_index"
         #[rustfmt::skip]
         const QUERY: &str = concatcp!(
             "SELECT ", ORDERS_SELECT,
