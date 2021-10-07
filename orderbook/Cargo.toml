@@ -24,7 +24,7 @@ contracts = { path = "../contracts" }
 either = "1.0"
 ethcontract = { path = "../../../ethcontract/ethcontract-rs/ethcontract" }
 futures = "0.3.17"
-gas-estimation = { path = "../../../gp-gas-estimation/gp-gas-estimation" }
+gas-estimation = { path = "../../../gp-gas-estimation/gp-gas-estimation", features = ["web3_"] }
 hex = { version = "0.4", default-features = false }
 hex-literal = "0.3"
 maplit = "1.0"
@@ -45,7 +45,7 @@ tokio = { version = "1.11", features = ["macros", "rt-multi-thread", "sync", "ti
 tracing = "0.1"
 url = "2.2"
 warp = "0.3"
-web3 = { git = "https://github.com/tomusdrw/rust-web3.git" }
+web3 = { git = "https://github.com/tomusdrw/rust-web3.git", rev="2e2d1dfa906aa2dff6312b97d0d5ba804e9c8c6e", default-features = false }
 
 [dev-dependencies]
 secp256k1 = "0.20"

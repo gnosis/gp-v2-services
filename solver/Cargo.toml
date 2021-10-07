@@ -21,10 +21,10 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 contracts = { path = "../contracts" }
 derivative = "2.2"
 derive_more = "0.99"
-ethcontract = { path = "../../../ethcontract/ethcontract-rs/ethcontract" }
+ethcontract = { path = "../../../ethcontract/ethcontract-rs/ethcontract", default-features = false }
 ethcontract-mock = { path = "../../../ethcontract/ethcontract-rs/ethcontract-mock" }
 futures = "0.3"
-gas-estimation = { path = "../../../gp-gas-estimation/gp-gas-estimation" }
+gas-estimation = { path = "../../../gp-gas-estimation/gp-gas-estimation", features = ["web3_"] }
 hex = "0.4"
 hex-literal = "0.3"
 itertools = "0.10"
@@ -49,7 +49,7 @@ thiserror = "1.0"
 tokio = { version = "1.11", features = ["macros", "rt-multi-thread", "time", "test-util"] }
 tracing = "0.1"
 transaction-retry = { path = "../../../gp-transaction-retry/gp-transaction-retry" }
-web3 = { git = "https://github.com/tomusdrw/rust-web3.git" }
+web3 = { git = "https://github.com/tomusdrw/rust-web3.git", rev="2e2d1dfa906aa2dff6312b97d0d5ba804e9c8c6e", default-features = false }
 
 [dev-dependencies]
 tracing-subscriber = "0.2"

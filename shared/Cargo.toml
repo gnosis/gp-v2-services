@@ -13,10 +13,10 @@ async-recursion = "0.3"
 atty = "0.2"
 contracts = { path = "../contracts" }
 derivative = "2.2"
-ethcontract = { path = "../../../ethcontract/ethcontract-rs/ethcontract" }
+ethcontract = { path = "../../../ethcontract/ethcontract-rs/ethcontract", default-features = false }
 ethcontract-mock = { path = "../../../ethcontract/ethcontract-rs/ethcontract-mock" }
 futures = "0.3"
-gas-estimation = { path = "../../../gp-gas-estimation/gp-gas-estimation" }
+gas-estimation = { path = "../../../gp-gas-estimation/gp-gas-estimation", features = ["web3_", "tokio_"] }
 hex = { version = "0.4", default-features = false }
 hex-literal = "0.3"
 http = "0.2.4"
@@ -45,7 +45,7 @@ tracing = "0.1"
 tracing-subscriber = "0.2"
 url = "2.2"
 warp = "0.3"
-web3 = { git = "https://github.com/tomusdrw/rust-web3.git" }
+web3 = { git = "https://github.com/tomusdrw/rust-web3.git", rev="2e2d1dfa906aa2dff6312b97d0d5ba804e9c8c6e", default-features = false }
 
 [dev-dependencies]
 regex = "1.5.4"
