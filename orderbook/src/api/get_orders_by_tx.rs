@@ -96,7 +96,7 @@ mod tests {
         .unwrap();
         // Each order was traded in the same block.
         for (i, order) in orders.clone().iter().enumerate() {
-            db.insert_order(&order).await.unwrap();
+            db.insert_order(order).await.unwrap();
             db.append_events_(vec![(
                 EventIndex {
                     block_number: 0,
