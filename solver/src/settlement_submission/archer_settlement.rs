@@ -237,7 +237,7 @@ impl<'a> ArcherSolutionSubmitter<'a> {
             // If gas price has increased cancel old and submit new new transaction.
 
             if let Some((previous_gas_price, previous_tx)) = previous_tx.as_ref() {
-                if gas_price.effective_gas_price() > previous_gas_price.effective_gas_price() {
+                if gas_price.cap() > previous_gas_price.cap() {
                     if let Err(err) = self.archer_api.cancel(previous_tx).await {
                         tracing::error!("archer cancellation failed: {:?}", err);
                     }
@@ -255,10 +255,10 @@ impl<'a> ArcherSolutionSubmitter<'a> {
                 };
 
             tracing::info!(
-                "creating archer transaction with hash {:?}, tip to miner {:.3e}, gas price {:.3e}, gas estimate {}",
+                "creating archer transaction with hash {:?}, tip to miner {:.3e}, gas price {:?}, gas estimate {}",
                 hash,
                 tx_gas_cost_in_ether_wei.to_f64_lossy(),
-                gas_price.effective_gas_price(),
+                gas_price,
                 gas_estimate,
             );
 

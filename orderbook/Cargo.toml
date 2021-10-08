@@ -22,7 +22,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 const_format = "0.2"
 contracts = { path = "../contracts" }
 either = "1.0"
-ethcontract = { path = "../../../ethcontract/ethcontract-rs/ethcontract" }
+ethcontract = { path = "../../../ethcontract/ethcontract-rs/ethcontract", default-features = false }
 futures = "0.3.17"
 gas-estimation = { path = "../../../gp-gas-estimation/gp-gas-estimation", features = ["web3_"] }
 hex = { version = "0.4", default-features = false }
