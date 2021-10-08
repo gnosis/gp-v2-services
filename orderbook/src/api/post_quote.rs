@@ -1,8 +1,8 @@
-use crate::api::price_estimation_error_to_warp_reply;
+use crate::api::{price_estimation_error_to_warp_reply, OrderQuoter};
 use crate::{
     api::{
         self,
-        order_validation::{OrderValidating, PreOrderData, ValidationError},
+        order_validation::{PreOrderData, ValidationError},
         WarpReplyConverting,
     },
     fee::MinFeeCalculating,
@@ -182,17 +182,20 @@ impl OrderQuoteRequest {
 
     pub async fn calculate_quote(
         &self,
-        fee_calculator: Arc<dyn MinFeeCalculating>,
-        price_estimator: Arc<dyn PriceEstimating>,
-        order_validator: Arc<dyn OrderValidating>,
+        quoter: Arc<OrderQuoter>,
     ) -> Result<OrderQuoteResponse, OrderQuoteError> {
         tracing::debug!("Received quote request {:?}", self);
-        order_validator
+        quoter
+            .clone()
+            .order_validator
             .partial_validate(self.into())
             .await
             .map_err(|err| OrderQuoteError::Order(ValidationError::Partial(err)))?;
         let fee_parameters = self
-            .calculate_fee_parameters(fee_calculator, price_estimator)
+            .calculate_fee_parameters(
+                quoter.fee_calculator.clone(),
+                quoter.price_estimator.clone(),
+            )
             .await
             .map_err(OrderQuoteError::Fee)?;
         Ok(OrderQuoteResponse {
@@ -331,18 +334,12 @@ pub fn response<T: Serialize>(result: Result<T, OrderQuoteError>) -> impl Reply 
 }
 
 pub fn post_quote(
-    fee_calculator: Arc<dyn MinFeeCalculating>,
-    price_estimator: Arc<dyn PriceEstimating>,
-    order_validator: Arc<dyn OrderValidating>,
+    quoter: Arc<OrderQuoter>,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
     post_quote_request().and_then(move |request: OrderQuoteRequest| {
-        let fee_calculator = fee_calculator.clone();
-        let price_estimator = price_estimator.clone();
-        let order_validator = order_validator.clone();
+        let quoter = quoter.clone();
         async move {
-            let result = request
-                .calculate_quote(fee_calculator, price_estimator, order_validator)
-                .await;
+            let result = request.calculate_quote(quoter).await;
             if let Err(err) = &result {
                 tracing::error!(?err, ?request, "post_quote error");
             }
@@ -665,15 +662,12 @@ mod tests {
         order_validator
             .expect_partial_validate()
             .returning(|_| Ok(()));
-
-        let result = buy_request
-            .calculate_quote(
-                Arc::new(fee_calculator),
-                Arc::new(price_estimator),
-                Arc::new(order_validator),
-            )
-            .await
-            .unwrap();
+        let quoter = Arc::new(OrderQuoter::new(
+            Arc::new(fee_calculator),
+            Arc::new(price_estimator),
+            Arc::new(order_validator),
+        ));
+        let result = buy_request.calculate_quote(quoter).await.unwrap();
 
         let expected = OrderQuote {
             sell_token: H160::from_low_u64_be(1),

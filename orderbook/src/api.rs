@@ -12,8 +12,8 @@ pub mod order_validation;
 mod post_quote;
 
 use crate::{
-    api::order_validation::OrderValidator, database::trades::TradeRetrieving,
-    fee::EthAwareMinFeeCalculator, orderbook::Orderbook,
+    api::order_validation::OrderValidating, database::trades::TradeRetrieving,
+    fee::MinFeeCalculating, orderbook::Orderbook,
 };
 use anyhow::Error as anyhowError;
 use serde::de::DeserializeOwned;
@@ -30,32 +30,21 @@ use warp::{
 pub fn handle_all_routes(
     database: Arc<dyn TradeRetrieving>,
     orderbook: Arc<Orderbook>,
-    fee_calculator: Arc<EthAwareMinFeeCalculator>,
-    price_estimator: Arc<dyn PriceEstimating>,
-    order_validator: Arc<OrderValidator>,
+    quoter: Arc<OrderQuoter>,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
     let create_order = create_order::create_order(orderbook.clone());
     let get_orders = get_orders::get_orders(orderbook.clone());
-    let legacy_fee_info = get_fee_info::legacy_get_fee_info(fee_calculator.clone());
-    let fee_info = get_fee_info::get_fee_info(fee_calculator.clone());
+    let legacy_fee_info = get_fee_info::legacy_get_fee_info(quoter.fee_calculator.clone());
+    let fee_info = get_fee_info::get_fee_info(quoter.fee_calculator.clone());
     let get_order = get_order_by_uid::get_order_by_uid(orderbook.clone());
     let get_solvable_orders = get_solvable_orders::get_solvable_orders(orderbook.clone());
     let get_trades = get_trades::get_trades(database);
     let cancel_order = cancel_order::cancel_order(orderbook.clone());
-    let get_amount_estimate = get_markets::get_amount_estimate(price_estimator.clone());
-    let get_fee_and_quote_sell = get_fee_and_quote::get_fee_and_quote_sell(
-        fee_calculator.clone(),
-        price_estimator.clone(),
-        order_validator.clone(),
-    );
-    let get_fee_and_quote_buy = get_fee_and_quote::get_fee_and_quote_buy(
-        fee_calculator.clone(),
-        price_estimator.clone(),
-        order_validator.clone(),
-    );
+    let get_amount_estimate = get_markets::get_amount_estimate(quoter.price_estimator.clone());
+    let get_fee_and_quote_sell = get_fee_and_quote::get_fee_and_quote_sell(quoter.clone());
+    let get_fee_and_quote_buy = get_fee_and_quote::get_fee_and_quote_buy(quoter.clone());
     let get_user_orders = get_user_orders::get_user_orders(orderbook);
-    let post_quote =
-        post_quote::post_quote(fee_calculator, price_estimator.clone(), order_validator);
+    let post_quote = post_quote::post_quote(quoter);
     let cors = warp::cors()
         .allow_any_origin()
         .allow_methods(vec!["GET", "POST", "DELETE", "OPTIONS", "PUT", "PATCH"])
@@ -77,6 +66,27 @@ pub fn handle_all_routes(
     );
 
     routes_with_labels.recover(handle_rejection).with(cors)
+}
+
+#[derive(Clone)]
+pub struct OrderQuoter {
+    fee_calculator: Arc<dyn MinFeeCalculating>,
+    price_estimator: Arc<dyn PriceEstimating>,
+    order_validator: Arc<dyn OrderValidating>,
+}
+
+impl OrderQuoter {
+    pub fn new(
+        fee_calculator: Arc<dyn MinFeeCalculating>,
+        price_estimator: Arc<dyn PriceEstimating>,
+        order_validator: Arc<dyn OrderValidating>,
+    ) -> Self {
+        Self {
+            fee_calculator,
+            price_estimator,
+            order_validator,
+        }
+    }
 }
 
 // We turn Rejection into Reply to workaround warp not setting CORS headers on rejections.

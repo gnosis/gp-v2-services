@@ -1,16 +1,12 @@
-use crate::{
-    api::{
-        order_validation::OrderValidating,
-        post_quote::{response, OrderQuoteRequest, OrderQuoteResponse, OrderQuoteSide, SellAmount},
-    },
-    fee::MinFeeCalculating,
+use crate::api::{
+    post_quote::{response, OrderQuoteRequest, OrderQuoteResponse, OrderQuoteSide, SellAmount},
+    OrderQuoter,
 };
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use ethcontract::{H160, U256};
 use model::{h160_hexadecimal, u256_decimal};
 use serde::{Deserialize, Serialize};
-use shared::price_estimation::PriceEstimating;
 use std::{convert::Infallible, sync::Arc};
 use warp::{Filter, Rejection, Reply};
 
@@ -124,18 +120,14 @@ fn buy_request() -> impl Filter<Extract = (BuyQuery,), Error = Rejection> + Clon
 }
 
 pub fn get_fee_and_quote_sell(
-    fee_calculator: Arc<dyn MinFeeCalculating>,
-    price_estimator: Arc<dyn PriceEstimating>,
-    order_validator: Arc<dyn OrderValidating>,
+    quoter: Arc<OrderQuoter>,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
     sell_request().and_then(move |query| {
-        let fee_calculator = fee_calculator.clone();
-        let price_estimator = price_estimator.clone();
-        let order_validator = order_validator.clone();
+        let quoter = quoter.clone();
         async move {
             Result::<_, Infallible>::Ok(response(
                 OrderQuoteRequest::from(query)
-                    .calculate_quote(fee_calculator, price_estimator, order_validator)
+                    .calculate_quote(quoter)
                     .await
                     .map(SellResponse::from),
             ))
@@ -144,18 +136,14 @@ pub fn get_fee_and_quote_sell(
 }
 
 pub fn get_fee_and_quote_buy(
-    fee_calculator: Arc<dyn MinFeeCalculating>,
-    price_estimator: Arc<dyn PriceEstimating>,
-    order_validator: Arc<dyn OrderValidating>,
+    quoter: Arc<OrderQuoter>,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
     buy_request().and_then(move |query| {
-        let fee_calculator = fee_calculator.clone();
-        let price_estimator = price_estimator.clone();
-        let order_validator = order_validator.clone();
+        let quoter = quoter.clone();
         async move {
             Result::<_, Infallible>::Ok(response(
                 OrderQuoteRequest::from(query)
-                    .calculate_quote(fee_calculator, price_estimator, order_validator)
+                    .calculate_quote(quoter)
                     .await
                     .map(BuyResponse::from),
             ))

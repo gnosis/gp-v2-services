@@ -4,7 +4,7 @@ use contracts::{
 use ethcontract::{prelude::U256, H160};
 use model::DomainSeparator;
 use orderbook::{
-    account_balances::Web3BalanceFetcher, api::order_validation::OrderValidator,
+    account_balances::Web3BalanceFetcher, api::order_validation::OrderValidator, api::OrderQuoter,
     database::Postgres, event_updater::EventUpdater, fee::EthAwareMinFeeCalculator,
     metrics::Metrics, orderbook::Orderbook, solvable_orders::SolvableOrdersCache,
 };
@@ -230,13 +230,16 @@ impl OrderbookServices {
         let maintenance = ServiceMaintenance {
             maintainers: vec![db.clone(), event_updater],
         };
+        let quoter = Arc::new(OrderQuoter::new(
+            fee_calculator,
+            price_estimator.clone(),
+            order_validator,
+        ));
         orderbook::serve_api(
             db.clone(),
             orderbook,
-            fee_calculator,
-            price_estimator.clone(),
+            quoter,
             API_HOST[7..].parse().expect("Couldn't parse API address"),
-            order_validator,
             pending(),
         );
 
