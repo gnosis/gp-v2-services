@@ -13,8 +13,7 @@ pub mod maintenance;
 pub mod metrics;
 pub mod network;
 pub mod paraswap_api;
-pub mod paraswap_price_estimator;
-pub mod price_estimate;
+pub mod price_estimation;
 pub mod recent_block_cache;
 pub mod sources;
 pub mod subgraph;
@@ -31,6 +30,7 @@ use ethcontract::H160;
 use hex::{FromHex, FromHexError};
 use model::h160_hexadecimal;
 use serde::Deserialize;
+use std::fmt::Debug;
 use std::{
     future::Future,
     str::FromStr,

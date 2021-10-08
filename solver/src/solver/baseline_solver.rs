@@ -254,7 +254,13 @@ impl Solution {
             let buy_token = amm.tokens.other(&sell_token).expect("Inconsistent path");
             let buy_amount = amm
                 .get_amount_out(buy_token, (sell_amount, sell_token))
-                .expect("Path was found, so amount must be calculable");
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "invariant violated: have path but amount was not calculatable: {}",
+                        order.id
+                    )
+                })?;
+            //.expect("Path was found, so amount must be calculable");
             let execution = AmmOrderExecution {
                 input: (sell_token, sell_amount),
                 output: (buy_token, buy_amount),
@@ -318,7 +324,7 @@ mod tests {
                 buy_token,
                 kind: OrderKind::Sell,
                 partially_fillable: false,
-                fee_amount: Default::default(),
+                scaled_fee_amount: Default::default(),
                 settlement_handling: order_handler[0].clone(),
                 id: "0".into(),
                 is_liquidity_order: false,
@@ -331,7 +337,7 @@ mod tests {
                 sell_token,
                 kind: OrderKind::Sell,
                 partially_fillable: false,
-                fee_amount: Default::default(),
+                scaled_fee_amount: Default::default(),
                 settlement_handling: order_handler[1].clone(),
                 id: "1".into(),
                 is_liquidity_order: false,
@@ -424,7 +430,7 @@ mod tests {
                 buy_token,
                 kind: OrderKind::Buy,
                 partially_fillable: false,
-                fee_amount: Default::default(),
+                scaled_fee_amount: Default::default(),
                 settlement_handling: order_handler[0].clone(),
                 id: "0".into(),
                 is_liquidity_order: false,
@@ -437,7 +443,7 @@ mod tests {
                 sell_token,
                 kind: OrderKind::Buy,
                 partially_fillable: false,
-                fee_amount: Default::default(),
+                scaled_fee_amount: Default::default(),
                 settlement_handling: order_handler[1].clone(),
                 id: "1".into(),
                 is_liquidity_order: false,
@@ -525,7 +531,7 @@ mod tests {
             buy_token,
             kind: OrderKind::Buy,
             partially_fillable: false,
-            fee_amount: Default::default(),
+            scaled_fee_amount: Default::default(),
             settlement_handling: CapturingSettlementHandler::arc(),
             id: "0".into(),
             is_liquidity_order: false,
@@ -563,7 +569,7 @@ mod tests {
             buy_amount: 500_000_000_000_000_000_000_u128.into(),
             kind: OrderKind::Buy,
             partially_fillable: false,
-            fee_amount: 3_429_706_374_800_940_u128.into(),
+            scaled_fee_amount: Default::default(),
             settlement_handling: CapturingSettlementHandler::arc(),
             id: "Crash Bandicoot".to_string(),
             is_liquidity_order: false,

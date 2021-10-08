@@ -18,12 +18,12 @@ lazy_static = "1.4"
 maplit = "1.0"
 model = { path = "../model" }
 orderbook = { path = "../orderbook" }
-prometheus = "0.12"
+prometheus = "0.13"
 rand = "0.8"
 reqwest = { version = "0.11", features = ["blocking"] }
 secp256k1 = "0.20"
 serde_json = "1.0"
 shared = { path = "../shared" }
 solver = { path = "../solver" }
-tokio = { version = "1.11", features = ["macros"] }
+tokio = { version = "1.12", features = ["macros"] }
 web3 = { git = "https://github.com/tomusdrw/rust-web3.git", rev="2e2d1dfa906aa2dff6312b97d0d5ba804e9c8c6e", default-features = false }

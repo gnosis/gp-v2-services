@@ -21,8 +21,8 @@ mod ganache;
 #[macro_use]
 mod services;
 use crate::services::{
-    create_orderbook_api, deploy_mintable_token, to_wei, GPv2, OrderbookServices, UniswapContracts,
-    API_HOST,
+    create_orderbook_liquidity, deploy_mintable_token, to_wei, GPv2, OrderbookServices,
+    UniswapContracts, API_HOST,
 };
 
 const TRADER: [u8; 32] = [1; 32];
@@ -154,7 +154,7 @@ async fn vault_balances(web3: Web3) {
     let solver = solver::solver::naive_solver(solver_account);
     let liquidity_collector = LiquidityCollector {
         uniswap_like_liquidity: vec![uniswap_liquidity],
-        orderbook_api: create_orderbook_api(&web3, gpv2.native_token.address()),
+        orderbook_liquidity: create_orderbook_liquidity(&web3, gpv2.native_token.address()),
         balancer_v2_liquidity: None,
     };
     let network_id = web3.net().version().await.unwrap();
@@ -174,14 +174,15 @@ async fn vault_balances(web3: Web3) {
         Duration::from_secs(30),
         None,
         block_stream,
-        1.0,
         SolutionSubmitter {
             web3: web3.clone(),
             contract: gpv2.settlement.clone(),
             gas_price_estimator: Arc::new(web3.clone()),
             target_confirm_time: Duration::from_secs(1),
             gas_price_cap: f64::MAX,
-            transaction_strategy: solver::settlement_submission::TransactionStrategy::PublicMempool,
+            transaction_strategy: solver::settlement_submission::TransactionStrategy::CustomNodes(
+                vec![web3.clone()],
+            ),
         },
         1_000_000_000_000_000_000_u128.into(),
     );

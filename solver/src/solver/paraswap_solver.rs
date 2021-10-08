@@ -77,7 +77,18 @@ impl From<ParaswapResponseError> for SettlementError {
                 err,
                 ParaswapResponseError::PriceChange
                     | ParaswapResponseError::BuildingTransaction(_)
-                    | ParaswapResponseError::GetParaswapPool(_),
+                    | ParaswapResponseError::GetParaswapPool(_)
+                    | ParaswapResponseError::ServerBusy
+                    | ParaswapResponseError::Send(_),
+            ),
+            should_alert: !matches!(
+                err,
+                ParaswapResponseError::PriceChange
+                    | ParaswapResponseError::BuildingTransaction(_)
+                    | ParaswapResponseError::ComputePrice(_)
+                    | ParaswapResponseError::InsufficientLiquidity
+                    | ParaswapResponseError::TooMuchSlippageOnQuote
+                    | ParaswapResponseError::ServerBusy,
             ),
         }
     }
@@ -317,8 +328,8 @@ mod tests {
 
         token_info.expect_get_token_infos().returning(move |_| {
             hashmap! {
-                sell_token => TokenInfo { decimals: Some(18)},
-                buy_token => TokenInfo { decimals: Some(18)},
+                sell_token => TokenInfo { decimals: Some(18), symbol: None },
+                buy_token => TokenInfo { decimals: Some(18), symbol: None },
             }
         });
 
@@ -422,8 +433,8 @@ mod tests {
 
         token_info.expect_get_token_infos().returning(move |_| {
             hashmap! {
-                sell_token => TokenInfo { decimals: Some(18)},
-                buy_token => TokenInfo { decimals: Some(18)},
+                sell_token => TokenInfo { decimals: Some(18), symbol: None },
+                buy_token => TokenInfo { decimals: Some(18), symbol: None },
             }
         });
 
@@ -514,8 +525,8 @@ mod tests {
 
         token_info.expect_get_token_infos().returning(move |_| {
             hashmap! {
-                sell_token => TokenInfo { decimals: Some(18)},
-                buy_token => TokenInfo { decimals: Some(18)},
+                sell_token => TokenInfo { decimals: Some(18), symbol: None },
+                buy_token => TokenInfo { decimals: Some(18), symbol: None },
             }
         });
 

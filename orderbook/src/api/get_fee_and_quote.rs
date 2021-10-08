@@ -1,12 +1,11 @@
-use crate::fee::MinFeeCalculating;
+use crate::{api::price_estimation_error_to_warp_reply, fee::MinFeeCalculating};
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use ethcontract::{H160, U256};
 use model::h160_hexadecimal;
 use model::{order::OrderKind, u256_decimal};
 use serde::{Deserialize, Serialize};
-use shared::price_estimate;
-use shared::price_estimate::{PriceEstimating, PriceEstimationError};
+use shared::price_estimation::{self, PriceEstimating, PriceEstimationError};
 use std::convert::Infallible;
 use std::sync::Arc;
 use warp::{hyper::StatusCode, reply, Filter, Rejection, Reply};
@@ -66,21 +65,8 @@ struct BuyResponse {
 
 #[derive(Debug)]
 enum Error {
-    NoLiquidity,
-    UnsupportedToken(H160),
-    AmountIsZero,
     SellAmountDoesNotCoverFee,
-    Other(anyhow::Error),
-}
-
-impl From<PriceEstimationError> for Error {
-    fn from(other: PriceEstimationError) -> Self {
-        match other {
-            PriceEstimationError::NoLiquidity => Error::NoLiquidity,
-            PriceEstimationError::UnsupportedToken(token) => Error::UnsupportedToken(token),
-            PriceEstimationError::Other(error) => Error::Other(error),
-        }
-    }
+    PriceEstimate(PriceEstimationError),
 }
 
 async fn calculate_sell(
@@ -89,18 +75,20 @@ async fn calculate_sell(
     query: SellQuery,
 ) -> Result<SellResponse, Error> {
     if query.sell_amount_before_fee.is_zero() {
-        return Err(Error::AmountIsZero);
+        return Err(Error::PriceEstimate(PriceEstimationError::ZeroAmount));
     }
 
     // TODO: would be nice to use true sell amount after the fee but that is more complicated.
     let (fee, expiration_date) = fee_calculator
-        .min_fee(
+        .compute_unsubsidized_min_fee(
             query.sell_token,
             Some(query.buy_token),
             Some(query.sell_amount_before_fee),
             Some(OrderKind::Sell),
+            None,
         )
-        .await?;
+        .await
+        .map_err(Error::PriceEstimate)?;
     let sell_amount_after_fee = query
         .sell_amount_before_fee
         .checked_sub(fee)
@@ -108,13 +96,14 @@ async fn calculate_sell(
         .max(U256::one());
 
     let estimate = price_estimator
-        .estimate(&price_estimate::Query {
+        .estimate(&price_estimation::Query {
             sell_token: query.sell_token,
             buy_token: query.buy_token,
             in_amount: sell_amount_after_fee,
             kind: OrderKind::Sell,
         })
-        .await?;
+        .await
+        .map_err(Error::PriceEstimate)?;
 
     Ok(SellResponse {
         fee: Fee {
@@ -131,30 +120,34 @@ async fn calculate_buy(
     query: BuyQuery,
 ) -> Result<BuyResponse, Error> {
     if query.buy_amount_after_fee.is_zero() {
-        return Err(Error::AmountIsZero);
+        return Err(Error::PriceEstimate(PriceEstimationError::ZeroAmount));
     }
 
     let (fee, expiration_date) = fee_calculator
-        .min_fee(
+        .compute_unsubsidized_min_fee(
             query.sell_token,
             Some(query.buy_token),
             Some(query.buy_amount_after_fee),
             Some(OrderKind::Buy),
+            None,
         )
-        .await?;
+        .await
+        .map_err(Error::PriceEstimate)?;
 
     let estimate = price_estimator
-        .estimate(&price_estimate::Query {
+        .estimate(&price_estimation::Query {
             sell_token: query.sell_token,
             buy_token: query.buy_token,
             in_amount: query.buy_amount_after_fee,
             kind: OrderKind::Buy,
         })
-        .await?;
-    let sell_amount_before_fee = estimate
-        .out_amount
-        .checked_add(fee)
-        .ok_or_else(|| Error::Other(anyhow!("overflow in sell_amount_before_fee")))?;
+        .await
+        .map_err(Error::PriceEstimate)?;
+    let sell_amount_before_fee = estimate.out_amount.checked_add(fee).ok_or_else(|| {
+        Error::PriceEstimate(PriceEstimationError::Other(anyhow!(
+            "overflow in sell_amount_before_fee"
+        )))
+    })?;
 
     Ok(BuyResponse {
         fee: Fee {
@@ -180,21 +173,6 @@ fn buy_request() -> impl Filter<Extract = (BuyQuery,), Error = Rejection> + Clon
 fn response<T: Serialize>(result: Result<T, Error>) -> impl Reply {
     match result {
         Ok(response) => reply::with_status(reply::json(&response), StatusCode::OK),
-        Err(Error::NoLiquidity) => reply::with_status(
-            super::error("NoLiquidity", "not enough liquidity"),
-            StatusCode::NOT_FOUND,
-        ),
-        Err(Error::UnsupportedToken(token)) => reply::with_status(
-            super::error("UnsupportedToken", format!("Token address {:?}", token)),
-            StatusCode::BAD_REQUEST,
-        ),
-        Err(Error::AmountIsZero) => reply::with_status(
-            super::error(
-                "AmountIsZero",
-                "The input amount must be greater than zero.".to_string(),
-            ),
-            StatusCode::BAD_REQUEST,
-        ),
         Err(Error::SellAmountDoesNotCoverFee) => reply::with_status(
             super::error(
                 "SellAmountDoesNotCoverFee",
@@ -202,9 +180,9 @@ fn response<T: Serialize>(result: Result<T, Error>) -> impl Reply {
             ),
             StatusCode::BAD_REQUEST,
         ),
-        Err(Error::Other(err)) => {
-            tracing::error!(?err, "get_fee_and_price error");
-            reply::with_status(super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
+        Err(Error::PriceEstimate(err)) => {
+            let (json, status_code) = price_estimation_error_to_warp_reply(err);
+            reply::with_status(json, status_code)
         }
     }
 }
@@ -245,16 +223,16 @@ mod tests {
     use crate::fee::MockMinFeeCalculating;
     use futures::FutureExt;
     use hex_literal::hex;
-    use shared::price_estimate::mocks::FakePriceEstimator;
+    use shared::price_estimation::mocks::FakePriceEstimator;
     use warp::test::request;
 
     #[test]
     fn calculate_sell_() {
         let mut fee_calculator = MockMinFeeCalculating::new();
         fee_calculator
-            .expect_min_fee()
-            .returning(|_, _, _, _| Ok((U256::from(3), Utc::now())));
-        let price_estimator = FakePriceEstimator(price_estimate::Estimate {
+            .expect_compute_unsubsidized_min_fee()
+            .returning(|_, _, _, _, _| Ok((U256::from(3), Utc::now())));
+        let price_estimator = FakePriceEstimator(price_estimation::Estimate {
             out_amount: 14.into(),
             gas: 1000.into(),
         });
@@ -279,9 +257,9 @@ mod tests {
     fn calculate_buy_() {
         let mut fee_calculator = MockMinFeeCalculating::new();
         fee_calculator
-            .expect_min_fee()
-            .returning(|_, _, _, _| Ok((U256::from(3), Utc::now())));
-        let price_estimator = FakePriceEstimator(price_estimate::Estimate {
+            .expect_compute_unsubsidized_min_fee()
+            .returning(|_, _, _, _, _| Ok((U256::from(3), Utc::now())));
+        let price_estimator = FakePriceEstimator(price_estimation::Estimate {
             out_amount: 20.into(),
             gas: 1000.into(),
         });

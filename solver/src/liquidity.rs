@@ -6,11 +6,15 @@ pub mod uniswap;
 use crate::settlement::SettlementEncoder;
 use anyhow::Result;
 #[cfg(test)]
+use derivative::Derivative;
+#[cfg(test)]
 use model::order::Order;
 use model::{order::OrderKind, TokenPair};
 use num::{rational::Ratio, BigRational};
 use primitive_types::{H160, U256};
-use shared::sources::balancer::pool_fetching::{TokenState, WeightedTokenState};
+use shared::sources::balancer::pool_fetching::{
+    AmplificationParameter, TokenState, WeightedTokenState,
+};
 #[cfg(test)]
 use shared::sources::uniswap::pool_fetching::Pool;
 use std::collections::HashMap;
@@ -19,10 +23,22 @@ use strum_macros::{AsStaticStr, EnumVariantNames};
 
 /// Defines the different types of liquidity our solvers support
 #[derive(Clone, AsStaticStr, EnumVariantNames, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 pub enum Liquidity {
     ConstantProduct(ConstantProductOrder),
     BalancerWeighted(WeightedProductOrder),
     BalancerStable(StablePoolOrder),
+}
+
+impl Liquidity {
+    /// Returns an iterator over all token pairs for the given liquidity.
+    pub fn all_token_pairs(&self) -> Vec<TokenPair> {
+        match self {
+            Liquidity::ConstantProduct(amm) => vec![amm.tokens],
+            Liquidity::BalancerWeighted(amm) => token_pairs(&amm.reserves),
+            Liquidity::BalancerStable(amm) => token_pairs(&amm.reserves),
+        }
+    }
 }
 
 /// A trait associating some liquidity model to how it is executed and encoded
@@ -53,7 +69,13 @@ pub struct LimitOrder {
     pub buy_amount: U256,
     pub kind: OrderKind,
     pub partially_fillable: bool,
-    pub fee_amount: U256,
+    /// The scaled fee amount that the protocol pretends it is receiving.
+    ///
+    /// This is different than the actual order `fee_amount` value in that it
+    /// does not have any subsidies applied and may be scaled by a constant
+    /// factor to make matching orders more valuable from an objective value
+    /// perspective.
+    pub scaled_fee_amount: U256,
     pub is_liquidity_order: bool,
     pub settlement_handling: Arc<dyn SettlementHandling<Self>>,
 }
@@ -85,12 +107,7 @@ impl Settleable for LimitOrder {
 #[cfg(test)]
 impl From<Order> for LimitOrder {
     fn from(order: Order) -> Self {
-        use self::offchain_orderbook::normalize_limit_order;
-        use contracts::WETH9;
-        use shared::dummy_contract;
-
-        let native_token = dummy_contract!(WETH9, H160([0x42; 20]));
-        normalize_limit_order(order, native_token, &Default::default())
+        offchain_orderbook::OrderConverter::test(H160([0x42; 20])).normalize_limit_order(order)
     }
 }
 
@@ -104,7 +121,7 @@ impl Default for LimitOrder {
             buy_amount: Default::default(),
             kind: Default::default(),
             partially_fillable: Default::default(),
-            fee_amount: Default::default(),
+            scaled_fee_amount: Default::default(),
             settlement_handling: tests::CapturingSettlementHandler::arc(),
             is_liquidity_order: false,
             id: Default::default(),
@@ -114,10 +131,13 @@ impl Default for LimitOrder {
 
 /// 2 sided constant product automated market maker with equal reserve value and a trading fee (e.g. Uniswap, Sushiswap)
 #[derive(Clone)]
+#[cfg_attr(test, derive(Derivative))]
+#[cfg_attr(test, derivative(PartialEq))]
 pub struct ConstantProductOrder {
     pub tokens: TokenPair,
     pub reserves: (u128, u128),
     pub fee: Ratio<u32>,
+    #[cfg_attr(test, derivative(PartialEq = "ignore"))]
     pub settlement_handling: Arc<dyn SettlementHandling<Self>>,
 }
 
@@ -141,9 +161,12 @@ impl From<Pool> for ConstantProductOrder {
 
 /// 2 sided weighted product automated market maker with weighted reserves and a trading fee (e.g. BalancerV2)
 #[derive(Clone)]
+#[cfg_attr(test, derive(Derivative))]
+#[cfg_attr(test, derivative(PartialEq))]
 pub struct WeightedProductOrder {
     pub reserves: HashMap<H160, WeightedTokenState>,
     pub fee: BigRational,
+    #[cfg_attr(test, derivative(PartialEq = "ignore"))]
     pub settlement_handling: Arc<dyn SettlementHandling<Self>>,
 }
 
@@ -154,10 +177,13 @@ impl std::fmt::Debug for WeightedProductOrder {
 }
 
 #[derive(Clone)]
+#[cfg_attr(test, derive(Derivative))]
+#[cfg_attr(test, derivative(PartialEq))]
 pub struct StablePoolOrder {
     pub reserves: HashMap<H160, TokenState>,
     pub fee: BigRational,
-    pub amplification_parameter: BigRational,
+    pub amplification_parameter: AmplificationParameter,
+    #[cfg_attr(test, derivative(PartialEq = "ignore"))]
     pub settlement_handling: Arc<dyn SettlementHandling<Self>>,
 }
 
@@ -249,7 +275,7 @@ impl Default for StablePoolOrder {
         StablePoolOrder {
             reserves: Default::default(),
             fee: num::Zero::zero(),
-            amplification_parameter: BigRational::from_integer(1.into()),
+            amplification_parameter: AmplificationParameter::new(1.into(), 1.into()).unwrap(),
             settlement_handling: tests::CapturingSettlementHandler::arc(),
         }
     }
@@ -321,7 +347,7 @@ pub mod tests {
                 buy_amount: buy_amount.into(),
                 kind,
                 partially_fillable: Default::default(),
-                fee_amount: Default::default(),
+                scaled_fee_amount: Default::default(),
                 settlement_handling: CapturingSettlementHandler::arc(),
                 is_liquidity_order: false,
             }

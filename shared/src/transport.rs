@@ -12,6 +12,8 @@ use reqwest::Client;
 use std::{convert::TryInto as _, sync::Arc};
 use web3::BatchTransport;
 
+pub const MAX_BATCH_SIZE: usize = 100;
+
 /// Convenience method to create our standard instrumented transport.
 pub fn create_instrumented_transport<T>(
     transport: T,
@@ -27,7 +29,11 @@ where
 
 /// Convenience method to create a transport from a URL.
 pub fn create_test_transport(url: &str) -> Web3Transport {
-    Web3Transport::new(HttpTransport::new(Client::new(), url.try_into().unwrap()))
+    Web3Transport::new(HttpTransport::new(
+        Client::new(),
+        url.try_into().unwrap(),
+        "".to_string(),
+    ))
 }
 
 /// Like above but takes url from the environment NODE_URL.

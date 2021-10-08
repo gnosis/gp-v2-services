@@ -1,10 +1,11 @@
+use crate::api::price_estimation_error_to_warp_reply;
 use crate::fee::{EthAwareMinFeeCalculator, MinFeeCalculating};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use model::{order::OrderKind, u256_decimal};
 use primitive_types::{H160, U256};
 use serde::{Deserialize, Serialize};
-use shared::{price_estimate::PriceEstimationError, H160Wrapper};
+use shared::{price_estimation::PriceEstimationError, H160Wrapper};
 use std::convert::Infallible;
 use std::sync::Arc;
 use warp::{hyper::StatusCode, reply, Filter, Rejection, Reply};
@@ -44,20 +45,9 @@ pub fn get_fee_info_response(
             };
             Ok(reply::with_status(reply::json(&fee_info), StatusCode::OK))
         }
-        Err(PriceEstimationError::NoLiquidity) => Ok(reply::with_status(
-            super::error("NoLiquidity", "not enough liquidity"),
-            StatusCode::NOT_FOUND,
-        )),
-        Err(PriceEstimationError::UnsupportedToken(token)) => Ok(reply::with_status(
-            super::error("UnsupportedToken", format!("Token address {:?}", token)),
-            StatusCode::BAD_REQUEST,
-        )),
-        Err(PriceEstimationError::Other(err)) => {
-            tracing::error!(?err, "get_fee error");
-            Ok(reply::with_status(
-                super::internal_error(),
-                StatusCode::INTERNAL_SERVER_ERROR,
-            ))
+        Err(err) => {
+            let (json, status_code) = price_estimation_error_to_warp_reply(err);
+            Ok(reply::with_status(json, status_code))
         }
     }
 }
@@ -70,11 +60,12 @@ pub fn get_fee_info(
         async move {
             Result::<_, Infallible>::Ok(get_fee_info_response(
                 fee_calculator
-                    .min_fee(
+                    .compute_unsubsidized_min_fee(
                         query.sell_token.0,
                         Some(query.buy_token.0),
                         Some(query.amount),
                         Some(query.kind),
+                        None,
                     )
                     .await,
             ))
@@ -111,20 +102,9 @@ pub fn legacy_get_fee_info_response(
             };
             Ok(reply::with_status(reply::json(&fee_info), StatusCode::OK))
         }
-        Err(PriceEstimationError::NoLiquidity) => Ok(reply::with_status(
-            super::error("NoLiquidity", "not enough liquidity"),
-            StatusCode::NOT_FOUND,
-        )),
-        Err(PriceEstimationError::UnsupportedToken(token)) => Ok(reply::with_status(
-            super::error("UnsupportedToken", format!("Token address {:?}", token)),
-            StatusCode::BAD_REQUEST,
-        )),
-        Err(PriceEstimationError::Other(err)) => {
-            tracing::error!(?err, "get_fee error");
-            Ok(reply::with_status(
-                super::internal_error(),
-                StatusCode::INTERNAL_SERVER_ERROR,
-            ))
+        Err(err) => {
+            let (json, status_code) = price_estimation_error_to_warp_reply(err);
+            Ok(reply::with_status(json, status_code))
         }
     }
 }
@@ -136,7 +116,9 @@ pub fn legacy_get_fee_info(
         let fee_calculator = fee_calculator.clone();
         async move {
             Result::<_, Infallible>::Ok(legacy_get_fee_info_response(
-                fee_calculator.min_fee(token, None, None, None).await,
+                fee_calculator
+                    .compute_unsubsidized_min_fee(token, None, None, None, None)
+                    .await,
             ))
         }
     })

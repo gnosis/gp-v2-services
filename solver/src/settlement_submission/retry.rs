@@ -9,8 +9,10 @@ use ethcontract::{
     web3::error::Error as Web3Error,
     Account, TransactionHash,
 };
+use futures::FutureExt;
 use gas_estimation::EstimatedGasPrice;
 use primitive_types::U256;
+use shared::Web3;
 use transaction_retry::{TransactionResult, TransactionSending};
 
 /// Failure indicating that some aspect about the signed transaction was wrong (e.g. wrong nonce, gas limit to high)
@@ -56,6 +58,7 @@ impl TransactionResult for SettleResult {
 
 pub struct SettlementSender<'a> {
     pub contract: &'a GPv2Settlement,
+    pub nodes: &'a [Web3],
     pub nonce: U256,
     pub gas_limit: f64,
     pub settlement: EncodedSettlement,
@@ -67,6 +70,7 @@ impl<'a> TransactionSending for SettlementSender<'a> {
     type Output = SettleResult;
 
     async fn send(&self, gas_price: EstimatedGasPrice) -> Self::Output {
+        debug_assert!(!self.nodes.is_empty());
         tracing::info!(
             "submitting solution transaction at gas price {:?}",
             gas_price
@@ -76,14 +80,28 @@ impl<'a> TransactionSending for SettlementSender<'a> {
         } else {
             gas_price.legacy.into()
         };
-        let mut method =
-            settle_method_builder(self.contract, self.settlement.clone(), self.account.clone())
-                .nonce(self.nonce)
-                .gas_price(gas_price)
-                .gas(U256::from_f64_lossy(self.gas_limit));
-        method.tx.resolve = Some(ResolveCondition::Confirmed(ConfirmParams::mined()));
-        let result = method.send().await.map(|tx| tx.hash());
-        SettleResult(result)
+        let send_with_node = |node| {
+            let contract = GPv2Settlement::at(node, self.contract.address());
+            let mut method =
+                settle_method_builder(&contract, self.settlement.clone(), self.account.clone())
+                    .nonce(self.nonce)
+                    .gas_price(gas_price)
+                    .gas(U256::from_f64_lossy(self.gas_limit));
+            method.tx.resolve = Some(ResolveCondition::Confirmed(ConfirmParams::mined()));
+            async { SettleResult(method.send().await.map(|tx| tx.hash())) }.boxed()
+        };
+        let mut futures = self.nodes.iter().map(send_with_node).collect::<Vec<_>>();
+        loop {
+            let (result, _index, rest) = futures::future::select_all(futures).await;
+            match &result.0 {
+                Ok(_) => return result,
+                Err(_) if rest.is_empty() => return result,
+                Err(err) => {
+                    tracing::warn!(?err, "single node tx failed");
+                    futures = rest;
+                }
+            }
+        }
     }
 }
 
@@ -123,8 +141,10 @@ impl TransactionSending for CancelSender {
 mod tests {
     use super::*;
     use anyhow::Context;
+    use ethcontract::PrivateKey;
     use jsonrpc_core::ErrorCode;
     use primitive_types::H256;
+    use shared::transport::create_test_transport;
 
     #[test]
     fn test_submission_result_was_mined() {
@@ -187,5 +207,49 @@ mod tests {
             .downcast_ref::<MethodError>()
             .map(|e| is_transaction_failure(&e.inner))
             .unwrap_or(false));
+    }
+
+    // env NODE0=... NODE1=... PRIVATE_KEY=... cargo test -p solver multi_node_rinkeby_test -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn multi_node_rinkeby_test() {
+        shared::tracing::initialize("solver=debug,shared=debug");
+        let envs = ["NODE0", "NODE1"];
+        let web3s: Vec<Web3> = envs
+            .iter()
+            .map(|key| {
+                let value = std::env::var(key).unwrap();
+                let transport = create_test_transport(&value);
+                Web3::new(transport)
+            })
+            .collect();
+        for web3 in &web3s {
+            let network_id = web3.net().version().await.unwrap();
+            assert_eq!(network_id, "4");
+        }
+        let contract = crate::get_settlement_contract(&web3s[0]).await.unwrap();
+        let private_key: PrivateKey = std::env::var("PRIVATE_KEY").unwrap().parse().unwrap();
+        let account = Account::Offline(private_key, Some(4));
+        let nonce = web3s[0]
+            .eth()
+            .transaction_count(account.address(), None)
+            .await
+            .unwrap();
+        let settlement = EncodedSettlement::default();
+        let sender = SettlementSender {
+            contract: &contract,
+            nodes: &web3s,
+            gas_limit: 1e5,
+            settlement,
+            account,
+            nonce,
+        };
+        let result = sender
+            .send(EstimatedGasPrice {
+                legacy: 1e9,
+                ..Default::default()
+            })
+            .await;
+        tracing::info!("finished with result {:?}", result.0);
     }
 }

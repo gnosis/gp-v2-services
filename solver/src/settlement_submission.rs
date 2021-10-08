@@ -6,7 +6,7 @@ pub mod retry;
 pub mod rpc;
 
 use crate::{encoding::EncodedSettlement, settlement::Settlement};
-use anyhow::{anyhow, Result};
+use anyhow::{bail, Result};
 use archer_api::ArcherApi;
 use contracts::GPv2Settlement;
 use ethcontract::{errors::ExecutionError, Account, TransactionHash};
@@ -45,14 +45,11 @@ pub struct SolutionSubmitter {
 }
 
 pub enum TransactionStrategy {
-    PublicMempool,
     ArcherNetwork {
         archer_api: ArcherApi,
         max_confirm_time: Duration,
     },
-    PrivateNetwork {
-        network_rpc: Web3,
-    },
+    CustomNodes(Vec<Web3>),
     DryRun,
 }
 
@@ -69,8 +66,9 @@ impl SolutionSubmitter {
         account: Account,
     ) -> Result<TransactionHash> {
         match &self.transaction_strategy {
-            TransactionStrategy::PublicMempool => {
+            TransactionStrategy::CustomNodes(nodes) => {
                 rpc::submit(
+                    nodes,
                     account,
                     &self.contract,
                     self.gas_price_estimator.as_ref(),
@@ -78,7 +76,6 @@ impl SolutionSubmitter {
                     self.gas_price_cap,
                     settlement,
                     gas_estimate,
-                    None,
                 )
                 .await
             }
@@ -86,14 +83,14 @@ impl SolutionSubmitter {
                 archer_api,
                 max_confirm_time,
             } => {
-                let submitter = ArcherSolutionSubmitter {
-                    web3: &self.web3,
-                    contract: &self.contract,
-                    account: &account,
+                let submitter = ArcherSolutionSubmitter::new(
+                    &self.web3,
+                    &self.contract,
+                    &account,
                     archer_api,
-                    gas_price_estimator: self.gas_price_estimator.as_ref(),
-                    gas_price_cap: self.gas_price_cap,
-                };
+                    self.gas_price_estimator.as_ref(),
+                    self.gas_price_cap,
+                )?;
                 let result = submitter
                     .submit(
                         self.target_confirm_time,
@@ -104,22 +101,9 @@ impl SolutionSubmitter {
                     .await;
                 match result {
                     Ok(Some(hash)) => Ok(hash),
-                    Ok(None) => Err(anyhow!("transaction did not get mined in time")),
+                    Ok(None) => bail!("transaction did not get mined in time"),
                     Err(err) => Err(err),
                 }
-            }
-            TransactionStrategy::PrivateNetwork { network_rpc } => {
-                rpc::submit(
-                    account,
-                    &self.contract,
-                    self.gas_price_estimator.as_ref(),
-                    self.target_confirm_time,
-                    self.gas_price_cap,
-                    settlement,
-                    gas_estimate,
-                    Some(network_rpc),
-                )
-                .await
             }
             TransactionStrategy::DryRun => {
                 dry_run::log_settlement(account, &self.contract, settlement).await

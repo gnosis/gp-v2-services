@@ -4,9 +4,9 @@ use contracts::{
 use ethcontract::{prelude::U256, H160};
 use model::DomainSeparator;
 use orderbook::{
-    account_balances::Web3BalanceFetcher, database::Postgres, event_updater::EventUpdater,
-    fee::EthAwareMinFeeCalculator, metrics::Metrics, orderbook::Orderbook,
-    solvable_orders::SolvableOrdersCache,
+    account_balances::Web3BalanceFetcher, api::order_validation::OrderValidator,
+    database::Postgres, event_updater::EventUpdater, fee::EthAwareMinFeeCalculator,
+    metrics::Metrics, orderbook::Orderbook, solvable_orders::SolvableOrdersCache,
 };
 use reqwest::Client;
 use shared::{
@@ -14,15 +14,17 @@ use shared::{
     baseline_solver::BaseTokens,
     current_block::{current_block_stream, CurrentBlockStream},
     maintenance::ServiceMaintenance,
-    price_estimate::BaselinePriceEstimator,
+    price_estimation::baseline::BaselinePriceEstimator,
     recent_block_cache::CacheConfig,
     sources::uniswap::{
         pair_provider::UniswapPairProvider, pool_cache::PoolCache, pool_fetching::PoolFetcher,
     },
     Web3,
 };
-use solver::orderbook::OrderBookApi;
-use std::{num::NonZeroU64, str::FromStr, sync::Arc, time::Duration};
+use solver::{liquidity::offchain_orderbook::OrderbookLiquidity, orderbook::OrderBookApi};
+use std::{
+    collections::HashMap, future::pending, num::NonZeroU64, str::FromStr, sync::Arc, time::Duration,
+};
 
 pub const API_HOST: &str = "http://127.0.0.1:8080";
 
@@ -49,13 +51,20 @@ pub fn to_wei(base: u32) -> U256 {
     U256::from(base) * U256::from(10).pow(18.into())
 }
 
-pub fn create_orderbook_api(web3: &Web3, weth_address: H160) -> OrderBookApi {
+#[allow(dead_code)]
+pub fn create_orderbook_api() -> OrderBookApi {
+    OrderBookApi::new(reqwest::Url::from_str(API_HOST).unwrap(), Client::new())
+}
+
+pub fn create_orderbook_liquidity(web3: &Web3, weth_address: H160) -> OrderbookLiquidity {
     let weth = WETH9::at(web3, weth_address);
-    solver::orderbook::OrderBookApi::new(
+    OrderbookLiquidity::new(
         reqwest::Url::from_str(API_HOST).unwrap(),
-        weth,
         Client::new(),
+        weth,
         Default::default(),
+        1.,
+        1.,
     )
 }
 
@@ -170,7 +179,7 @@ impl OrderbookServices {
                 web3: web3.clone(),
             }),
             current_block_stream.clone(),
-            metrics.clone(),
+            metrics,
         )
         .unwrap();
         let gas_estimator = Arc::new(web3.clone());
@@ -191,6 +200,7 @@ impl OrderbookServices {
             db.clone(),
             0.0,
             bad_token_detector.clone(),
+            HashMap::default(),
             1_000_000_000_000_000_000_u128.into(),
         ));
         let balance_fetcher = Arc::new(Web3BalanceFetcher::new(
@@ -206,31 +216,35 @@ impl OrderbookServices {
             bad_token_detector.clone(),
             current_block_stream.clone(),
         );
+        let order_validator = Arc::new(OrderValidator::new(
+            Box::new(web3.clone()),
+            gpv2.native_token.clone(),
+            vec![],
+            Duration::from_secs(120),
+            fee_calculator.clone(),
+            bad_token_detector.clone(),
+            balance_fetcher,
+        ));
         let orderbook = Arc::new(Orderbook::new(
             gpv2.domain_separator,
             gpv2.settlement.address(),
             db.clone(),
-            balance_fetcher,
-            fee_calculator.clone(),
-            Duration::from_secs(120),
             bad_token_detector,
-            Box::new(web3.clone()),
-            gpv2.native_token.clone(),
-            vec![],
             true,
             solvable_orders_cache.clone(),
             Duration::from_secs(600),
+            order_validator,
         ));
         let maintenance = ServiceMaintenance {
             maintainers: vec![db.clone(), event_updater],
         };
-        orderbook::serve_task(
+        orderbook::serve_api(
             db.clone(),
             orderbook,
             fee_calculator,
             price_estimator.clone(),
             API_HOST[7..].parse().expect("Couldn't parse API address"),
-            metrics,
+            pending(),
         );
 
         Self {

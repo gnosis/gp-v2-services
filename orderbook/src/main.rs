@@ -1,16 +1,19 @@
+use anyhow::{anyhow, Context, Result};
 use contracts::{BalancerV2Vault, GPv2Settlement, WETH9};
 use model::{
+    app_id::AppId,
     order::{OrderUid, BUY_ETH_ADDRESS},
     DomainSeparator,
 };
 use orderbook::{
     account_balances::Web3BalanceFetcher,
+    api::order_validation::OrderValidator,
     database::{self, orders::OrderFilter, Postgres},
     event_updater::EventUpdater,
     fee::EthAwareMinFeeCalculator,
     metrics::Metrics,
     orderbook::Orderbook,
-    serve_task,
+    serve_api,
     solvable_orders::SolvableOrdersCache,
     verify_deployed_contract_constants,
 };
@@ -23,11 +26,15 @@ use shared::{
             AmmPairProviderFinder, BalancerVaultFinder, TokenOwnerFinding, TraceCallDetector,
         },
     },
+    baseline_solver::BaseTokens,
     current_block::current_block_stream,
     maintenance::ServiceMaintenance,
+    metrics::{serve_metrics, setup_metrics_registry, DEFAULT_METRICS_PORT},
     paraswap_api::DefaultParaswapApi,
-    paraswap_price_estimator::ParaswapPriceEstimator,
-    price_estimate::{BaselinePriceEstimator, PriceEstimating},
+    price_estimation::{
+        baseline::BaselinePriceEstimator, paraswap::ParaswapPriceEstimator,
+        priority::PriorityPriceEstimator, PriceEstimating, PriceEstimatorType,
+    },
     recent_block_cache::CacheConfig,
     sources::{
         self,
@@ -41,11 +48,7 @@ use shared::{
     transport::create_instrumented_transport,
     transport::http::HttpTransport,
 };
-use shared::{
-    baseline_solver::BaseTokens, metrics::setup_metrics_registry,
-    price_estimate::PriceEstimatorType,
-};
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 use structopt::StructOpt;
 use tokio::task;
 use url::Url;
@@ -55,21 +58,21 @@ struct Arguments {
     #[structopt(flatten)]
     shared: shared::arguments::Arguments,
 
-    #[structopt(long, env = "BIND_ADDRESS", default_value = "0.0.0.0:8080")]
+    #[structopt(long, env, default_value = "0.0.0.0:8080")]
     bind_address: SocketAddr,
 
     /// Url of the Postgres database. By default connects to locally running postgres.
-    #[structopt(long, env = "DB_URL", default_value = "postgresql://")]
+    #[structopt(long, env, default_value = "postgresql://")]
     db_url: Url,
 
     /// Skip syncing past events (useful for local deployments)
     #[structopt(long)]
     skip_event_sync: bool,
 
-    /// The minimum amount of time an order has to be valid for.
+    /// The minimum amount of time in seconds an order has to be valid for.
     #[structopt(
         long,
-        env = "MIN_ORDER_VALIDITY_PERIOD",
+        env,
         default_value = "60",
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
@@ -78,34 +81,29 @@ struct Arguments {
     /// Don't use the trace_callMany api that only some nodes support to check whether a token
     /// should be denied.
     /// Note that if a node does not support the api we still use the less accurate call api.
-    #[structopt(
-        long,
-        env = "SKIP_TRACE_API",
-        parse(try_from_str),
-        default_value = "false"
-    )]
+    #[structopt(long, env, parse(try_from_str), default_value = "false")]
     skip_trace_api: bool,
 
-    /// The amount of time a classification of a token into good or bad is valid for.
+    /// The amount of time in seconds a classification of a token into good or bad is valid for.
     #[structopt(
         long,
-        env = "TOKEN_QUALITY_CACHE_EXPIRY_SECONDS",
+        env,
         default_value = "600",
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
     token_quality_cache_expiry: Duration,
 
     /// List of token addresses to be ignored throughout service
-    #[structopt(long, env = "UNSUPPORTED_TOKENS", use_delimiter = true)]
+    #[structopt(long, env, use_delimiter = true)]
     pub unsupported_tokens: Vec<H160>,
 
     /// List of account addresses to be denied from order creation
-    #[structopt(long, env = "BANNED_USERS", use_delimiter = true)]
+    #[structopt(long, env, use_delimiter = true)]
     pub banned_users: Vec<H160>,
 
     /// List of token addresses that should be allowed regardless of whether the bad token detector
     /// thinks they are bad. Base tokens are automatically allowed.
-    #[structopt(long, env = "ALLOWED_TOKENS", use_delimiter = true)]
+    #[structopt(long, env, use_delimiter = true)]
     pub allowed_tokens: Vec<H160>,
 
     /// The number of pairs that are automatically updated in the pool cache.
@@ -119,14 +117,30 @@ struct Arguments {
     #[structopt(long, env, parse(try_from_str), default_value = "false")]
     pub enable_presign_orders: bool,
 
-    /// If solvable orders haven't been successfully update in this time attempting to get them
-    /// errors and our liveness check fails.
+    /// If solvable orders haven't been successfully update in this time in seconds attempting
+    /// to get them errors and our liveness check fails.
     #[structopt(
         long,
         default_value = "300",
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
     solvable_orders_max_update_age: Duration,
+
+    /// Used to specify additional fee subsidy factor based on app_ids contained in orders.
+    /// Should take the form of a json string as shown in the following example:
+    ///
+    /// '0x0000000000000000000000000000000000000000000000000000000000000000:0.5,$PROJECT_APP_ID:0.7'
+    ///
+    /// Furthermore, a value of
+    /// - 1 means no subsidy and is the default for all app_data not contained in this list.
+    /// - 0.5 means that this project pays only 50% of the estimated fees.
+    #[structopt(
+        long,
+        env,
+        default_value = "",
+        parse(try_from_str = parse_partner_fee_factor),
+    )]
+    partner_additional_fee_factors: HashMap<AppId, f64>,
 }
 
 pub async fn database_metrics(metrics: Arc<Metrics>, database: Postgres) -> ! {
@@ -155,7 +169,7 @@ async fn main() {
     let client = shared::http_client(args.shared.http_timeout);
 
     let transport = create_instrumented_transport(
-        HttpTransport::new(client.clone(), args.shared.node_url),
+        HttpTransport::new(client.clone(), args.shared.node_url.clone(), "".to_string()),
         metrics.clone(),
     );
     let web3 = web3::Web3::new(transport);
@@ -242,7 +256,7 @@ async fn main() {
             client.clone(),
             &web3,
             args.shared.gas_estimators.as_slice(),
-            args.shared.blocknative_api_key,
+            args.shared.blocknative_api_key.clone(),
         )
         .await
         .expect("failed to create gas price estimator"),
@@ -258,10 +272,10 @@ async fn main() {
         native_token.address(),
         &args.shared.base_tokens,
     ));
-    let mut allowed_tokens = args.allowed_tokens;
+    let mut allowed_tokens = args.allowed_tokens.clone();
     allowed_tokens.extend(base_tokens.tokens().iter().copied());
     allowed_tokens.push(BUY_ETH_ADDRESS);
-    let unsupported_tokens = args.unsupported_tokens;
+    let unsupported_tokens = args.unsupported_tokens.clone();
 
     let mut finders: Vec<Arc<dyn TokenOwnerFinding>> = pair_providers
         .iter()
@@ -329,25 +343,31 @@ async fn main() {
     let token_info_fetcher = Arc::new(CachedTokenInfoFetcher::new(Box::new(TokenInfoFetcher {
         web3: web3.clone(),
     })));
-    let price_estimator = match args.shared.price_estimator {
-        PriceEstimatorType::Baseline => Arc::new(BaselinePriceEstimator::new(
-            pool_fetcher.clone(),
-            gas_price_estimator.clone(),
-            base_tokens,
-            bad_token_detector.clone(),
-            native_token.address(),
-            native_token_price_estimation_amount,
-        )) as Arc<dyn PriceEstimating>,
-        PriceEstimatorType::Paraswap => Arc::new(ParaswapPriceEstimator {
-            paraswap: Arc::new(DefaultParaswapApi {
-                client: client.clone(),
-                partner: args.shared.paraswap_partner.unwrap_or_default(),
+    let price_estimators = args
+        .shared
+        .price_estimators
+        .iter()
+        .map(|estimator| match estimator {
+            PriceEstimatorType::Baseline => Box::new(BaselinePriceEstimator::new(
+                pool_fetcher.clone(),
+                gas_price_estimator.clone(),
+                base_tokens.clone(),
+                bad_token_detector.clone(),
+                native_token.address(),
+                native_token_price_estimation_amount,
+            )) as Box<dyn PriceEstimating>,
+            PriceEstimatorType::Paraswap => Box::new(ParaswapPriceEstimator {
+                paraswap: Arc::new(DefaultParaswapApi {
+                    client: client.clone(),
+                    partner: args.shared.paraswap_partner.clone().unwrap_or_default(),
+                }),
+                token_info: token_info_fetcher.clone(),
+                bad_token_detector: bad_token_detector.clone(),
+                disabled_paraswap_dexs: args.shared.disabled_paraswap_dexs.clone(),
             }),
-            token_info: token_info_fetcher,
-            bad_token_detector: bad_token_detector.clone(),
-            disabled_paraswap_dexs: args.shared.disabled_paraswap_dexs,
-        }),
-    };
+        })
+        .collect::<Vec<_>>();
+    let price_estimator = Arc::new(PriorityPriceEstimator::new(price_estimators));
     let fee_calculator = Arc::new(EthAwareMinFeeCalculator::new(
         price_estimator.clone(),
         gas_price_estimator,
@@ -355,6 +375,7 @@ async fn main() {
         database.clone(),
         args.shared.fee_factor,
         bad_token_detector.clone(),
+        args.partner_additional_fee_factors,
         native_token_price_estimation_amount,
     ));
 
@@ -369,45 +390,93 @@ async fn main() {
     solvable_orders_cache
         .update(block)
         .await
-        .expect("failed to perform initial sovlable orders update");
-
+        .expect("failed to perform initial solvable orders update");
+    let order_validator = Arc::new(OrderValidator::new(
+        Box::new(web3.clone()),
+        native_token.clone(),
+        args.banned_users,
+        args.min_order_validity_period,
+        fee_calculator.clone(),
+        bad_token_detector.clone(),
+        balance_fetcher,
+    ));
     let orderbook = Arc::new(Orderbook::new(
         domain_separator,
         settlement_contract.address(),
         database.clone(),
-        balance_fetcher,
-        fee_calculator.clone(),
-        args.min_order_validity_period,
         bad_token_detector,
-        Box::new(web3.clone()),
-        native_token.clone(),
-        args.banned_users,
         args.enable_presign_orders,
         solvable_orders_cache,
         args.solvable_orders_max_update_age,
+        order_validator,
     ));
     let service_maintainer = ServiceMaintenance {
         maintainers: vec![database.clone(), Arc::new(event_updater), pool_fetcher],
     };
     check_database_connection(orderbook.as_ref()).await;
 
-    let serve_task = serve_task(
+    let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel();
+    let serve_api = serve_api(
         database.clone(),
         orderbook.clone(),
         fee_calculator,
         price_estimator,
         args.bind_address,
-        metrics.clone(),
+        async {
+            let _ = shutdown_receiver.await;
+        },
     );
     let maintenance_task =
         task::spawn(service_maintainer.run_maintenance_on_new_block(current_block_stream));
     let db_metrics_task = task::spawn(database_metrics(metrics, postgres));
 
+    let mut metrics_address = args.bind_address;
+    metrics_address.set_port(DEFAULT_METRICS_PORT);
+    tracing::info!(%metrics_address, "serving metrics");
+    let metrics_task = serve_metrics(orderbook, metrics_address);
+
+    futures::pin_mut!(serve_api);
     tokio::select! {
-        result = serve_task => tracing::error!(?result, "serve task exited"),
+        result = &mut serve_api => tracing::error!(?result, "API task exited"),
         result = maintenance_task => tracing::error!(?result, "maintenance task exited"),
         result = db_metrics_task => tracing::error!(?result, "database metrics task exited"),
+        result = metrics_task => tracing::error!(?result, "metrics task exited"),
+        _ = shutdown_signal() => {
+            tracing::info!("Gracefully shutting down API");
+            shutdown_sender.send(()).expect("failed to send shutdown signal");
+            match tokio::time::timeout(Duration::from_secs(10), serve_api).await {
+                Ok(inner) => inner.expect("API failed during shutdown"),
+                Err(_) => tracing::error!("API shutdown exceeded timeout"),
+            }
+        }
     };
+}
+
+#[cfg(unix)]
+async fn shutdown_signal() {
+    // Intercept main signals for graceful shutdown
+    // Kubernetes sends sigterm, whereas locally sigint (ctrl-c) is most common
+    let sigterm = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .unwrap()
+            .recv()
+            .await
+    };
+    let sigint = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+            .unwrap()
+            .recv()
+            .await;
+    };
+    futures::pin_mut!(sigint);
+    futures::pin_mut!(sigterm);
+    futures::future::select(sigterm, sigint).await;
+}
+
+#[cfg(windows)]
+async fn shutdown_signal() {
+    // We don't support signal handling on windows
+    std::future::pending().await
 }
 
 async fn check_database_connection(orderbook: &Orderbook) {
@@ -418,4 +487,78 @@ async fn check_database_connection(orderbook: &Orderbook) {
         })
         .await
         .expect("failed to connect to database");
+}
+
+/// Parses a comma separated list of colon separated values representing fee factors for AppIds.
+fn parse_partner_fee_factor(s: &str) -> Result<HashMap<AppId, f64>> {
+    let mut res = HashMap::default();
+    if s.is_empty() {
+        return Ok(res);
+    }
+    for pair_str in s.split(',').into_iter() {
+        let mut split = pair_str.trim().split(':');
+        let key = split
+            .next()
+            .ok_or_else(|| anyhow!("missing AppId"))?
+            .trim()
+            .parse()
+            .context("failed to parse address")?;
+        let value = split
+            .next()
+            .ok_or_else(|| anyhow!("missing value"))?
+            .trim()
+            .parse::<f64>()
+            .context("failed to parse fee factor")?;
+        if split.next().is_some() {
+            return Err(anyhow!("Invalid pair lengths"));
+        }
+        res.insert(key, value);
+    }
+    Ok(res)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use maplit::hashmap;
+
+    #[test]
+    fn parse_partner_fee_factor_ok() {
+        let x = "0x0000000000000000000000000000000000000000000000000000000000000000";
+        let y = "0x0101010101010101010101010101010101010101010101010101010101010101";
+        // without spaces
+        assert_eq!(
+            parse_partner_fee_factor(&format!("{}:0.5,{}:0.7", x, y)).unwrap(),
+            hashmap! { AppId([0u8; 32]) => 0.5, AppId([1u8; 32]) => 0.7 }
+        );
+        // with spaces
+        assert_eq!(
+            parse_partner_fee_factor(&format!("{}: 0.5, {}: 0.7", x, y)).unwrap(),
+            hashmap! { AppId([0u8; 32]) => 0.5, AppId([1u8; 32]) => 0.7 }
+        );
+        // whole numbers
+        assert_eq!(
+            parse_partner_fee_factor(&format!("{}: 1, {}: 2", x, y)).unwrap(),
+            hashmap! { AppId([0u8; 32]) => 1., AppId([1u8; 32]) => 2. }
+        );
+    }
+
+    #[test]
+    fn parse_partner_fee_factor_err() {
+        assert!(parse_partner_fee_factor("0x1:0.5,0x2:0.7").is_err());
+        assert!(parse_partner_fee_factor("0x12:0.5,0x22:0.7").is_err());
+        assert!(parse_partner_fee_factor(
+            "0x0000000000000000000000000000000000000000000000000000000000000000:0.5:3"
+        )
+        .is_err());
+        assert!(parse_partner_fee_factor(
+            "0x0000000000000000000000000000000000000000000000000000000000000000:word"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn parse_partner_fee_factor_ok_on_empty() {
+        assert!(parse_partner_fee_factor("").unwrap().is_empty());
+    }
 }

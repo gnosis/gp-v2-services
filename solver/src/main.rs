@@ -1,15 +1,15 @@
+use anyhow::anyhow;
 use contracts::{IUniswapLikeRouter, WETH9};
 use ethcontract::{Account, PrivateKey, H160, U256};
 use reqwest::Url;
-use shared::baseline_solver::BaseTokens;
-use shared::metrics::setup_metrics_registry;
 use shared::{
     bad_token::list_based::ListBasedDetector,
+    baseline_solver::BaseTokens,
     current_block::current_block_stream,
     maintenance::{Maintaining, ServiceMaintenance},
-    metrics::serve_metrics,
+    metrics::{serve_metrics, setup_metrics_registry},
     network::network_name,
-    price_estimate::BaselinePriceEstimator,
+    price_estimation::baseline::BaselinePriceEstimator,
     recent_block_cache::CacheConfig,
     sources::{
         self,
@@ -22,18 +22,20 @@ use shared::{
     },
     token_info::{CachedTokenInfoFetcher, TokenInfoFetcher},
     token_list::TokenList,
-    transport::create_instrumented_transport,
-    transport::http::HttpTransport,
+    transport::{create_instrumented_transport, http::HttpTransport},
 };
 use solver::{
     driver::Driver,
-    liquidity::{balancer::BalancerV2Liquidity, uniswap::UniswapLikeLiquidity},
+    liquidity::{
+        balancer::BalancerV2Liquidity, offchain_orderbook::OrderbookLiquidity,
+        uniswap::UniswapLikeLiquidity,
+    },
     liquidity_collector::LiquidityCollector,
     metrics::Metrics,
     settlement_submission::{archer_api::ArcherApi, SolutionSubmitter, TransactionStrategy},
     solver::SolverType,
 };
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, str::FromStr, sync::Arc, time::Duration};
 use structopt::{clap::arg_enum, StructOpt};
 
 #[derive(Debug, StructOpt)]
@@ -42,38 +44,36 @@ struct Arguments {
     shared: shared::arguments::Arguments,
 
     /// The API endpoint to fetch the orderbook
-    #[structopt(long, env = "ORDERBOOK_URL", default_value = "http://localhost:8080")]
+    #[structopt(long, env, default_value = "http://localhost:8080")]
     orderbook_url: Url,
 
     /// The API endpoint to call the mip solver
-    #[structopt(long, env = "MIP_SOLVER_URL", default_value = "http://localhost:8000")]
+    #[structopt(long, env, default_value = "http://localhost:8000")]
     mip_solver_url: Url,
 
     /// The API endpoint to call the mip v2 solver
-    #[structopt(
-        long,
-        env = "QUASIMODO_SOLVER_URL",
-        default_value = "http://localhost:8000"
-    )]
+    #[structopt(long, env, default_value = "http://localhost:8000")]
     quasimodo_solver_url: Url,
 
-    /// The private key used by the driver to sign transactions.
-    #[structopt(short = "k", long, env = "PRIVATE_KEY", hide_env_values = true)]
-    private_key: Option<PrivateKey>,
+    /// The account used by the driver to sign transactions. This can be either
+    /// a 32-byte private key for offline signing, or a 20-byte Ethereum address
+    /// for signing with a local node account.
+    #[structopt(long, env, hide_env_values = true)]
+    solver_account: Option<SolverAccountArg>,
 
-    /// The target confirmation time for settlement transactions used to estimate gas price.
+    /// The target confirmation time in seconds for settlement transactions used to estimate gas price.
     #[structopt(
         long,
-        env = "TARGET_CONFIRM_TIME",
+        env,
         default_value = "30",
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
     target_confirm_time: Duration,
 
-    /// Every how often we should execute the driver's run loop
+    /// Every how often in seconds we should execute the driver's run loop
     #[structopt(
         long,
-        env = "SETTLE_INTERVAL",
+        env,
         default_value = "10",
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
@@ -82,7 +82,7 @@ struct Arguments {
     /// Which type of solver to use
     #[structopt(
         long,
-        env = "SOLVER_TYPE",
+        env,
         default_value = "Naive,Baseline",
         possible_values = &SolverType::variants(),
         case_insensitive = true,
@@ -90,44 +90,40 @@ struct Arguments {
     )]
     solvers: Vec<SolverType>,
 
-    /// Individual private keys for each solver
+    /// Individual accounts for each solver. See `--solver-account` for more
+    /// information about configuring accounts.
     #[structopt(
         long,
-        env = "SOLVER_PRIVATE_KEYS",
+        env,
         case_insensitive = true,
         use_delimiter = true,
         hide_env_values = true
     )]
-    solver_private_keys: Option<Vec<PrivateKey>>,
+    solver_accounts: Option<Vec<SolverAccountArg>>,
 
-    /// A settlement must contain at least one order older than this duration for it to be applied.
-    /// Larger values delay individual settlements more but have a higher coincidence of wants
-    /// chance.
+    /// A settlement must contain at least one order older than this duration in seconds for it
+    /// to be applied.  Larger values delay individual settlements more but have a higher
+    /// coincidence of wants chance.
     #[structopt(
         long,
-        env = "MIN_ORDER_AGE",
+        env,
         default_value = "30",
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
     min_order_age: Duration,
 
     /// The port at which we serve our metrics
-    #[structopt(
-        long,
-        env = "METRICS_PORT",
-        default_value = "9587",
-        case_insensitive = true
-    )]
+    #[structopt(long, env, default_value = "9587", case_insensitive = true)]
     metrics_port: u16,
 
     /// The port at which we serve our metrics
-    #[structopt(long, env = "MAX_MERGED_SETTLEMENTS", default_value = "5")]
+    #[structopt(long, env, default_value = "5")]
     max_merged_settlements: usize,
 
-    /// The maximum amount of time a solver is allowed to take.
+    /// The maximum amount of time in seconds a solver is allowed to take.
     #[structopt(
         long,
-        env = "SOLVER_TIME_LIMIT",
+        env,
         default_value = "30",
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
@@ -137,7 +133,7 @@ struct Arguments {
     /// traded in order to use the 1Inch solver.
     #[structopt(
         long,
-        env = "MIN_ORDER_SIZE_ONE_INCH",
+        env,
         default_value = "5",
         parse(try_from_str = shared::arguments::wei_from_base_unit)
     )]
@@ -153,15 +149,15 @@ struct Arguments {
     /// without external liquidity
     #[structopt(
         long,
-        env = "MARKET_MAKABLE_TOKEN_LIST",
+        env,
         default_value = "https://tokens.coingecko.com/uniswap/all.json"
     )]
     market_makable_token_list: String,
 
-    /// The maximum gas price the solver is willing to pay in a settlement
+    /// The maximum gas price in Gwei the solver is willing to pay in a settlement.
     #[structopt(
         long,
-        env = "GAS_PRICE_CAP_GWEI",
+        env,
         default_value = "1500",
         parse(try_from_str = shared::arguments::wei_from_gwei)
     )]
@@ -179,8 +175,8 @@ struct Arguments {
     #[structopt(long, env, default_value = "PublicMempool")]
     transaction_strategy: TransactionStrategyArg,
 
-    /// The maximum time we spend trying to settle a transaction through the archer network before
-    /// going to back to solving.
+    /// The maximum time in seconds we spend trying to settle a transaction through the archer
+    /// network before going to back to solving.
     #[structopt(
         long,
         default_value = "60",
@@ -188,23 +184,63 @@ struct Arguments {
     )]
     max_archer_submission_seconds: Duration,
 
-    /// The RPC endpoint to use for submitting private network transactions.
-    #[structopt(long, env)]
-    private_tx_network_url: Option<Url>,
+    /// The RPC endpoints to use for submitting transaction to a custom set of nodes.
+    #[structopt(long, env, use_delimiter = true)]
+    transaction_submission_nodes: Vec<Url>,
 
     /// The configured addresses whose orders should be considered liquidity
     /// and not to be included in the objective function by the HTTP solver.
-    #[structopt(long, env)]
+    #[structopt(long, env, use_delimiter = true)]
     liquidity_order_owners: Vec<H160>,
+
+    /// Fee scaling factor for objective value. This controls the constant
+    /// factor by which order fees are multiplied with. Setting this to a value
+    /// greater than 1.0 makes settlements with negative objective values less
+    /// likely, promoting more aggressive merging of single order settlements.
+    #[structopt(long, env, default_value = "1", parse(try_from_str = shared::arguments::parse_fee_factor))]
+    pub fee_objective_scaling_factor: f64,
 }
 
 arg_enum! {
     #[derive(Debug)]
-    pub enum TransactionStrategyArg {
+    enum TransactionStrategyArg {
         PublicMempool,
         ArcherNetwork,
-        PrivateNetwork,
+        CustomNodes,
         DryRun,
+    }
+}
+
+#[derive(Debug)]
+enum SolverAccountArg {
+    PrivateKey(PrivateKey),
+    Address(H160),
+}
+
+impl SolverAccountArg {
+    fn into_account(self, chain_id: u64) -> Account {
+        match self {
+            SolverAccountArg::PrivateKey(key) => Account::Offline(key, Some(chain_id)),
+            SolverAccountArg::Address(address) => Account::Local(address, None),
+        }
+    }
+}
+
+impl FromStr for SolverAccountArg {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse::<PrivateKey>()
+            .map(SolverAccountArg::PrivateKey)
+            .or_else(|pk_err| {
+                Ok(SolverAccountArg::Address(s.parse().map_err(
+                    |addr_err| {
+                        anyhow!("could not parse as private key: {}", pk_err)
+                            .context(anyhow!("could not parse as address: {}", addr_err))
+                            .context("invalid solver account, it is neither a private key or an Ethereum address")
+                    },
+                )?))
+            })
     }
 }
 
@@ -220,7 +256,7 @@ async fn main() {
     let client = shared::http_client(args.shared.http_timeout);
 
     let transport = create_instrumented_transport(
-        HttpTransport::new(client.clone(), args.shared.node_url),
+        HttpTransport::new(client.clone(), args.shared.node_url, "base".to_string()),
         metrics.clone(),
     );
     let web3 = web3::Web3::new(transport);
@@ -242,11 +278,13 @@ async fn main() {
     let native_token_contract = WETH9::deployed(&web3)
         .await
         .expect("couldn't load deployed native token");
-    let orderbook_api = solver::orderbook::OrderBookApi::new(
+    let orderbook_liquidity = OrderbookLiquidity::new(
         args.orderbook_url,
-        native_token_contract.clone(),
         client.clone(),
+        native_token_contract.clone(),
         args.liquidity_order_owners.into_iter().collect(),
+        args.shared.fee_factor,
+        args.fee_objective_scaling_factor,
     );
 
     let base_tokens = Arc::new(BaseTokens::new(
@@ -363,23 +401,25 @@ async fn main() {
     .await;
 
     let solvers = {
-        if let Some(private_keys) = args.solver_private_keys {
+        if let Some(solver_accounts) = args.solver_accounts {
             assert!(
-                private_keys.len() == args.solvers.len(),
-                "number of solver does not match the number of private keys"
+                solver_accounts.len() == args.solvers.len(),
+                "number of solvers ({}) does not match the number of accounts ({})",
+                args.solvers.len(),
+                solver_accounts.len()
             );
 
-            private_keys
+            solver_accounts
                 .into_iter()
-                .map(|private_key| Account::Offline(private_key, Some(chain_id)))
+                .map(|account_arg| account_arg.into_account(chain_id))
                 .zip(args.solvers)
                 .collect()
-        } else if let Some(private_key) = args.private_key {
-            std::iter::repeat(Account::Offline(private_key, Some(chain_id)))
+        } else if let Some(account_arg) = args.solver_account {
+            std::iter::repeat(account_arg.into_account(chain_id))
                 .zip(args.solvers)
                 .collect()
         } else {
-            panic!("either SOLVER_PRIVATE_KEY or PRIVATE_KEY must be set")
+            panic!("either SOLVER_ACCOUNTS or SOLVER_ACCOUNT must be set")
         }
     };
 
@@ -395,7 +435,6 @@ async fn main() {
         price_estimator.clone(),
         network_name.to_string(),
         chain_id,
-        args.shared.fee_factor,
         args.min_order_size_one_inch,
         args.disabled_one_inch_protocols,
         args.paraswap_slippage_bps,
@@ -406,8 +445,8 @@ async fn main() {
     )
     .expect("failure creating solvers");
     let liquidity_collector = LiquidityCollector {
+        orderbook_liquidity,
         uniswap_like_liquidity,
-        orderbook_api,
         balancer_v2_liquidity,
     };
     let market_makable_token_list =
@@ -422,7 +461,9 @@ async fn main() {
         target_confirm_time: args.target_confirm_time,
         gas_price_cap: args.gas_price_cap,
         transaction_strategy: match args.transaction_strategy {
-            TransactionStrategyArg::PublicMempool => TransactionStrategy::PublicMempool,
+            TransactionStrategyArg::PublicMempool => {
+                TransactionStrategy::CustomNodes(vec![web3.clone()])
+            }
             TransactionStrategyArg::ArcherNetwork => TransactionStrategy::ArcherNetwork {
                 archer_api: ArcherApi::new(
                     args.archer_authorization
@@ -431,18 +472,32 @@ async fn main() {
                 ),
                 max_confirm_time: args.max_archer_submission_seconds,
             },
-            TransactionStrategyArg::PrivateNetwork => TransactionStrategy::PrivateNetwork {
-                network_rpc: {
-                    let url = args
-                        .private_tx_network_url
-                        .expect("missing private transaction network URL");
-                    let transport = create_instrumented_transport(
-                        HttpTransport::new(client.clone(), url),
-                        metrics.clone(),
+            TransactionStrategyArg::CustomNodes => {
+                assert!(
+                    !args.transaction_submission_nodes.is_empty(),
+                    "missing transaction submission nodes"
+                );
+                let nodes = args
+                    .transaction_submission_nodes
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, url)| {
+                        let transport = create_instrumented_transport(
+                            HttpTransport::new(client.clone(), url, index.to_string()),
+                            metrics.clone(),
+                        );
+                        web3::Web3::new(transport)
+                    })
+                    .collect::<Vec<_>>();
+                for node in &nodes {
+                    let node_network_id = node.net().version().await.unwrap();
+                    assert_eq!(
+                        node_network_id, network_id,
+                        "network id of custom node doesn't match main node"
                     );
-                    web3::Web3::new(transport)
-                },
-            },
+                }
+                TransactionStrategy::CustomNodes(nodes)
+            }
             TransactionStrategyArg::DryRun => TransactionStrategy::DryRun,
         },
     };
@@ -462,7 +517,6 @@ async fn main() {
         args.solver_time_limit,
         market_makable_token_list,
         current_block_stream.clone(),
-        args.shared.fee_factor,
         solution_submitter,
         native_token_price_estimation_amount,
     );
@@ -517,4 +571,45 @@ async fn build_amm_artifacts(
         }
     }
     res
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    impl PartialEq for SolverAccountArg {
+        fn eq(&self, other: &Self) -> bool {
+            match (self, other) {
+                (SolverAccountArg::PrivateKey(a), SolverAccountArg::PrivateKey(b)) => {
+                    a.public_address() == b.public_address()
+                }
+                (SolverAccountArg::Address(a), SolverAccountArg::Address(b)) => a == b,
+                _ => false,
+            }
+        }
+    }
+
+    #[test]
+    fn parses_solver_account_arg() {
+        assert_eq!(
+            "0x4242424242424242424242424242424242424242424242424242424242424242"
+                .parse::<SolverAccountArg>()
+                .unwrap(),
+            SolverAccountArg::PrivateKey(PrivateKey::from_raw([0x42; 32]).unwrap())
+        );
+        assert_eq!(
+            "0x4242424242424242424242424242424242424242"
+                .parse::<SolverAccountArg>()
+                .unwrap(),
+            SolverAccountArg::Address(H160([0x42; 20])),
+        );
+    }
+
+    #[test]
+    fn errors_on_invalid_solver_account_arg() {
+        assert!("0x010203040506070809101112131415161718192021"
+            .parse::<SolverAccountArg>()
+            .is_err());
+        assert!("not an account".parse::<SolverAccountArg>().is_err());
+    }
 }

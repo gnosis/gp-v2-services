@@ -33,9 +33,8 @@ lazy_static = "1.4"
 maplit = "1.0"
 model = { path = "../model" }
 num = "0.4"
-orderbook= { path = "../orderbook" }
 primitive-types = { version = "0.9", features = ["fp-conversion"] }
-prometheus = "0.12"
+prometheus = "0.13"
 rand = "0.8"
 reqwest = { version = "0.11", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -46,7 +45,7 @@ structopt = "0.3"
 strum = "0.20"
 strum_macros = "0.21"
 thiserror = "1.0"
-tokio = { version = "1.11", features = ["macros", "rt-multi-thread", "time", "test-util"] }
+tokio = { version = "1.12", features = ["macros", "rt-multi-thread", "time", "test-util"] }
 tracing = "0.1"
 transaction-retry = { path = "../../../gp-transaction-retry/gp-transaction-retry" }
 web3 = { git = "https://github.com/tomusdrw/rust-web3.git", rev="2e2d1dfa906aa2dff6312b97d0d5ba804e9c8c6e", default-features = false }

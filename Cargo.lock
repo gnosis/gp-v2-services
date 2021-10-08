@@ -108,6 +108,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c07dab4369547dbe5114677b33fbbf724971019f3818172d59a97a61c774ffd"
 
 [[package]]
+name = "async-recursion"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7d78656ba01f1b93024b7c3a0467f1608e4be67d725749fdcd7d2c7678fd7a2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.51"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -744,8 +755,6 @@ dependencies = [
 [[package]]
 name = "ethcontract"
 version = "0.15.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2267d015c10e2df6bb5a24cdfdbfb037b2cec9b24132b83910ee77701a51a0c5"
 dependencies = [
  "arrayvec 0.7.1",
  "ethcontract-common",
@@ -768,8 +777,6 @@ dependencies = [
 [[package]]
 name = "ethcontract-common"
 version = "0.15.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b7af54e00ba011a694c8fcb4a00bbdd81994874c0203b7887a230e547550a50"
 dependencies = [
  "ethabi",
  "hex",
@@ -784,8 +791,6 @@ dependencies = [
 [[package]]
 name = "ethcontract-derive"
 version = "0.15.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "802f4b47a4fea9182d0746bb121c03b45ddceee600e33a5eb90167eb64802547"
 dependencies = [
  "anyhow",
  "ethcontract-common",
@@ -798,8 +803,6 @@ dependencies = [
 [[package]]
 name = "ethcontract-generate"
 version = "0.15.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fd1a1ad98206db73dbb8e95849a737ff24e5b58bfe8abceb6ba33259c81b572"
 dependencies = [
  "Inflector",
  "anyhow",
@@ -814,8 +817,6 @@ dependencies = [
 [[package]]
 name = "ethcontract-mock"
 version = "0.15.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c925e885492448a4e3910d18d26823352a6a1e5f198866bcd3d1b77b6140c9d"
 dependencies = [
  "ethcontract",
  "hex",
@@ -1037,11 +1038,11 @@ dependencies = [
 [[package]]
 name = "gas-estimation"
 version = "0.1.0"
-source = "git+https://github.com/gnosis/gp-gas-estimation.git?tag=v0.3.2#b6b4808e182cacd660913a408d3938ef024c86fe"
 dependencies = [
  "anyhow",
  "async-trait",
  "futures",
+ "http",
  "primitive-types",
  "serde",
  "serde_json",
@@ -1845,6 +1846,7 @@ dependencies = [
  "num-bigint 0.3.3",
  "primitive-types",
  "prometheus",
+ "prometheus-metric-storage",
  "reqwest",
  "secp256k1",
  "serde",
@@ -2098,9 +2100,9 @@ dependencies = [
 
 [[package]]
 name = "prometheus"
-version = "0.12.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5986aa8d62380092d2f50f8b1cdba9cb9b6731ffd4b25b51fd126b6c3e05b99c"
+checksum = "b7f64969ffd5dd8f39bd57a68ac53c163a095ed9d0fb707146da1b27025a3504"
 dependencies = [
  "cfg-if",
  "fnv",
@@ -2113,9 +2115,9 @@ dependencies = [
 
 [[package]]
 name = "prometheus-metric-storage"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46063c7c7e9054bfca94b0aa77e6f70d33c04bb96b8cac6332f95230c34bc6c2"
+checksum = "4386765c6446d3b5260d8cfcf2eb2d795ea741acce1be50c414a8ea7d9e42edd"
 dependencies = [
  "lazy_static",
  "prometheus",
@@ -2124,9 +2126,9 @@ dependencies = [
 
 [[package]]
 name = "prometheus-metric-storage-derive"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "518fca4a07c57d69fc3721f74e724bf6c20bb8a44598abb667c4e218a2501417"
+checksum = "681eb556e1680139d92b974285b280fbce867b43b1670db0b9d7dec0d5ea19c3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2608,6 +2610,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_approx_eq",
+ "async-recursion",
  "async-trait",
  "atty",
  "contracts",
@@ -2618,6 +2621,7 @@ dependencies = [
  "gas-estimation",
  "hex",
  "hex-literal",
+ "http",
  "itertools",
  "lazy_static",
  "lru",
@@ -2717,7 +2721,6 @@ dependencies = [
  "mockall",
  "model",
  "num",
- "orderbook",
  "primitive-types",
  "prometheus",
  "rand",
@@ -3039,9 +3042,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.11.0"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4efe6fc2395938c8155973d7be49fe8d03a843726e285e100a8a383cc0154ce"
+checksum = "c2c2416fdedca8443ae44b4527de1ea633af61d8f7169ffa6e72c5b53d24efcc"
 dependencies = [
  "autocfg",
  "bytes",
@@ -3227,10 +3230,10 @@ dependencies = [
 [[package]]
 name = "transaction-retry"
 version = "0.1.0"
-source = "git+https://github.com/gnosis/gp-transaction-retry.git?tag=v0.1.1#6c94d9d2e2a8314f85b5aec4ca0a96185110bd98"
 dependencies = [
  "async-trait",
  "futures",
+ "gas-estimation",
 ]
 
 [[package]]
@@ -3538,8 +3541,7 @@ dependencies = [
 [[package]]
 name = "web3"
 version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd24abe6f2b68e0677f843059faea87bcbd4892e39f02886f366d8222c3c540d"
+source = "git+https://github.com/tomusdrw/rust-web3.git?rev=2e2d1dfa906aa2dff6312b97d0d5ba804e9c8c6e#2e2d1dfa906aa2dff6312b97d0d5ba804e9c8c6e"
 dependencies = [
  "arrayvec 0.5.2",
  "base64",
@@ -3553,6 +3555,7 @@ dependencies = [
  "hex",
  "jsonrpc-core",
  "log",
+ "once_cell",
  "parking_lot",
  "pin-project",
  "reqwest",

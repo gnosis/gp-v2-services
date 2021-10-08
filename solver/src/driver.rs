@@ -22,8 +22,7 @@ use num::BigRational;
 use primitive_types::{H160, U256};
 use shared::{
     current_block::{self, CurrentBlockStream},
-    price_estimate,
-    price_estimate::PriceEstimating,
+    price_estimation::{self, PriceEstimating},
     recent_block_cache::Block,
     token_list::TokenList,
     Web3,
@@ -51,7 +50,6 @@ pub struct Driver {
     market_makable_token_list: Option<TokenList>,
     inflight_trades: HashSet<OrderUid>,
     block_stream: CurrentBlockStream,
-    fee_factor: f64,
     solution_submitter: SolutionSubmitter,
     solve_id: u64,
     native_token_amount_to_estimate_prices_with: U256,
@@ -74,7 +72,6 @@ impl Driver {
         solver_time_limit: Duration,
         market_makable_token_list: Option<TokenList>,
         block_stream: CurrentBlockStream,
-        fee_factor: f64,
         solution_submitter: SolutionSubmitter,
         native_token_amount_to_estimate_prices_with: U256,
     ) -> Self {
@@ -95,7 +92,6 @@ impl Driver {
             market_makable_token_list,
             inflight_trades: HashSet::new(),
             block_stream,
-            fee_factor,
             solution_submitter,
             solve_id: 0,
             native_token_amount_to_estimate_prices_with,
@@ -328,9 +324,7 @@ impl Driver {
         futures::stream::iter(settlements)
             .filter_map(|(solver, settlement)| async {
                 let surplus = settlement.total_surplus(prices);
-                // Because of a potential fee discount, the solver fees may by themselves not be sufficient to make a solution economically viable (leading to a negative objective value)
-                // We therefore reverse apply the fee discount to simulate unsubsidized fees for ranking.
-                let unsubsidized_solver_fees = settlement.total_fees(prices) / BigRational::from_float(self.fee_factor).expect("Discount factor is not a rational");
+                let scaled_solver_fees = settlement.total_scaled_unsubsidized_fees(prices);
                 let gas_estimate = settlement_submission::estimate_gas(
                     &self.settlement_contract,
                     &settlement.clone().into(),
@@ -345,7 +339,7 @@ impl Driver {
                 let rated_settlement = RatedSettlement {
                     settlement,
                     surplus,
-                    solver_fees: unsubsidized_solver_fees,
+                    solver_fees: scaled_solver_fees,
                     gas_estimate,
                     gas_price: gas_price_wei.clone(),
                 };
@@ -531,7 +525,7 @@ pub async fn collect_estimated_prices(
         .filter(|token| *token != native_token)
         .collect::<HashSet<_>>()
         .into_iter()
-        .map(|token| price_estimate::Query {
+        .map(|token| price_estimation::Query {
             // For ranking purposes it doesn't matter how the external price vector is scaled,
             // but native_token is used here anyway for better logging/debugging.
             sell_token: native_token,
@@ -612,13 +606,13 @@ mod tests {
     use model::order::{Order, OrderCreation, OrderKind};
     use num::traits::One as _;
     use shared::{
-        price_estimate::mocks::{FailingPriceEstimator, FakePriceEstimator},
+        price_estimation::mocks::{FailingPriceEstimator, FakePriceEstimator},
         token_list::Token,
     };
 
     #[tokio::test]
     async fn collect_estimated_prices_adds_prices_for_buy_and_sell_token_of_limit_orders() {
-        let price_estimator = FakePriceEstimator(price_estimate::Estimate {
+        let price_estimator = FakePriceEstimator(price_estimation::Estimate {
             out_amount: 1.into(),
             gas: 1.into(),
         });
@@ -634,7 +628,7 @@ mod tests {
             buy_token,
             kind: OrderKind::Buy,
             partially_fillable: false,
-            fee_amount: Default::default(),
+            scaled_fee_amount: Default::default(),
             settlement_handling: CapturingSettlementHandler::arc(),
             id: "0".into(),
             is_liquidity_order: false,
@@ -661,7 +655,7 @@ mod tests {
             buy_token,
             kind: OrderKind::Buy,
             partially_fillable: false,
-            fee_amount: Default::default(),
+            scaled_fee_amount: Default::default(),
             settlement_handling: CapturingSettlementHandler::arc(),
             id: "0".into(),
             is_liquidity_order: false,
@@ -673,7 +667,7 @@ mod tests {
 
     #[tokio::test]
     async fn collect_estimated_prices_adds_native_token_if_wrapped_is_traded() {
-        let price_estimator = FakePriceEstimator(price_estimate::Estimate {
+        let price_estimator = FakePriceEstimator(price_estimation::Estimate {
             out_amount: 1.into(),
             gas: 1.into(),
         });
@@ -688,7 +682,7 @@ mod tests {
             buy_token: native_token,
             kind: OrderKind::Buy,
             partially_fillable: false,
-            fee_amount: Default::default(),
+            scaled_fee_amount: Default::default(),
             settlement_handling: CapturingSettlementHandler::arc(),
             id: "0".into(),
             is_liquidity_order: false,

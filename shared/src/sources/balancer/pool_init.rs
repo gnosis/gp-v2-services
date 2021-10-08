@@ -88,8 +88,12 @@ impl PoolInitializing for DefaultPoolInitializer {
             DefaultPoolInitializer::Subgraph(inner) => inner.initialize_pools().await,
             DefaultPoolInitializer::Fetched(inner) => inner.initialize_pools().await,
         }?;
-
-        tracing::debug!("initialized registered pools {:?}", registered_pools);
+        tracing::debug!(
+            "initialized registered pools ({} Stable, {} Weighted & {} TwoTokenWeighted)",
+            registered_pools.stable_pools.len(),
+            registered_pools.weighted_pools.len(),
+            registered_pools.weighted_2token_pools.len()
+        );
         Ok(registered_pools)
     }
 }
@@ -355,7 +359,6 @@ mod tests {
     use ethcontract::H256;
     use maplit::hashmap;
     use mockall::{predicate::*, Sequence};
-    use num::BigRational;
 
     #[tokio::test]
     async fn initializes_empty_pools() {
@@ -646,7 +649,6 @@ mod tests {
                         tokens: vec![],
                         scaling_exponents: vec![],
                     },
-                    amplification_parameter: BigRational::from_integer(3.into()),
                 })
             });
 

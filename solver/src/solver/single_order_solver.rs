@@ -58,10 +58,12 @@ impl<I: SingleOrderSolving + Send + Sync + 'static> Solver for SingleOrderSolver
                     Err(err) => {
                         let name = self.inner.name();
                         if err.retryable {
-                            tracing::warn!("Solver {} benign error: {:?}", name, &err);
+                            tracing::warn!("Solver {} retryable error: {:?}", name, &err);
                             orders.push_back(order);
-                        } else {
+                        } else if err.should_alert {
                             tracing::error!("Solver {} hard error: {:?}", name, &err);
+                        } else {
+                            tracing::warn!("Solver {} soft error: {:?}", name, &err);
                         }
                     }
                 }
@@ -86,6 +88,8 @@ impl<I: SingleOrderSolving + Send + Sync + 'static> Solver for SingleOrderSolver
 pub struct SettlementError {
     pub inner: anyhow::Error,
     pub retryable: bool,
+    // Whether or not this error should be logged as an error
+    pub should_alert: bool,
 }
 
 impl From<anyhow::Error> for SettlementError {
@@ -93,6 +97,7 @@ impl From<anyhow::Error> for SettlementError {
         SettlementError {
             inner: err,
             retryable: false,
+            should_alert: true,
         }
     }
 }
@@ -122,7 +127,7 @@ mod tests {
             buy_amount: Default::default(),
             kind: Default::default(),
             partially_fillable: Default::default(),
-            fee_amount: Default::default(),
+            scaled_fee_amount: Default::default(),
             settlement_handling: handler.clone(),
             is_liquidity_order: false,
         };
@@ -161,6 +166,7 @@ mod tests {
                     0 => Err(SettlementError {
                         inner: anyhow!(""),
                         retryable: true,
+                        should_alert: true,
                     }),
                     1 => Ok(None),
                     _ => unreachable!(),
@@ -179,7 +185,7 @@ mod tests {
             buy_amount: Default::default(),
             kind: Default::default(),
             partially_fillable: Default::default(),
-            fee_amount: Default::default(),
+            scaled_fee_amount: Default::default(),
             settlement_handling: handler.clone(),
             is_liquidity_order: false,
         };
@@ -200,6 +206,7 @@ mod tests {
             Err(SettlementError {
                 inner: anyhow!(""),
                 retryable: false,
+                should_alert: true,
             })
         });
 
@@ -213,7 +220,7 @@ mod tests {
             buy_amount: Default::default(),
             kind: Default::default(),
             partially_fillable: Default::default(),
-            fee_amount: Default::default(),
+            scaled_fee_amount: Default::default(),
             settlement_handling: handler.clone(),
             is_liquidity_order: false,
         };

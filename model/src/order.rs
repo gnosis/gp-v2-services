@@ -1,7 +1,7 @@
 //! Contains the order type as described by the specification with serialization as described by the openapi documentation.
 
 use crate::{
-    appdata_hexadecimal,
+    app_id::AppId,
     h160_hexadecimal::{self, HexadecimalH160},
     signature::{EcdsaSignature, EcdsaSigningScheme, Signature},
     u256_decimal::{self, DecimalU256},
@@ -16,9 +16,11 @@ use secp256k1::key::ONE_KEY;
 use serde::{de, Deserialize, Serialize};
 use serde::{Deserializer, Serializer};
 use serde_with::serde_as;
-use std::collections::HashSet;
-use std::fmt::{self, Display};
-use std::str::FromStr;
+use std::{
+    collections::HashSet,
+    fmt::{self, Debug, Display},
+    str::FromStr,
+};
 use web3::signing::{self, Key, SecretKeyRef};
 
 /// The flag denoting that an order is buying ETH (or the chain's native token).
@@ -43,6 +45,7 @@ impl Default for Order {
             OrderCreation::default(),
             &DomainSeparator::default(),
             H160::default(),
+            U256::default(),
         )
         .unwrap()
     }
@@ -63,17 +66,18 @@ impl Order {
         order_creation: OrderCreation,
         domain: &DomainSeparator,
         settlement_contract: H160,
+        full_fee_amount: U256,
     ) -> Option<Self> {
         let owner = order_creation
             .signature
             .validate(domain, &order_creation.hash_struct())?;
-        // TODO - test this function when validate returns None.
         Some(Self {
             order_meta_data: OrderMetaData {
                 creation_date: chrono::offset::Utc::now(),
                 owner,
                 uid: order_creation.uid(domain, &owner),
                 settlement_contract,
+                full_fee_amount,
                 ..Default::default()
             },
             order_creation,
@@ -124,12 +128,17 @@ impl OrderBuilder {
     }
 
     pub fn with_app_data(mut self, app_data: [u8; 32]) -> Self {
-        self.0.order_creation.app_data = app_data;
+        self.0.order_creation.app_data = AppId(app_data);
         self
     }
 
     pub fn with_fee_amount(mut self, fee_amount: U256) -> Self {
         self.0.order_creation.fee_amount = fee_amount;
+        self
+    }
+
+    pub fn with_full_fee_amount(mut self, full_fee_amount: U256) -> Self {
+        self.0.order_meta_data.full_fee_amount = full_fee_amount;
         self
     }
 
@@ -190,8 +199,7 @@ impl OrderBuilder {
 
 /// An order as provided to the orderbook by the frontend.
 #[serde_as]
-#[derive(Eq, PartialEq, Clone, Derivative, Deserialize, Serialize, Hash)]
-#[derivative(Debug)]
+#[derive(Eq, PartialEq, Clone, Deserialize, Debug, Serialize, Hash)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderCreation {
     #[serde(with = "h160_hexadecimal")]
@@ -206,9 +214,7 @@ pub struct OrderCreation {
     #[serde(with = "u256_decimal")]
     pub buy_amount: U256,
     pub valid_to: u32,
-    #[derivative(Debug(format_with = "debug_app_data"))]
-    #[serde(with = "appdata_hexadecimal")]
-    pub app_data: [u8; 32],
+    pub app_data: AppId,
     #[serde(with = "u256_decimal")]
     pub fee_amount: U256,
     pub kind: OrderKind,
@@ -309,7 +315,7 @@ impl OrderCreation {
         self.sell_amount.to_big_endian(&mut hash_data[128..160]);
         self.buy_amount.to_big_endian(&mut hash_data[160..192]);
         hash_data[220..224].copy_from_slice(&self.valid_to.to_be_bytes());
-        hash_data[224..256].copy_from_slice(&self.app_data);
+        hash_data[224..256].copy_from_slice(&self.app_data.0);
         self.fee_amount.to_big_endian(&mut hash_data[256..288]);
         hash_data[288..320].copy_from_slice(match self.kind {
             OrderKind::Sell => &Self::KIND_SELL,
@@ -402,6 +408,8 @@ pub struct OrderMetaData {
     pub status: OrderStatus,
     #[serde(with = "h160_hexadecimal")]
     pub settlement_contract: H160,
+    #[serde(default, with = "u256_decimal")]
+    pub full_fee_amount: U256,
 }
 
 impl Default for OrderMetaData {
@@ -418,6 +426,7 @@ impl Default for OrderMetaData {
             invalidated: Default::default(),
             status: OrderStatus::Open,
             settlement_contract: H160::default(),
+            full_fee_amount: U256::default(),
         }
     }
 }
@@ -610,6 +619,7 @@ mod tests {
             "validTo": 4294967295u32,
             "appData": "0x6000000000000000000000000000000000000000000000000000000000000007",
             "feeAmount": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+            "fullFeeAmount": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
             "kind": "buy",
             "partiallyFillable": false,
             "signature": "0x0200000000000000000000000000000000000000000000000000000000000003040000000000000000000000000000000000000000000000000000000000000501",
@@ -633,6 +643,7 @@ mod tests {
                 invalidated: true,
                 status: OrderStatus::Open,
                 settlement_contract: H160::from_low_u64_be(2),
+                full_fee_amount: U256::MAX,
             },
             order_creation: OrderCreation {
                 sell_token: H160::from_low_u64_be(10),
@@ -641,7 +652,9 @@ mod tests {
                 sell_amount: 1.into(),
                 buy_amount: 0.into(),
                 valid_to: u32::MAX,
-                app_data: hex!("6000000000000000000000000000000000000000000000000000000000000007"),
+                app_data: AppId(hex!(
+                    "6000000000000000000000000000000000000000000000000000000000000007"
+                )),
                 fee_amount: U256::MAX,
                 kind: OrderKind::Buy,
                 partially_fillable: false,
@@ -701,7 +714,9 @@ mod tests {
                 sell_amount: 0x0246ddf97976680000_u128.into(),
                 buy_amount: 0xb98bc829a6f90000_u128.into(),
                 valid_to: 0xffffffff,
-                app_data: hex!("0000000000000000000000000000000000000000000000000000000000000000"),
+                app_data: AppId(hex!(
+                    "0000000000000000000000000000000000000000000000000000000000000000"
+                )),
                 fee_amount: 0x0de0b6b3a7640000_u128.into(),
                 kind: OrderKind::Sell,
                 partially_fillable: false,
@@ -756,7 +771,9 @@ mod tests {
             sell_amount: 0x0246ddf97976680000_u128.into(),
             buy_amount: 0xb98bc829a6f90000_u128.into(),
             valid_to: 0xffffffff,
-            app_data: hex!("0000000000000000000000000000000000000000000000000000000000000000"),
+            app_data: AppId(hex!(
+                "0000000000000000000000000000000000000000000000000000000000000000"
+            )),
             fee_amount: 0x0de0b6b3a7640000_u128.into(),
             kind: OrderKind::Sell,
             partially_fillable: false,

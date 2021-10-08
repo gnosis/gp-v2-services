@@ -110,6 +110,12 @@ fn is_mainnet(network_id: &str) -> bool {
 
 #[derive(Default)]
 pub struct FakeGasPriceEstimator(pub Arc<Mutex<EstimatedGasPrice>>);
+
+impl FakeGasPriceEstimator {
+    pub fn new(gas_price: EstimatedGasPrice) -> Self {
+        Self(Arc::new(Mutex::new(gas_price)))
+    }
+}
 #[async_trait::async_trait]
 impl GasPriceEstimating for FakeGasPriceEstimator {
     async fn estimate_with_limits(

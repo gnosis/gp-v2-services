@@ -2,11 +2,11 @@ use super::{Interaction, Trade, TradeExecution};
 use crate::{encoding::EncodedSettlement, interactions::UnwrapWethInteraction};
 use anyhow::{bail, ensure, Context as _, Result};
 use model::order::{Order, OrderKind};
-use num::{BigRational, Zero};
+use num::{BigRational, One, Zero};
 use primitive_types::{H160, U256};
-use shared::conversions::U256Ext;
+use shared::conversions::{big_rational_to_u256, U256Ext};
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, HashMap, HashSet},
     iter,
     sync::Arc,
 };
@@ -88,7 +88,12 @@ impl SettlementEncoder {
     }
 
     // Fails if any used token doesn't have a price.
-    pub fn add_trade(&mut self, order: Order, executed_amount: U256) -> Result<TradeExecution> {
+    pub fn add_trade(
+        &mut self,
+        order: Order,
+        executed_amount: U256,
+        scaled_fee_amount: U256,
+    ) -> Result<TradeExecution> {
         let sell_price = self
             .clearing_prices
             .get(&order.order_creation.sell_token)
@@ -110,6 +115,7 @@ impl SettlementEncoder {
             sell_token_index,
             buy_token_index,
             executed_amount,
+            scaled_fee_amount,
         };
         let execution = trade
             .executed_amounts(*sell_price, *buy_price)
@@ -259,13 +265,23 @@ impl SettlementEncoder {
 
     // Merge other into self so that the result contains both settlements.
     // Fails if the settlements cannot be merged for example because the same limit order is used in
-    // both or the same token has different clearing prices.
+    // both or more than one token has a different clearing prices (a single token difference is scaled)
     pub fn merge(mut self, mut other: Self) -> Result<Self> {
+        let scaling_factor = self.price_scaling_factor(&other);
+        // Make sure we always scale prices up to avoid precision issues
+        if scaling_factor < BigRational::one() {
+            return other.merge(self);
+        }
         for (key, value) in other.clearing_prices {
+            let scaled_price = big_rational_to_u256(&(value.to_big_rational() * &scaling_factor))
+                .context("Invalid price scaling factor")?;
             match self.clearing_prices.entry(key) {
-                Entry::Occupied(entry) => ensure!(*entry.get() == value, "different price"),
+                Entry::Occupied(entry) => ensure!(
+                    *entry.get() == scaled_price,
+                    "different price after scaling"
+                ),
                 Entry::Vacant(entry) => {
-                    entry.insert(value);
+                    entry.insert(scaled_price);
                     self.tokens.push(key);
                 }
             }
@@ -290,6 +306,28 @@ impl SettlementEncoder {
         }
 
         Ok(self)
+    }
+
+    fn price_scaling_factor(&self, other: &Self) -> BigRational {
+        let self_keys: HashSet<_> = self.clearing_prices().keys().collect();
+        let other_keys: HashSet<_> = other.clearing_prices().keys().collect();
+        let common_tokens: Vec<_> = self_keys.intersection(&other_keys).collect();
+        match common_tokens.first() {
+            Some(token) => {
+                let price_in_self = self
+                    .clearing_prices
+                    .get(token)
+                    .expect("common token should be present")
+                    .to_big_rational();
+                let price_in_other = other
+                    .clearing_prices
+                    .get(token)
+                    .expect("common token should be present")
+                    .to_big_rational();
+                price_in_self / price_in_other
+            }
+            None => U256::one().to_big_rational(),
+        }
     }
 }
 
@@ -333,8 +371,8 @@ pub mod tests {
             token1 => 1.into(),
         });
 
-        assert!(settlement.add_trade(order0, 1.into()).is_ok());
-        assert!(settlement.add_trade(order1, 1.into()).is_ok());
+        assert!(settlement.add_trade(order0, 1.into(), 1.into()).is_ok());
+        assert!(settlement.add_trade(order1, 1.into(), 0.into()).is_ok());
     }
 
     #[test]
@@ -422,6 +460,7 @@ pub mod tests {
                     ..Default::default()
                 },
                 0.into(),
+                0.into(),
             )
             .unwrap();
 
@@ -477,7 +516,7 @@ pub mod tests {
             .with_buy_amount(11.into())
             .build();
         order13.order_meta_data.uid.0[0] = 0;
-        encoder0.add_trade(order13, 13.into()).unwrap();
+        encoder0.add_trade(order13, 13.into(), 0.into()).unwrap();
         encoder0.append_to_execution_plan(NoopInteraction {});
         encoder0.add_unwrap(UnwrapWethInteraction {
             weth: weth.clone(),
@@ -493,7 +532,7 @@ pub mod tests {
             .with_buy_amount(22.into())
             .build();
         order24.order_meta_data.uid.0[0] = 1;
-        encoder1.add_trade(order24, 24.into()).unwrap();
+        encoder1.add_trade(order24, 24.into(), 0.into()).unwrap();
         encoder1.append_to_execution_plan(NoopInteraction {});
         encoder1.add_unwrap(UnwrapWethInteraction {
             weth,
@@ -514,11 +553,45 @@ pub mod tests {
 
     #[test]
     fn merge_fails_because_price_is_different() {
-        let prices = hashmap! { token(1) => 1.into() };
+        let prices = hashmap! { token(1) => 1.into(), token(2) => 2.into() };
         let encoder0 = SettlementEncoder::new(prices);
-        let prices = hashmap! { token(1) => 2.into() };
+        let prices = hashmap! { token(1) => 1.into(), token(2) => 4.into() };
         let encoder1 = SettlementEncoder::new(prices);
         assert!(encoder0.merge(encoder1).is_err());
+    }
+
+    #[test]
+    fn merge_scales_prices_if_only_one_token_used_twice() {
+        let prices = hashmap! { token(1) => 2.into(), token(2) => 2.into() };
+        let encoder0 = SettlementEncoder::new(prices);
+        let prices = hashmap! { token(1) => 1.into(), token(3) => 3.into() };
+        let encoder1 = SettlementEncoder::new(prices);
+
+        let merged = encoder0.merge(encoder1).unwrap();
+        let prices = hashmap! {
+            token(1) => 2.into(),
+            token(2) => 2.into(),
+            token(3) => 6.into(),
+        };
+        assert_eq!(merged.clearing_prices, prices);
+    }
+
+    #[test]
+    fn merge_always_scales_smaller_price_up() {
+        let prices = hashmap! { token(1) => 1.into(), token(2) => 1_000_000.into() };
+        let encoder0 = SettlementEncoder::new(prices);
+        let prices = hashmap! { token(1) => 1_000_000.into(), token(3) => 900_000.into() };
+        let encoder1 = SettlementEncoder::new(prices);
+
+        let merge01 = encoder0.clone().merge(encoder1.clone()).unwrap();
+        let merge10 = encoder1.merge(encoder0).unwrap();
+        assert_eq!(merge10.clearing_prices, merge01.clearing_prices);
+
+        // If scaled down 900k would have become 0
+        assert_eq!(
+            *merge10.clearing_prices.get(&token(3)).unwrap(),
+            900_000.into()
+        );
     }
 
     #[test]
@@ -532,10 +605,12 @@ pub mod tests {
             .build();
 
         let mut encoder0 = SettlementEncoder::new(prices.clone());
-        encoder0.add_trade(order13.clone(), 13.into()).unwrap();
+        encoder0
+            .add_trade(order13.clone(), 13.into(), 0.into())
+            .unwrap();
 
         let mut encoder1 = SettlementEncoder::new(prices);
-        encoder1.add_trade(order13, 24.into()).unwrap();
+        encoder1.add_trade(order13, 24.into(), 0.into()).unwrap();
 
         assert!(encoder0.merge(encoder1).is_err());
     }

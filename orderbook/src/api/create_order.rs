@@ -1,5 +1,7 @@
-use crate::api::extract_payload;
-use crate::orderbook::{AddOrderResult, Orderbook};
+use crate::{
+    api::{extract_payload, WarpReplyConverting},
+    orderbook::{AddOrderResult, Orderbook},
+};
 use anyhow::Result;
 use model::order::OrderCreationPayload;
 use std::{convert::Infallible, sync::Arc};
@@ -15,86 +17,13 @@ pub fn create_order_request(
 pub fn create_order_response(result: Result<AddOrderResult>) -> impl Reply {
     let (body, status_code) = match result {
         Ok(AddOrderResult::Added(uid)) => (warp::reply::json(&uid), StatusCode::CREATED),
-        Ok(AddOrderResult::UnsupportedBuyTokenDestination(dest)) => (
-            super::error("UnsupportedBuyTokenDestination", format!("Type {:?}", dest)),
-            StatusCode::BAD_REQUEST,
-        ),
-        Ok(AddOrderResult::UnsupportedSellTokenSource(source)) => (
-            super::error("UnsupportedSellTokenSource", format!("Type {:?}", source)),
-            StatusCode::BAD_REQUEST,
-        ),
-        Ok(AddOrderResult::UnsupportedToken(token)) => (
-            super::error("UnsupportedToken", format!("Token address {}", token)),
-            StatusCode::BAD_REQUEST,
-        ),
-        Ok(AddOrderResult::WrongOwner(owner)) => (
-            super::error(
-                "WrongOwner",
-                format!(
-                    "Address recovered from signature {} does not match from address",
-                    owner
-                ),
-            ),
-            StatusCode::BAD_REQUEST,
-        ),
-        Ok(AddOrderResult::DuplicatedOrder) => (
-            super::error("DuplicatedOrder", "order already exists"),
-            StatusCode::BAD_REQUEST,
-        ),
-        Ok(AddOrderResult::InvalidSignature) => (
-            super::error("InvalidSignature", "invalid signature"),
-            StatusCode::BAD_REQUEST,
-        ),
+        Ok(AddOrderResult::OrderValidation(err)) => err.to_warp_reply(),
         Ok(AddOrderResult::UnsupportedSignature) => (
             super::error("UnsupportedSignature", "signing scheme is not supported"),
             StatusCode::BAD_REQUEST,
         ),
-        Ok(AddOrderResult::Forbidden) => (
-            super::error("Forbidden", "Forbidden, your account is deny-listed"),
-            StatusCode::FORBIDDEN,
-        ),
-        Ok(AddOrderResult::InsufficientValidTo) => (
-            super::error(
-                "InsufficientValidTo",
-                "validTo is not far enough in the future",
-            ),
-            StatusCode::BAD_REQUEST,
-        ),
-        Ok(AddOrderResult::MissingOrderData) => (
-            super::error(
-                "MissingOrderData",
-                "at least 1 field of orderCreation is missing, please check the field",
-            ),
-            StatusCode::BAD_REQUEST,
-        ),
-        Ok(AddOrderResult::InsufficientFunds) => (
-            super::error(
-                "InsufficientFunds",
-                "order owner must have funds worth at least x in his account",
-            ),
-            StatusCode::BAD_REQUEST,
-        ),
-        Ok(AddOrderResult::InsufficientFee) => (
-            super::error("InsufficientFee", "Order does not include sufficient fee"),
-            StatusCode::BAD_REQUEST,
-        ),
-        Ok(AddOrderResult::TransferEthToContract) => (
-            super::error(
-                "TransferEthToContract",
-                "Sending Ether to a smart contract wallets is currently not \
-                 supported",
-            ),
-            StatusCode::BAD_REQUEST,
-        ),
-        Ok(AddOrderResult::SameBuyAndSellToken) => (
-            super::error(
-                "SameBuyAndSellToken",
-                "Buy token is the same as the sell token.",
-            ),
-            StatusCode::BAD_REQUEST,
-        ),
-        Ok(AddOrderResult::ZeroAmount) => (
-            super::error("ZeroAmount", "Buy or sell amount is zero."),
+        Ok(AddOrderResult::DuplicatedOrder) => (
+            super::error("DuplicatedOrder", "order already exists"),
             StatusCode::BAD_REQUEST,
         ),
         Err(_) => (super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
