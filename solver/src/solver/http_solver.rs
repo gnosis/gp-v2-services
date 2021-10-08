@@ -250,7 +250,11 @@ impl HttpSolver {
             .append_pair("instance_name", &instance_name)
             .append_pair("time_limit", &timeout.as_secs().to_string());
 
-        let ucp_policy = if model.orders.len() > 1 { "Enforce" } else { "EnforceForOrders" };
+        let ucp_policy = if model.orders.len() > 1 {
+            "Enforce"
+        } else {
+            "EnforceForOrders"
+        };
         self.config.add_to_query(&mut url, ucp_policy);
 
         let query = url.query().map(ToString::to_string).unwrap_or_default();
