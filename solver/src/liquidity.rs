@@ -69,6 +69,12 @@ pub struct LimitOrder {
     pub buy_amount: U256,
     pub kind: OrderKind,
     pub partially_fillable: bool,
+    /// The scaled fee amount that the protocol pretends it is receiving.
+    ///
+    /// This is different than the actual order `fee_amount` value in that it
+    /// does not have any subsidies applied and may be scaled by a constant
+    /// factor to make matching orders more valuable from an objective value
+    /// perspective.
     pub scaled_fee_amount: U256,
     pub is_liquidity_order: bool,
     pub settlement_handling: Arc<dyn SettlementHandling<Self>>,
