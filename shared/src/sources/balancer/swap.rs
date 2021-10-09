@@ -18,6 +18,66 @@ mod weighted_math;
 
 const BALANCER_SWAP_GAS_COST: usize = 100_000;
 
+trait BalancerPoolSwapping {
+    fn add_swap_fee_amount(&self, amount: U256, swap_fee_percentage: Bfp) -> Result<U256, Error> {
+        // https://github.com/balancer-labs/balancer-v2-monorepo/blob/6c9e24e22d0c46cca6dd15861d3d33da61a60b98/pkg/core/contracts/pools/BasePool.sol#L454-L457
+        Bfp::from_wei(amount)
+            .div_up(swap_fee_percentage.complement())
+            .map(|amount_with_fees| amount_with_fees.as_uint256())
+    }
+
+    fn subtract_swap_fee_amount(
+        &self,
+        amount: U256,
+        swap_fee_percentage: Bfp,
+    ) -> Result<U256, Error> {
+        // https://github.com/balancer-labs/balancer-v2-monorepo/blob/6c9e24e22d0c46cca6dd15861d3d33da61a60b98/pkg/core/contracts/pools/BasePool.sol#L462-L466
+        let amount = Bfp::from_wei(amount);
+        let fee_amount = amount.mul_up(swap_fee_percentage)?;
+        amount
+            .sub(fee_amount)
+            .map(|amount_without_fees| amount_without_fees.as_uint256())
+    }
+
+    fn checked_get_amount_in(
+        &self,
+        in_token: H160,
+        out_amount: U256,
+        out_token: H160,
+    ) -> Option<U256> {
+        let in_amount = self.unchecked_get_amount_in(in_token, out_amount, out_token)?;
+        // We double check that resulting amount in can symmetrically provide an amount out.
+        self.unchecked_get_amount_out(out_token, in_amount, in_token)?;
+        Some(in_amount)
+    }
+
+    fn checked_get_amount_out(
+        &self,
+        out_token: H160,
+        in_amount: U256,
+        in_token: H160,
+    ) -> Option<U256> {
+        let out_amount = self.unchecked_get_amount_out(out_token, in_amount, in_token)?;
+        // We double check that resulting amount out can symmetrically provide an amount in.
+        self.unchecked_get_amount_in(in_token, out_amount, out_token)?;
+        Some(out_amount)
+    }
+
+    fn unchecked_get_amount_in(
+        &self,
+        in_token: H160,
+        out_amount: U256,
+        out_token: H160,
+    ) -> Option<U256>;
+
+    fn unchecked_get_amount_out(
+        &self,
+        out_token: H160,
+        in_amount: U256,
+        in_token: H160,
+    ) -> Option<U256>;
+}
+
 impl TokenState {
     /// Converts the stored balance into its internal representation as a
     /// Balancer fixed point number.
@@ -52,27 +112,12 @@ pub struct WeightedPoolRef<'a> {
     pub swap_fee_percentage: Bfp,
 }
 
-impl WeightedPoolRef<'_> {
-    fn add_swap_fee_amount(&self, amount: U256) -> Result<U256, Error> {
-        // https://github.com/balancer-labs/balancer-v2-monorepo/blob/6c9e24e22d0c46cca6dd15861d3d33da61a60b98/pkg/core/contracts/pools/BasePool.sol#L454-L457
-        Bfp::from_wei(amount)
-            .div_up(self.swap_fee_percentage.complement())
-            .map(|amount_with_fees| amount_with_fees.as_uint256())
-    }
-
-    fn subtract_swap_fee_amount(&self, amount: U256) -> Result<U256, Error> {
-        // https://github.com/balancer-labs/balancer-v2-monorepo/blob/6c9e24e22d0c46cca6dd15861d3d33da61a60b98/pkg/core/contracts/pools/BasePool.sol#L462-L466
-        let amount = Bfp::from_wei(amount);
-        let fee_amount = amount.mul_up(self.swap_fee_percentage)?;
-        amount
-            .sub(fee_amount)
-            .map(|amount_without_fees| amount_without_fees.as_uint256())
-    }
-
+impl BalancerPoolSwapping for WeightedPoolRef<'_> {
     fn unchecked_get_amount_in(
         &self,
         in_token: H160,
-        (out_amount, out_token): (U256, H160),
+        out_amount: U256,
+        out_token: H160,
     ) -> Option<U256> {
         // Note that the output of this function does not depend on the pool
         // specialization. All contract branches compute this amount with:
@@ -90,24 +135,15 @@ impl WeightedPoolRef<'_> {
         .map(|bfp| in_reserves.token_state.downscale(bfp))
         .flatten()?;
 
-        self.add_swap_fee_amount(amount_in_before_fee).ok()
-    }
-
-    fn checked_get_amount_in(
-        &self,
-        in_token: H160,
-        (out_amount, out_token): (U256, H160),
-    ) -> Option<U256> {
-        let in_amount = self.unchecked_get_amount_in(in_token, (out_amount, out_token))?;
-        // We double check that resulting amount in can symmetrically provide an amount out.
-        self.unchecked_get_amount_out(out_token, (in_amount, in_token))?;
-        Some(in_amount)
+        self.add_swap_fee_amount(amount_in_before_fee, self.swap_fee_percentage)
+            .ok()
     }
 
     fn unchecked_get_amount_out(
         &self,
         out_token: H160,
-        (in_amount, in_token): (U256, H160),
+        in_amount: U256,
+        in_token: H160,
     ) -> Option<U256> {
         // Note that the output of this function does not depend on the pool
         // specialization. All contract branches compute this amount with:
@@ -115,7 +151,9 @@ impl WeightedPoolRef<'_> {
         let in_reserves = self.reserves.get(&in_token)?;
         let out_reserves = self.reserves.get(&out_token)?;
 
-        let in_amount_minus_fees = self.subtract_swap_fee_amount(in_amount).ok()?;
+        let in_amount_minus_fees = self
+            .subtract_swap_fee_amount(in_amount, self.swap_fee_percentage)
+            .ok()?;
 
         weighted_math::calc_out_given_in(
             in_reserves.token_state.upscaled_balance()?,
@@ -128,26 +166,15 @@ impl WeightedPoolRef<'_> {
         .map(|bfp| out_reserves.token_state.downscale(bfp))
         .flatten()
     }
-
-    fn checked_get_amount_out(
-        &self,
-        out_token: H160,
-        (in_amount, in_token): (U256, H160),
-    ) -> Option<U256> {
-        let out_amount = self.unchecked_get_amount_out(out_token, (in_amount, in_token))?;
-        // We double check that resulting amount out can symmetrically provide an amount in.
-        self.unchecked_get_amount_in(in_token, (out_amount, out_token))?;
-        Some(out_amount)
-    }
 }
 
 impl BaselineSolvable for WeightedPoolRef<'_> {
     fn get_amount_out(&self, out_token: H160, (in_amount, in_token): (U256, H160)) -> Option<U256> {
-        self.checked_get_amount_out(out_token, (in_amount, in_token))
+        self.checked_get_amount_out(out_token, in_amount, in_token)
     }
 
     fn get_amount_in(&self, in_token: H160, (out_amount, out_token): (U256, H160)) -> Option<U256> {
-        self.checked_get_amount_in(in_token, (out_amount, out_token))
+        self.checked_get_amount_in(in_token, out_amount, out_token)
     }
 
     fn get_spot_price(&self, base_token: H160, quote_token: H160) -> Option<BigRational> {
@@ -203,23 +230,70 @@ struct BalancesWithIndices {
     balances: Vec<Bfp>,
 }
 
+impl BalancerPoolSwapping for StablePoolRef<'_> {
+    fn unchecked_get_amount_in(
+        &self,
+        in_token: H160,
+        out_amount: U256,
+        out_token: H160,
+    ) -> Option<U256> {
+        let in_reserves = self.reserves.get(&in_token)?;
+        let out_reserves = self.reserves.get(&out_token)?;
+        let BalancesWithIndices {
+            token_index_in,
+            token_index_out,
+            mut balances,
+        } = self.construct_balances_and_token_indices(&in_token, &out_token)?;
+
+        let amount_in_before_fee = stable_math::calc_in_given_out(
+            self.amplification_parameter,
+            balances.as_mut_slice(),
+            token_index_in,
+            token_index_out,
+            out_reserves.upscale(out_amount)?,
+        )
+        .ok()
+        .map(|bfp| in_reserves.downscale(bfp))
+        .flatten()?;
+
+        self.add_swap_fee_amount(amount_in_before_fee, self.swap_fee_percentage)
+            .ok()
+    }
+
+    fn unchecked_get_amount_out(
+        &self,
+        out_token: H160,
+        in_amount: U256,
+        in_token: H160,
+    ) -> Option<U256> {
+        // Note that the output of this function does not depend on the pool
+        // specialization. All contract branches compute this amount with:
+        // https://github.com/balancer-labs/balancer-v2-monorepo/blob/6c9e24e22d0c46cca6dd15861d3d33da61a60b98/pkg/core/contracts/pools/BaseMinimalSwapInfoPool.sol#L62-L75
+        let in_reserves = self.reserves.get(&in_token)?;
+        let out_reserves = self.reserves.get(&out_token)?;
+        let BalancesWithIndices {
+            token_index_in,
+            token_index_out,
+            mut balances,
+        } = self.construct_balances_and_token_indices(&in_token, &out_token)?;
+        let in_amount_minus_fees = self
+            .subtract_swap_fee_amount(in_amount, self.swap_fee_percentage)
+            .ok()?;
+
+        stable_math::calc_out_given_in(
+            self.amplification_parameter,
+            balances.as_mut_slice(),
+            token_index_in,
+            token_index_out,
+            in_reserves.upscale(in_amount_minus_fees)?,
+        )
+        .ok()
+        .map(|bfp| out_reserves.downscale(bfp))
+        .flatten()
+    }
+}
+
 impl StablePoolRef<'_> {
-    fn add_swap_fee_amount(&self, amount: U256) -> Result<U256, Error> {
-        // https://github.com/balancer-labs/balancer-v2-monorepo/blob/6c9e24e22d0c46cca6dd15861d3d33da61a60b98/pkg/core/contracts/pools/BasePool.sol#L454-L457
-        Bfp::from_wei(amount)
-            .div_up(self.swap_fee_percentage.complement())
-            .map(|amount_with_fees| amount_with_fees.as_uint256())
-    }
-
-    fn subtract_swap_fee_amount(&self, amount: U256) -> Result<U256, Error> {
-        // https://github.com/balancer-labs/balancer-v2-monorepo/blob/6c9e24e22d0c46cca6dd15861d3d33da61a60b98/pkg/core/contracts/pools/BasePool.sol#L462-L466
-        let amount = Bfp::from_wei(amount);
-        let fee_amount = amount.mul_up(self.swap_fee_percentage)?;
-        amount
-            .sub(fee_amount)
-            .map(|amount_without_fees| amount_without_fees.as_uint256())
-    }
-
     fn construct_balances_and_token_indices(
         &self,
         in_token: &H160,
@@ -247,93 +321,15 @@ impl StablePoolRef<'_> {
             balances,
         })
     }
-
-    fn unchecked_get_amount_in(
-        &self,
-        in_token: H160,
-        (out_amount, out_token): (U256, H160),
-    ) -> Option<U256> {
-        let in_reserves = self.reserves.get(&in_token)?;
-        let out_reserves = self.reserves.get(&out_token)?;
-        let BalancesWithIndices {
-            token_index_in,
-            token_index_out,
-            mut balances,
-        } = self.construct_balances_and_token_indices(&in_token, &out_token)?;
-
-        let amount_in_before_fee = stable_math::calc_in_given_out(
-            self.amplification_parameter,
-            balances.as_mut_slice(),
-            token_index_in,
-            token_index_out,
-            out_reserves.upscale(out_amount)?,
-        )
-        .ok()
-        .map(|bfp| in_reserves.downscale(bfp))
-        .flatten()?;
-
-        self.add_swap_fee_amount(amount_in_before_fee).ok()
-    }
-
-    fn checked_get_amount_in(
-        &self,
-        in_token: H160,
-        (out_amount, out_token): (U256, H160),
-    ) -> Option<U256> {
-        let in_amount = self.unchecked_get_amount_in(in_token, (out_amount, out_token))?;
-        // We double check that resulting amount in can symmetrically provide an amount out.
-        self.unchecked_get_amount_out(out_token, (in_amount, in_token))?;
-        Some(in_amount)
-    }
-
-    fn unchecked_get_amount_out(
-        &self,
-        out_token: H160,
-        (in_amount, in_token): (U256, H160),
-    ) -> Option<U256> {
-        // Note that the output of this function does not depend on the pool
-        // specialization. All contract branches compute this amount with:
-        // https://github.com/balancer-labs/balancer-v2-monorepo/blob/6c9e24e22d0c46cca6dd15861d3d33da61a60b98/pkg/core/contracts/pools/BaseMinimalSwapInfoPool.sol#L62-L75
-        let in_reserves = self.reserves.get(&in_token)?;
-        let out_reserves = self.reserves.get(&out_token)?;
-        let BalancesWithIndices {
-            token_index_in,
-            token_index_out,
-            mut balances,
-        } = self.construct_balances_and_token_indices(&in_token, &out_token)?;
-        let in_amount_minus_fees = self.subtract_swap_fee_amount(in_amount).ok()?;
-
-        stable_math::calc_out_given_in(
-            self.amplification_parameter,
-            balances.as_mut_slice(),
-            token_index_in,
-            token_index_out,
-            in_reserves.upscale(in_amount_minus_fees)?,
-        )
-        .ok()
-        .map(|bfp| out_reserves.downscale(bfp))
-        .flatten()
-    }
-
-    fn checked_get_amount_out(
-        &self,
-        out_token: H160,
-        (in_amount, in_token): (U256, H160),
-    ) -> Option<U256> {
-        let out_amount = self.unchecked_get_amount_out(out_token, (in_amount, in_token))?;
-        // We double check that resulting amount out can symmetrically provide an amount in.
-        self.unchecked_get_amount_in(in_token, (out_amount, out_token))?;
-        Some(out_amount)
-    }
 }
 
 impl BaselineSolvable for StablePoolRef<'_> {
     fn get_amount_out(&self, out_token: H160, (in_amount, in_token): (U256, H160)) -> Option<U256> {
-        self.checked_get_amount_out(out_token, (in_amount, in_token))
+        self.checked_get_amount_out(out_token, in_amount, in_token)
     }
 
     fn get_amount_in(&self, in_token: H160, (out_amount, out_token): (U256, H160)) -> Option<U256> {
-        self.checked_get_amount_in(in_token, (out_amount, out_token))
+        self.checked_get_amount_in(in_token, out_amount, out_token)
     }
 
     fn get_spot_price(&self, base_token: H160, quote_token: H160) -> Option<BigRational> {
