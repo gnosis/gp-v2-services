@@ -40,7 +40,10 @@ async fn ganache_onchain_settlement() {
 }
 
 async fn onchain_settlement(web3: Web3) {
-    shared::tracing::initialize("warn,orderbook=debug,solver=debug");
+    shared::tracing::initialize(
+        "warn,orderbook=debug,solver=debug",
+        "error".parse().unwrap(),
+    );
     let chain_id = web3
         .eth()
         .chain_id()

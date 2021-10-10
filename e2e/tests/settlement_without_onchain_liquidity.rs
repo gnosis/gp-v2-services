@@ -39,7 +39,7 @@ async fn ganache_onchain_settlement_without_liquidity() {
 }
 
 async fn onchain_settlement_without_liquidity(web3: Web3) {
-    shared::tracing::initialize("warn,orderbook=debug,solver=debug");
+    shared::tracing::initialize("warn,orderbook=debug,solver=debug", "off".parse().unwrap());
     let chain_id = web3
         .eth()
         .chain_id()

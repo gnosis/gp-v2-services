@@ -35,7 +35,7 @@ async fn ganache_vault_balances() {
 }
 
 async fn vault_balances(web3: Web3) {
-    shared::tracing::initialize("warn,orderbook=debug,solver=debug");
+    shared::tracing::initialize("warn,orderbook=debug,solver=debug", "off".parse().unwrap());
     let chain_id = web3
         .eth()
         .chain_id()

@@ -207,7 +207,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn multi_node_rinkeby_test() {
-        shared::tracing::initialize("solver=debug,shared=debug");
+        shared::tracing::initialize("solver=debug,shared=debug", "off".parse().unwrap());
         let envs = ["NODE0", "NODE1"];
         let web3s: Vec<Web3> = envs
             .iter()

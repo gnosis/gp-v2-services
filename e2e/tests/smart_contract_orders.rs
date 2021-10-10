@@ -30,7 +30,7 @@ async fn ganache_smart_contract_orders() {
 }
 
 async fn smart_contract_orders(web3: Web3) {
-    shared::tracing::initialize("warn,orderbook=debug,solver=debug");
+    shared::tracing::initialize("warn,orderbook=debug,solver=debug", "off".parse().unwrap());
     let chain_id = web3
         .eth()
         .chain_id()
