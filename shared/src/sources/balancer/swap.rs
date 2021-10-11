@@ -591,7 +591,8 @@ mod tests {
 
     #[test]
     fn stable_get_amount_out() {
-        // https://dashboard.tenderly.co/tx/main/0x014d92abcbd503ede8ef678e31ddc55389c5d40c7533d12e3afce9eb08b0f331/debugger
+        // Test based on actual swap.
+        // https://dashboard.tenderly.co/tx/main/0x75be93fff064ad46b423b9e20cee09b0ae7f741087f43e4187d4f4cf59f54229/debugger
         // Token addresses are irrelevant for computation.
         let dai = H160::from_low_u64_be(1);
         let usdc = H160::from_low_u64_be(2);
