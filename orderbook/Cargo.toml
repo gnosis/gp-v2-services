@@ -22,9 +22,9 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 const_format = "0.2"
 contracts = { path = "../contracts" }
 either = "1.0"
-ethcontract = { path = "../../../ethcontract/ethcontract-rs/ethcontract", default-features = false }
+ethcontract = { git = "https://github.com/gnosis/ethcontract-rs.git", rev = "34c618cf63ad4750d1d9198eada85f3d1cf334ab", default-features = false }
 futures = "0.3.17"
-gas-estimation = { path = "../../../gp-gas-estimation/gp-gas-estimation", features = ["web3_"] }
+gas-estimation = { git = "https://github.com/gnosis/gp-gas-estimation.git", tag = "v0.3.4", features = ["web3_"] }
 hex = { version = "0.4", default-features = false }
 hex-literal = "0.3"
 maplit = "1.0"

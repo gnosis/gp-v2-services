@@ -13,10 +13,10 @@ async-recursion = "0.3"
 atty = "0.2"
 contracts = { path = "../contracts" }
 derivative = "2.2"
-ethcontract = { path = "../../../ethcontract/ethcontract-rs/ethcontract", default-features = false }
-ethcontract-mock = { path = "../../../ethcontract/ethcontract-rs/ethcontract-mock" }
+ethcontract = { git = "https://github.com/gnosis/ethcontract-rs.git", rev = "34c618cf63ad4750d1d9198eada85f3d1cf334ab", default-features = false }
+ethcontract-mock = { git = "https://github.com/gnosis/ethcontract-rs.git", rev = "34c618cf63ad4750d1d9198eada85f3d1cf334ab" }
 futures = "0.3"
-gas-estimation = { path = "../../../gp-gas-estimation/gp-gas-estimation", features = ["web3_", "tokio_"] }
+gas-estimation = { git = "https://github.com/gnosis/gp-gas-estimation.git", tag = "v0.3.4", features = ["web3_", "tokio_"] }
 hex = { version = "0.4", default-features = false }
 hex-literal = "0.3"
 http = "0.2.4"

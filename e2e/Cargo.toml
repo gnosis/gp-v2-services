@@ -12,7 +12,7 @@ harness = false
 [dev-dependencies]
 contracts = { path = "../contracts" }
 criterion = "0.3"
-ethcontract = { path = "../../../ethcontract/ethcontract-rs/ethcontract", default-features = false }
+ethcontract = { git = "https://github.com/gnosis/ethcontract-rs.git", rev = "34c618cf63ad4750d1d9198eada85f3d1cf334ab", default-features = false }
 hex-literal = "0.3"
 lazy_static = "1.4"
 maplit = "1.0"
