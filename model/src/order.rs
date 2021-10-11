@@ -402,7 +402,7 @@ pub struct OrderMetaData {
     pub invalidated: bool,
     pub status: OrderStatus,
     pub settlement_contract: H160,
-    #[serde(with = "u256_decimal")]
+    #[serde(default, with = "u256_decimal")]
     pub full_fee_amount: U256,
 }
 
