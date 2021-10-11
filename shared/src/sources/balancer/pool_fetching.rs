@@ -122,7 +122,8 @@ impl AmplificationParameter {
 
     /// This is the format used to pass into smart contracts.
     pub fn as_u256(&self) -> U256 {
-        self.factor
+        // TODO - This was needed to make things work.
+        self.factor * self.precision
     }
 
     /// This is the format used to pass along to HTTP solver.

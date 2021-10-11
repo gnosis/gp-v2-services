@@ -16,6 +16,7 @@ mod math;
 mod stable_math;
 mod weighted_math;
 
+// TODO - Should probably distinguish between a stable / weighted swap
 const BALANCER_SWAP_GAS_COST: usize = 100_000;
 
 trait BalancerPoolSwapping {
@@ -224,6 +225,7 @@ pub struct StablePoolRef<'a> {
     pub amplification_parameter: U256,
 }
 
+#[derive(Debug)]
 struct BalancesWithIndices {
     token_index_in: usize,
     token_index_out: usize,
@@ -244,7 +246,6 @@ impl BalancerPoolSwapping for StablePoolRef<'_> {
             token_index_out,
             mut balances,
         } = self.construct_balances_and_token_indices(&in_token, &out_token)?;
-
         let amount_in_before_fee = stable_math::calc_in_given_out(
             self.amplification_parameter,
             balances.as_mut_slice(),
@@ -255,7 +256,6 @@ impl BalancerPoolSwapping for StablePoolRef<'_> {
         .ok()
         .map(|bfp| in_reserves.downscale(bfp))
         .flatten()?;
-
         self.add_swap_fee_amount(amount_in_before_fee, self.swap_fee_percentage)
             .ok()
     }
@@ -279,7 +279,6 @@ impl BalancerPoolSwapping for StablePoolRef<'_> {
         let in_amount_minus_fees = self
             .subtract_swap_fee_amount(in_amount, self.swap_fee_percentage)
             .ok()?;
-
         stable_math::calc_out_given_in(
             self.amplification_parameter,
             balances.as_mut_slice(),
@@ -408,10 +407,10 @@ impl BaselineSolvable for StablePool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sources::balancer::pool_fetching::CommonPoolState;
+    use crate::sources::balancer::pool_fetching::{AmplificationParameter, CommonPoolState};
     use std::collections::HashMap;
 
-    fn create_pool_with(
+    fn create_weighted_pool_with(
         tokens: Vec<H160>,
         balances: Vec<U256>,
         weights: Vec<Bfp>,
@@ -444,13 +443,43 @@ mod tests {
         }
     }
 
+    fn create_stable_pool_with(
+        tokens: Vec<H160>,
+        balances: Vec<U256>,
+        amplification_parameter: AmplificationParameter,
+        scaling_exps: Vec<u8>,
+        swap_fee_percentage: U256,
+    ) -> StablePool {
+        let mut reserves = HashMap::new();
+        for i in 0..tokens.len() {
+            let (token, balance, scaling_exponent) = (tokens[i], balances[i], scaling_exps[i]);
+            reserves.insert(
+                token,
+                TokenState {
+                    balance,
+                    scaling_exponent,
+                },
+            );
+        }
+        StablePool {
+            common: CommonPoolState {
+                pool_id: Default::default(),
+                pool_address: H160::zero(),
+                swap_fee_percentage: Bfp::from_wei(swap_fee_percentage),
+                paused: true,
+            },
+            reserves,
+            amplification_parameter,
+        }
+    }
+
     #[test]
-    fn get_amount_out() {
+    fn weighted_get_amount_out() {
         // Values obtained from this transaction:
         // https://dashboard.tenderly.co/tx/main/0xa9f571c9bfd4289bd4bd270465d73e1b7e010622ed089d54d81ec63a0365ec22/debugger
         let crv = H160::repeat_byte(21);
         let sdvecrv_dao = H160::repeat_byte(42);
-        let b = create_pool_with(
+        let b = create_weighted_pool_with(
             vec![crv, sdvecrv_dao],
             vec![
                 1_850_304_144_768_426_873_445_489_i128.into(),
@@ -469,12 +498,12 @@ mod tests {
     }
 
     #[test]
-    fn get_amount_in() {
+    fn weighted_get_amount_in() {
         // Values obtained from this transaction:
         // https://dashboard.tenderly.co/tx/main/0xafc3dd6a636a85d9c1976dfa5aee33f78e6ee902f285c9d4cf80a0014aa2a052/debugger
         let weth = H160::repeat_byte(21);
         let tusd = H160::repeat_byte(42);
-        let b = create_pool_with(
+        let b = create_weighted_pool_with(
             vec![weth, tusd],
             vec![60_000_000_000_000_000_i128.into(), 250_000_000_i128.into()],
             vec!["0.5".parse().unwrap(), "0.5".parse().unwrap()],
@@ -490,10 +519,10 @@ mod tests {
     }
 
     #[test]
-    fn balanced_spot_price() {
+    fn weighted_balanced_spot_price() {
         let weth = H160::repeat_byte(21);
         let usdc = H160::repeat_byte(42);
-        let b = create_pool_with(
+        let b = create_weighted_pool_with(
             vec![weth, usdc],
             vec![U256::exp10(22), U256::exp10(22) * U256::from(2500)],
             vec!["0.5".parse().unwrap(), "0.5".parse().unwrap()],
@@ -515,10 +544,10 @@ mod tests {
     }
 
     #[test]
-    fn unbalanced_spot_price() {
+    fn weighted_unbalanced_spot_price() {
         let weth = H160::repeat_byte(21);
         let dai = H160::repeat_byte(42);
-        let b = create_pool_with(
+        let b = create_weighted_pool_with(
             vec![weth, dai],
             vec![U256::exp10(22), U256::exp10(22) * U256::from(7500)],
             vec!["0.25".parse().unwrap(), "0.75".parse().unwrap()],
@@ -534,5 +563,60 @@ mod tests {
             b.get_spot_price(dai, weth).unwrap(),
             BigRational::new(1.into(), 2500.into())
         );
+    }
+
+    #[test]
+    fn construct_balances_and_token_indices() {
+        let tokens: Vec<_> = (1..=3).map(H160::from_low_u64_be).collect();
+        let balances = (1..=3).map(|n| n.into()).collect();
+        let pool = create_stable_pool_with(
+            tokens.clone(),
+            balances,
+            AmplificationParameter::new(1.into(), 1.into()).unwrap(),
+            vec![18, 18, 18],
+            1.into(),
+        );
+
+        for (i, token_i) in tokens.iter().enumerate() {
+            for (j, token_j) in tokens.iter().enumerate() {
+                let res_ij = pool
+                    .as_pool_ref()
+                    .construct_balances_and_token_indices(token_i, token_j)
+                    .unwrap();
+                assert_eq!(res_ij.token_index_in, i);
+                assert_eq!(res_ij.token_index_out, j);
+            }
+        }
+    }
+
+    #[test]
+    fn stable_get_amount_out() {
+        // https://dashboard.tenderly.co/tx/main/0x014d92abcbd503ede8ef678e31ddc55389c5d40c7533d12e3afce9eb08b0f331/debugger
+        // Token addresses are irrelevant for computation.
+        let dai = H160::from_low_u64_be(1);
+        let usdc = H160::from_low_u64_be(2);
+        let tusd = H160::from_low_u64_be(3);
+        let tokens = vec![dai, usdc, tusd];
+        let scaling_exps = vec![0, 12, 12];
+        let amplification_parameter = AmplificationParameter::new(57.into(), 10000.into()).unwrap();
+        let balances = vec![
+            40_927_687_702_846_622_465_144_342_i128.into(),
+            59_448_574_675_062_i128.into(),
+            55_199_308_926_456_i128.into(),
+        ];
+        let swap_fee_percentage = 300_000_000_000_000u128.into();
+        let pool = create_stable_pool_with(
+            tokens,
+            balances,
+            amplification_parameter,
+            scaling_exps,
+            swap_fee_percentage,
+        );
+        // Etherscan for amount verification:
+        // https://etherscan.io/tx/0x75be93fff064ad46b423b9e20cee09b0ae7f741087f43e4187d4f4cf59f54229
+        let amount_in = 1_886_982_823_746_269_817_650_i128.into();
+        let amount_out = 1_887_770_905_i128;
+        let res_out = pool.get_amount_out(usdc, (amount_in, dai));
+        assert_eq!(res_out.unwrap(), amount_out.into());
     }
 }
