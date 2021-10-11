@@ -223,7 +223,6 @@ pub trait BalancerPoolFetching: Send + Sync {
 
 pub struct BalancerPoolFetcher {
     pool_registry: Arc<BalancerPoolRegistry>,
-    // pool_reserve_cache: BalancerPoolReserveCache,
     stable_pool_reserve_cache: StablePoolReserveCache,
     weighted_pool_reserve_cache: WeightedPoolReserveCache,
 }
