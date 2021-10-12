@@ -169,9 +169,9 @@ struct FeeParameters {
 
 #[derive(Clone)]
 pub struct OrderQuoter {
-    pub(crate) fee_calculator: Arc<dyn MinFeeCalculating>,
-    pub(crate) price_estimator: Arc<dyn PriceEstimating>,
-    order_validator: Arc<dyn OrderValidating>,
+    pub fee_calculator: Arc<dyn MinFeeCalculating>,
+    pub price_estimator: Arc<dyn PriceEstimating>,
+    pub order_validator: Arc<dyn OrderValidating>,
 }
 
 impl OrderQuoter {
