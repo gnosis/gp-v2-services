@@ -1714,12 +1714,12 @@ mod tests {
             .await
             .unwrap();
         }
-        for i in 0..=3 {
+        for (i, order) in orders.into_iter().enumerate() {
             let res = db
                 .orders_for_tx(&H256::from_low_u64_be(i as u64))
                 .await
                 .unwrap();
-            assert_eq!(res, vec![orders[i].clone()]);
+            assert_eq!(res, vec![order]);
         }
     }
 }
