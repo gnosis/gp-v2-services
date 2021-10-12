@@ -312,13 +312,6 @@ impl Driver {
             .map(|order| order.order_meta_data.uid)
             .collect();
         let matched_but_not_settled = all_matched_ids.difference(&submitted).copied().collect();
-        let cancelled_order_ids: HashSet<_> = all_matched_orders
-            .iter()
-            .filter_map(|order| match order.order_meta_data.invalidated {
-                true => Some(order.order_meta_data.uid),
-                false => None,
-            })
-            .collect();
         let liquidity_order_ids: HashSet<_> = orders
             .into_iter()
             .filter_map(|order| match order.is_liquidity_order {
@@ -331,13 +324,8 @@ impl Driver {
         let matched_but_unsettled_liquidity_ids: HashSet<_> = liquidity_order_ids
             .intersection(&matched_but_not_settled)
             .collect();
-        let matched_but_unsettled_cancelled_ids: HashSet<_> = cancelled_order_ids
-            .intersection(&matched_but_not_settled)
-            .collect();
         self.metrics
             .orders_matched_but_liquidity(matched_but_unsettled_liquidity_ids.len());
-        self.metrics
-            .orders_matched_but_cancelled(matched_but_unsettled_cancelled_ids.len());
         self.metrics
             .orders_matched_but_not_settled(matched_but_not_settled.len())
     }
