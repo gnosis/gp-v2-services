@@ -95,12 +95,11 @@ impl OrderConverter {
             order.order_creation.buy_token
         };
 
-        let full_fee_amount = order.order_meta_data.full_fee_amount;
-
         // The reported fee amount that is used for objective computation is the
         // order's full full amount scaled by a constant factor.
         let scaled_fee_amount = U256::from_f64_lossy(
-            full_fee_amount.to_f64_lossy() * self.fee_objective_scaling_factor,
+            order.order_meta_data.full_fee_amount.to_f64_lossy()
+                * self.fee_objective_scaling_factor,
         );
 
         LimitOrder {
@@ -197,43 +196,6 @@ pub mod tests {
         };
 
         assert_eq!(converter.normalize_limit_order(order).buy_token, buy_token);
-    }
-
-    #[test]
-    fn computes_full_fee_amount_if_missing() {
-        let converter = OrderConverter::test(H160::default());
-
-        assert_eq!(
-            converter
-                .normalize_limit_order(Order {
-                    order_creation: OrderCreation {
-                        fee_amount: 10.into(),
-                        ..Default::default()
-                    },
-                    order_meta_data: OrderMetaData {
-                        full_fee_amount: 20.into(),
-                        ..Default::default()
-                    }
-                })
-                .scaled_fee_amount,
-            20.into(),
-        );
-
-        assert_eq!(
-            converter
-                .normalize_limit_order(Order {
-                    order_creation: OrderCreation {
-                        fee_amount: 10.into(),
-                        ..Default::default()
-                    },
-                    order_meta_data: OrderMetaData {
-                        full_fee_amount: 50.into(),
-                        ..Default::default()
-                    },
-                })
-                .scaled_fee_amount,
-            50.into(),
-        );
     }
 
     #[test]
