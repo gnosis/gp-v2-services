@@ -1683,37 +1683,40 @@ mod tests {
                 order_creation: Default::default(),
             })
             .collect();
-        // Add settlement
-        db.append_events_(vec![(
-            EventIndex {
-                block_number: 0,
-                log_index: 0,
-            },
-            Event::Settlement(Settlement {
-                solver: Default::default(),
-                transaction_hash: H256::from_low_u64_be(1),
-            }),
-        )])
-        .await
-        .unwrap();
-        // Each order was traded in the same block.
+
+        // Each order was traded in the consecutive blocks.
         for (i, order) in orders.clone().iter().enumerate() {
             db.insert_order(order).await.unwrap();
-            db.append_events_(vec![(
-                EventIndex {
-                    block_number: 0,
-                    log_index: i as u64 + 1,
-                },
-                Event::Trade(Trade {
-                    order_uid: order.order_meta_data.uid,
-                    ..Default::default()
-                }),
-            )])
+            db.append_events_(vec![
+                // Add settlement
+                (
+                    EventIndex {
+                        block_number: i as u64,
+                        log_index: 0,
+                    },
+                    Event::Settlement(Settlement {
+                        solver: Default::default(),
+                        transaction_hash: H256::from_low_u64_be(i as u64),
+                    }),
+                ),
+                // Add trade
+                (
+                    EventIndex {
+                        block_number: i as u64,
+                        log_index: 1,
+                    },
+                    Event::Trade(Trade {
+                        order_uid: order.order_meta_data.uid,
+                        ..Default::default()
+                    }),
+                ),
+            ])
             .await
             .unwrap();
         }
-
-        let res = db.orders_for_tx(&H256::from_low_u64_be(1)).await.unwrap();
-        assert_eq!(res, orders);
+        for i in 0..=3 {
+            let res = db.orders_for_tx(&H256::from_low_u64_be(i as u64)).await.unwrap();
+            assert_eq!(res, vec![orders[i].clone()]);
+        }
     }
 }

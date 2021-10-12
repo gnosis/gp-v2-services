@@ -25,9 +25,7 @@ pub mod tracing;
 pub mod transport;
 pub mod web3_traits;
 
-use ethcontract::{
-    dyns::{DynTransport, DynWeb3},
-};
+use ethcontract::dyns::{DynTransport, DynWeb3};
 use std::{
     future::Future,
     time::{Duration, Instant},
