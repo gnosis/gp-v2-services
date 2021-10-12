@@ -27,12 +27,7 @@ pub mod web3_traits;
 
 use ethcontract::{
     dyns::{DynTransport, DynWeb3},
-    H160,
 };
-use hex::{FromHex, FromHexError};
-use model::h160_hexadecimal;
-use serde::Deserialize;
-use std::fmt::Debug;
 use std::{
     future::Future,
     time::{Duration, Instant},
