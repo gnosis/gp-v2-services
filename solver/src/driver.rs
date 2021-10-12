@@ -512,7 +512,7 @@ impl Driver {
             self.report_matched_orders(
                 &settlement.settlement,
                 rated_settlements.into_iter().map(|(_, solution)| solution),
-                orders.clone(),
+                orders,
             );
         }
 
