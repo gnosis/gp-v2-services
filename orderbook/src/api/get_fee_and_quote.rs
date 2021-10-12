@@ -4,7 +4,7 @@ use crate::api::post_quote::{
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use ethcontract::{H160, U256};
-use model::{h160_hexadecimal, u256_decimal};
+use model::{order::OrderKind, u256_decimal};
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, sync::Arc};
 use warp::{Filter, Rejection, Reply};
@@ -20,9 +20,7 @@ struct Fee {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SellQuery {
-    #[serde(with = "h160_hexadecimal")]
     sell_token: H160,
-    #[serde(with = "h160_hexadecimal")]
     buy_token: H160,
     // The total amount to be sold from which the fee will be deducted.
     #[serde(with = "u256_decimal")]
@@ -66,9 +64,7 @@ impl From<OrderQuoteResponse> for SellResponse {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BuyQuery {
-    #[serde(with = "h160_hexadecimal")]
     sell_token: H160,
-    #[serde(with = "h160_hexadecimal")]
     buy_token: H160,
     // The total amount to be bought.
     #[serde(with = "u256_decimal")]

@@ -196,8 +196,7 @@ mod tests {
             buy_amount: 2.into(),
             kind: OrderKind::Sell,
             partially_fillable: false,
-            fee_amount: Default::default(),
-            full_fee_amount: Default::default(),
+            scaled_fee_amount: Default::default(),
             settlement_handling: limit_handler.clone(),
             is_liquidity_order: false,
             id: "0".to_string(),
@@ -230,7 +229,7 @@ mod tests {
                         weight: Bfp::from(800_000_000_000_000_000),
                     }
                 },
-                fee: BigRational::new(3.into(), 1.into()),
+                fee: "0.03".parse().unwrap(),
                 settlement_handling: wp_amm_handler.clone(),
             }),
             Liquidity::BalancerStable(StablePoolOrder {
@@ -365,7 +364,7 @@ mod tests {
                     weight: Bfp::from(500_000_000_000_000_000),
                 }
             },
-            fee: BigRational::new(1.into(), 1000.into()),
+            fee: "0.001".parse().unwrap(),
             settlement_handling: CapturingSettlementHandler::arc(),
         };
 

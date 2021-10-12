@@ -12,17 +12,18 @@ use model::order::Order;
 use model::{order::OrderKind, TokenPair};
 use num::{rational::Ratio, BigRational};
 use primitive_types::{H160, U256};
-use shared::sources::balancer::pool_fetching::{
-    AmplificationParameter, TokenState, WeightedTokenState,
+use shared::sources::balancer::{
+    pool_fetching::{AmplificationParameter, TokenState, WeightedTokenState},
+    swap::fixed_point::Bfp,
 };
 #[cfg(test)]
 use shared::sources::uniswap::pool_fetching::Pool;
 use std::collections::HashMap;
 use std::sync::Arc;
-use strum_macros::{AsStaticStr, EnumVariantNames};
+use strum::{EnumVariantNames, IntoStaticStr};
 
 /// Defines the different types of liquidity our solvers support
-#[derive(Clone, AsStaticStr, EnumVariantNames, Debug)]
+#[derive(Clone, IntoStaticStr, EnumVariantNames, Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub enum Liquidity {
     ConstantProduct(ConstantProductOrder),
@@ -69,8 +70,13 @@ pub struct LimitOrder {
     pub buy_amount: U256,
     pub kind: OrderKind,
     pub partially_fillable: bool,
-    pub fee_amount: U256,
-    pub full_fee_amount: U256,
+    /// The scaled fee amount that the protocol pretends it is receiving.
+    ///
+    /// This is different than the actual order `fee_amount` value in that it
+    /// does not have any subsidies applied and may be scaled by a constant
+    /// factor to make matching orders more valuable from an objective value
+    /// perspective.
+    pub scaled_fee_amount: U256,
     pub is_liquidity_order: bool,
     pub settlement_handling: Arc<dyn SettlementHandling<Self>>,
 }
@@ -102,12 +108,7 @@ impl Settleable for LimitOrder {
 #[cfg(test)]
 impl From<Order> for LimitOrder {
     fn from(order: Order) -> Self {
-        use self::offchain_orderbook::normalize_limit_order;
-        use contracts::WETH9;
-        use shared::dummy_contract;
-
-        let native_token = dummy_contract!(WETH9, H160([0x42; 20]));
-        normalize_limit_order(order, native_token, &Default::default())
+        offchain_orderbook::OrderConverter::test(H160([0x42; 20])).normalize_limit_order(order)
     }
 }
 
@@ -121,8 +122,7 @@ impl Default for LimitOrder {
             buy_amount: Default::default(),
             kind: Default::default(),
             partially_fillable: Default::default(),
-            fee_amount: Default::default(),
-            full_fee_amount: Default::default(),
+            scaled_fee_amount: Default::default(),
             settlement_handling: tests::CapturingSettlementHandler::arc(),
             is_liquidity_order: false,
             id: Default::default(),
@@ -166,7 +166,7 @@ impl From<Pool> for ConstantProductOrder {
 #[cfg_attr(test, derivative(PartialEq))]
 pub struct WeightedProductOrder {
     pub reserves: HashMap<H160, WeightedTokenState>,
-    pub fee: BigRational,
+    pub fee: Bfp,
     #[cfg_attr(test, derivative(PartialEq = "ignore"))]
     pub settlement_handling: Arc<dyn SettlementHandling<Self>>,
 }
@@ -264,7 +264,7 @@ impl Default for WeightedProductOrder {
     fn default() -> Self {
         WeightedProductOrder {
             reserves: Default::default(),
-            fee: num::Zero::zero(),
+            fee: Bfp::zero(),
             settlement_handling: tests::CapturingSettlementHandler::arc(),
         }
     }
@@ -348,8 +348,7 @@ pub mod tests {
                 buy_amount: buy_amount.into(),
                 kind,
                 partially_fillable: Default::default(),
-                fee_amount: Default::default(),
-                full_fee_amount: Default::default(),
+                scaled_fee_amount: Default::default(),
                 settlement_handling: CapturingSettlementHandler::arc(),
                 is_liquidity_order: false,
             }
