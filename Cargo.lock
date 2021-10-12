@@ -1055,6 +1055,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "gas-estimation"
+version = "0.1.0"
+source = "git+https://github.com/gnosis/gp-gas-estimation.git?tag=v0.3.4#5060ad766c2da74fcbab40857fdb1a1a5b2b7e3f"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "http",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1836,7 +1852,7 @@ dependencies = [
  "either",
  "ethcontract",
  "futures",
- "gas-estimation",
+ "gas-estimation 0.1.0 (git+https://github.com/gnosis/gp-gas-estimation.git?tag=v0.3.2)",
  "hex",
  "hex-literal",
  "maplit",
@@ -2617,7 +2633,7 @@ dependencies = [
  "ethcontract",
  "ethcontract-mock",
  "futures",
- "gas-estimation",
+ "gas-estimation 0.1.0 (git+https://github.com/gnosis/gp-gas-estimation.git?tag=v0.3.2)",
  "hex",
  "hex-literal",
  "itertools",
@@ -2709,7 +2725,7 @@ dependencies = [
  "ethcontract",
  "ethcontract-mock",
  "futures",
- "gas-estimation",
+ "gas-estimation 0.1.0 (git+https://github.com/gnosis/gp-gas-estimation.git?tag=v0.3.2)",
  "hex",
  "hex-literal",
  "itertools",
@@ -3228,10 +3244,11 @@ dependencies = [
 [[package]]
 name = "transaction-retry"
 version = "0.1.0"
-source = "git+https://github.com/gnosis/gp-transaction-retry.git?tag=v0.1.1#6c94d9d2e2a8314f85b5aec4ca0a96185110bd98"
+source = "git+https://github.com/gnosis/gp-transaction-retry.git?tag=v0.2.0#fedcc409e056841cc412099554e9055cab1eb4c1"
 dependencies = [
  "async-trait",
  "futures",
+ "gas-estimation 0.1.0 (git+https://github.com/gnosis/gp-gas-estimation.git?tag=v0.3.4)",
 ]
 
 [[package]]
