@@ -35,25 +35,12 @@ use serde::Deserialize;
 use std::fmt::Debug;
 use std::{
     future::Future,
-    str::FromStr,
     time::{Duration, Instant},
 };
 use web3::types::Bytes;
 
 pub type Web3Transport = DynTransport;
 pub type Web3 = DynWeb3;
-
-/// Wraps H160 with FromStr and Deserialize that can handle a `0x` prefix.
-#[derive(Debug, Deserialize)]
-#[serde(transparent)]
-pub struct H160Wrapper(#[serde(with = "h160_hexadecimal")] pub H160);
-impl FromStr for H160Wrapper {
-    type Err = FromHexError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let s = s.strip_prefix("0x").unwrap_or(s);
-        Ok(H160Wrapper(H160(FromHex::from_hex(s)?)))
-    }
-}
 
 /// The standard http client we use in the api and driver.
 pub fn http_client(timeout: Duration) -> reqwest::Client {

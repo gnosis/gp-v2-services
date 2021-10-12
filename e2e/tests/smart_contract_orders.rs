@@ -1,6 +1,10 @@
+mod ganache;
+#[macro_use]
+mod services;
+
 use crate::services::{
-    create_orderbook_api, deploy_mintable_token, to_wei, GPv2, OrderbookServices, UniswapContracts,
-    API_HOST,
+    create_orderbook_liquidity, deploy_mintable_token, to_wei, GPv2, OrderbookServices,
+    UniswapContracts, API_HOST,
 };
 use contracts::IUniswapLikeRouter;
 use ethcontract::prelude::{Account, Address, Bytes, PrivateKey, U256};
@@ -15,10 +19,7 @@ use solver::{
     metrics::NoopMetrics, settlement_submission::SolutionSubmitter,
 };
 use std::{sync::Arc, time::Duration};
-
-mod ganache;
-#[macro_use]
-mod services;
+use tracing::level_filters::LevelFilter;
 
 const TRADER: [u8; 32] = [1; 32];
 
@@ -30,7 +31,7 @@ async fn ganache_smart_contract_orders() {
 }
 
 async fn smart_contract_orders(web3: Web3) {
-    shared::tracing::initialize("warn,orderbook=debug,solver=debug");
+    shared::tracing::initialize("warn,orderbook=debug,solver=debug", LevelFilter::OFF);
     let chain_id = web3
         .eth()
         .chain_id()
@@ -176,7 +177,7 @@ async fn smart_contract_orders(web3: Web3) {
     let solver = solver::solver::naive_solver(solver_account);
     let liquidity_collector = LiquidityCollector {
         uniswap_like_liquidity: vec![uniswap_liquidity],
-        orderbook_api: create_orderbook_api(&web3, gpv2.native_token.address()),
+        orderbook_liquidity: create_orderbook_liquidity(&web3, gpv2.native_token.address()),
         balancer_v2_liquidity: None,
     };
     let network_id = web3.net().version().await.unwrap();
@@ -196,7 +197,6 @@ async fn smart_contract_orders(web3: Web3) {
         Duration::from_secs(30),
         None,
         block_stream,
-        1.0,
         SolutionSubmitter {
             web3: web3.clone(),
             contract: gpv2.settlement.clone(),

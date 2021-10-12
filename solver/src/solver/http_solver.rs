@@ -52,17 +52,17 @@ lazy_static! {
 #[derive(Debug, Default)]
 pub struct SolverConfig {
     pub max_nr_exec_orders: u32,
-    pub enforce_uniform_clearing_prices: bool,
+    pub has_ucp_policy_parameter: bool,
 }
 
 impl SolverConfig {
-    fn add_to_query(&self, url: &mut Url) {
+    fn add_to_query(&self, url: &mut Url, ucp_policy: &str) {
         url.query_pairs_mut().append_pair(
             "max_nr_exec_orders",
             self.max_nr_exec_orders.to_string().as_str(),
         );
-        if self.enforce_uniform_clearing_prices {
-            url.query_pairs_mut().append_pair("ucp_policy", "Enforce");
+        if self.has_ucp_policy_parameter {
+            url.query_pairs_mut().append_pair("ucp_policy", ucp_policy);
         }
     }
 }
@@ -92,7 +92,6 @@ pub struct HttpSolver {
     network_id: String,
     chain_id: u64,
     instance_cache: InstanceCache,
-    fee_factor: f64,
     native_token_amount_to_estimate_prices_with: U256,
 }
 
@@ -110,7 +109,6 @@ impl HttpSolver {
         buffer_retriever: Arc<dyn BufferRetrieving>,
         network_id: String,
         chain_id: u64,
-        fee_factor: f64,
         client: Client,
         instance_cache: InstanceCache,
         native_token_amount_to_estimate_prices_with: U256,
@@ -129,7 +127,6 @@ impl HttpSolver {
             network_id,
             chain_id,
             instance_cache,
-            fee_factor,
             native_token_amount_to_estimate_prices_with,
         }
     }
@@ -212,7 +209,6 @@ impl HttpSolver {
         let gas_model = GasModel {
             native_token: self.native_token,
             gas_price,
-            fee_factor: self.fee_factor,
         };
 
         let token_models = token_models(&token_infos, &all_price_estimates, &buffers, &gas_model);
@@ -250,7 +246,13 @@ impl HttpSolver {
             .append_pair("instance_name", &instance_name)
             .append_pair("time_limit", &timeout.as_secs().to_string());
 
-        self.config.add_to_query(&mut url);
+        let ucp_policy = if model.orders.len() > 1 {
+            "Enforce"
+        } else {
+            "EnforceForOrders"
+        };
+        self.config.add_to_query(&mut url, ucp_policy);
+
         let query = url.query().map(ToString::to_string).unwrap_or_default();
         // The default Client created in main has a short http request timeout which we might
         // exceed. We remove it here because the solver already internally enforces the timeout and
@@ -319,7 +321,6 @@ fn map_tokens_for_solver(orders: &[LimitOrder], liquidity: &[Liquidity]) -> Vec<
 struct GasModel {
     native_token: H160,
     gas_price: f64,
-    fee_factor: f64,
 }
 
 impl GasModel {
@@ -343,14 +344,8 @@ impl GasModel {
     }
 
     fn order_fee(&self, order: &LimitOrder) -> FeeModel {
-        let amount = if order.full_fee_amount.is_zero() {
-            U256::from_f64_lossy((order.fee_amount.to_f64_lossy() / self.fee_factor).ceil())
-        } else {
-            order.full_fee_amount
-        };
-
         FeeModel {
-            amount,
+            amount: order.scaled_fee_amount,
             token: order.sell_token,
         }
     }
@@ -456,7 +451,7 @@ fn amm_models(liquidity: &[Liquidity], gas_model: &GasModel) -> BTreeMap<usize, 
                             })
                             .collect(),
                     }),
-                    fee: amm.fee.clone(),
+                    fee: amm.fee.into(),
                     cost: gas_model.balancer_cost(),
                     mandatory: false,
                 },
@@ -667,7 +662,7 @@ mod tests {
             None,
             SolverConfig {
                 max_nr_exec_orders: 100,
-                enforce_uniform_clearing_prices: false,
+                has_ucp_policy_parameter: false,
             },
             H160::zero(),
             mock_token_info_fetcher,
@@ -675,7 +670,6 @@ mod tests {
             mock_buffer_retriever,
             "mock_network_id".to_string(),
             0,
-            1.,
             Client::new(),
             Default::default(),
             1.into(),
@@ -688,8 +682,7 @@ mod tests {
             sell_amount: base(2).into(),
             kind: OrderKind::Sell,
             partially_fillable: false,
-            fee_amount: Default::default(),
-            full_fee_amount: Default::default(),
+            scaled_fee_amount: Default::default(),
             settlement_handling: CapturingSettlementHandler::arc(),
             is_liquidity_order: false,
             id: "0".to_string(),
@@ -739,7 +732,6 @@ mod tests {
         ];
 
         let gas_model = GasModel {
-            fee_factor: 1.,
             gas_price: 1e9,
             native_token,
         };
@@ -774,8 +766,7 @@ mod tests {
             buy_amount: Default::default(),
             kind: OrderKind::Sell,
             partially_fillable: Default::default(),
-            fee_amount: Default::default(),
-            full_fee_amount: Default::default(),
+            scaled_fee_amount: Default::default(),
             settlement_handling: limit_handling.clone(),
             is_liquidity_order: false,
             id: "0".to_string(),

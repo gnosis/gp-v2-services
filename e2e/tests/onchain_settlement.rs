@@ -16,14 +16,15 @@ use solver::{
     metrics::NoopMetrics, settlement_submission::SolutionSubmitter,
 };
 use std::{sync::Arc, time::Duration};
+use tracing::level_filters::LevelFilter;
 use web3::signing::SecretKeyRef;
 
 mod ganache;
 #[macro_use]
 mod services;
 use crate::services::{
-    create_orderbook_api, deploy_mintable_token, to_wei, GPv2, OrderbookServices, UniswapContracts,
-    API_HOST,
+    create_orderbook_api, create_orderbook_liquidity, deploy_mintable_token, to_wei, GPv2,
+    OrderbookServices, UniswapContracts, API_HOST,
 };
 use shared::maintenance::Maintaining;
 
@@ -40,7 +41,7 @@ async fn ganache_onchain_settlement() {
 }
 
 async fn onchain_settlement(web3: Web3) {
-    shared::tracing::initialize("warn,orderbook=debug,solver=debug");
+    shared::tracing::initialize("warn,orderbook=debug,solver=debug", LevelFilter::ERROR);
     let chain_id = web3
         .eth()
         .chain_id()
@@ -215,7 +216,7 @@ async fn onchain_settlement(web3: Web3) {
     let solver = solver::solver::naive_solver(solver_account);
     let liquidity_collector = LiquidityCollector {
         uniswap_like_liquidity: vec![uniswap_liquidity],
-        orderbook_api: create_orderbook_api(&web3, gpv2.native_token.address()),
+        orderbook_liquidity: create_orderbook_liquidity(&web3, gpv2.native_token.address()),
         balancer_v2_liquidity: None,
     };
     let network_id = web3.net().version().await.unwrap();
@@ -235,7 +236,6 @@ async fn onchain_settlement(web3: Web3) {
         Duration::from_secs(30),
         None,
         block_stream,
-        1.0,
         SolutionSubmitter {
             web3: web3.clone(),
             contract: gpv2.settlement.clone(),
@@ -269,10 +269,7 @@ async fn onchain_settlement(web3: Web3) {
     maintenance.run_maintenance().await.unwrap();
     solvable_orders_cache.update(0).await.unwrap();
 
-    let orders = create_orderbook_api(&web3, gpv2.native_token.address())
-        .get_orders()
-        .await
-        .unwrap();
+    let orders = create_orderbook_api().get_orders().await.unwrap();
     assert!(orders.is_empty());
 
     // Drive again to ensure we can continue solution finding
