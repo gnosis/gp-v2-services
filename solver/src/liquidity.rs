@@ -12,17 +12,18 @@ use model::order::Order;
 use model::{order::OrderKind, TokenPair};
 use num::{rational::Ratio, BigRational};
 use primitive_types::{H160, U256};
-use shared::sources::balancer::pool_fetching::{
-    AmplificationParameter, TokenState, WeightedTokenState,
+use shared::sources::balancer::{
+    pool_fetching::{AmplificationParameter, TokenState, WeightedTokenState},
+    swap::fixed_point::Bfp,
 };
 #[cfg(test)]
 use shared::sources::uniswap::pool_fetching::Pool;
 use std::collections::HashMap;
 use std::sync::Arc;
-use strum_macros::{AsStaticStr, EnumVariantNames};
+use strum::{EnumVariantNames, IntoStaticStr};
 
 /// Defines the different types of liquidity our solvers support
-#[derive(Clone, AsStaticStr, EnumVariantNames, Debug)]
+#[derive(Clone, IntoStaticStr, EnumVariantNames, Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub enum Liquidity {
     ConstantProduct(ConstantProductOrder),
@@ -165,7 +166,7 @@ impl From<Pool> for ConstantProductOrder {
 #[cfg_attr(test, derivative(PartialEq))]
 pub struct WeightedProductOrder {
     pub reserves: HashMap<H160, WeightedTokenState>,
-    pub fee: BigRational,
+    pub fee: Bfp,
     #[cfg_attr(test, derivative(PartialEq = "ignore"))]
     pub settlement_handling: Arc<dyn SettlementHandling<Self>>,
 }
@@ -263,7 +264,7 @@ impl Default for WeightedProductOrder {
     fn default() -> Self {
         WeightedProductOrder {
             reserves: Default::default(),
-            fee: num::Zero::zero(),
+            fee: Bfp::zero(),
             settlement_handling: tests::CapturingSettlementHandler::arc(),
         }
     }
