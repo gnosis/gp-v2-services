@@ -41,7 +41,7 @@ pub fn handle_all_routes(
     let get_amount_estimate = get_markets::get_amount_estimate(quoter.price_estimator.clone());
     let get_fee_and_quote_sell = get_fee_and_quote::get_fee_and_quote_sell(quoter.clone());
     let get_fee_and_quote_buy = get_fee_and_quote::get_fee_and_quote_buy(quoter.clone());
-    let get_user_orders = get_user_orders::get_user_orders(orderbook);
+    let get_user_orders = get_user_orders::get_user_orders(orderbook.clone());
     let get_orders_by_tx = get_orders_by_tx::get_orders_by_tx(orderbook);
     let post_quote = post_quote::post_quote(quoter);
     let cors = warp::cors()

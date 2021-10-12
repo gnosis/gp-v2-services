@@ -4,7 +4,7 @@ use crate::api::post_quote::{
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use ethcontract::{H160, U256};
-use model::{order::OrderKind, u256_decimal};
+use model::u256_decimal;
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, sync::Arc};
 use warp::{Filter, Rejection, Reply};
