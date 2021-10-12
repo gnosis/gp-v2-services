@@ -35,13 +35,6 @@ pub fn get_orders_by_tx(
 mod tests {
     use super::*;
     use crate::api::response_body;
-    use crate::database::{
-        events::{Event, Settlement, Trade},
-        orders::OrderStoring,
-        Postgres,
-    };
-    use model::order::{OrderMetaData, OrderUid};
-    use shared::event_handling::EventIndex;
     use std::str::FromStr;
 
     #[tokio::test]
@@ -64,54 +57,5 @@ mod tests {
         let body = response_body(response).await;
         let response_orders: Vec<Order> = serde_json::from_slice(body.as_slice()).unwrap();
         assert_eq!(response_orders, orders);
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn postgres_returns_expected_orders_for_tx_hash_request() {
-        let db = Postgres::new("postgresql://").unwrap();
-        db.clear().await.unwrap();
-
-        let orders: Vec<Order> = (0..=3)
-            .map(|i| Order {
-                order_meta_data: OrderMetaData {
-                    uid: OrderUid::from_integer(i),
-                    ..Default::default()
-                },
-                order_creation: Default::default(),
-            })
-            .collect();
-        // Add settlement
-        db.append_events_(vec![(
-            EventIndex {
-                block_number: 0,
-                log_index: 0,
-            },
-            Event::Settlement(Settlement {
-                solver: Default::default(),
-                transaction_hash: H256::from_low_u64_be(1),
-            }),
-        )])
-        .await
-        .unwrap();
-        // Each order was traded in the same block.
-        for (i, order) in orders.clone().iter().enumerate() {
-            db.insert_order(order).await.unwrap();
-            db.append_events_(vec![(
-                EventIndex {
-                    block_number: 0,
-                    log_index: i as u64 + 1,
-                },
-                Event::Trade(Trade {
-                    order_uid: order.order_meta_data.uid,
-                    ..Default::default()
-                }),
-            )])
-            .await
-            .unwrap();
-        }
-
-        let res = db.orders_for_tx(&H256::from_low_u64_be(1)).await.unwrap();
-        assert_eq!(res, orders);
     }
 }
