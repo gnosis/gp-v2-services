@@ -289,7 +289,6 @@ impl Driver {
     /// Record metrics on the matched orders from a single batch. Specifically we report on
     /// the number of orders that were;
     ///  - matched but not settled in this runloop (effectively queued for the next one)
-    ///  - matched but cancelled
     ///  - matched but coming from known liquidity providers.
     /// Should help us to identify how much we can save by parallelizing execution.
     fn report_matched_orders(
