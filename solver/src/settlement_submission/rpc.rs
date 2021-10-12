@@ -64,8 +64,8 @@ pub async fn submit(
     // least high enough to accommodate. This isn't perfect because it's still possible that that
     // transaction gets mined first in which case our new transaction would fail with "nonce already
     // used".
-    let pending_gas_price = pending_gas_price
-        .map(|gas_price| transaction_retry::gas_price_increase::minimum_increase(gas_price));
+    let pending_gas_price =
+        pending_gas_price.map(transaction_retry::gas_price_increase::minimum_increase);
     let stream = gas_price_stream(
         target_confirm_time,
         gas_price_cap,
