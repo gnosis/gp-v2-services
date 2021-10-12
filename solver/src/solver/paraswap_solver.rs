@@ -81,7 +81,7 @@ impl From<ParaswapResponseError> for SettlementError {
                     | ParaswapResponseError::ServerBusy
                     | ParaswapResponseError::Send(_),
             ),
-            should_alert: !matches!(
+            track_failure: !matches!(
                 err,
                 ParaswapResponseError::PriceChange
                     | ParaswapResponseError::BuildingTransaction(_)

@@ -27,6 +27,8 @@ pub trait SolverMetrics {
     fn order_settled(&self, order: &Order, solver: &'static str);
     fn settlement_simulation_succeeded(&self, solver: &'static str);
     fn settlement_simulation_failed_on_latest(&self, solver: &'static str);
+    fn single_order_solver_succeeded(&self, solver: &'static str);
+    fn single_order_solver_failed(&self, solver: &'static str);
     fn settlement_simulation_failed(&self, solver: &'static str);
     fn settlement_submitted(&self, successful: bool, solver: &'static str);
     fn orders_matched_but_not_settled(&self, count: usize);
@@ -41,6 +43,7 @@ pub struct Metrics {
     liquidity: IntGaugeVec,
     settlement_simulations: IntCounterVec,
     settlement_submissions: IntCounterVec,
+    single_order_solver_runs: IntCounterVec,
     matched_but_unsettled_orders: IntCounter,
     transport_requests: HistogramVec,
     pool_cache_hits: IntCounter,
@@ -94,6 +97,12 @@ impl Metrics {
         )?;
         registry.register(Box::new(settlement_submissions.clone()))?;
 
+        let single_order_solver_runs = IntCounterVec::new(
+            Opts::new("single_order_solver", "Success/Failure counts"),
+            &["result", "solver_type"],
+        )?;
+        registry.register(Box::new(single_order_solver_runs.clone()))?;
+
         let matched_but_unsettled_orders = IntCounter::new(
             "orders_matched_not_settled",
             "Counter for the number of orders for which at least one solver computed an execution which was not chosen in this run-loop",
@@ -126,6 +135,7 @@ impl Metrics {
             liquidity,
             settlement_simulations,
             settlement_submissions,
+            single_order_solver_runs,
             matched_but_unsettled_orders,
             transport_requests,
             pool_cache_hits,
@@ -186,6 +196,18 @@ impl SolverMetrics for Metrics {
     fn settlement_simulation_failed_on_latest(&self, solver: &'static str) {
         self.settlement_simulations
             .with_label_values(&["failure_on_latest", solver])
+            .inc()
+    }
+
+    fn single_order_solver_succeeded(&self, solver: &'static str) {
+        self.single_order_solver_runs
+            .with_label_values(&["success", solver])
+            .inc()
+    }
+
+    fn single_order_solver_failed(&self, solver: &'static str) {
+        self.single_order_solver_runs
+            .with_label_values(&["failure", solver])
             .inc()
     }
 
@@ -260,6 +282,8 @@ impl SolverMetrics for NoopMetrics {
     fn order_settled(&self, _: &Order, _: &'static str) {}
     fn settlement_simulation_succeeded(&self, _: &'static str) {}
     fn settlement_simulation_failed_on_latest(&self, _: &'static str) {}
+    fn single_order_solver_succeeded(&self, _: &'static str) {}
+    fn single_order_solver_failed(&self, _: &'static str) {}
     fn settlement_simulation_failed(&self, _: &'static str) {}
     fn settlement_submitted(&self, _: bool, _: &'static str) {}
     fn orders_matched_but_not_settled(&self, _: usize) {}

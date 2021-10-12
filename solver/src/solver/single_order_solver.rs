@@ -54,14 +54,18 @@ impl<I: SingleOrderSolving + Send + Sync + 'static> Solver for SingleOrderSolver
         let settle = async {
             while let Some(order) = orders.pop_front() {
                 match self.inner.try_settle_order(order.clone()).await {
-                    Ok(settlement) => settlements.extend(settlement),
+                    Ok(settlement) => {
+                        // TODO - track success
+                        settlements.extend(settlement)
+                    },
                     Err(err) => {
                         let name = self.inner.name();
                         if err.retryable {
                             tracing::warn!("Solver {} retryable error: {:?}", name, &err);
                             orders.push_back(order);
-                        } else if err.should_alert {
-                            tracing::error!("Solver {} hard error: {:?}", name, &err);
+                        } else if err.track_failure {
+                            tracing::warn!("Solver {} hard error: {:?}", name, &err);
+                            // TODO - record metric (increment counter for name)
                         } else {
                             tracing::warn!("Solver {} soft error: {:?}", name, &err);
                         }
@@ -89,7 +93,7 @@ pub struct SettlementError {
     pub inner: anyhow::Error,
     pub retryable: bool,
     // Whether or not this error should be logged as an error
-    pub should_alert: bool,
+    pub track_failure: bool,
 }
 
 impl From<anyhow::Error> for SettlementError {
@@ -97,7 +101,7 @@ impl From<anyhow::Error> for SettlementError {
         SettlementError {
             inner: err,
             retryable: false,
-            should_alert: true,
+            track_failure: true,
         }
     }
 }
@@ -166,7 +170,7 @@ mod tests {
                     0 => Err(SettlementError {
                         inner: anyhow!(""),
                         retryable: true,
-                        should_alert: true,
+                        track_failure: true,
                     }),
                     1 => Ok(None),
                     _ => unreachable!(),
@@ -206,7 +210,7 @@ mod tests {
             Err(SettlementError {
                 inner: anyhow!(""),
                 retryable: false,
-                should_alert: true,
+                track_failure: true,
             })
         });
 
