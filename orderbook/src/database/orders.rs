@@ -1715,7 +1715,10 @@ mod tests {
             .unwrap();
         }
         for i in 0..=3 {
-            let res = db.orders_for_tx(&H256::from_low_u64_be(i as u64)).await.unwrap();
+            let res = db
+                .orders_for_tx(&H256::from_low_u64_be(i as u64))
+                .await
+                .unwrap();
             assert_eq!(res, vec![orders[i].clone()]);
         }
     }
