@@ -35,6 +35,7 @@ macro_rules! tx_value {
         $call
             .from($acc.clone())
             .value($value)
+            .gas_price(0.into())
             .send()
             .await
             .expect(&format!("{} failed", NAME))
