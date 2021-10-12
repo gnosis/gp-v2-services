@@ -658,7 +658,7 @@ dependencies = [
  "solver",
  "tokio",
  "tracing",
- "web3",
+ "web3 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -762,7 +762,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "uint",
- "web3",
+ "web3 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "zeroize",
 ]
 
@@ -779,7 +779,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tiny-keccak",
- "web3",
+ "web3 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1038,11 +1038,12 @@ dependencies = [
 [[package]]
 name = "gas-estimation"
 version = "0.1.0"
-source = "git+https://github.com/gnosis/gp-gas-estimation.git?tag=v0.3.2#b6b4808e182cacd660913a408d3938ef024c86fe"
+source = "git+https://github.com/gnosis/gp-gas-estimation.git?tag=v0.3.4#5060ad766c2da74fcbab40857fdb1a1a5b2b7e3f"
 dependencies = [
  "anyhow",
  "async-trait",
  "futures",
+ "http",
  "primitive-types",
  "serde",
  "serde_json",
@@ -1051,7 +1052,7 @@ dependencies = [
  "tokio-tungstenite 0.15.0",
  "tracing",
  "url",
- "web3",
+ "web3 0.17.0 (git+https://github.com/tomusdrw/rust-web3.git?rev=2e2d1dfa906aa2dff6312b97d0d5ba804e9c8c6e)",
 ]
 
 [[package]]
@@ -1600,7 +1601,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "web3",
+ "web3 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1860,7 +1861,7 @@ dependencies = [
  "tracing",
  "url",
  "warp",
- "web3",
+ "web3 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -2646,7 +2647,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "warp",
- "web3",
+ "web3 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -2735,7 +2736,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "transaction-retry",
- "web3",
+ "web3 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -3567,6 +3568,28 @@ dependencies = [
  "tokio-util",
  "url",
  "web3-async-native-tls",
+]
+
+[[package]]
+name = "web3"
+version = "0.17.0"
+source = "git+https://github.com/tomusdrw/rust-web3.git?rev=2e2d1dfa906aa2dff6312b97d0d5ba804e9c8c6e#2e2d1dfa906aa2dff6312b97d0d5ba804e9c8c6e"
+dependencies = [
+ "arrayvec 0.5.2",
+ "derive_more",
+ "ethabi",
+ "ethereum-types",
+ "futures",
+ "futures-timer",
+ "hex",
+ "jsonrpc-core",
+ "log",
+ "parking_lot",
+ "pin-project",
+ "rlp",
+ "serde",
+ "serde_json",
+ "tiny-keccak",
 ]
 
 [[package]]
