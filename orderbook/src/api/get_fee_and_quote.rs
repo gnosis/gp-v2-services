@@ -13,8 +13,8 @@ use warp::{Filter, Rejection, Reply};
 #[serde(rename_all = "camelCase")]
 struct Fee {
     #[serde(with = "u256_decimal")]
-    pub amount: U256,
-    pub expiration_date: DateTime<Utc>,
+    amount: U256,
+    expiration_date: DateTime<Utc>,
 }
 
 #[derive(Deserialize)]
