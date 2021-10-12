@@ -8,7 +8,7 @@ pub mod metrics;
 pub mod orderbook;
 pub mod solvable_orders;
 
-use crate::{api::OrderQuoter, orderbook::Orderbook};
+use crate::{api::post_quote::OrderQuoter, orderbook::Orderbook};
 use anyhow::{anyhow, Context as _, Result};
 use contracts::GPv2Settlement;
 use database::trades::TradeRetrieving;

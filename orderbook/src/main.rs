@@ -7,7 +7,7 @@ use model::{
 };
 use orderbook::{
     account_balances::Web3BalanceFetcher,
-    api::{order_validation::OrderValidator, OrderQuoter},
+    api::{order_validation::OrderValidator, post_quote::OrderQuoter},
     database::{self, orders::OrderFilter, Postgres},
     event_updater::EventUpdater,
     fee::EthAwareMinFeeCalculator,

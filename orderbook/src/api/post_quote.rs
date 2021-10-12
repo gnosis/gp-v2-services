@@ -1,9 +1,8 @@
-use crate::api::{price_estimation_error_to_warp_reply, OrderQuoter};
 use crate::{
     api::{
         self,
-        order_validation::{PreOrderData, ValidationError},
-        WarpReplyConverting,
+        order_validation::{OrderValidating, PreOrderData, ValidationError},
+        price_estimation_error_to_warp_reply, WarpReplyConverting,
     },
     fee::MinFeeCalculating,
 };
@@ -168,62 +167,64 @@ struct FeeParameters {
     kind: OrderKind,
 }
 
-impl OrderQuoteRequest {
-    /// This method is used by the old, deprecated, fee endpoint to convert {Buy, Sell}Requests
-    pub fn new(sell_token: H160, buy_token: H160, side: OrderQuoteSide) -> Self {
+#[derive(Clone)]
+pub struct OrderQuoter {
+    pub(crate) fee_calculator: Arc<dyn MinFeeCalculating>,
+    pub(crate) price_estimator: Arc<dyn PriceEstimating>,
+    order_validator: Arc<dyn OrderValidating>,
+}
+
+impl OrderQuoter {
+    pub fn new(
+        fee_calculator: Arc<dyn MinFeeCalculating>,
+        price_estimator: Arc<dyn PriceEstimating>,
+        order_validator: Arc<dyn OrderValidating>,
+    ) -> Self {
         Self {
-            sell_token,
-            buy_token,
-            side,
-            valid_to: u32::MAX,
-            ..Default::default()
+            fee_calculator,
+            price_estimator,
+            order_validator,
         }
     }
 
     pub async fn calculate_quote(
         &self,
-        quoter: Arc<OrderQuoter>,
+        quote_request: &OrderQuoteRequest,
     ) -> Result<OrderQuoteResponse, OrderQuoteError> {
-        tracing::debug!("Received quote request {:?}", self);
-        quoter
-            .clone()
-            .order_validator
-            .partial_validate(self.into())
+        tracing::debug!("Received quote request {:?}", quote_request);
+        self.order_validator
+            .partial_validate(quote_request.into())
             .await
             .map_err(|err| OrderQuoteError::Order(ValidationError::Partial(err)))?;
         let fee_parameters = self
-            .calculate_fee_parameters(
-                quoter.fee_calculator.clone(),
-                quoter.price_estimator.clone(),
-            )
+            .calculate_fee_parameters(quote_request)
             .await
             .map_err(OrderQuoteError::Fee)?;
         Ok(OrderQuoteResponse {
             quote: OrderQuote {
-                sell_token: self.sell_token,
-                buy_token: self.buy_token,
-                receiver: self.receiver,
+                sell_token: quote_request.sell_token,
+                buy_token: quote_request.buy_token,
+                receiver: quote_request.receiver,
                 sell_amount: fee_parameters.sell_amount,
                 buy_amount: fee_parameters.buy_amount,
-                valid_to: self.valid_to,
-                app_data: self.app_data,
+                valid_to: quote_request.valid_to,
+                app_data: quote_request.app_data,
                 fee_amount: fee_parameters.fee_amount,
                 kind: fee_parameters.kind,
-                partially_fillable: self.partially_fillable,
-                sell_token_balance: self.sell_token_balance,
-                buy_token_balance: self.buy_token_balance,
+                partially_fillable: quote_request.partially_fillable,
+                sell_token_balance: quote_request.sell_token_balance,
+                buy_token_balance: quote_request.buy_token_balance,
             },
-            from: self.from,
+            from: quote_request.from,
             expiration: fee_parameters.expiration,
         })
     }
 
     async fn calculate_fee_parameters(
         &self,
-        fee_calculator: Arc<dyn MinFeeCalculating>,
-        price_estimator: Arc<dyn PriceEstimating>,
+        quote_request: &OrderQuoteRequest,
     ) -> Result<FeeParameters, FeeError> {
-        match self.side {
+        match quote_request.side {
             OrderQuoteSide::Sell {
                 sell_amount:
                     SellAmount::BeforeFee {
@@ -233,13 +234,14 @@ impl OrderQuoteRequest {
                 if sell_amount_before_fee.is_zero() {
                     Err(FeeError::PriceEstimate(PriceEstimationError::ZeroAmount))
                 } else {
-                    let (fee, expiration) = fee_calculator
+                    let (fee, expiration) = self
+                        .fee_calculator
                         .compute_unsubsidized_min_fee(
-                            self.sell_token,
-                            Some(self.buy_token),
+                            quote_request.sell_token,
+                            Some(quote_request.buy_token),
                             Some(sell_amount_before_fee),
                             Some(OrderKind::Sell),
-                            Some(self.app_data),
+                            Some(quote_request.app_data),
                         )
                         .await
                         .map_err(FeeError::PriceEstimate)?;
@@ -247,10 +249,11 @@ impl OrderQuoteRequest {
                         .checked_sub(fee)
                         .ok_or(FeeError::SellAmountDoesNotCoverFee)?
                         .max(U256::one());
-                    let estimate = price_estimator
+                    let estimate = self
+                        .price_estimator
                         .estimate(&price_estimation::Query {
-                            sell_token: self.sell_token,
-                            buy_token: self.buy_token,
+                            sell_token: quote_request.sell_token,
+                            buy_token: quote_request.buy_token,
                             in_amount: sell_amount_after_fee,
                             kind: OrderKind::Sell,
                         })
@@ -279,20 +282,22 @@ impl OrderQuoteRequest {
                 if buy_amount_after_fee.is_zero() {
                     Err(FeeError::PriceEstimate(PriceEstimationError::ZeroAmount))
                 } else {
-                    let (fee, expiration) = fee_calculator
+                    let (fee, expiration) = self
+                        .fee_calculator
                         .compute_unsubsidized_min_fee(
-                            self.sell_token,
-                            Some(self.buy_token),
+                            quote_request.sell_token,
+                            Some(quote_request.buy_token),
                             Some(buy_amount_after_fee),
                             Some(OrderKind::Buy),
-                            Some(self.app_data),
+                            Some(quote_request.app_data),
                         )
                         .await
                         .map_err(FeeError::PriceEstimate)?;
-                    let estimate = price_estimator
+                    let estimate = self
+                        .price_estimator
                         .estimate(&price_estimation::Query {
-                            sell_token: self.sell_token,
-                            buy_token: self.buy_token,
+                            sell_token: quote_request.sell_token,
+                            buy_token: quote_request.buy_token,
                             in_amount: buy_amount_after_fee,
                             kind: OrderKind::Buy,
                         })
@@ -313,6 +318,19 @@ impl OrderQuoteRequest {
                     })
                 }
             }
+        }
+    }
+}
+
+impl OrderQuoteRequest {
+    /// This method is used by the old, deprecated, fee endpoint to convert {Buy, Sell}Requests
+    pub fn new(sell_token: H160, buy_token: H160, side: OrderQuoteSide) -> Self {
+        Self {
+            sell_token,
+            buy_token,
+            side,
+            valid_to: u32::MAX,
+            ..Default::default()
         }
     }
 }
@@ -339,7 +357,7 @@ pub fn post_quote(
     post_quote_request().and_then(move |request: OrderQuoteRequest| {
         let quoter = quoter.clone();
         async move {
-            let result = request.calculate_quote(quoter).await;
+            let result = quoter.calculate_quote(&request).await;
             if let Err(err) = &result {
                 tracing::error!(?err, ?request, "post_quote error");
             }
@@ -542,9 +560,13 @@ mod tests {
                 sell_amount: SellAmount::BeforeFee { value: 10.into() },
             },
         );
-
-        let result = sell_query
-            .calculate_fee_parameters(fee_calculator, Arc::new(price_estimator))
+        let quoter = Arc::new(OrderQuoter::new(
+            fee_calculator,
+            Arc::new(price_estimator),
+            Arc::new(MockOrderValidating::new()),
+        ));
+        let result = quoter
+            .calculate_fee_parameters(&sell_query)
             .now_or_never()
             .unwrap()
             .unwrap();
@@ -581,8 +603,13 @@ mod tests {
             },
         );
 
-        let result = sell_query
-            .calculate_fee_parameters(fee_calculator, Arc::new(price_estimator))
+        let quoter = Arc::new(OrderQuoter::new(
+            fee_calculator,
+            Arc::new(price_estimator),
+            Arc::new(MockOrderValidating::new()),
+        ));
+        let result = quoter
+            .calculate_fee_parameters(&sell_query)
             .now_or_never()
             .unwrap()
             .unwrap_err();
@@ -612,8 +639,13 @@ mod tests {
                 buy_amount_after_fee: 10.into(),
             },
         );
-        let result = buy_query
-            .calculate_fee_parameters(fee_calculator, Arc::new(price_estimator))
+        let quoter = Arc::new(OrderQuoter::new(
+            fee_calculator,
+            Arc::new(price_estimator),
+            Arc::new(MockOrderValidating::new()),
+        ));
+        let result = quoter
+            .calculate_fee_parameters(&buy_query)
             .now_or_never()
             .unwrap()
             .unwrap();
@@ -667,7 +699,7 @@ mod tests {
             Arc::new(price_estimator),
             Arc::new(order_validator),
         ));
-        let result = buy_request.calculate_quote(quoter).await.unwrap();
+        let result = quoter.calculate_quote(&buy_request).await.unwrap();
 
         let expected = OrderQuote {
             sell_token: H160::from_low_u64_be(1),

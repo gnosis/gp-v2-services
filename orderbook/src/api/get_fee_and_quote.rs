@@ -1,6 +1,5 @@
-use crate::api::{
-    post_quote::{response, OrderQuoteRequest, OrderQuoteResponse, OrderQuoteSide, SellAmount},
-    OrderQuoter,
+use crate::api::post_quote::{
+    response, OrderQuoteRequest, OrderQuoteResponse, OrderQuoteSide, OrderQuoter, SellAmount,
 };
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -122,12 +121,12 @@ fn buy_request() -> impl Filter<Extract = (BuyQuery,), Error = Rejection> + Clon
 pub fn get_fee_and_quote_sell(
     quoter: Arc<OrderQuoter>,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
-    sell_request().and_then(move |query| {
+    sell_request().and_then(move |query: SellQuery| {
         let quoter = quoter.clone();
         async move {
             Result::<_, Infallible>::Ok(response(
-                OrderQuoteRequest::from(query)
-                    .calculate_quote(quoter)
+                quoter
+                    .calculate_quote(&query.into())
                     .await
                     .map(SellResponse::from),
             ))
@@ -138,12 +137,12 @@ pub fn get_fee_and_quote_sell(
 pub fn get_fee_and_quote_buy(
     quoter: Arc<OrderQuoter>,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
-    buy_request().and_then(move |query| {
+    buy_request().and_then(move |query: BuyQuery| {
         let quoter = quoter.clone();
         async move {
             Result::<_, Infallible>::Ok(response(
-                OrderQuoteRequest::from(query)
-                    .calculate_quote(quoter)
+                quoter
+                    .calculate_quote(&query.into())
                     .await
                     .map(BuyResponse::from),
             ))

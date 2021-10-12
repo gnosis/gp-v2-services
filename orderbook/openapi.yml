@@ -895,18 +895,14 @@ components:
             - appData
             - partiallyFillable
             - from
-    OrderQuote:
+    OrderQuoteResponse:
       description: |
         An order quoted by the back end that can be directly signed and
         submitted to the order creation backend.
-      allOf:
-        - $ref: "#/components/schemas/OrderParameters"
-        - type: object
-    OrderQuoteResponse:
       type: object
       properties:
         quote:
-          $ref: "#/components/schemas/OrderQuote"
+          $ref: "#/components/schemas/OrderParameters"
         from:
           $ref: "#/components/schemas/Address"
         expirationDate:

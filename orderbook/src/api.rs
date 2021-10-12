@@ -9,17 +9,14 @@ mod get_solvable_orders;
 mod get_trades;
 mod get_user_orders;
 pub mod order_validation;
-mod post_quote;
+pub mod post_quote;
 
 use crate::{
-    api::order_validation::OrderValidating, database::trades::TradeRetrieving,
-    fee::MinFeeCalculating, orderbook::Orderbook,
+    api::post_quote::OrderQuoter, database::trades::TradeRetrieving, orderbook::Orderbook,
 };
 use anyhow::Error as anyhowError;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use shared::metrics::get_metric_storage_registry;
-use shared::price_estimation::{PriceEstimating, PriceEstimationError};
+use serde::{de::DeserializeOwned, Serialize};
+use shared::{metrics::get_metric_storage_registry, price_estimation::PriceEstimationError};
 use std::{convert::Infallible, sync::Arc};
 use warp::{
     hyper::StatusCode,
@@ -66,27 +63,6 @@ pub fn handle_all_routes(
     );
 
     routes_with_labels.recover(handle_rejection).with(cors)
-}
-
-#[derive(Clone)]
-pub struct OrderQuoter {
-    fee_calculator: Arc<dyn MinFeeCalculating>,
-    price_estimator: Arc<dyn PriceEstimating>,
-    order_validator: Arc<dyn OrderValidating>,
-}
-
-impl OrderQuoter {
-    pub fn new(
-        fee_calculator: Arc<dyn MinFeeCalculating>,
-        price_estimator: Arc<dyn PriceEstimating>,
-        order_validator: Arc<dyn OrderValidating>,
-    ) -> Self {
-        Self {
-            fee_calculator,
-            price_estimator,
-            order_validator,
-        }
-    }
 }
 
 // We turn Rejection into Reply to workaround warp not setting CORS headers on rejections.
