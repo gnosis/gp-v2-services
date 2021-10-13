@@ -97,21 +97,21 @@ pub enum SellAmount {
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderQuote {
-    sell_token: H160,
-    buy_token: H160,
-    receiver: Option<H160>,
+    pub sell_token: H160,
+    pub buy_token: H160,
+    pub receiver: Option<H160>,
     #[serde(with = "u256_decimal")]
     pub sell_amount: U256,
     #[serde(with = "u256_decimal")]
     pub buy_amount: U256,
-    valid_to: u32,
-    app_data: AppId,
+    pub valid_to: u32,
+    pub app_data: AppId,
     #[serde(with = "u256_decimal")]
     pub fee_amount: U256,
-    kind: OrderKind,
-    partially_fillable: bool,
-    sell_token_balance: SellTokenSource,
-    buy_token_balance: BuyTokenDestination,
+    pub kind: OrderKind,
+    pub partially_fillable: bool,
+    pub sell_token_balance: SellTokenSource,
+    pub buy_token_balance: BuyTokenDestination,
 }
 
 #[derive(Debug, PartialEq, Serialize)]
