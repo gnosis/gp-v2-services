@@ -235,38 +235,38 @@ impl OrderQuoter {
                     return Err(FeeError::PriceEstimate(PriceEstimationError::ZeroAmount));
                 }
 
-                    let (fee, expiration) = self
-                        .fee_calculator
-                        .compute_unsubsidized_min_fee(
-                            quote_request.sell_token,
-                            Some(quote_request.buy_token),
-                            Some(sell_amount_before_fee),
-                            Some(OrderKind::Sell),
-                            Some(quote_request.app_data),
-                        )
-                        .await
-                        .map_err(FeeError::PriceEstimate)?;
-                    let sell_amount_after_fee = sell_amount_before_fee
-                        .checked_sub(fee)
-                        .ok_or(FeeError::SellAmountDoesNotCoverFee)?
-                        .max(U256::one());
-                    let estimate = self
-                        .price_estimator
-                        .estimate(&price_estimation::Query {
-                            sell_token: quote_request.sell_token,
-                            buy_token: quote_request.buy_token,
-                            in_amount: sell_amount_after_fee,
-                            kind: OrderKind::Sell,
-                        })
-                        .await
-                        .map_err(FeeError::PriceEstimate)?;
-                    FeeParameters {
-                        buy_amount: estimate.out_amount,
-                        sell_amount: sell_amount_after_fee,
-                        fee_amount: fee,
-                        expiration,
+                let (fee, expiration) = self
+                    .fee_calculator
+                    .compute_unsubsidized_min_fee(
+                        quote_request.sell_token,
+                        Some(quote_request.buy_token),
+                        Some(sell_amount_before_fee),
+                        Some(OrderKind::Sell),
+                        Some(quote_request.app_data),
+                    )
+                    .await
+                    .map_err(FeeError::PriceEstimate)?;
+                let sell_amount_after_fee = sell_amount_before_fee
+                    .checked_sub(fee)
+                    .ok_or(FeeError::SellAmountDoesNotCoverFee)?
+                    .max(U256::one());
+                let estimate = self
+                    .price_estimator
+                    .estimate(&price_estimation::Query {
+                        sell_token: quote_request.sell_token,
+                        buy_token: quote_request.buy_token,
+                        in_amount: sell_amount_after_fee,
                         kind: OrderKind::Sell,
-                    }
+                    })
+                    .await
+                    .map_err(FeeError::PriceEstimate)?;
+                FeeParameters {
+                    buy_amount: estimate.out_amount,
+                    sell_amount: sell_amount_after_fee,
+                    fee_amount: fee,
+                    expiration,
+                    kind: OrderKind::Sell,
+                }
             }
             OrderQuoteSide::Sell {
                 sell_amount: SellAmount::AfterFee { .. },
@@ -283,35 +283,35 @@ impl OrderQuoter {
                     return Err(FeeError::PriceEstimate(PriceEstimationError::ZeroAmount));
                 }
 
-                    let (fee, expiration) = self
-                        .fee_calculator
-                        .compute_unsubsidized_min_fee(
-                            quote_request.sell_token,
-                            Some(quote_request.buy_token),
-                            Some(buy_amount_after_fee),
-                            Some(OrderKind::Buy),
-                            Some(quote_request.app_data),
-                        )
-                        .await
-                        .map_err(FeeError::PriceEstimate)?;
-                    let estimate = self
-                        .price_estimator
-                        .estimate(&price_estimation::Query {
-                            sell_token: quote_request.sell_token,
-                            buy_token: quote_request.buy_token,
-                            in_amount: buy_amount_after_fee,
-                            kind: OrderKind::Buy,
-                        })
-                        .await
-                        .map_err(FeeError::PriceEstimate)?;
-                    let sell_amount_after_fee = estimate.out_amount;
-                    FeeParameters {
-                        buy_amount: buy_amount_after_fee,
-                        sell_amount: sell_amount_after_fee,
-                        fee_amount: fee,
-                        expiration,
+                let (fee, expiration) = self
+                    .fee_calculator
+                    .compute_unsubsidized_min_fee(
+                        quote_request.sell_token,
+                        Some(quote_request.buy_token),
+                        Some(buy_amount_after_fee),
+                        Some(OrderKind::Buy),
+                        Some(quote_request.app_data),
+                    )
+                    .await
+                    .map_err(FeeError::PriceEstimate)?;
+                let estimate = self
+                    .price_estimator
+                    .estimate(&price_estimation::Query {
+                        sell_token: quote_request.sell_token,
+                        buy_token: quote_request.buy_token,
+                        in_amount: buy_amount_after_fee,
                         kind: OrderKind::Buy,
-                    }
+                    })
+                    .await
+                    .map_err(FeeError::PriceEstimate)?;
+                let sell_amount_after_fee = estimate.out_amount;
+                FeeParameters {
+                    buy_amount: buy_amount_after_fee,
+                    sell_amount: sell_amount_after_fee,
+                    fee_amount: fee,
+                    expiration,
+                    kind: OrderKind::Buy,
+                }
             }
         })
     }
