@@ -3,6 +3,7 @@ pub mod model;
 mod settlement;
 
 use self::{model::*, settlement::SettlementContext};
+use crate::metrics::SolverMetrics;
 use crate::{
     liquidity::{LimitOrder, Liquidity},
     settlement::Settlement,
@@ -559,6 +560,7 @@ impl Solver for HttpSolver {
             deadline,
             price_estimates,
         }: Auction,
+        _: Arc<dyn SolverMetrics>,
     ) -> Result<Vec<Settlement>> {
         if orders.is_empty() {
             return Ok(Vec::new());

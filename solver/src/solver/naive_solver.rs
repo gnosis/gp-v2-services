@@ -1,5 +1,6 @@
 mod multi_order_solver;
 
+use crate::metrics::SolverMetrics;
 use crate::{
     liquidity::{ConstantProductOrder, LimitOrder, Liquidity},
     settlement::Settlement,
@@ -9,6 +10,7 @@ use anyhow::Result;
 use ethcontract::Account;
 use model::TokenPair;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 pub struct NaiveSolver {
     account: Account,
@@ -27,6 +29,7 @@ impl Solver for NaiveSolver {
         Auction {
             orders, liquidity, ..
         }: Auction,
+        _: Arc<dyn SolverMetrics>,
     ) -> Result<Vec<Settlement>> {
         let uniswaps = extract_deepest_amm_liquidity(&liquidity);
         Ok(settle(orders, uniswaps).await)

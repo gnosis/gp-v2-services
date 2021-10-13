@@ -119,13 +119,15 @@ impl Driver {
             let metrics = &self.metrics;
             async move {
                 let start_time = Instant::now();
-                let result =
-                    match tokio::time::timeout_at(auction.deadline.into(), solver.solve(auction))
-                        .await
-                    {
-                        Ok(inner) => inner,
-                        Err(_timeout) => Err(anyhow!("solver timed out")),
-                    };
+                let result = match tokio::time::timeout_at(
+                    auction.deadline.into(),
+                    solver.solve(auction, metrics.clone()),
+                )
+                .await
+                {
+                    Ok(inner) => inner,
+                    Err(_timeout) => Err(anyhow!("solver timed out")),
+                };
                 metrics.settlement_computed(solver.name(), start_time);
                 (solver.clone(), result)
             }

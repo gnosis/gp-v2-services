@@ -20,7 +20,7 @@ use strum::VariantNames;
 /// The maximum time between the completion of two run loops. If exceeded the service will be considered unhealthy.
 const MAX_RUNLOOP_DURATION: Duration = Duration::from_secs(7 * 60);
 
-pub trait SolverMetrics {
+pub trait SolverMetrics: Send + Sync {
     fn orders_fetched(&self, orders: &[LimitOrder]);
     fn liquidity_fetched(&self, liquidity: &[Liquidity]);
     fn settlement_computed(&self, solver_type: &str, start: Instant);

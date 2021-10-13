@@ -1,3 +1,4 @@
+use crate::metrics::SolverMetrics;
 use crate::{
     liquidity::{LimitOrder, Liquidity},
     settlement::Settlement,
@@ -47,7 +48,11 @@ pub trait Solver: 'static {
     /// order) so that they can be merged by the driver at its leisure.
     ///
     /// id identifies this instance of solving by the driver in which it invokes all solvers.
-    async fn solve(&self, auction: Auction) -> Result<Vec<Settlement>>;
+    async fn solve(
+        &self,
+        auction: Auction,
+        metrics: Arc<dyn SolverMetrics>,
+    ) -> Result<Vec<Settlement>>;
 
     /// Returns solver's account that should be used to submit settlements.
     fn account(&self) -> &Account;
@@ -307,7 +312,11 @@ impl SellVolumeFilteringSolver {
 
 #[async_trait::async_trait]
 impl Solver for SellVolumeFilteringSolver {
-    async fn solve(&self, mut auction: Auction) -> Result<Vec<Settlement>> {
+    async fn solve(
+        &self,
+        mut auction: Auction,
+        metrics: Arc<dyn SolverMetrics>,
+    ) -> Result<Vec<Settlement>> {
         let original_length = auction.orders.len();
         auction.orders = self
             .filter_orders(auction.orders, &auction.price_estimates)
@@ -316,7 +325,7 @@ impl Solver for SellVolumeFilteringSolver {
             "Filtered {} orders because on insufficient volume",
             original_length - auction.orders.len()
         );
-        self.inner.solve(auction).await
+        self.inner.solve(auction, metrics).await
     }
 
     fn account(&self) -> &Account {
@@ -338,7 +347,7 @@ mod tests {
     pub struct NoopSolver();
     #[async_trait::async_trait]
     impl Solver for NoopSolver {
-        async fn solve(&self, _: Auction) -> Result<Vec<Settlement>> {
+        async fn solve(&self, _: Auction, _: Arc<dyn SolverMetrics>) -> Result<Vec<Settlement>> {
             Ok(Vec::new())
         }
 

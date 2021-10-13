@@ -1,3 +1,4 @@
+use crate::metrics::SolverMetrics;
 use crate::{
     liquidity::LimitOrder,
     settlement::Settlement,
@@ -6,6 +7,7 @@ use crate::{
 use anyhow::{Error, Result};
 use ethcontract::Account;
 use rand::prelude::SliceRandom;
+use std::sync::Arc;
 use std::{collections::VecDeque, time::Duration};
 
 #[cfg_attr(test, mockall::automock)]
@@ -45,6 +47,7 @@ impl<I: SingleOrderSolving + Send + Sync + 'static> Solver for SingleOrderSolver
             deadline,
             ..
         }: Auction,
+        metrics: Arc<dyn SolverMetrics>,
     ) -> Result<Vec<Settlement>> {
         // Randomize which orders we start with to prevent us getting stuck on bad orders.
         orders.shuffle(&mut rand::thread_rng());
@@ -55,17 +58,18 @@ impl<I: SingleOrderSolving + Send + Sync + 'static> Solver for SingleOrderSolver
             while let Some(order) = orders.pop_front() {
                 match self.inner.try_settle_order(order.clone()).await {
                     Ok(settlement) => {
-                        // TODO - track success
+                        metrics.single_order_solver_succeeded(self.inner.name());
                         settlements.extend(settlement)
-                    },
+                    }
                     Err(err) => {
                         let name = self.inner.name();
+                        // TODO - determine if we should record failure on all or just some of these.
                         if err.retryable {
                             tracing::warn!("Solver {} retryable error: {:?}", name, &err);
                             orders.push_back(order);
                         } else if err.track_failure {
                             tracing::warn!("Solver {} hard error: {:?}", name, &err);
-                            // TODO - record metric (increment counter for name)
+                            metrics.single_order_solver_failed(name);
                         } else {
                             tracing::warn!("Solver {} soft error: {:?}", name, &err);
                         }
@@ -110,6 +114,7 @@ impl From<anyhow::Error> for SettlementError {
 mod tests {
     use super::*;
     use crate::liquidity::tests::CapturingSettlementHandler;
+    use crate::metrics::NoopMetrics;
     use anyhow::anyhow;
     use std::sync::Arc;
 
@@ -147,10 +152,13 @@ mod tests {
         ];
 
         let settlements = solver
-            .solve(Auction {
-                orders,
-                ..Default::default()
-            })
+            .solve(
+                Auction {
+                    orders,
+                    ..Default::default()
+                },
+                Arc::new(NoopMetrics::default()),
+            )
             .await
             .unwrap();
         assert_eq!(settlements.len(), 2);
@@ -194,10 +202,13 @@ mod tests {
             is_liquidity_order: false,
         };
         solver
-            .solve(Auction {
-                orders: vec![order],
-                ..Default::default()
-            })
+            .solve(
+                Auction {
+                    orders: vec![order],
+                    ..Default::default()
+                },
+                Arc::new(NoopMetrics::default()),
+            )
             .await
             .unwrap();
     }
@@ -229,10 +240,13 @@ mod tests {
             is_liquidity_order: false,
         };
         solver
-            .solve(Auction {
-                orders: vec![order],
-                ..Default::default()
-            })
+            .solve(
+                Auction {
+                    orders: vec![order],
+                    ..Default::default()
+                },
+                Arc::new(NoopMetrics::default()),
+            )
             .await
             .unwrap();
     }

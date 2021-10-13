@@ -1,3 +1,4 @@
+use crate::metrics::SolverMetrics;
 use crate::{
     liquidity::{
         token_pairs, AmmOrderExecution, ConstantProductOrder, LimitOrder, Liquidity,
@@ -29,6 +30,7 @@ impl Solver for BaselineSolver {
         Auction {
             orders, liquidity, ..
         }: Auction,
+        _: Arc<dyn SolverMetrics>,
     ) -> Result<Vec<Settlement>> {
         Ok(self.solve_(orders, liquidity))
     }
