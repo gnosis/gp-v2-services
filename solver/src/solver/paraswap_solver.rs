@@ -81,15 +81,6 @@ impl From<ParaswapResponseError> for SettlementError {
                     | ParaswapResponseError::ServerBusy
                     | ParaswapResponseError::Send(_),
             ),
-            track_failure: !matches!(
-                err,
-                ParaswapResponseError::PriceChange
-                    | ParaswapResponseError::BuildingTransaction(_)
-                    | ParaswapResponseError::ComputePrice(_)
-                    | ParaswapResponseError::InsufficientLiquidity
-                    | ParaswapResponseError::TooMuchSlippageOnQuote
-                    | ParaswapResponseError::ServerBusy,
-            ),
         }
     }
 }

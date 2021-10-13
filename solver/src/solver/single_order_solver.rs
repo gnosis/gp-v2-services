@@ -30,11 +30,12 @@ pub trait SingleOrderSolving {
 
 pub struct SingleOrderSolver<I> {
     inner: I,
+    metrics: Arc<dyn SolverMetrics>,
 }
 
-impl<I: SingleOrderSolving> From<I> for SingleOrderSolver<I> {
-    fn from(inner: I) -> Self {
-        Self { inner }
+impl<I: SingleOrderSolving> SingleOrderSolver<I> {
+    pub fn new(inner: I, metrics: Arc<dyn SolverMetrics>) -> Self {
+        Self { inner, metrics }
     }
 }
 
@@ -47,7 +48,6 @@ impl<I: SingleOrderSolving + Send + Sync + 'static> Solver for SingleOrderSolver
             deadline,
             ..
         }: Auction,
-        metrics: Arc<dyn SolverMetrics>,
     ) -> Result<Vec<Settlement>> {
         // Randomize which orders we start with to prevent us getting stuck on bad orders.
         orders.shuffle(&mut rand::thread_rng());
@@ -58,20 +58,18 @@ impl<I: SingleOrderSolving + Send + Sync + 'static> Solver for SingleOrderSolver
             while let Some(order) = orders.pop_front() {
                 match self.inner.try_settle_order(order.clone()).await {
                     Ok(settlement) => {
-                        metrics.single_order_solver_succeeded(self.inner.name());
+                        self.metrics
+                            .single_order_solver_succeeded(self.inner.name());
                         settlements.extend(settlement)
                     }
                     Err(err) => {
                         let name = self.inner.name();
-                        // TODO - determine if we should record failure on all or just some of these.
+                        self.metrics.single_order_solver_failed(name);
                         if err.retryable {
-                            tracing::warn!("Solver {} retryable error: {:?}", name, &err);
+                            tracing::warn!("Solver {} retryable error: {:?}", name, &err.inner);
                             orders.push_back(order);
-                        } else if err.track_failure {
-                            tracing::warn!("Solver {} hard error: {:?}", name, &err);
-                            metrics.single_order_solver_failed(name);
                         } else {
-                            tracing::warn!("Solver {} soft error: {:?}", name, &err);
+                            tracing::warn!("Solver {} error: {:?}", name, &err.inner);
                         }
                     }
                 }
@@ -96,8 +94,6 @@ impl<I: SingleOrderSolving + Send + Sync + 'static> Solver for SingleOrderSolver
 pub struct SettlementError {
     pub inner: anyhow::Error,
     pub retryable: bool,
-    // Whether or not this error should be logged as an error
-    pub track_failure: bool,
 }
 
 impl From<anyhow::Error> for SettlementError {
@@ -105,7 +101,6 @@ impl From<anyhow::Error> for SettlementError {
         SettlementError {
             inner: err,
             retryable: false,
-            track_failure: true,
         }
     }
 }
@@ -125,8 +120,10 @@ mod tests {
             .expect_try_settle_order()
             .times(2)
             .returning(|_| Ok(Some(Settlement::new(Default::default()))));
+        inner.expect_name().returning(|| "Mock Solver");
 
-        let solver: SingleOrderSolver<_> = inner.into();
+        let solver: SingleOrderSolver<_> =
+            SingleOrderSolver::new(inner, Arc::new(NoopMetrics::default()));
         let handler = Arc::new(CapturingSettlementHandler::default());
         let order = LimitOrder {
             id: Default::default(),
@@ -152,13 +149,10 @@ mod tests {
         ];
 
         let settlements = solver
-            .solve(
-                Auction {
-                    orders,
-                    ..Default::default()
-                },
-                Arc::new(NoopMetrics::default()),
-            )
+            .solve(Auction {
+                orders,
+                ..Default::default()
+            })
             .await
             .unwrap();
         assert_eq!(settlements.len(), 2);
@@ -178,7 +172,6 @@ mod tests {
                     0 => Err(SettlementError {
                         inner: anyhow!(""),
                         retryable: true,
-                        track_failure: true,
                     }),
                     1 => Ok(None),
                     _ => unreachable!(),
@@ -187,7 +180,8 @@ mod tests {
                 result
             });
 
-        let solver: SingleOrderSolver<_> = inner.into();
+        let solver: SingleOrderSolver<_> =
+            SingleOrderSolver::new(inner, Arc::new(NoopMetrics::default()));
         let handler = Arc::new(CapturingSettlementHandler::default());
         let order = LimitOrder {
             id: Default::default(),
@@ -202,13 +196,10 @@ mod tests {
             is_liquidity_order: false,
         };
         solver
-            .solve(
-                Auction {
-                    orders: vec![order],
-                    ..Default::default()
-                },
-                Arc::new(NoopMetrics::default()),
-            )
+            .solve(Auction {
+                orders: vec![order],
+                ..Default::default()
+            })
             .await
             .unwrap();
     }
@@ -221,11 +212,11 @@ mod tests {
             Err(SettlementError {
                 inner: anyhow!(""),
                 retryable: false,
-                track_failure: true,
             })
         });
 
-        let solver: SingleOrderSolver<_> = inner.into();
+        let solver: SingleOrderSolver<_> =
+            SingleOrderSolver::new(inner, Arc::new(NoopMetrics::default()));
         let handler = Arc::new(CapturingSettlementHandler::default());
         let order = LimitOrder {
             id: Default::default(),
@@ -240,13 +231,10 @@ mod tests {
             is_liquidity_order: false,
         };
         solver
-            .solve(
-                Auction {
-                    orders: vec![order],
-                    ..Default::default()
-                },
-                Arc::new(NoopMetrics::default()),
-            )
+            .solve(Auction {
+                orders: vec![order],
+                ..Default::default()
+            })
             .await
             .unwrap();
     }

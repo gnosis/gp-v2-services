@@ -143,7 +143,6 @@ impl From<SwapResponseError> for SettlementError {
         SettlementError {
             inner: anyhow!(error.message),
             retryable: matches!(error.status_code, 500),
-            track_failure: true,
         }
     }
 }
