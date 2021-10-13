@@ -57,14 +57,15 @@ pub fn create_orderbook_api() -> OrderBookApi {
     OrderBookApi::new(reqwest::Url::from_str(API_HOST).unwrap(), Client::new())
 }
 
-pub fn create_orderbook_liquidity(web3: &Web3, weth_address: H160) -> OrderbookLiquidity {
+pub fn create_orderbook_liquidity(
+    web3: &Web3,
+    weth_address: H160,
+) -> (OrderbookLiquidity, OrderBookApi) {
     let weth = WETH9::at(web3, weth_address);
-    OrderbookLiquidity::new(
-        reqwest::Url::from_str(API_HOST).unwrap(),
-        Client::new(),
-        weth,
-        Default::default(),
-        1.,
+    let api = OrderBookApi::new(reqwest::Url::from_str(API_HOST).unwrap(), Client::new());
+    (
+        OrderbookLiquidity::new(api.clone(), weth, Default::default(), 1.),
+        api,
     )
 }
 

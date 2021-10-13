@@ -32,6 +32,7 @@ use solver::{
     },
     liquidity_collector::LiquidityCollector,
     metrics::Metrics,
+    orderbook::OrderBookApi,
     settlement_submission::{archer_api::ArcherApi, SolutionSubmitter, TransactionStrategy},
     solver::SolverType,
 };
@@ -69,15 +70,6 @@ struct Arguments {
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
     target_confirm_time: Duration,
-
-    /// Every how often in seconds we should execute the driver's run loop
-    #[structopt(
-        long,
-        env,
-        default_value = "10",
-        parse(try_from_str = shared::arguments::duration_from_seconds),
-    )]
-    settle_interval: Duration,
 
     /// Which type of solver to use
     #[structopt(
@@ -281,9 +273,9 @@ async fn main() {
     let native_token_contract = WETH9::deployed(&web3)
         .await
         .expect("couldn't load deployed native token");
+    let orderbook_api = OrderBookApi::new(args.orderbook_url, client.clone());
     let orderbook_liquidity = OrderbookLiquidity::new(
-        args.orderbook_url,
-        client.clone(),
+        orderbook_api.clone(),
         native_token_contract.clone(),
         args.liquidity_order_owners.into_iter().collect(),
         args.fee_objective_scaling_factor,
@@ -508,7 +500,6 @@ async fn main() {
         price_estimator,
         solver,
         gas_price_estimator,
-        args.settle_interval,
         native_token_contract.address(),
         args.min_order_age,
         metrics.clone(),
@@ -520,6 +511,7 @@ async fn main() {
         current_block_stream.clone(),
         solution_submitter,
         native_token_price_estimation_amount,
+        orderbook_api,
     );
 
     let maintainer = ServiceMaintenance {

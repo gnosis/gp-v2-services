@@ -5,6 +5,7 @@ use crate::{
     liquidity::LimitOrder,
     liquidity_collector::LiquidityCollector,
     metrics::SolverMetrics,
+    orderbook::OrderBookApi,
     settlement::Settlement,
     settlement_simulation,
     settlement_submission::{retry::is_transaction_failure, SolutionSubmitter},
@@ -17,7 +18,7 @@ use ethcontract::errors::MethodError;
 use futures::future::join_all;
 use gas_estimation::GasPriceEstimating;
 use itertools::{Either, Itertools};
-use model::order::{OrderUid, BUY_ETH_ADDRESS};
+use model::order::BUY_ETH_ADDRESS;
 use num::BigRational;
 use primitive_types::{H160, U256};
 use shared::{
@@ -32,6 +33,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use web3::types::TransactionReceipt;
 
 pub struct Driver {
     settlement_contract: GPv2Settlement,
@@ -39,7 +41,6 @@ pub struct Driver {
     price_estimator: Arc<dyn PriceEstimating>,
     solvers: Solvers,
     gas_price_estimator: Arc<dyn GasPriceEstimating>,
-    settle_interval: Duration,
     native_token: H160,
     min_order_age: Duration,
     metrics: Arc<dyn SolverMetrics>,
@@ -48,11 +49,11 @@ pub struct Driver {
     max_merged_settlements: usize,
     solver_time_limit: Duration,
     market_makable_token_list: Option<TokenList>,
-    inflight_trades: HashSet<OrderUid>,
     block_stream: CurrentBlockStream,
     solution_submitter: SolutionSubmitter,
     solve_id: u64,
     native_token_amount_to_estimate_prices_with: U256,
+    orderbook_api: OrderBookApi,
 }
 impl Driver {
     #[allow(clippy::too_many_arguments)]
@@ -62,7 +63,6 @@ impl Driver {
         price_estimator: Arc<dyn PriceEstimating>,
         solvers: Solvers,
         gas_price_estimator: Arc<dyn GasPriceEstimating>,
-        settle_interval: Duration,
         native_token: H160,
         min_order_age: Duration,
         metrics: Arc<dyn SolverMetrics>,
@@ -74,6 +74,7 @@ impl Driver {
         block_stream: CurrentBlockStream,
         solution_submitter: SolutionSubmitter,
         native_token_amount_to_estimate_prices_with: U256,
+        orderbook_api: OrderBookApi,
     ) -> Self {
         Self {
             settlement_contract,
@@ -81,7 +82,6 @@ impl Driver {
             price_estimator,
             solvers,
             gas_price_estimator,
-            settle_interval,
             native_token,
             min_order_age,
             metrics,
@@ -90,11 +90,11 @@ impl Driver {
             max_merged_settlements,
             solver_time_limit,
             market_makable_token_list,
-            inflight_trades: HashSet::new(),
             block_stream,
             solution_submitter,
             solve_id: 0,
             native_token_amount_to_estimate_prices_with,
+            orderbook_api,
         }
     }
 
@@ -105,7 +105,7 @@ impl Driver {
                 Err(err) => tracing::error!("single run errored: {:?}", err),
             }
             self.metrics.runloop_completed();
-            tokio::time::sleep(self.settle_interval).await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
 
@@ -137,7 +137,7 @@ impl Driver {
         &self,
         solver: Arc<dyn Solver>,
         rated_settlement: RatedSettlement,
-    ) -> Result<()> {
+    ) -> Option<TransactionReceipt> {
         let settlement = rated_settlement.settlement;
         let trades = settlement.trades().to_vec();
         match self
@@ -149,14 +149,18 @@ impl Driver {
             )
             .await
         {
-            Ok(hash) => {
+            Ok(receipt) => {
                 let name = solver.name();
-                tracing::info!("Successfully submitted {} settlement: {:?}", name, hash);
+                tracing::info!(
+                    "Successfully submitted {} settlement: {:?}",
+                    name,
+                    receipt.transaction_hash
+                );
                 trades
                     .iter()
                     .for_each(|trade| self.metrics.order_settled(&trade.order, name));
                 self.metrics.settlement_submitted(true, name);
-                Ok(())
+                Some(receipt)
             }
             Err(err) => {
                 // Since we simulate and only submit solutions when they used to pass before, there is no
@@ -172,7 +176,7 @@ impl Driver {
                     tracing::error!("Failed to submit {} settlement: {:?}", name, err)
                 };
                 self.metrics.settlement_submitted(false, name);
-                Err(err)
+                None
             }
         }
     }
@@ -369,10 +373,7 @@ impl Driver {
         let current_block_during_liquidity_fetch =
             current_block::block_number(&self.block_stream.borrow())?;
 
-        let orders = self
-            .liquidity_collector
-            .get_orders(&self.inflight_trades)
-            .await?;
+        let orders = self.liquidity_collector.get_orders().await?;
         let liquidity = self
             .liquidity_collector
             .get_liquidity_for_orders(&orders, Block::Number(current_block_during_liquidity_fetch))
@@ -463,7 +464,7 @@ impl Driver {
             .rate_settlements(settlements, &estimated_prices, gas_price_wei)
             .await;
 
-        self.inflight_trades.clear();
+        let mut receipt = None;
         if let Some((solver, mut settlement)) = rated_settlements
             .clone()
             .into_iter()
@@ -480,18 +481,7 @@ impl Driver {
             }
 
             tracing::info!("winning settlement: {:?}", settlement);
-            if self
-                .submit_settlement(solver, settlement.clone())
-                .await
-                .is_ok()
-            {
-                self.inflight_trades = settlement
-                    .settlement
-                    .trades()
-                    .iter()
-                    .map(|t| t.order.order_meta_data.uid)
-                    .collect::<HashSet<OrderUid>>();
-            }
+            receipt = self.submit_settlement(solver, settlement.clone()).await;
 
             self.report_matched_but_unsettled_orders(
                 &settlement.settlement,
@@ -503,6 +493,10 @@ impl Driver {
         self.report_simulation_errors(&errors, current_block_during_liquidity_fetch, gas_price_wei)
             .await;
 
+        if let Some(receipt) = receipt {
+            self.wait_for_api_to_see_settlement(&receipt).await;
+        }
+
         Ok(())
     }
 
@@ -510,6 +504,44 @@ impl Driver {
         let id = self.solve_id;
         self.solve_id += 1;
         id
+    }
+
+    /// Wait for the api to see our settlement transaction. This prevents getting the same orders we
+    /// already settled next run loop which would then fail to simulate.
+    /// Also returns after a deadline in case the api never sees the new settlement for example
+    /// because of a reorg.
+    async fn wait_for_api_to_see_settlement(&self, receipt: &TransactionReceipt) {
+        let block = match receipt.block_number {
+            Some(block) => block.as_u64(),
+            None => {
+                tracing::error!("tx receipt without block");
+                return;
+            }
+        };
+
+        const TIMEOUT: Duration = Duration::from_secs(60);
+        const POLL_INTERVAL: Duration = Duration::from_secs(1);
+        tracing::info!("waiting for api to see mined settlement");
+        let wait_for_block = async {
+            loop {
+                let orders = match self.orderbook_api.get_orders().await {
+                    Ok(orders) => orders,
+                    Err(err) => {
+                        tracing::warn!(?err, "failed to get orders");
+                        tokio::time::sleep(POLL_INTERVAL).await;
+                        continue;
+                    }
+                };
+                if orders.latest_settlement_block >= block {
+                    break;
+                }
+                tokio::time::sleep(POLL_INTERVAL).await;
+            }
+        };
+        match tokio::time::timeout(TIMEOUT, wait_for_block).await {
+            Ok(()) => tracing::info!("api found settlement block"),
+            Err(_) => tracing::warn!("api did not find settlement block within deadline"),
+        }
     }
 }
 

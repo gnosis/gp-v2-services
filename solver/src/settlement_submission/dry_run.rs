@@ -4,13 +4,14 @@ use super::retry::settle_method_builder;
 use crate::{settlement::Settlement, settlement_simulation::tenderly_link};
 use anyhow::Result;
 use contracts::GPv2Settlement;
-use ethcontract::{Account, TransactionHash};
+use ethcontract::Account;
+use web3::types::TransactionReceipt;
 
 pub async fn log_settlement(
     account: Account,
     contract: &GPv2Settlement,
     settlement: Settlement,
-) -> Result<TransactionHash> {
+) -> Result<TransactionReceipt> {
     let web3 = contract.raw_instance().web3();
     let current_block = web3.eth().block_number().await?;
     let network = web3.net().version().await?;

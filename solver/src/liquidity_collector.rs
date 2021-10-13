@@ -6,9 +6,7 @@ use crate::{
     },
 };
 use anyhow::{Context, Result};
-use model::order::OrderUid;
 use shared::recent_block_cache::Block;
-use std::collections::HashSet;
 
 pub struct LiquidityCollector {
     pub orderbook_liquidity: OrderbookLiquidity,
@@ -17,10 +15,10 @@ pub struct LiquidityCollector {
 }
 
 impl LiquidityCollector {
-    pub async fn get_orders(&self, inflight_trades: &HashSet<OrderUid>) -> Result<Vec<LimitOrder>> {
+    pub async fn get_orders(&self) -> Result<Vec<LimitOrder>> {
         let limit_orders = self
             .orderbook_liquidity
-            .get_liquidity(inflight_trades)
+            .get_liquidity()
             .await
             .context("failed to get orderbook liquidity")?;
         tracing::info!("got {} orders: {:?}", limit_orders.len(), limit_orders);

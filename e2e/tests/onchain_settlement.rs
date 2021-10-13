@@ -214,9 +214,10 @@ async fn onchain_settlement(web3: Web3) {
         }),
     );
     let solver = solver::solver::naive_solver(solver_account);
+    let (orderbook_liquidity, api) = create_orderbook_liquidity(&web3, gpv2.native_token.address());
     let liquidity_collector = LiquidityCollector {
         uniswap_like_liquidity: vec![uniswap_liquidity],
-        orderbook_liquidity: create_orderbook_liquidity(&web3, gpv2.native_token.address()),
+        orderbook_liquidity,
         balancer_v2_liquidity: None,
     };
     let network_id = web3.net().version().await.unwrap();
@@ -226,7 +227,6 @@ async fn onchain_settlement(web3: Web3) {
         price_estimator,
         vec![solver],
         Arc::new(web3.clone()),
-        Duration::from_secs(30),
         gpv2.native_token.address(),
         Duration::from_secs(0),
         Arc::new(NoopMetrics::default()),
@@ -247,6 +247,7 @@ async fn onchain_settlement(web3: Web3) {
             ),
         },
         1_000_000_000_000_000_000_u128.into(),
+        api,
     );
     driver.single_run().await.unwrap();
 
@@ -270,7 +271,7 @@ async fn onchain_settlement(web3: Web3) {
     solvable_orders_cache.update(0).await.unwrap();
 
     let orders = create_orderbook_api().get_orders().await.unwrap();
-    assert!(orders.is_empty());
+    assert!(orders.orders.is_empty());
 
     // Drive again to ensure we can continue solution finding
     driver.single_run().await.unwrap();

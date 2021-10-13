@@ -5,14 +5,17 @@ use ethcontract::{
     dyns::DynMethodBuilder,
     errors::{ExecutionError, MethodError},
     jsonrpc::types::Error as RpcError,
-    transaction::{confirm::ConfirmParams, ResolveCondition},
+    transaction::{
+        confirm::ConfirmParams, ResolveCondition, TransactionResult as EthContractTransactionResult,
+    },
     web3::error::Error as Web3Error,
-    Account, GasPrice, TransactionHash,
+    Account, GasPrice,
 };
 use futures::FutureExt;
 use primitive_types::U256;
 use shared::Web3;
 use transaction_retry::{TransactionResult, TransactionSending};
+use web3::types::TransactionReceipt;
 
 /// Failure indicating that some aspect about the signed transaction was wrong (e.g. wrong nonce, gas limit to high)
 /// and that the transaction could not be mined. This doesn't mean the transaction reverted.
@@ -43,7 +46,7 @@ pub fn is_transaction_failure(error: &ExecutionError) -> bool {
         || matches!(error, ExecutionError::InvalidOpcode)
 }
 
-pub struct SettleResult(pub Result<TransactionHash, MethodError>);
+pub struct SettleResult(pub Result<TransactionReceipt, MethodError>);
 
 impl TransactionResult for SettleResult {
     fn was_mined(&self) -> bool {
@@ -82,7 +85,16 @@ impl<'a> TransactionSending for SettlementSender<'a> {
                     .gas_price(GasPrice::Value(U256::from_f64_lossy(gas_price)))
                     .gas(U256::from_f64_lossy(self.gas_limit));
             method.tx.resolve = Some(ResolveCondition::Confirmed(ConfirmParams::mined()));
-            async { SettleResult(method.send().await.map(|tx| tx.hash())) }.boxed()
+            async {
+                SettleResult(method.send().await.map(|a| match a {
+                    // This branch is unreachable because the ethcontract documentation specifies
+                    // that this variant is only returned when no confirmation has been requested.
+                    // We request "mined".
+                    EthContractTransactionResult::Hash(_) => unreachable!(""),
+                    EthContractTransactionResult::Receipt(receipt) => receipt,
+                }))
+            }
+            .boxed()
         };
         let mut futures = self.nodes.iter().map(send_with_node).collect::<Vec<_>>();
         loop {
@@ -153,8 +165,10 @@ mod tests {
             message: "nonce too low".into(),
             data: None,
         }));
-
-        let result = SettleResult(Ok(H256([0xcd; 32])));
+        let result = SettleResult(Ok(TransactionReceipt {
+            transaction_hash: H256([0xcd; 32]),
+            ..Default::default()
+        }));
         assert!(result.was_mined());
 
         let result = SettleResult(Err(MethodError::from_parts(
