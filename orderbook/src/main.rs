@@ -7,7 +7,7 @@ use model::{
 };
 use orderbook::{
     account_balances::Web3BalanceFetcher,
-    api::order_validation::OrderValidator,
+    api::{order_validation::OrderValidator, post_quote::OrderQuoter},
     database::{self, orders::OrderFilter, Postgres},
     event_updater::EventUpdater,
     fee::EthAwareMinFeeCalculator,
@@ -125,6 +125,11 @@ struct Arguments {
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
     solvable_orders_max_update_age: Duration,
+
+    /// Gas Fee Factor: 1.0 means cost is forwarded to users alteration, 0.9 means there is a 10%
+    /// subsidy, 1.1 means users pay 10% in fees than what we estimate we pay for gas.
+    #[structopt(long, env, default_value = "1", parse(try_from_str = shared::arguments::parse_fee_factor))]
+    pub fee_factor: f64,
 
     /// Used to specify additional fee subsidy factor based on app_ids contained in orders.
     /// Should take the form of a json string as shown in the following example:
@@ -376,7 +381,7 @@ async fn main() {
         gas_price_estimator,
         native_token.address(),
         database.clone(),
-        args.shared.fee_factor,
+        args.fee_factor,
         bad_token_detector.clone(),
         args.partner_additional_fee_factors,
         native_token_price_estimation_amount,
@@ -411,19 +416,22 @@ async fn main() {
         args.enable_presign_orders,
         solvable_orders_cache,
         args.solvable_orders_max_update_age,
-        order_validator,
+        order_validator.clone(),
     ));
     let service_maintainer = ServiceMaintenance {
         maintainers: vec![database.clone(), Arc::new(event_updater), pool_fetcher],
     };
     check_database_connection(orderbook.as_ref()).await;
-
+    let quoter = Arc::new(OrderQuoter::new(
+        fee_calculator,
+        price_estimator,
+        order_validator,
+    ));
     let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel();
     let serve_api = serve_api(
         database.clone(),
         orderbook.clone(),
-        fee_calculator,
-        price_estimator,
+        quoter,
         args.bind_address,
         async {
             let _ = shutdown_receiver.await;

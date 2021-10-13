@@ -104,8 +104,6 @@ async fn recover_gas_price_from_pending_transaction(
             legacy: gas_price.to_f64_lossy(),
             ..Default::default()
         })),
-        // vk: At time of writing we never create eip1559 transactions so this branch should not be
-        // taken. Still, to be more future proof we return the priority fee.
         Fee::Eip1559 {
             max_priority_fee_per_gas,
             max_fee_per_gas,
