@@ -119,7 +119,6 @@ fn settle_method(
     // is done because the between retrieving the gas price and executing the simulation,
     // a block may have been mined that increases the base gas fee and causes the
     // `eth_call` simulation to fail with `max fee per gas less than block base fee`.
-    //let gas_price = GasPrice::Value(U256::from_f64_lossy(gas_price * MAX_BASE_GAS_FEE_INCREASE));
     let gas_price = gas_price.bump(MAX_BASE_GAS_FEE_INCREASE);
     let gas_price = if let Some(eip1559) = gas_price.eip1559 {
         (eip1559.max_fee_per_gas, eip1559.max_priority_fee_per_gas).into()
