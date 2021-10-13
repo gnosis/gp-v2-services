@@ -65,7 +65,6 @@ pub fn create_orderbook_liquidity(web3: &Web3, weth_address: H160) -> OrderbookL
         weth,
         Default::default(),
         1.,
-        1.,
     )
 }
 
