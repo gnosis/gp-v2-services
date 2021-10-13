@@ -314,9 +314,7 @@ impl Driver {
         let liquidity_order_ids: HashSet<_> = orders
             .into_iter()
             .filter_map(|order| match order.is_liquidity_order {
-                true => Some(
-                    OrderUid::from_str(&order.id).expect("LimitOrder was constructed from Order"),
-                ),
+                true => OrderUid::from_str(&order.id).ok(),
                 false => None,
             })
             .collect();
