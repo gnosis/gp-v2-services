@@ -103,7 +103,7 @@ impl Metrics {
             Opts::new("single_order_solver", "Success/Failure counts"),
             &["result", "solver_type"],
         )?;
-      
+
         registry.register(Box::new(single_order_solver_runs.clone()))?;
         let matched_but_liquidity = IntCounter::new(
             "orders_matched_liquidity",
