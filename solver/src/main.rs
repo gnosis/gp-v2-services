@@ -308,6 +308,7 @@ async fn main() {
             client.clone(),
             &web3,
             args.shared.gas_estimators.as_slice(),
+            args.shared.blocknative_api_key,
         )
         .await
         .expect("failed to create gas price estimator"),
@@ -443,6 +444,7 @@ async fn main() {
         args.shared.paraswap_partner,
         client.clone(),
         native_token_price_estimation_amount,
+        metrics.clone(),
     )
     .expect("failure creating solvers");
     let liquidity_collector = LiquidityCollector {

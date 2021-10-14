@@ -15,7 +15,7 @@ use anyhow::{anyhow, Context, Error, Result};
 use contracts::GPv2Settlement;
 use ethcontract::errors::MethodError;
 use futures::future::join_all;
-use gas_estimation::GasPriceEstimating;
+use gas_estimation::{EstimatedGasPrice, GasPriceEstimating};
 use itertools::{Either, Itertools};
 use model::order::{OrderUid, BUY_ETH_ADDRESS};
 use num::BigRational;
@@ -27,6 +27,7 @@ use shared::{
     token_list::TokenList,
     Web3,
 };
+use std::str::FromStr;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -181,7 +182,7 @@ impl Driver {
         &self,
         solver: Arc<dyn Solver>,
         settlement: &RatedSettlement,
-        gas_price_wei: f64,
+        gas_price: EstimatedGasPrice,
     ) -> Result<bool> {
         // We don't want to buy tokens that we don't trust. If no list is set, we settle with external liquidity.
         if !self
@@ -200,7 +201,7 @@ impl Driver {
             )),
             &self.settlement_contract,
             &self.web3,
-            gas_price_wei,
+            gas_price,
         )
         .await
         .context("failed to simulate settlement")?;
@@ -211,7 +212,7 @@ impl Driver {
     async fn simulate_settlements(
         &self,
         settlements: Vec<SettlementWithSolver>,
-        gas_price_wei: f64,
+        gas_price: EstimatedGasPrice,
     ) -> Result<(
         Vec<SettlementWithSolver>,
         Vec<(SettlementWithSolver, Error)>,
@@ -222,7 +223,7 @@ impl Driver {
                 .map(|settlement| (settlement.0.account().clone(), settlement.1.clone())),
             &self.settlement_contract,
             &self.web3,
-            gas_price_wei,
+            gas_price,
         )
         .await
         .context("failed to simulate settlements")?;
@@ -245,7 +246,7 @@ impl Driver {
         &self,
         errors: &[(SettlementWithSolver, Error)],
         current_block_during_liquidity_fetch: u64,
-        gas_price_wei: f64,
+        gas_price: EstimatedGasPrice,
     ) {
         let simulations = match settlement_simulation::simulate_and_error_with_tenderly_link(
             errors
@@ -253,7 +254,7 @@ impl Driver {
                 .map(|(settlement, _)| (settlement.0.account().clone(), settlement.1.clone())),
             &self.settlement_contract,
             &self.web3,
-            gas_price_wei,
+            gas_price,
             &self.network_id,
             current_block_during_liquidity_fetch,
         )
@@ -288,23 +289,43 @@ impl Driver {
         }
     }
 
-    // Record metric with the amount of orders that were matched but not settled in this runloop (effectively queued for the next one)
-    // Should help us to identify how much we can save by parallelizing execution.
-    fn report_matched_but_unsettled_orders(
+    /// Record metrics on the matched orders from a single batch. Specifically we report on
+    /// the number of orders that were;
+    ///  - matched but not settled in this runloop (effectively queued for the next one)
+    ///  - matched but coming from known liquidity providers.
+    /// Should help us to identify how much we can save by parallelizing execution.
+    fn report_matched_orders(
         &self,
         submitted: &Settlement,
         all: impl Iterator<Item = RatedSettlement>,
+        orders: Vec<LimitOrder>,
     ) {
         let submitted: HashSet<_> = submitted
             .trades()
             .iter()
             .map(|trade| trade.order.order_meta_data.uid)
             .collect();
-        let all_matched: HashSet<_> = all
+        let all_matched_orders: HashSet<_> = all
             .flat_map(|solution| solution.settlement.trades().to_vec())
-            .map(|trade| trade.order.order_meta_data.uid)
+            .map(|trade| trade.order)
             .collect();
-        let matched_but_not_settled: HashSet<_> = all_matched.difference(&submitted).collect();
+        let all_matched_ids: HashSet<_> = all_matched_orders
+            .iter()
+            .map(|order| order.order_meta_data.uid)
+            .collect();
+        let matched_but_not_settled = all_matched_ids.difference(&submitted).copied().collect();
+        let liquidity_order_ids: HashSet<_> = orders
+            .into_iter()
+            .filter_map(|order| match order.is_liquidity_order {
+                true => OrderUid::from_str(&order.id).ok(),
+                false => None,
+            })
+            .collect();
+        let matched_but_unsettled_liquidity_ids: HashSet<_> = liquidity_order_ids
+            .intersection(&matched_but_not_settled)
+            .collect();
+        self.metrics
+            .orders_matched_but_liquidity(matched_but_unsettled_liquidity_ids.len());
         self.metrics
             .orders_matched_but_not_settled(matched_but_not_settled.len())
     }
@@ -314,12 +335,12 @@ impl Driver {
         &self,
         settlements: Vec<SettlementWithSolver>,
         prices: &HashMap<H160, BigRational>,
-        gas_price_wei: f64,
+        gas_price: EstimatedGasPrice,
     ) -> Vec<(Arc<dyn Solver>, RatedSettlement)> {
         use futures::stream::StreamExt;
 
         // Normalize gas_price_wei to the native token price in the prices vector.
-        let gas_price_normalized = BigRational::from_float(gas_price_wei)
+        let gas_price_normalized = BigRational::from_float(gas_price.effective_gas_price())
             .expect("Invalid gas price.")
             * prices
                 .get(&self.native_token)
@@ -332,7 +353,7 @@ impl Driver {
                 let gas_estimate = match settlement_simulation::simulate_and_estimate_gas_at_current_block(
                     std::iter::once((solver.account().clone(), settlement.clone())),
                     &self.settlement_contract,
-                    &self.web3,gas_price_wei
+                    &self.web3,gas_price
                 )
                 .await
                 .map(|results|  results.into_iter().next().unwrap().map_err(Error::from))
@@ -392,20 +413,20 @@ impl Driver {
         self.metrics.orders_fetched(&orders);
         self.metrics.liquidity_fetched(&liquidity);
 
-        let gas_price_wei = self
+        let gas_price = self
             .gas_price_estimator
             .estimate()
             .await
             .context("failed to estimate gas price")?;
-        tracing::debug!("solving with gas price of {}", gas_price_wei);
+        tracing::debug!("solving with gas price of {:?}", gas_price);
 
         let mut solver_settlements = Vec::new();
 
         let auction = Auction {
             id: self.next_auction_id(),
-            orders,
+            orders: orders.clone(),
             liquidity,
-            gas_price: gas_price_wei,
+            gas_price: gas_price.effective_gas_price(),
             deadline: Instant::now() + self.solver_time_limit,
             price_estimates: estimated_prices.clone(),
         };
@@ -447,7 +468,7 @@ impl Driver {
         }
 
         let (settlements, errors) = self
-            .simulate_settlements(solver_settlements, gas_price_wei)
+            .simulate_settlements(solver_settlements, gas_price)
             .await?;
 
         tracing::info!(
@@ -460,7 +481,7 @@ impl Driver {
         }
 
         let rated_settlements = self
-            .rate_settlements(settlements, &estimated_prices, gas_price_wei)
+            .rate_settlements(settlements, &estimated_prices, gas_price)
             .await;
 
         self.inflight_trades.clear();
@@ -471,7 +492,7 @@ impl Driver {
         {
             // If we have enough buffer in the settlement contract to not use on-chain interactions, remove those
             if self
-                .can_settle_without_liquidity(solver.clone(), &settlement, gas_price_wei)
+                .can_settle_without_liquidity(solver.clone(), &settlement, gas_price)
                 .await
                 .unwrap_or(false)
             {
@@ -493,14 +514,15 @@ impl Driver {
                     .collect::<HashSet<OrderUid>>();
             }
 
-            self.report_matched_but_unsettled_orders(
+            self.report_matched_orders(
                 &settlement.settlement,
                 rated_settlements.into_iter().map(|(_, solution)| solution),
+                orders,
             );
         }
 
         // Happens after settlement submission so that we do not delay it.
-        self.report_simulation_errors(&errors, current_block_during_liquidity_fetch, gas_price_wei)
+        self.report_simulation_errors(&errors, current_block_during_liquidity_fetch, gas_price)
             .await;
 
         Ok(())
