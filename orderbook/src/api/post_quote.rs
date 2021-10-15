@@ -354,7 +354,16 @@ pub fn post_quote(
         async move {
             let result = quoter.calculate_quote(&request).await;
             if let Err(err) = &result {
-                tracing::error!(?err, ?request, "post_quote error");
+                match err {
+                    OrderQuoteError::Fee(FeeError::PriceEstimate(PriceEstimationError::Other(err))) => {
+                        tracing::error!(?err, ?request, "post_quote Fee error");
+                    },
+                    OrderQuoteError::Order(ValidationError::Other(err))=> {
+                        tracing::error!(?err, ?request, "post_quote Order Validation error");
+                    },
+                    _ => tracing::warn!(?err, ?request, "post_quote User error")
+                }
+
             }
             Result::<_, Infallible>::Ok(response(result))
         }
