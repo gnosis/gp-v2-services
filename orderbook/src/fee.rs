@@ -310,7 +310,7 @@ impl MinFeeCalculating for MinFeeCalculator {
                 .compute_unsubsidized_min_fee(sell_token, buy_token, amount, kind)
                 .await?;
 
-            let _ = self
+            if let Err(err) = self
                 .measurements
                 .save_fee_measurement(
                     sell_token,
@@ -320,7 +320,10 @@ impl MinFeeCalculating for MinFeeCalculator {
                     internal_valid_until,
                     current_fee,
                 )
-                .await;
+                .await
+            {
+                tracing::warn!(?err, "error saving fee measurement");
+            }
 
             current_fee
         };
