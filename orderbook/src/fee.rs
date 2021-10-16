@@ -91,7 +91,7 @@ pub trait MinFeeStoring: Send + Sync {
     ) -> Result<Option<U256>>;
 }
 
-const GAS_PER_ORDER: f64 = 200_000.0;
+const GAS_PER_ORDER: f64 = 300_000.0;
 
 // We use a longer validity internally for persistence to avoid writing a value to storage on every request
 // This way we can serve a previous estimate if the same token is queried again shortly after
@@ -211,8 +211,7 @@ impl MinFeeCalculator {
 
         let gas_amount =
             if let (Some(buy_token), Some(amount), Some(kind)) = (buy_token, amount, kind) {
-                let gas_estimate = self
-                    .price_estimator
+                self.price_estimator
                     .estimate(&price_estimation::Query {
                         sell_token,
                         buy_token,
@@ -221,32 +220,8 @@ impl MinFeeCalculator {
                     })
                     .await?
                     .gas
-                    .to_f64_lossy();
-
-                match kind {
-                    OrderKind::Sell => {
-                        tracing::debug!(
-                            "estimated {} gas for order selling {} {:?} for {:?}",
-                            gas_estimate,
-                            amount,
-                            sell_token,
-                            buy_token
-                        );
-                    }
-                    OrderKind::Buy => {
-                        tracing::debug!(
-                            "estimated {} gas for order buying {} {:?} for {:?}",
-                            gas_estimate,
-                            amount,
-                            buy_token,
-                            sell_token
-                        );
-                    }
-                }
-
-                gas_estimate
+                    .to_f64_lossy()
             } else {
-                tracing::debug!("using default {} gas per order", GAS_PER_ORDER);
                 GAS_PER_ORDER
             };
 
@@ -299,11 +274,17 @@ impl MinFeeCalculating for MinFeeCalculator {
         let official_valid_until = now + Duration::seconds(STANDARD_VALIDITY_FOR_FEE_IN_SEC);
         let internal_valid_until = now + Duration::seconds(PERSISTED_VALIDITY_FOR_FEE_IN_SEC);
 
+        tracing::debug!(
+            "computing subsidized fee for {:?}",
+            (sell_token, buy_token, amount, kind, app_data),
+        );
+
         let unsubsidized_min_fee = if let Ok(Some(past_fee)) = self
             .measurements
             .read_fee_measurement(sell_token, buy_token, amount, kind, official_valid_until)
             .await
         {
+            tracing::debug!("using existing fee measurement {}", past_fee);
             past_fee
         } else {
             let current_fee = self
@@ -325,13 +306,17 @@ impl MinFeeCalculating for MinFeeCalculator {
                 tracing::warn!(?err, "error saving fee measurement");
             }
 
+            tracing::debug!("using new fee measurement {}", current_fee);
             current_fee
         };
 
-        Ok((
-            self.apply_fee_factor(unsubsidized_min_fee, app_data),
-            official_valid_until,
-        ))
+        let subsidized_min_fee = self.apply_fee_factor(unsubsidized_min_fee, app_data);
+        tracing::debug!(
+            "computed subsidized fee of {:?}",
+            (subsidized_min_fee, sell_token),
+        );
+
+        Ok((subsidized_min_fee, official_valid_until))
     }
 
     async fn get_unsubsidized_min_fee(
