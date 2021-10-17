@@ -1,7 +1,7 @@
 use super::{Interaction, Trade, TradeExecution};
 use crate::{encoding::EncodedSettlement, interactions::UnwrapWethInteraction};
 use anyhow::{bail, ensure, Context as _, Result};
-use model::order::{Order, OrderKind};
+use model::order::{Order, OrderKind, OrderUid};
 use num::{BigRational, One, Zero};
 use primitive_types::{H160, U256};
 use shared::conversions::{big_rational_to_u256, U256Ext};
@@ -190,27 +190,33 @@ impl SettlementEncoder {
     pub fn total_surplus(
         &self,
         normalizing_prices: &HashMap<H160, BigRational>,
+        liquidity_orders: HashSet<OrderUid>,
     ) -> Option<BigRational> {
         self.trades.iter().fold(Some(num::zero()), |acc, trade| {
+            let order = trade.order.clone();
+            if liquidity_orders.contains(&order.order_meta_data.uid) {
+                // Exclude liquidity orders from surplus calculation
+                return None;
+            }
             let sell_token_clearing_price = self
                 .clearing_prices
-                .get(&trade.order.order_creation.sell_token)
+                .get(&order.order_creation.sell_token)
                 .expect("Solution with trade but without price for sell token")
                 .to_big_rational();
             let buy_token_clearing_price = self
                 .clearing_prices
-                .get(&trade.order.order_creation.buy_token)
+                .get(&order.order_creation.buy_token)
                 .expect("Solution with trade but without price for buy token")
                 .to_big_rational();
 
             let sell_token_external_price = normalizing_prices
-                .get(&trade.order.order_creation.sell_token)
+                .get(&order.order_creation.sell_token)
                 .expect("Solution with trade but without price for sell token");
             let buy_token_external_price = normalizing_prices
-                .get(&trade.order.order_creation.buy_token)
+                .get(&order.order_creation.buy_token)
                 .expect("Solution with trade but without price for buy token");
 
-            if match trade.order.order_creation.kind {
+            if match order.order_creation.kind {
                 OrderKind::Sell => &buy_token_clearing_price,
                 OrderKind::Buy => &sell_token_clearing_price,
             }
@@ -220,7 +226,7 @@ impl SettlementEncoder {
             }
 
             let surplus = &trade.surplus(&sell_token_clearing_price, &buy_token_clearing_price)?;
-            let normalized_surplus = match trade.order.order_creation.kind {
+            let normalized_surplus = match order.order_creation.kind {
                 OrderKind::Sell => surplus * buy_token_external_price / buy_token_clearing_price,
                 OrderKind::Buy => surplus * sell_token_external_price / sell_token_clearing_price,
             };

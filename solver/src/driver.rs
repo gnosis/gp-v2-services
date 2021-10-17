@@ -307,6 +307,7 @@ impl Driver {
         settlements: Vec<SettlementWithSolver>,
         prices: &HashMap<H160, BigRational>,
         gas_price: EstimatedGasPrice,
+        liquidity_order_ids: HashSet<OrderUid>,
     ) -> Result<(
         Vec<(Arc<dyn Solver>, RatedSettlement)>,
         Vec<(Arc<dyn Solver>, Settlement, ExecutionError)>,
@@ -329,8 +330,8 @@ impl Driver {
                 .get(&self.native_token)
                 .expect("Price of native token must be known.");
 
-        let rate_settlement = |solver, settlement: Settlement, gas_estimate| {
-            let surplus = settlement.total_surplus(prices);
+        let rate_settlement = |solver, settlement: Settlement, gas_estimate, liquidity_order_ids: HashSet<OrderUid>| {
+            let surplus = settlement.total_surplus(prices, liquidity_order_ids);
             let scaled_solver_fees = settlement.total_scaled_unsubsidized_fees(prices);
             let rated_settlement = RatedSettlement {
                 settlement,
@@ -354,7 +355,7 @@ impl Driver {
             |((solver, settlement), result)| match result {
                 Ok(gas_estimate) => Either::Left((
                     solver.clone(),
-                    rate_settlement(solver.name(), settlement, gas_estimate),
+                    rate_settlement(solver.name(), settlement, gas_estimate, liquidity_order_ids.clone()),
                 )),
                 Err(err) => Either::Right((solver, settlement, err)),
             },
@@ -407,7 +408,15 @@ impl Driver {
             price_estimates: estimated_prices.clone(),
         };
         tracing::debug!("solving auction ID {}", auction.id);
-
+        let liquidity_order_ids: HashSet<_> = orders
+            .iter()
+            .filter_map(|order| {
+                if order.is_liquidity_order {
+                    return Some(OrderUid::from_str(&order.id).expect("conversion from known Uid"));
+                }
+                None
+            })
+            .collect();
         let run_solver_results = self.run_solvers(auction).await;
         for (solver, settlements) in run_solver_results {
             let name = solver.name();
@@ -430,6 +439,7 @@ impl Driver {
                 self.max_merged_settlements,
                 &estimated_prices,
                 &mut settlements,
+                liquidity_order_ids.clone()
             );
 
             solver_settlements::filter_settlements_without_old_orders(
@@ -444,7 +454,7 @@ impl Driver {
         }
 
         let (rated_settlements, errors) = self
-            .rate_settlements(solver_settlements, &estimated_prices, gas_price)
+            .rate_settlements(solver_settlements, &estimated_prices, gas_price, liquidity_order_ids)
             .await?;
         tracing::info!(
             "{} settlements passed simulation and {} failed",
