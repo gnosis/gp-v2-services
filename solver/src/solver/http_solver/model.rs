@@ -1,4 +1,5 @@
 use ethcontract::H160;
+use model::order::OrderKind;
 use model::{
     ratio_as_decimal,
     u256_decimal::{self, DecimalU256},
@@ -60,6 +61,12 @@ impl AmmModel {
                 .values()
                 .filter(|&balance| balance.gt(&U256::zero()))
                 .count(),
+            AmmParameters::PrivateMarketMaker(_limit_order) => {
+                // TODO - This assumes the Private market maker has sufficient funds of both tokens
+                //  To be more accurate, we should make this function async and fetch balances of
+                //  the buy and sell token.
+                2
+            }
         };
         // HTTP solver requires at least two non-zero reserves.
         non_zero_balance_count >= 2
@@ -72,6 +79,20 @@ pub enum AmmParameters {
     ConstantProduct(ConstantProductPoolParameters),
     WeightedProduct(WeightedProductPoolParameters),
     Stable(StablePoolParameters),
+    PrivateMarketMaker(LimitOrderParameters),
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct LimitOrderParameters {
+    pub id: String,
+    pub sell_token: H160,
+    pub buy_token: H160,
+    #[serde(with = "u256_decimal")]
+    pub sell_amount: U256,
+    #[serde(with = "u256_decimal")]
+    pub buy_amount: U256,
+    pub kind: OrderKind,
+    pub partially_fillable: bool,
 }
 
 #[serde_as]

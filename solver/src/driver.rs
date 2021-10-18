@@ -27,7 +27,6 @@ use shared::{
     token_list::TokenList,
     Web3,
 };
-use std::str::FromStr;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -269,7 +268,6 @@ impl Driver {
         &self,
         submitted: &Settlement,
         all: impl Iterator<Item = RatedSettlement>,
-        orders: Vec<LimitOrder>,
     ) {
         let submitted: HashSet<_> = submitted
             .trades()
@@ -284,19 +282,8 @@ impl Driver {
             .iter()
             .map(|order| order.order_meta_data.uid)
             .collect();
-        let matched_but_not_settled = all_matched_ids.difference(&submitted).copied().collect();
-        let liquidity_order_ids: HashSet<_> = orders
-            .into_iter()
-            .filter_map(|order| match order.is_liquidity_order {
-                true => OrderUid::from_str(&order.id).ok(),
-                false => None,
-            })
-            .collect();
-        let matched_but_unsettled_liquidity_ids: HashSet<_> = liquidity_order_ids
-            .intersection(&matched_but_not_settled)
-            .collect();
-        self.metrics
-            .orders_matched_but_liquidity(matched_but_unsettled_liquidity_ids.len());
+        let matched_but_not_settled: HashSet<_> =
+            all_matched_ids.difference(&submitted).copied().collect();
         self.metrics
             .orders_matched_but_not_settled(matched_but_not_settled.len())
     }
@@ -307,7 +294,6 @@ impl Driver {
         settlements: Vec<SettlementWithSolver>,
         prices: &HashMap<H160, BigRational>,
         gas_price: EstimatedGasPrice,
-        liquidity_order_ids: HashSet<OrderUid>,
     ) -> Result<(
         Vec<(Arc<dyn Solver>, RatedSettlement)>,
         Vec<(Arc<dyn Solver>, Settlement, ExecutionError)>,
@@ -330,8 +316,8 @@ impl Driver {
                 .get(&self.native_token)
                 .expect("Price of native token must be known.");
 
-        let rate_settlement = |solver, settlement: Settlement, gas_estimate, liquidity_order_ids: HashSet<OrderUid>| {
-            let surplus = settlement.total_surplus(prices, liquidity_order_ids);
+        let rate_settlement = |solver, settlement: Settlement, gas_estimate| {
+            let surplus = settlement.total_surplus(prices);
             let scaled_solver_fees = settlement.total_scaled_unsubsidized_fees(prices);
             let rated_settlement = RatedSettlement {
                 settlement,
@@ -355,7 +341,7 @@ impl Driver {
             |((solver, settlement), result)| match result {
                 Ok(gas_estimate) => Either::Left((
                     solver.clone(),
-                    rate_settlement(solver.name(), settlement, gas_estimate, liquidity_order_ids.clone()),
+                    rate_settlement(solver.name(), settlement, gas_estimate),
                 )),
                 Err(err) => Either::Right((solver, settlement, err)),
             },
@@ -367,25 +353,34 @@ impl Driver {
         let current_block_during_liquidity_fetch =
             current_block::block_number(&self.block_stream.borrow())?;
 
-        let orders = self
+        let limit_orders = self
             .liquidity_collector
             .get_orders(&self.inflight_trades)
             .await?;
+        // Liquidity now contains pmm_orders.
         let liquidity = self
             .liquidity_collector
-            .get_liquidity_for_orders(&orders, Block::Number(current_block_during_liquidity_fetch))
+            .get_liquidity_for_orders(
+                &limit_orders,
+                Block::Number(current_block_during_liquidity_fetch),
+            )
             .await?;
-
+        // TODO - should we estimate prices for all limit orders or just user orders?
         let estimated_prices = collect_estimated_prices(
             self.price_estimator.as_ref(),
             self.native_token_amount_to_estimate_prices_with,
             self.native_token,
-            &orders,
+            &limit_orders,
         )
         .await;
         tracing::debug!("estimated prices: {:?}", estimated_prices);
 
-        let orders = orders_with_price_estimates(orders, &estimated_prices);
+        let user_orders = limit_orders
+            .into_iter()
+            .filter(|order| !order.is_liquidity_order)
+            .collect();
+        // At this point the orders list is now reduced to just user orders
+        let orders = orders_with_price_estimates(user_orders, &estimated_prices);
 
         self.metrics.orders_fetched(&orders);
         self.metrics.liquidity_fetched(&liquidity);
@@ -408,15 +403,6 @@ impl Driver {
             price_estimates: estimated_prices.clone(),
         };
         tracing::debug!("solving auction ID {}", auction.id);
-        let liquidity_order_ids: HashSet<_> = orders
-            .iter()
-            .filter_map(|order| {
-                if order.is_liquidity_order {
-                    return Some(OrderUid::from_str(&order.id).expect("conversion from known Uid"));
-                }
-                None
-            })
-            .collect();
         let run_solver_results = self.run_solvers(auction).await;
         for (solver, settlements) in run_solver_results {
             let name = solver.name();
@@ -439,7 +425,6 @@ impl Driver {
                 self.max_merged_settlements,
                 &estimated_prices,
                 &mut settlements,
-                liquidity_order_ids.clone()
             );
 
             solver_settlements::filter_settlements_without_old_orders(
@@ -454,7 +439,7 @@ impl Driver {
         }
 
         let (rated_settlements, errors) = self
-            .rate_settlements(solver_settlements, &estimated_prices, gas_price, liquidity_order_ids)
+            .rate_settlements(solver_settlements, &estimated_prices, gas_price)
             .await?;
         tracing::info!(
             "{} settlements passed simulation and {} failed",
@@ -498,7 +483,6 @@ impl Driver {
             self.report_matched_orders(
                 &settlement.settlement,
                 rated_settlements.into_iter().map(|(_, solution)| solution),
-                orders,
             );
         }
 

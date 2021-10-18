@@ -1,7 +1,7 @@
 use super::{Interaction, Trade, TradeExecution};
 use crate::{encoding::EncodedSettlement, interactions::UnwrapWethInteraction};
 use anyhow::{bail, ensure, Context as _, Result};
-use model::order::{Order, OrderKind, OrderUid};
+use model::order::{Order, OrderKind};
 use num::{BigRational, One, Zero};
 use primitive_types::{H160, U256};
 use shared::conversions::{big_rational_to_u256, U256Ext};
@@ -190,14 +190,9 @@ impl SettlementEncoder {
     pub fn total_surplus(
         &self,
         normalizing_prices: &HashMap<H160, BigRational>,
-        liquidity_orders: HashSet<OrderUid>,
     ) -> Option<BigRational> {
         self.trades.iter().fold(Some(num::zero()), |acc, trade| {
             let order = trade.order.clone();
-            if liquidity_orders.contains(&order.order_meta_data.uid) {
-                // Exclude liquidity orders from surplus calculation
-                return None;
-            }
             let sell_token_clearing_price = self
                 .clearing_prices
                 .get(&order.order_creation.sell_token)

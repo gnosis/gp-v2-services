@@ -4,8 +4,6 @@ use num::BigRational;
 use primitive_types::H160;
 use shared::conversions::U256Ext;
 use std::{collections::HashMap, time::Duration};
-use std::collections::HashSet;
-use model::order::OrderUid;
 
 // Return None if the result is an error or there are no settlements remaining after removing
 // settlements with no trades.
@@ -52,9 +50,8 @@ pub fn merge_settlements(
     max_merged_settlements: usize,
     prices: &HashMap<H160, BigRational>,
     settlements: &mut Vec<Settlement>,
-    liquidity_order_ids: HashSet<OrderUid>,
 ) {
-    settlements.sort_by_cached_key(|a| -a.total_surplus(prices, liquidity_order_ids.clone()));
+    settlements.sort_by_cached_key(|a| -a.total_surplus(prices));
 
     if let Some(settlement) =
         merge_at_most_settlements(max_merged_settlements, settlements.clone().into_iter())
@@ -159,7 +156,7 @@ mod tests {
             settlement(2.into(), 2),
             settlement(3.into(), 3),
         ];
-        merge_settlements(2, &prices_rational, &mut settlements, HashSet::new());
+        merge_settlements(2, &prices_rational, &mut settlements);
 
         assert_eq!(settlements.len(), 4);
         assert!(settlements.iter().any(|settlement| {

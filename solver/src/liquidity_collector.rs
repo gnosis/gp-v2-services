@@ -33,10 +33,15 @@ impl LiquidityCollector {
         at_block: Block,
     ) -> Result<Vec<Liquidity>> {
         let mut amms = vec![];
+        let (user_orders, pmm_orders): (Vec<_>, Vec<_>) = limit_orders
+            .to_vec()
+            .into_iter()
+            .partition(|order| !order.is_liquidity_order);
+        amms.extend(pmm_orders.into_iter().map(Liquidity::PrivateMarketMaker));
         for liquidity in &self.uniswap_like_liquidity {
             amms.extend(
                 liquidity
-                    .get_liquidity(limit_orders, at_block)
+                    .get_liquidity(user_orders.as_slice(), at_block)
                     .await
                     .context("failed to get UniswapLike liquidity")?
                     .into_iter()
@@ -45,7 +50,7 @@ impl LiquidityCollector {
         }
         if let Some(balancer_v2_liquidity) = self.balancer_v2_liquidity.as_ref() {
             let (stable_orders, weighted_orders) = balancer_v2_liquidity
-                .get_liquidity(limit_orders, at_block)
+                .get_liquidity(user_orders.as_slice(), at_block)
                 .await
                 .context("failed to get Balancer liquidity")?;
 

@@ -29,6 +29,7 @@ pub enum Liquidity {
     ConstantProduct(ConstantProductOrder),
     BalancerWeighted(WeightedProductOrder),
     BalancerStable(StablePoolOrder),
+    PrivateMarketMaker(LimitOrder),
 }
 
 impl Liquidity {
@@ -38,6 +39,10 @@ impl Liquidity {
             Liquidity::ConstantProduct(amm) => vec![amm.tokens],
             Liquidity::BalancerWeighted(amm) => token_pairs(&amm.reserves),
             Liquidity::BalancerStable(amm) => token_pairs(&amm.reserves),
+            Liquidity::PrivateMarketMaker(order) => {
+                vec![TokenPair::new(order.sell_token, order.buy_token)
+                    .expect("orders do not have identical buy/sell tokens")]
+            }
         }
     }
 }
@@ -61,6 +66,8 @@ where
 
 /// Basic limit sell and buy orders
 #[derive(Clone)]
+#[cfg_attr(test, derive(Derivative))]
+#[cfg_attr(test, derivative(PartialEq))]
 pub struct LimitOrder {
     // Opaque Identifier for debugging purposes
     pub id: String,
@@ -78,6 +85,7 @@ pub struct LimitOrder {
     /// perspective.
     pub scaled_fee_amount: U256,
     pub is_liquidity_order: bool,
+    #[cfg_attr(test, derivative(PartialEq = "ignore"))]
     pub settlement_handling: Arc<dyn SettlementHandling<Self>>,
 }
 
