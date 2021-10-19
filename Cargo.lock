@@ -1829,7 +1829,6 @@ dependencies = [
  "chrono",
  "const_format",
  "contracts",
- "either",
  "ethcontract",
  "futures",
  "gas-estimation",
