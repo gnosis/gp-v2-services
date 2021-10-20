@@ -379,7 +379,7 @@ async fn main() {
             }) as Box<dyn PriceEstimating>,
             PriceEstimatorType::ZeroEx => Box::new(ZeroExPriceEstimator {
                 client: Arc::new(
-                    DefaultZeroExApi::new(DefaultZeroExApi::DEFAULT_URL, client.clone()).unwrap(),
+                    DefaultZeroExApi::with_default_url(client.clone()),
                 ),
                 bad_token_detector: bad_token_detector.clone(),
             }) as Box<dyn PriceEstimating>,
