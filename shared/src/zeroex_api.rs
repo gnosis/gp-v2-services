@@ -188,7 +188,7 @@ impl ZeroExApi for DefaultZeroExApi {
 }
 
 impl DefaultZeroExApi {
-    async fn swap_like_request_impl<T: for <'a> serde::Deserialize<'a>>(
+    async fn swap_like_request_impl<T: for<'a> serde::Deserialize<'a>>(
         &self,
         endpoint: &str,
         query: SwapQuery,

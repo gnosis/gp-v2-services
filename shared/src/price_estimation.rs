@@ -1,7 +1,7 @@
 pub mod baseline;
 pub mod paraswap;
-pub mod zeroex;
 pub mod priority;
+pub mod zeroex;
 
 use crate::{bad_token::BadTokenDetecting, conversions::U256Ext};
 use anyhow::Result;
