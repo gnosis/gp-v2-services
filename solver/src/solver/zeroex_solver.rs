@@ -103,16 +103,16 @@ impl SingleOrderSolving for ZeroExSolver {
         }
 
         let mut settlement = Settlement::new(hashmap! {
-            order.sell_token => swap.buy_amount,
-            order.buy_token => swap.sell_amount,
+            order.sell_token => swap.header.buy_amount,
+            order.buy_token => swap.header.sell_amount,
         });
-        let spender = swap.allowance_target;
+        let spender = swap.header.allowance_target;
 
         settlement.with_liquidity(&order, order.full_execution_amount())?;
 
         settlement.encoder.append_to_execution_plan(
             self.allowance_fetcher
-                .get_approval(order.sell_token, spender, swap.sell_amount)
+                .get_approval(order.sell_token, spender, swap.header.sell_amount)
                 .await?,
         );
         settlement.encoder.append_to_execution_plan(swap);
@@ -139,8 +139,8 @@ impl From<ZeroExResponseError> for SettlementError {
 
 fn swap_respects_limit_price(swap: &SwapResponse, order: &LimitOrder) -> bool {
     match order.kind {
-        OrderKind::Buy => swap.sell_amount <= order.sell_amount,
-        OrderKind::Sell => swap.buy_amount >= order.buy_amount,
+        OrderKind::Buy => swap.header.sell_amount <= order.sell_amount,
+        OrderKind::Sell => swap.header.buy_amount >= order.buy_amount,
     }
 }
 
@@ -169,7 +169,7 @@ mod tests {
     use mockall::Sequence;
     use model::order::{Order, OrderCreation, OrderKind};
     use shared::transport::{create_env_test_transport, create_test_transport};
-    use shared::zeroex_api::MockZeroExApi;
+    use shared::zeroex_api::{MockZeroExApi, PriceResponse};
 
     #[tokio::test]
     #[ignore]
@@ -248,10 +248,13 @@ mod tests {
         let allowance_target = shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff");
         client.expect_get_swap().returning(move |_| {
             Ok(SwapResponse {
-                sell_amount: U256::from_dec_str("100").unwrap(),
-                buy_amount: U256::from_dec_str("91").unwrap(),
-                allowance_target,
-                price: 0.91_f64,
+                header: PriceResponse {
+                    sell_amount: U256::from_dec_str("100").unwrap(),
+                    buy_amount: U256::from_dec_str("91").unwrap(),
+                    allowance_target,
+                    price: 0.91_f64,
+                    estimated_gas: Default::default(),
+                },
                 to: shared::addr!("0000000000000000000000000000000000000000"),
                 data: web3::types::Bytes(hex::decode("00").unwrap()),
                 value: U256::from_dec_str("0").unwrap(),
@@ -370,10 +373,13 @@ mod tests {
         let allowance_target = shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff");
         client.expect_get_swap().returning(move |_| {
             Ok(SwapResponse {
-                sell_amount: U256::from_dec_str("100").unwrap(),
-                buy_amount: U256::from_dec_str("91").unwrap(),
-                allowance_target,
-                price: 13.121_002_575_170_278_f64,
+                header: PriceResponse {
+                    sell_amount: U256::from_dec_str("100").unwrap(),
+                    buy_amount: U256::from_dec_str("91").unwrap(),
+                    allowance_target,
+                    price: 13.121_002_575_170_278_f64,
+                    estimated_gas: Default::default(),
+                },
                 to: shared::addr!("0000000000000000000000000000000000000000"),
                 data: web3::types::Bytes(hex::decode("").unwrap()),
                 value: U256::from_dec_str("0").unwrap(),
@@ -434,10 +440,13 @@ mod tests {
         let mut client = Box::new(MockZeroExApi::new());
         client.expect_get_swap().returning(move |_| {
             Ok(SwapResponse {
-                sell_amount: 1000.into(),
-                buy_amount: 5000.into(),
-                allowance_target: shared::addr!("0000000000000000000000000000000000000000"),
-                price: 0.,
+                header: PriceResponse {
+                    sell_amount: 1000.into(),
+                    buy_amount: 5000.into(),
+                    allowance_target: shared::addr!("0000000000000000000000000000000000000000"),
+                    price: 0.,
+                    estimated_gas: Default::default(),
+                },
                 to: shared::addr!("0000000000000000000000000000000000000000"),
                 data: web3::types::Bytes(vec![]),
                 value: 0.into(),

@@ -1,5 +1,6 @@
 pub mod baseline;
 pub mod paraswap;
+pub mod zeroex;
 pub mod priority;
 
 use crate::{bad_token::BadTokenDetecting, conversions::U256Ext};
@@ -15,6 +16,7 @@ arg_enum! {
     pub enum PriceEstimatorType {
         Baseline,
         Paraswap,
+        ZeroEx,
     }
 }
 
