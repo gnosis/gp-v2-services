@@ -41,7 +41,6 @@ pub struct Driver {
     price_estimator: Arc<dyn PriceEstimating>,
     solvers: Solvers,
     gas_price_estimator: Arc<dyn GasPriceEstimating>,
-    settle_interval: Duration,
     native_token: H160,
     min_order_age: Duration,
     metrics: Arc<dyn SolverMetrics>,
@@ -65,7 +64,6 @@ impl Driver {
         price_estimator: Arc<dyn PriceEstimating>,
         solvers: Solvers,
         gas_price_estimator: Arc<dyn GasPriceEstimating>,
-        settle_interval: Duration,
         native_token: H160,
         min_order_age: Duration,
         metrics: Arc<dyn SolverMetrics>,
@@ -85,7 +83,6 @@ impl Driver {
             price_estimator,
             solvers,
             gas_price_estimator,
-            settle_interval,
             native_token,
             min_order_age,
             metrics,
@@ -110,7 +107,7 @@ impl Driver {
                 Err(err) => tracing::error!("single run errored: {:?}", err),
             }
             self.metrics.runloop_completed();
-            tokio::time::sleep(self.settle_interval).await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
 
@@ -366,6 +363,7 @@ impl Driver {
     }
 
     pub async fn single_run(&mut self) -> Result<()> {
+        let start = Instant::now();
         tracing::debug!("starting single run");
         let current_block_during_liquidity_fetch =
             current_block::block_number(&self.block_stream.borrow())?;
@@ -484,6 +482,9 @@ impl Driver {
             }
 
             tracing::info!("winning settlement: {:?}", settlement);
+            self.metrics
+                .complete_runloop_until_transaction(start.elapsed());
+            let start = Instant::now();
             if self
                 .submit_settlement(solver, settlement.clone())
                 .await
@@ -496,6 +497,7 @@ impl Driver {
                     .map(|t| t.order.order_meta_data.uid)
                     .collect::<HashSet<OrderUid>>();
             }
+            self.metrics.transaction_submission(start.elapsed());
 
             self.report_matched_orders(
                 &settlement.settlement,
