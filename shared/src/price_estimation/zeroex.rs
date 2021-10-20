@@ -235,8 +235,9 @@ mod tests {
         dbg!(&result);
         let estimate = result.unwrap();
         println!(
-            "1 eth buys {} gno",
+            "1 eth buys {} gno, costing {} gas",
             estimate.out_amount.to_f64_lossy() / 1e18
+            estimate.gas,
         );
     }
 }
