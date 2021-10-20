@@ -36,7 +36,7 @@ impl ZeroExPriceEstimator {
                 sell_amount,
                 buy_amount,
                 slippage_percentage: Default::default(),
-                skip_validation: None,
+                skip_validation: Some(true),
             })
             .await
             .map_err(|err| PriceEstimationError::Other(err.into()))?;
