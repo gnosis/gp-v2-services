@@ -212,7 +212,6 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
         price_estimator,
         vec![solver],
         Arc::new(web3.clone()),
-        Duration::from_secs(30),
         gpv2.native_token.address(),
         Duration::from_secs(0),
         Arc::new(NoopMetrics::default()),
@@ -233,6 +232,7 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
             ),
         },
         1_000_000_000_000_000_000_u128.into(),
+        10,
     );
     driver.single_run().await.unwrap();
 

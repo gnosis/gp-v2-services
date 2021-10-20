@@ -20,6 +20,7 @@ use itertools::{Either, Itertools};
 use model::order::{OrderUid, BUY_ETH_ADDRESS};
 use num::BigRational;
 use primitive_types::{H160, U256};
+use rand::prelude::SliceRandom;
 use shared::{
     current_block::{self, CurrentBlockStream},
     price_estimation::{self, PriceEstimating},
@@ -40,7 +41,6 @@ pub struct Driver {
     price_estimator: Arc<dyn PriceEstimating>,
     solvers: Solvers,
     gas_price_estimator: Arc<dyn GasPriceEstimating>,
-    settle_interval: Duration,
     native_token: H160,
     min_order_age: Duration,
     metrics: Arc<dyn SolverMetrics>,
@@ -54,6 +54,7 @@ pub struct Driver {
     solution_submitter: SolutionSubmitter,
     solve_id: u64,
     native_token_amount_to_estimate_prices_with: U256,
+    max_settlements_per_solver: usize,
 }
 impl Driver {
     #[allow(clippy::too_many_arguments)]
@@ -63,7 +64,6 @@ impl Driver {
         price_estimator: Arc<dyn PriceEstimating>,
         solvers: Solvers,
         gas_price_estimator: Arc<dyn GasPriceEstimating>,
-        settle_interval: Duration,
         native_token: H160,
         min_order_age: Duration,
         metrics: Arc<dyn SolverMetrics>,
@@ -75,6 +75,7 @@ impl Driver {
         block_stream: CurrentBlockStream,
         solution_submitter: SolutionSubmitter,
         native_token_amount_to_estimate_prices_with: U256,
+        max_settlements_per_solver: usize,
     ) -> Self {
         Self {
             settlement_contract,
@@ -82,7 +83,6 @@ impl Driver {
             price_estimator,
             solvers,
             gas_price_estimator,
-            settle_interval,
             native_token,
             min_order_age,
             metrics,
@@ -96,6 +96,7 @@ impl Driver {
             solution_submitter,
             solve_id: 0,
             native_token_amount_to_estimate_prices_with,
+            max_settlements_per_solver,
         }
     }
 
@@ -106,7 +107,7 @@ impl Driver {
                 Err(err) => tracing::error!("single run errored: {:?}", err),
             }
             self.metrics.runloop_completed();
-            tokio::time::sleep(self.settle_interval).await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
 
@@ -368,6 +369,7 @@ impl Driver {
     }
 
     pub async fn single_run(&mut self) -> Result<()> {
+        let start = Instant::now();
         tracing::debug!("starting single run");
         let current_block_during_liquidity_fetch =
             current_block::block_number(&self.block_stream.borrow())?;
@@ -432,6 +434,14 @@ impl Driver {
                 tracing::debug!("solver {} found solution:\n{:?}", name, settlement);
             }
 
+            // Keep at most this many settlements. This is important in case where a solver produces
+            // a large number of settlements which would hold up the driver logic when simulating
+            // them.
+            // Shuffle first so that in the case a buggy solver keeps returning some amount of
+            // invalid settlements first we have a chance to make progress.
+            settlements.shuffle(&mut rand::thread_rng());
+            settlements.truncate(self.max_settlements_per_solver);
+
             solver_settlements::merge_settlements(
                 self.max_merged_settlements,
                 &estimated_prices,
@@ -478,6 +488,9 @@ impl Driver {
             }
 
             tracing::info!("winning settlement: {:?}", settlement);
+            self.metrics
+                .complete_runloop_until_transaction(start.elapsed());
+            let start = Instant::now();
             if self
                 .submit_settlement(solver, settlement.clone())
                 .await
@@ -490,6 +503,7 @@ impl Driver {
                     .map(|t| t.order.order_meta_data.uid)
                     .collect::<HashSet<OrderUid>>();
             }
+            self.metrics.transaction_submission(start.elapsed());
 
             self.report_matched_orders(
                 &settlement.settlement,
