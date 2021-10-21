@@ -33,6 +33,7 @@ pub trait SolverMetrics: Send + Sync {
     fn single_order_solver_failed(&self, solver: &'static str);
     fn settlement_simulation_failed(&self, solver: &'static str);
     fn settlement_submitted(&self, successful: bool, solver: &'static str);
+    fn solver_time_out(&self, solver: &'static str);
     fn orders_matched_but_liquidity(&self, count: usize);
     fn orders_matched_but_not_settled(&self, count: usize);
     fn runloop_completed(&self);
@@ -49,6 +50,7 @@ pub struct Metrics {
     settlement_simulations: IntCounterVec,
     settlement_submissions: IntCounterVec,
     single_order_solver_runs: IntCounterVec,
+    solver_timeouts: IntCounterVec,
     matched_but_liquidity: IntCounter,
     matched_but_unsettled_orders: IntCounter,
     transport_requests: HistogramVec,
@@ -104,6 +106,12 @@ impl Metrics {
             &["result", "solver_type"],
         )?;
         registry.register(Box::new(settlement_submissions.clone()))?;
+
+        let solver_timeouts = IntCounterVec::new(
+            Opts::new("solver_timeouts", "Solver timeout counts"),
+            &["solver_type"],
+        )?;
+        registry.register(Box::new(solver_timeouts.clone()))?;
 
         let single_order_solver_runs = IntCounterVec::new(
             Opts::new("single_order_solver", "Success/Failure counts"),
@@ -170,6 +178,7 @@ impl Metrics {
             settlement_simulations,
             settlement_submissions,
             single_order_solver_runs,
+            solver_timeouts,
             matched_but_liquidity,
             matched_but_unsettled_orders,
             transport_requests,
@@ -261,6 +270,12 @@ impl SolverMetrics for Metrics {
             .inc()
     }
 
+    fn solver_time_out(&self, solver: &'static str) {
+        self.solver_timeouts
+            .with_label_values(&[solver])
+            .inc()
+    }
+
     fn orders_matched_but_liquidity(&self, count: usize) {
         self.matched_but_liquidity.inc_by(count as u64);
     }
@@ -336,6 +351,7 @@ impl SolverMetrics for NoopMetrics {
     fn single_order_solver_failed(&self, _: &'static str) {}
     fn settlement_simulation_failed(&self, _: &'static str) {}
     fn settlement_submitted(&self, _: bool, _: &'static str) {}
+    fn solver_time_out(&self, _: &'static str) {}
     fn orders_matched_but_liquidity(&self, _: usize) {}
     fn orders_matched_but_not_settled(&self, _: usize) {}
     fn runloop_completed(&self) {}

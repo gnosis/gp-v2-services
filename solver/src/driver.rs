@@ -423,7 +423,8 @@ impl Driver {
             let mut settlements = match settlements {
                 Ok(settlement) => settlement,
                 Err(err) => {
-                    tracing::error!("solver {} error: {:?}", name, err);
+                    self.metrics.solver_time_out(name);
+                    tracing::warn!("solver {} error: {:?}", name, err);
                     continue;
                 }
             };
