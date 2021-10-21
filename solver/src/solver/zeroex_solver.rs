@@ -65,10 +65,7 @@ impl ZeroExSolver {
         Ok(Self {
             account,
             allowance_fetcher: Box::new(allowance_fetcher),
-            client: Box::new(DefaultZeroExApi::new(
-                DefaultZeroExApi::DEFAULT_URL,
-                client,
-            )?),
+            client: Box::new(DefaultZeroExApi::with_default_url(client)),
         })
     }
 }
@@ -103,16 +100,16 @@ impl SingleOrderSolving for ZeroExSolver {
         }
 
         let mut settlement = Settlement::new(hashmap! {
-            order.sell_token => swap.header.buy_amount,
-            order.buy_token => swap.header.sell_amount,
+            order.sell_token => swap.price.buy_amount,
+            order.buy_token => swap.price.sell_amount,
         });
-        let spender = swap.header.allowance_target;
+        let spender = swap.price.allowance_target;
 
         settlement.with_liquidity(&order, order.full_execution_amount())?;
 
         settlement.encoder.append_to_execution_plan(
             self.allowance_fetcher
-                .get_approval(order.sell_token, spender, swap.header.sell_amount)
+                .get_approval(order.sell_token, spender, swap.price.sell_amount)
                 .await?,
         );
         settlement.encoder.append_to_execution_plan(swap);
@@ -139,8 +136,8 @@ impl From<ZeroExResponseError> for SettlementError {
 
 fn swap_respects_limit_price(swap: &SwapResponse, order: &LimitOrder) -> bool {
     match order.kind {
-        OrderKind::Buy => swap.header.sell_amount <= order.sell_amount,
-        OrderKind::Sell => swap.header.buy_amount >= order.buy_amount,
+        OrderKind::Buy => swap.price.sell_amount <= order.sell_amount,
+        OrderKind::Sell => swap.price.buy_amount >= order.buy_amount,
     }
 }
 
@@ -248,7 +245,7 @@ mod tests {
         let allowance_target = shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff");
         client.expect_get_swap().returning(move |_| {
             Ok(SwapResponse {
-                header: PriceResponse {
+                price: PriceResponse {
                     sell_amount: U256::from_dec_str("100").unwrap(),
                     buy_amount: U256::from_dec_str("91").unwrap(),
                     allowance_target,
@@ -373,7 +370,7 @@ mod tests {
         let allowance_target = shared::addr!("def1c0ded9bec7f1a1670819833240f027b25eff");
         client.expect_get_swap().returning(move |_| {
             Ok(SwapResponse {
-                header: PriceResponse {
+                price: PriceResponse {
                     sell_amount: U256::from_dec_str("100").unwrap(),
                     buy_amount: U256::from_dec_str("91").unwrap(),
                     allowance_target,
@@ -440,7 +437,7 @@ mod tests {
         let mut client = Box::new(MockZeroExApi::new());
         client.expect_get_swap().returning(move |_| {
             Ok(SwapResponse {
-                header: PriceResponse {
+                price: PriceResponse {
                     sell_amount: 1000.into(),
                     buy_amount: 5000.into(),
                     allowance_target: shared::addr!("0000000000000000000000000000000000000000"),

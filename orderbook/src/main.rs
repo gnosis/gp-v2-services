@@ -378,9 +378,7 @@ async fn main() {
                 disabled_paraswap_dexs: args.shared.disabled_paraswap_dexs.clone(),
             }) as Box<dyn PriceEstimating>,
             PriceEstimatorType::ZeroEx => Box::new(ZeroExPriceEstimator {
-                client: Arc::new(
-                    DefaultZeroExApi::with_default_url(client.clone()),
-                ),
+                client: Arc::new(DefaultZeroExApi::with_default_url(client.clone())),
                 bad_token_detector: bad_token_detector.clone(),
             }) as Box<dyn PriceEstimating>,
         })

@@ -100,7 +100,7 @@ pub struct PriceResponse {
 #[serde(rename_all = "camelCase")]
 pub struct SwapResponse {
     #[serde(flatten)]
-    pub header: PriceResponse,
+    pub price: PriceResponse,
     pub to: H160,
     #[derivative(Debug(format_with = "debug_bytes"))]
     pub data: Bytes,
@@ -300,7 +300,7 @@ mod tests {
         assert_eq!(
                 swap,
                 SwapResponse {
-                    header: PriceResponse {
+                    price: PriceResponse {
                         sell_amount: U256::from_dec_str("100000000000000000").unwrap(),
                         buy_amount: U256::from_dec_str("1312100257517027783").unwrap(),
                         allowance_target: crate::addr!("def1c0ded9bec7f1a1670819833240f027b25eff"),
