@@ -19,6 +19,8 @@ use orderbook::{
     verify_deployed_contract_constants,
 };
 use primitive_types::H160;
+use shared::price_estimation::zeroex::ZeroExPriceEstimator;
+use shared::zeroex_api::DefaultZeroExApi;
 use shared::{
     bad_token::{
         cache::CachingDetector,
@@ -33,8 +35,9 @@ use shared::{
     metrics::{serve_metrics, setup_metrics_registry, DEFAULT_METRICS_PORT},
     paraswap_api::DefaultParaswapApi,
     price_estimation::{
-        baseline::BaselinePriceEstimator, paraswap::ParaswapPriceEstimator,
-        priority::PriorityPriceEstimator, PriceEstimating, PriceEstimatorType,
+        baseline::BaselinePriceEstimator, instrumented::InstrumentedPriceEstimator,
+        paraswap::ParaswapPriceEstimator, priority::PriorityPriceEstimator, PriceEstimating,
+        PriceEstimatorType,
     },
     recent_block_cache::CacheConfig,
     sources::{
@@ -357,24 +360,42 @@ async fn main() {
         .shared
         .price_estimators
         .iter()
-        .map(|estimator| match estimator {
-            PriceEstimatorType::Baseline => Box::new(BaselinePriceEstimator::new(
-                pool_fetcher.clone(),
-                gas_price_estimator.clone(),
-                base_tokens.clone(),
-                bad_token_detector.clone(),
-                native_token.address(),
-                native_token_price_estimation_amount,
-            )) as Box<dyn PriceEstimating>,
-            PriceEstimatorType::Paraswap => Box::new(ParaswapPriceEstimator {
-                paraswap: Arc::new(DefaultParaswapApi {
-                    client: client.clone(),
-                    partner: args.shared.paraswap_partner.clone().unwrap_or_default(),
-                }),
-                token_info: token_info_fetcher.clone(),
-                bad_token_detector: bad_token_detector.clone(),
-                disabled_paraswap_dexs: args.shared.disabled_paraswap_dexs.clone(),
-            }),
+        .map(|estimator| -> Box<dyn PriceEstimating> {
+            match estimator {
+                PriceEstimatorType::Baseline => Box::new(InstrumentedPriceEstimator::new(
+                    BaselinePriceEstimator::new(
+                        pool_fetcher.clone(),
+                        gas_price_estimator.clone(),
+                        base_tokens.clone(),
+                        bad_token_detector.clone(),
+                        native_token.address(),
+                        native_token_price_estimation_amount,
+                    ),
+                    "Baseline",
+                    metrics.clone(),
+                )),
+                PriceEstimatorType::Paraswap => Box::new(InstrumentedPriceEstimator::new(
+                    ParaswapPriceEstimator {
+                        paraswap: Arc::new(DefaultParaswapApi {
+                            client: client.clone(),
+                            partner: args.shared.paraswap_partner.clone().unwrap_or_default(),
+                        }),
+                        token_info: token_info_fetcher.clone(),
+                        bad_token_detector: bad_token_detector.clone(),
+                        disabled_paraswap_dexs: args.shared.disabled_paraswap_dexs.clone(),
+                    },
+                    "ParaSwap",
+                    metrics.clone(),
+                )),
+                PriceEstimatorType::ZeroEx => Box::new(InstrumentedPriceEstimator::new(
+                    ZeroExPriceEstimator {
+                        client: Arc::new(DefaultZeroExApi::with_default_url(client.clone())),
+                        bad_token_detector: bad_token_detector.clone(),
+                    },
+                    "ZeroEx",
+                    metrics.clone(),
+                )),
+            }
         })
         .collect::<Vec<_>>();
     let price_estimator = Arc::new(PriorityPriceEstimator::new(price_estimators));
