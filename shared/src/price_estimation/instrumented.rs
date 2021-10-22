@@ -31,7 +31,6 @@ where
         &self,
         queries: &[Query],
     ) -> Vec<anyhow::Result<Estimate, PriceEstimationError>> {
-        dbg!(queries);
         let results = self.inner.estimates(queries).await;
         for result in &results {
             self.metrics.price_estimated(&self.name, result.is_ok());
