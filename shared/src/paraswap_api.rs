@@ -675,6 +675,17 @@ mod tests {
             Err(ParaswapResponseError::Other(_))
         ));
 
+        for liquidity_error in &[
+            "ESTIMATED_LOSS_GREATER_THAN_MAX_IMPACT",
+            "No routes found with enough liquidity",
+            "Too much slippage on quote, please try again",
+        ] {
+            assert!(matches!(
+                parse(&format!("{{\"error\": \"{}\"}}", liquidity_error)),
+                Err(ParaswapResponseError::InsufficientLiquidity(message)) if &message == liquidity_error,
+            ));
+        }
+
         for retryable_error in &[
             "ERROR_BUILDING_TRANSACTION",
             "Error getParaSwapPool",
