@@ -16,7 +16,7 @@ pub mod post_quote;
 use crate::{
     api::post_quote::OrderQuoter, database::trades::TradeRetrieving, orderbook::Orderbook,
 };
-use anyhow::Error as anyhowError;
+use anyhow::{Error as anyhowError, Result};
 use serde::{de::DeserializeOwned, Serialize};
 use shared::{metrics::get_metric_storage_registry, price_estimation::PriceEstimationError};
 use std::{convert::Infallible, sync::Arc};
@@ -124,6 +124,17 @@ fn internal_error() -> Json {
         error_type: "InternalServerError",
         description: "",
     })
+}
+
+pub fn convert_response<T>(result: Result<T>) -> impl Reply
+where
+    T: WarpReplyConverting,
+{
+    let (body, status_code) = match result {
+        Ok(result) => result.into_warp_reply(),
+        Err(_) => (internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
+    };
+    warp::reply::with_status(body, status_code)
 }
 
 pub trait WarpReplyConverting {

@@ -1,4 +1,4 @@
-use crate::api::extract_payload;
+use crate::api::{convert_response, extract_payload, WarpReplyConverting};
 use crate::orderbook::{OrderCancellationResult, Orderbook};
 use anyhow::Result;
 use model::signature::EcdsaSignature;
@@ -8,6 +8,7 @@ use model::{
 };
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, sync::Arc};
+use warp::reply::Json;
 use warp::{hyper::StatusCode, Filter, Rejection, Reply};
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
@@ -29,43 +30,43 @@ pub fn cancel_order_request(
         })
 }
 
-pub fn cancel_order_response(result: Result<OrderCancellationResult>) -> impl Reply {
-    let (body, status_code) = match result {
-        Ok(OrderCancellationResult::Cancelled) => (warp::reply::json(&"Cancelled"), StatusCode::OK),
-        Ok(OrderCancellationResult::InvalidSignature) => (
-            super::error("InvalidSignature", "Likely malformed signature"),
-            StatusCode::BAD_REQUEST,
-        ),
-        Ok(OrderCancellationResult::AlreadyCancelled) => (
-            super::error("AlreadyCancelled", "Order is already cancelled"),
-            StatusCode::BAD_REQUEST,
-        ),
-        Ok(OrderCancellationResult::OrderFullyExecuted) => (
-            super::error("OrderFullyExecuted", "Order is fully executed"),
-            StatusCode::BAD_REQUEST,
-        ),
-        Ok(OrderCancellationResult::OrderExpired) => (
-            super::error("OrderExpired", "Order is expired"),
-            StatusCode::BAD_REQUEST,
-        ),
-        Ok(OrderCancellationResult::OrderNotFound) => (
-            super::error("OrderNotFound", "Order not located in database"),
-            StatusCode::NOT_FOUND,
-        ),
-        Ok(OrderCancellationResult::WrongOwner) => (
-            super::error(
-                "WrongOwner",
-                "Signature recovery's owner doesn't match order's",
+impl WarpReplyConverting for OrderCancellationResult {
+    fn into_warp_reply(self) -> (Json, StatusCode) {
+        match self {
+            Self::Cancelled => (warp::reply::json(&"Cancelled"), StatusCode::OK),
+            Self::InvalidSignature => (
+                super::error("InvalidSignature", "Likely malformed signature"),
+                StatusCode::BAD_REQUEST,
             ),
-            StatusCode::UNAUTHORIZED,
-        ),
-        Ok(OrderCancellationResult::OnChainOrder) => (
-            super::error("OnChainOrder", "On-chain orders must be cancelled on-chain"),
-            StatusCode::BAD_REQUEST,
-        ),
-        Err(_) => (super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
-    };
-    warp::reply::with_status(body, status_code)
+            Self::AlreadyCancelled => (
+                super::error("AlreadyCancelled", "Order is already cancelled"),
+                StatusCode::BAD_REQUEST,
+            ),
+            Self::OrderFullyExecuted => (
+                super::error("OrderFullyExecuted", "Order is fully executed"),
+                StatusCode::BAD_REQUEST,
+            ),
+            Self::OrderExpired => (
+                super::error("OrderExpired", "Order is expired"),
+                StatusCode::BAD_REQUEST,
+            ),
+            Self::OrderNotFound => (
+                super::error("OrderNotFound", "Order not located in database"),
+                StatusCode::NOT_FOUND,
+            ),
+            Self::WrongOwner => (
+                super::error(
+                    "WrongOwner",
+                    "Signature recovery's owner doesn't match order's",
+                ),
+                StatusCode::UNAUTHORIZED,
+            ),
+            Self::OnChainOrder => (
+                super::error("OnChainOrder", "On-chain orders must be cancelled on-chain"),
+                StatusCode::BAD_REQUEST,
+            ),
+        }
+    }
 }
 
 pub fn cancel_order(
@@ -78,7 +79,7 @@ pub fn cancel_order(
             if let Err(err) = &result {
                 tracing::error!(?err, ?order, "cancel_order error");
             }
-            Result::<_, Infallible>::Ok(cancel_order_response(result))
+            Result::<_, Infallible>::Ok(convert_response(result))
         }
     })
 }
@@ -135,39 +136,44 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancel_order_response_ok() {
+    async fn cancel_order_result_converting() {
+        assert_eq!(
+            OrderCancellationResult::Cancelled.into_warp_reply().1,
+            StatusCode::OK
+        );
+        assert_eq!(
+            OrderCancellationResult::InvalidSignature
+                .into_warp_reply()
+                .1,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            OrderCancellationResult::OrderFullyExecuted
+                .into_warp_reply()
+                .1,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            OrderCancellationResult::AlreadyCancelled
+                .into_warp_reply()
+                .1,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            OrderCancellationResult::OrderExpired.into_warp_reply().1,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            OrderCancellationResult::WrongOwner.into_warp_reply().1,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            OrderCancellationResult::OrderNotFound.into_warp_reply().1,
+            StatusCode::NOT_FOUND
+        );
         let response =
-            cancel_order_response(Ok(OrderCancellationResult::Cancelled)).into_response();
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn cancel_order_response_err() {
-        let response =
-            cancel_order_response(Ok(OrderCancellationResult::InvalidSignature)).into_response();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-        let response =
-            cancel_order_response(Ok(OrderCancellationResult::OrderFullyExecuted)).into_response();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-        let response =
-            cancel_order_response(Ok(OrderCancellationResult::AlreadyCancelled)).into_response();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-        let response =
-            cancel_order_response(Ok(OrderCancellationResult::OrderExpired)).into_response();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-        let response =
-            cancel_order_response(Ok(OrderCancellationResult::WrongOwner)).into_response();
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-
-        let response =
-            cancel_order_response(Ok(OrderCancellationResult::OrderNotFound)).into_response();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-        let response = cancel_order_response(Err(anyhow::Error::msg("test error"))).into_response();
+            convert_response::<OrderCancellationResult>(Err(anyhow::Error::msg("test error")))
+                .into_response();
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }
