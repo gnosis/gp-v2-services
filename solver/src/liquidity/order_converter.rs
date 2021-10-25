@@ -268,7 +268,9 @@ pub mod tests {
                 encoder
                     .add_token_equivalency(native_token.address(), BUY_ETH_ADDRESS)
                     .unwrap();
-                assert!(encoder.add_trade(order, executed_amount, 0.into(), false).is_ok());
+                assert!(encoder
+                    .add_trade(order, executed_amount, 0.into(), false)
+                    .is_ok());
                 encoder.add_unwrap(UnwrapWethInteraction {
                     weth: native_token,
                     amount: executed_amount,
@@ -313,7 +315,9 @@ pub mod tests {
             order_settlement_handler,
             executed_amount,
             |encoder| {
-                assert!(encoder.add_trade(order, executed_amount, 0.into(), false).is_ok());
+                assert!(encoder
+                    .add_trade(order, executed_amount, 0.into(), false)
+                    .is_ok());
             },
         );
     }

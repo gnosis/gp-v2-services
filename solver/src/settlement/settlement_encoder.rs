@@ -382,8 +382,12 @@ pub mod tests {
             token1 => 1.into(),
         });
 
-        assert!(settlement.add_trade(order0, 1.into(), 1.into(), false).is_ok());
-        assert!(settlement.add_trade(order1, 1.into(), 0.into(), false).is_ok());
+        assert!(settlement
+            .add_trade(order0, 1.into(), 1.into(), false)
+            .is_ok());
+        assert!(settlement
+            .add_trade(order1, 1.into(), 0.into(), false)
+            .is_ok());
     }
 
     #[test]
@@ -528,7 +532,9 @@ pub mod tests {
             .with_buy_amount(11.into())
             .build();
         order13.order_meta_data.uid.0[0] = 0;
-        encoder0.add_trade(order13, 13.into(), 0.into(), false).unwrap();
+        encoder0
+            .add_trade(order13, 13.into(), 0.into(), false)
+            .unwrap();
         encoder0.append_to_execution_plan(NoopInteraction {});
         encoder0.add_unwrap(UnwrapWethInteraction {
             weth: weth.clone(),
@@ -544,7 +550,9 @@ pub mod tests {
             .with_buy_amount(22.into())
             .build();
         order24.order_meta_data.uid.0[0] = 1;
-        encoder1.add_trade(order24, 24.into(), 0.into(), false).unwrap();
+        encoder1
+            .add_trade(order24, 24.into(), 0.into(), false)
+            .unwrap();
         encoder1.append_to_execution_plan(NoopInteraction {});
         encoder1.add_unwrap(UnwrapWethInteraction {
             weth,
@@ -622,7 +630,9 @@ pub mod tests {
             .unwrap();
 
         let mut encoder1 = SettlementEncoder::new(prices);
-        encoder1.add_trade(order13, 24.into(), 0.into(), false).unwrap();
+        encoder1
+            .add_trade(order13, 24.into(), 0.into(), false)
+            .unwrap();
 
         assert!(encoder0.merge(encoder1).is_err());
     }
