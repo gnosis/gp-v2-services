@@ -300,9 +300,9 @@ fn sell_order_surplus(
 pub mod tests {
     use super::*;
     use crate::liquidity::SettlementHandling;
+    use maplit::hashset;
     use model::order::{OrderCreation, OrderKind, OrderMetaData};
     use num::FromPrimitive;
-    use maplit::hashset;
 
     pub fn assert_settlement_encoded_with<L, S>(
         prices: HashMap<H160, U256>,
@@ -845,28 +845,28 @@ pub mod tests {
                 sell_token: token0,
                 buy_token: token1,
                 sell_amount: 10.into(),
-                buy_amount: 9.into(),
+                buy_amount: 7.into(),
                 kind: OrderKind::Sell,
                 ..Default::default()
             },
             order_meta_data: OrderMetaData {
                 uid: OrderUid::from_integer(1),
                 ..Default::default()
-            }
+            },
         };
         let order1 = Order {
             order_creation: OrderCreation {
                 sell_token: token1,
                 buy_token: token0,
                 sell_amount: 10.into(),
-                buy_amount: 9.into(),
+                buy_amount: 6.into(),
                 kind: OrderKind::Sell,
                 ..Default::default()
             },
             order_meta_data: OrderMetaData {
                 uid: OrderUid::from_integer(2),
                 ..Default::default()
-            }
+            },
         };
 
         let trade0 = Trade {
@@ -884,19 +884,16 @@ pub mod tests {
         let settlement = test_settlement(clearing_prices, vec![trade0, trade1]);
         let external_prices = maplit::hashmap! {token0 => r(1), token1 => r(1)};
 
-        let with_both = settlement.total_surplus(hashset! { }, &external_prices, );
-        let without_order0 = settlement.total_surplus(hashset! { OrderUid::from_integer(1) }, &external_prices, );
-        let without_order1 = settlement.total_surplus(hashset! { OrderUid::from_integer(2) }, &external_prices,);
-        let without_both = settlement.total_surplus(hashset! { OrderUid::from_integer(1), OrderUid::from_integer(2) }, &external_prices);
-        println!("with Both - {}", with_both);
-        println!("without0 - {}", without_order0);
-        println!("without1 - {}", without_order1);
-        println!("without both - {}", without_both);
-        // with Both 19/10
-        // without 0 0
-        // without 1 0
-        // without both 0
-        assert_eq!(with_both, without_order0 + without_order1);
+        let total_surplus_without_pmms = settlement.total_surplus(hashset! {}, &external_prices);
+        let surplus_order1 =
+            settlement.total_surplus(hashset! { OrderUid::from_integer(1) }, &external_prices);
+        let surplus_order0 =
+            settlement.total_surplus(hashset! { OrderUid::from_integer(2) }, &external_prices);
+        let both_pmm = settlement.total_surplus(
+            hashset! { OrderUid::from_integer(1), OrderUid::from_integer(2) },
+            &external_prices,
+        );
+        assert_eq!(total_surplus_without_pmms, surplus_order0 + surplus_order1);
+        assert!(both_pmm.is_zero());
     }
-
 }
