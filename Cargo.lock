@@ -54,7 +54,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "model",
- "primitive-types",
+ "primitive-types 0.9.1",
  "reqwest",
  "serde",
  "shared",
@@ -658,7 +658,7 @@ dependencies = [
  "solver",
  "tokio",
  "tracing",
- "web3",
+ "web3 0.17.0 (git+https://github.com/tomusdrw/rust-web3.git?rev=2e2d1dfa906aa2dff6312b97d0d5ba804e9c8c6e)",
 ]
 
 [[package]]
@@ -720,7 +720,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a01317735d563b3bad2d5f90d2e1799f414165408251abb762510f40e790e69a"
 dependencies = [
  "anyhow",
- "ethereum-types",
+ "ethereum-types 0.11.0",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha3",
+ "thiserror",
+ "uint",
+]
+
+[[package]]
+name = "ethabi"
+version = "15.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f76ef192b63e8a44b3d08832acebbb984c3fba154b5c26f70037c860202a0d4b"
+dependencies = [
+ "anyhow",
+ "ethereum-types 0.12.1",
  "hex",
  "serde",
  "serde_json",
@@ -755,13 +771,13 @@ dependencies = [
  "hex",
  "jsonrpc-core",
  "lazy_static",
- "primitive-types",
+ "primitive-types 0.9.1",
  "secp256k1",
  "serde",
  "serde_json",
  "thiserror",
  "uint",
- "web3",
+ "web3 0.17.0 (git+https://github.com/tomusdrw/rust-web3.git?rev=2e2d1dfa906aa2dff6312b97d0d5ba804e9c8c6e)",
  "zeroize",
 ]
 
@@ -770,14 +786,14 @@ name = "ethcontract-common"
 version = "0.15.3"
 source = "git+https://github.com/gnosis/ethcontract-rs.git?rev=34c618cf63ad4750d1d9198eada85f3d1cf334ab#34c618cf63ad4750d1d9198eada85f3d1cf334ab"
 dependencies = [
- "ethabi",
+ "ethabi 14.1.0",
  "hex",
  "serde",
  "serde_derive",
  "serde_json",
  "thiserror",
  "tiny-keccak",
- "web3",
+ "web3 0.17.0 (git+https://github.com/tomusdrw/rust-web3.git?rev=2e2d1dfa906aa2dff6312b97d0d5ba804e9c8c6e)",
 ]
 
 [[package]]
@@ -830,7 +846,21 @@ dependencies = [
  "fixed-hash",
  "impl-rlp",
  "impl-serde",
- "primitive-types",
+ "primitive-types 0.9.1",
+ "uint",
+]
+
+[[package]]
+name = "ethereum-types"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05136f7057fe789f06e6d41d07b34e6f70d8c86e5693b60f97aaa6553553bdaf"
+dependencies = [
+ "ethbloom",
+ "fixed-hash",
+ "impl-rlp",
+ "impl-serde",
+ "primitive-types 0.10.1",
  "uint",
 ]
 
@@ -1039,7 +1069,23 @@ dependencies = [
  "async-trait",
  "futures",
  "http",
- "primitive-types",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "gas-estimation"
+version = "0.1.0"
+source = "git+https://github.com/gnosis/gp-gas-estimation.git?tag=v0.3.5#e6b09f9e319a310c3da31d435f8d109a34952078"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "http",
+ "primitive-types 0.10.1",
  "serde",
  "serde_json",
  "serde_with",
@@ -1047,7 +1093,7 @@ dependencies = [
  "tokio-tungstenite 0.15.0",
  "tracing",
  "url",
- "web3",
+ "web3 0.17.0 (git+https://github.com/tomusdrw/rust-web3.git?rev=a425fa747bca69c7aede4d2c2828f7267d79227e)",
 ]
 
 [[package]]
@@ -1584,19 +1630,19 @@ dependencies = [
  "chrono",
  "derivative",
  "enum-utils",
- "ethabi",
+ "ethabi 14.1.0",
  "hex",
  "hex-literal",
  "lazy_static",
  "maplit",
  "num",
  "num-bigint 0.3.3",
- "primitive-types",
+ "primitive-types 0.9.1",
  "secp256k1",
  "serde",
  "serde_json",
  "serde_with",
- "web3",
+ "web3 0.17.0 (git+https://github.com/tomusdrw/rust-web3.git?rev=2e2d1dfa906aa2dff6312b97d0d5ba804e9c8c6e)",
 ]
 
 [[package]]
@@ -1831,7 +1877,7 @@ dependencies = [
  "contracts",
  "ethcontract",
  "futures",
- "gas-estimation",
+ "gas-estimation 0.1.0 (git+https://github.com/gnosis/gp-gas-estimation.git?tag=v0.3.5)",
  "hex",
  "hex-literal",
  "maplit",
@@ -1839,7 +1885,7 @@ dependencies = [
  "model",
  "num",
  "num-bigint 0.3.3",
- "primitive-types",
+ "primitive-types 0.9.1",
  "prometheus",
  "prometheus-metric-storage",
  "reqwest",
@@ -1855,7 +1901,7 @@ dependencies = [
  "tracing",
  "url",
  "warp",
- "web3",
+ "web3 0.17.0 (git+https://github.com/tomusdrw/rust-web3.git?rev=2e2d1dfa906aa2dff6312b97d0d5ba804e9c8c6e)",
 ]
 
 [[package]]
@@ -2030,6 +2076,19 @@ name = "primitive-types"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06345ee39fbccfb06ab45f3a1a5798d9dafa04cb8921a76d227040003a234b0e"
+dependencies = [
+ "fixed-hash",
+ "impl-codec",
+ "impl-rlp",
+ "impl-serde",
+ "uint",
+]
+
+[[package]]
+name = "primitive-types"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05e4722c697a58a99d5d06a08c30821d7c082a4632198de1eaa5a6c22ef42373"
 dependencies = [
  "fixed-hash",
  "impl-codec",
@@ -2612,7 +2671,7 @@ dependencies = [
  "ethcontract",
  "ethcontract-mock",
  "futures",
- "gas-estimation",
+ "gas-estimation 0.1.0 (git+https://github.com/gnosis/gp-gas-estimation.git?tag=v0.3.5)",
  "hex",
  "hex-literal",
  "http",
@@ -2625,7 +2684,7 @@ dependencies = [
  "num",
  "num-bigint 0.3.3",
  "once_cell",
- "primitive-types",
+ "primitive-types 0.9.1",
  "prometheus",
  "prometheus-metric-storage",
  "regex",
@@ -2642,7 +2701,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "warp",
- "web3",
+ "web3 0.17.0 (git+https://github.com/tomusdrw/rust-web3.git?rev=2e2d1dfa906aa2dff6312b97d0d5ba804e9c8c6e)",
 ]
 
 [[package]]
@@ -2705,7 +2764,7 @@ dependencies = [
  "ethcontract",
  "ethcontract-mock",
  "futures",
- "gas-estimation",
+ "gas-estimation 0.1.0 (git+https://github.com/gnosis/gp-gas-estimation.git?tag=v0.3.5)",
  "hex",
  "hex-literal",
  "itertools",
@@ -2715,7 +2774,7 @@ dependencies = [
  "mockall",
  "model",
  "num",
- "primitive-types",
+ "primitive-types 0.9.1",
  "prometheus",
  "rand",
  "reqwest",
@@ -2730,7 +2789,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "transaction-retry",
- "web3",
+ "web3 0.17.0 (git+https://github.com/tomusdrw/rust-web3.git?rev=2e2d1dfa906aa2dff6312b97d0d5ba804e9c8c6e)",
 ]
 
 [[package]]
@@ -3226,7 +3285,7 @@ source = "git+https://github.com/gnosis/gp-transaction-retry.git?tag=v0.2.0#fedc
 dependencies = [
  "async-trait",
  "futures",
- "gas-estimation",
+ "gas-estimation 0.1.0 (git+https://github.com/gnosis/gp-gas-estimation.git?tag=v0.3.4)",
 ]
 
 [[package]]
@@ -3532,8 +3591,8 @@ dependencies = [
  "base64",
  "bytes",
  "derive_more",
- "ethabi",
- "ethereum-types",
+ "ethabi 14.1.0",
+ "ethereum-types 0.11.0",
  "futures",
  "futures-timer",
  "headers",
@@ -3554,6 +3613,28 @@ dependencies = [
  "tokio-util",
  "url",
  "web3-async-native-tls",
+]
+
+[[package]]
+name = "web3"
+version = "0.17.0"
+source = "git+https://github.com/tomusdrw/rust-web3.git?rev=a425fa747bca69c7aede4d2c2828f7267d79227e#a425fa747bca69c7aede4d2c2828f7267d79227e"
+dependencies = [
+ "arrayvec 0.7.1",
+ "derive_more",
+ "ethabi 15.0.0",
+ "ethereum-types 0.12.1",
+ "futures",
+ "futures-timer",
+ "hex",
+ "jsonrpc-core",
+ "log",
+ "parking_lot",
+ "pin-project",
+ "rlp",
+ "serde",
+ "serde_json",
+ "tiny-keccak",
 ]
 
 [[package]]
