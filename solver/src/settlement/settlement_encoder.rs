@@ -192,46 +192,50 @@ impl SettlementEncoder {
         pmm_order_ids: HashSet<OrderUid>,
         normalizing_prices: &HashMap<H160, BigRational>,
     ) -> Option<BigRational> {
-        self.trades.iter().fold(Some(num::zero()), |acc, trade| {
-            let order = trade.order.clone();
-            // Do not evaluate surplus of PMM orders.
-            if pmm_order_ids.contains(&order.order_meta_data.uid) {
-                return acc;
-            }
-            let sell_token_clearing_price = self
-                .clearing_prices
-                .get(&order.order_creation.sell_token)
-                .expect("Solution with trade but without price for sell token")
-                .to_big_rational();
-            let buy_token_clearing_price = self
-                .clearing_prices
-                .get(&order.order_creation.buy_token)
-                .expect("Solution with trade but without price for buy token")
-                .to_big_rational();
+        self.trades
+            .iter()
+            .filter(|trade| !pmm_order_ids.contains(&trade.order.order_meta_data.uid))
+            .fold(Some(num::zero()), |acc, trade| {
+                let order = trade.order.clone();
+                let sell_token_clearing_price = self
+                    .clearing_prices
+                    .get(&order.order_creation.sell_token)
+                    .expect("Solution with trade but without price for sell token")
+                    .to_big_rational();
+                let buy_token_clearing_price = self
+                    .clearing_prices
+                    .get(&order.order_creation.buy_token)
+                    .expect("Solution with trade but without price for buy token")
+                    .to_big_rational();
 
-            let sell_token_external_price = normalizing_prices
-                .get(&order.order_creation.sell_token)
-                .expect("Solution with trade but without price for sell token");
-            let buy_token_external_price = normalizing_prices
-                .get(&order.order_creation.buy_token)
-                .expect("Solution with trade but without price for buy token");
+                let sell_token_external_price = normalizing_prices
+                    .get(&order.order_creation.sell_token)
+                    .expect("Solution with trade but without price for sell token");
+                let buy_token_external_price = normalizing_prices
+                    .get(&order.order_creation.buy_token)
+                    .expect("Solution with trade but without price for buy token");
 
-            if match order.order_creation.kind {
-                OrderKind::Sell => &buy_token_clearing_price,
-                OrderKind::Buy => &sell_token_clearing_price,
-            }
-            .is_zero()
-            {
-                return None;
-            }
+                if match order.order_creation.kind {
+                    OrderKind::Sell => &buy_token_clearing_price,
+                    OrderKind::Buy => &sell_token_clearing_price,
+                }
+                .is_zero()
+                {
+                    return None;
+                }
 
-            let surplus = &trade.surplus(&sell_token_clearing_price, &buy_token_clearing_price)?;
-            let normalized_surplus = match order.order_creation.kind {
-                OrderKind::Sell => surplus * buy_token_external_price / buy_token_clearing_price,
-                OrderKind::Buy => surplus * sell_token_external_price / sell_token_clearing_price,
-            };
-            Some(acc? + normalized_surplus)
-        })
+                let surplus =
+                    &trade.surplus(&sell_token_clearing_price, &buy_token_clearing_price)?;
+                let normalized_surplus = match order.order_creation.kind {
+                    OrderKind::Sell => {
+                        surplus * buy_token_external_price / buy_token_clearing_price
+                    }
+                    OrderKind::Buy => {
+                        surplus * sell_token_external_price / sell_token_clearing_price
+                    }
+                };
+                Some(acc? + normalized_surplus)
+            })
     }
 
     pub fn finish(self) -> EncodedSettlement {
