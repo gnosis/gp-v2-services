@@ -1,7 +1,7 @@
 use super::{Interaction, Trade, TradeExecution};
 use crate::{encoding::EncodedSettlement, interactions::UnwrapWethInteraction};
 use anyhow::{bail, ensure, Context as _, Result};
-use model::order::{Order, OrderKind};
+use model::order::{Order, OrderKind, OrderUid};
 use num::{BigRational, One, Zero};
 use primitive_types::{H160, U256};
 use shared::conversions::{big_rational_to_u256, U256Ext};
@@ -176,10 +176,10 @@ impl SettlementEncoder {
         for i in 0..self.trades.len() {
             self.trades[i].sell_token_index = self
                 .token_index(self.trades[i].order.order_creation.sell_token)
-                .expect("missing sell token for exisiting trade");
+                .expect("missing sell token for existing trade");
             self.trades[i].buy_token_index = self
                 .token_index(self.trades[i].order.order_creation.buy_token)
-                .expect("missing buy token for exisiting trade");
+                .expect("missing buy token for existing trade");
         }
     }
 
@@ -189,10 +189,15 @@ impl SettlementEncoder {
 
     pub fn total_surplus(
         &self,
+        pmm_order_ids: HashSet<OrderUid>,
         normalizing_prices: &HashMap<H160, BigRational>,
     ) -> Option<BigRational> {
         self.trades.iter().fold(Some(num::zero()), |acc, trade| {
             let order = trade.order.clone();
+            // Do not evaluate surplus of PMM orders.
+            if pmm_order_ids.contains(&order.order_meta_data.uid) {
+                return None;
+            }
             let sell_token_clearing_price = self
                 .clearing_prices
                 .get(&order.order_creation.sell_token)
