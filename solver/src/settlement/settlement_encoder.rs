@@ -220,15 +220,20 @@ impl SettlementEncoder {
                     OrderKind::Sell => &buy_token_clearing_price,
                     OrderKind::Buy => &sell_token_clearing_price,
                 }
-                    .is_zero()
+                .is_zero()
                 {
                     return None;
                 }
 
-                let surplus = &trade.surplus(&sell_token_clearing_price, &buy_token_clearing_price)?;
+                let surplus =
+                    &trade.surplus(&sell_token_clearing_price, &buy_token_clearing_price)?;
                 match order.order_creation.kind {
-                    OrderKind::Sell => surplus * buy_token_external_price / buy_token_clearing_price,
-                    OrderKind::Buy => surplus * sell_token_external_price / sell_token_clearing_price,
+                    OrderKind::Sell => {
+                        surplus * buy_token_external_price / buy_token_clearing_price
+                    }
+                    OrderKind::Buy => {
+                        surplus * sell_token_external_price / sell_token_clearing_price
+                    }
                 }
             };
             Some(acc? + normalized_surplus)
