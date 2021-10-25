@@ -196,7 +196,7 @@ impl SettlementEncoder {
             let order = trade.order.clone();
             // Do not evaluate surplus of PMM orders.
             if pmm_order_ids.contains(&order.order_meta_data.uid) {
-                return Some(acc? + BigRational::zero());
+                return acc;
             }
             let sell_token_clearing_price = self
                 .clearing_prices
