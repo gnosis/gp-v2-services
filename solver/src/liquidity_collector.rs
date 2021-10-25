@@ -17,10 +17,11 @@ impl LiquidityCollector {
         at_block: Block,
     ) -> Result<Vec<Liquidity>> {
         let mut amms = vec![];
-        let (user_orders, _): (Vec<_>, Vec<_>) = limit_orders
-            .to_vec()
-            .into_iter()
-            .partition(|order| !order.is_liquidity_order);
+        let user_orders = limit_orders
+            .iter()
+            .filter(|order| !order.is_liquidity_order)
+            .cloned()
+            .collect::<Vec<_>>();
         for liquidity in &self.uniswap_like_liquidity {
             amms.extend(
                 liquidity

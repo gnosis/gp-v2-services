@@ -327,27 +327,29 @@ impl Driver {
                 .get(&self.native_token)
                 .expect("Price of native token must be known.");
 
-        let rate_settlement =
-            |solver, settlement: Settlement, gas_estimate, pmm_order_ids: HashSet<OrderUid>| {
-                let surplus = settlement.total_surplus(pmm_order_ids, prices);
-                let scaled_solver_fees = settlement.total_scaled_unsubsidized_fees(prices);
-                let rated_settlement = RatedSettlement {
-                    settlement,
-                    surplus,
-                    solver_fees: scaled_solver_fees,
-                    gas_estimate,
-                    gas_price: gas_price_normalized.clone(),
-                };
-                tracing::info!(
-                    "Objective value for solver {} is {}: surplus={}, gas_estimate={}, gas_price={}",
-                    solver,
-                    rated_settlement.objective_value(),
-                    rated_settlement.surplus,
-                    rated_settlement.gas_estimate,
-                    rated_settlement.gas_price,
-                );
-                rated_settlement
+        let rate_settlement = |solver,
+                               settlement: Settlement,
+                               gas_estimate,
+                               pmm_order_ids: HashSet<OrderUid>| {
+            let surplus = settlement.total_surplus(pmm_order_ids, prices);
+            let scaled_solver_fees = settlement.total_scaled_unsubsidized_fees(prices);
+            let rated_settlement = RatedSettlement {
+                settlement,
+                surplus,
+                solver_fees: scaled_solver_fees,
+                gas_estimate,
+                gas_price: gas_price_normalized.clone(),
             };
+            tracing::info!(
+                "Objective value for solver {} is {}: surplus={}, gas_estimate={}, gas_price={}",
+                solver,
+                rated_settlement.objective_value(),
+                rated_settlement.surplus,
+                rated_settlement.gas_estimate,
+                rated_settlement.gas_price,
+            );
+            rated_settlement
+        };
         Ok(settlements.into_iter().zip(simulations).partition_map(
             |((solver, settlement), result)| match result {
                 Ok(gas_estimate) => Either::Left((
