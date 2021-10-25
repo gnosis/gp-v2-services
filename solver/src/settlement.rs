@@ -6,11 +6,11 @@ use crate::{
     liquidity::Settleable,
 };
 use anyhow::Result;
-use model::order::{Order, OrderKind, OrderUid};
+use model::order::{Order, OrderKind};
 use num::{BigRational, Signed, Zero};
 use primitive_types::{H160, U256};
 use shared::conversions::U256Ext as _;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Trade {
@@ -19,6 +19,7 @@ pub struct Trade {
     pub buy_token_index: usize,
     pub executed_amount: U256,
     pub scaled_fee_amount: U256,
+    pub is_liquidity_order: bool,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -210,12 +211,8 @@ impl Settlement {
     }
 
     // Computes the total surplus of all protocol trades (in wei ETH).
-    pub fn total_surplus(
-        &self,
-        pmm_order_ids: HashSet<OrderUid>,
-        external_prices: &HashMap<H160, BigRational>,
-    ) -> BigRational {
-        match self.encoder.total_surplus(pmm_order_ids, external_prices) {
+    pub fn total_surplus(&self, external_prices: &HashMap<H160, BigRational>) -> BigRational {
+        match self.encoder.total_surplus(external_prices) {
             Some(value) => value,
             None => {
                 tracing::error!("Overflow computing objective value for: {:?}", self);
@@ -300,8 +297,7 @@ fn sell_order_surplus(
 pub mod tests {
     use super::*;
     use crate::liquidity::SettlementHandling;
-    use maplit::hashset;
-    use model::order::{OrderCreation, OrderKind, OrderMetaData};
+    use model::order::{OrderCreation, OrderKind};
     use num::FromPrimitive;
 
     pub fn assert_settlement_encoded_with<L, S>(
@@ -469,14 +465,14 @@ pub mod tests {
 
         let external_prices = maplit::hashmap! {token0 => r(1), token1 => r(1)};
         assert_eq!(
-            settlement0.total_surplus(HashSet::new(), &external_prices),
-            settlement1.total_surplus(HashSet::new(), &external_prices)
+            settlement0.total_surplus(&external_prices),
+            settlement1.total_surplus(&external_prices)
         );
 
         let external_prices = maplit::hashmap! {token0 => r(2), token1 => r(1)};
         assert_eq!(
-            settlement0.total_surplus(HashSet::new(), &external_prices),
-            settlement1.total_surplus(HashSet::new(), &external_prices)
+            settlement0.total_surplus(&external_prices),
+            settlement1.total_surplus(&external_prices)
         );
 
         // Case where external price vector influences ranking:
@@ -520,8 +516,8 @@ pub mod tests {
         // If the external prices of the two tokens is the same, then both settlements are symmetric.
         let external_prices = maplit::hashmap! {token0 => r(1), token1 => r(1)};
         assert_eq!(
-            settlement0.total_surplus(HashSet::new(), &external_prices),
-            settlement1.total_surplus(HashSet::new(), &external_prices)
+            settlement0.total_surplus(&external_prices),
+            settlement1.total_surplus(&external_prices)
         );
 
         // If the external price of the first token is higher, then the first settlement is preferred.
@@ -536,16 +532,16 @@ pub mod tests {
         // trade1: 0
 
         assert!(
-            settlement0.total_surplus(HashSet::new(), &external_prices)
-                > settlement1.total_surplus(HashSet::new(), &external_prices)
+            settlement0.total_surplus(&external_prices)
+                > settlement1.total_surplus(&external_prices)
         );
 
         // If the external price of the second token is higher, then the second settlement is preferred.
         // (swaps above normalized surpluses of settlement0 and settlement1)
         let external_prices = maplit::hashmap! {token0 => r(1), token1 => r(2)};
         assert!(
-            settlement0.total_surplus(HashSet::new(), &external_prices)
-                < settlement1.total_surplus(HashSet::new(), &external_prices)
+            settlement0.total_surplus(&external_prices)
+                < settlement1.total_surplus(&external_prices)
         );
     }
 
@@ -580,7 +576,7 @@ pub mod tests {
         let settlement = test_settlement(clearing_prices, vec![trade]);
 
         let external_prices = maplit::hashmap! {token0 => r(1), token1 => r(1)};
-        settlement.total_surplus(HashSet::new(), &external_prices);
+        settlement.total_surplus(&external_prices);
     }
 
     #[test]
@@ -849,10 +845,7 @@ pub mod tests {
                 kind: OrderKind::Sell,
                 ..Default::default()
             },
-            order_meta_data: OrderMetaData {
-                uid: OrderUid::from_integer(1),
-                ..Default::default()
-            },
+            ..Default::default()
         };
         let order1 = Order {
             order_creation: OrderCreation {
@@ -863,36 +856,46 @@ pub mod tests {
                 kind: OrderKind::Sell,
                 ..Default::default()
             },
-            order_meta_data: OrderMetaData {
-                uid: OrderUid::from_integer(2),
-                ..Default::default()
-            },
+            ..Default::default()
         };
 
         let trade0 = Trade {
             order: order0,
             executed_amount: 10.into(),
+            is_liquidity_order: false,
             ..Default::default()
         };
         let trade1 = Trade {
             order: order1,
             executed_amount: 9.into(),
+            is_liquidity_order: false,
             ..Default::default()
         };
 
         let clearing_prices = maplit::hashmap! {token0 => 9.into(), token1 => 10.into()};
-        let settlement = test_settlement(clearing_prices, vec![trade0, trade1]);
         let external_prices = maplit::hashmap! {token0 => r(1), token1 => r(1)};
 
-        let total_surplus_without_pmms = settlement.total_surplus(hashset! {}, &external_prices);
-        let surplus_order1 =
-            settlement.total_surplus(hashset! { OrderUid::from_integer(1) }, &external_prices);
-        let surplus_order0 =
-            settlement.total_surplus(hashset! { OrderUid::from_integer(2) }, &external_prices);
-        let both_pmm = settlement.total_surplus(
-            hashset! { OrderUid::from_integer(1), OrderUid::from_integer(2) },
-            &external_prices,
-        );
+        let compute_total_surplus = |trade0_is_pmm: bool, trade1_is_pmm: bool| {
+            let settlement = test_settlement(
+                clearing_prices.clone(),
+                vec![
+                    Trade {
+                        is_liquidity_order: trade0_is_pmm,
+                        ..trade0.clone()
+                    },
+                    Trade {
+                        is_liquidity_order: trade1_is_pmm,
+                        ..trade1.clone()
+                    },
+                ],
+            );
+            settlement.total_surplus(&external_prices)
+        };
+
+        let total_surplus_without_pmms = compute_total_surplus(false, false);
+        let surplus_order1 = compute_total_surplus(false, true);
+        let surplus_order0 = compute_total_surplus(true, false);
+        let both_pmm = compute_total_surplus(true, true);
         assert_eq!(total_surplus_without_pmms, surplus_order0 + surplus_order1);
         assert!(both_pmm.is_zero());
     }

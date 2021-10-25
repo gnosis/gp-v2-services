@@ -1,10 +1,8 @@
 use crate::settlement::Settlement;
 use ethcontract::U256;
-use model::order::OrderUid;
 use num::BigRational;
 use primitive_types::H160;
 use shared::conversions::U256Ext;
-use std::collections::HashSet;
 use std::{collections::HashMap, time::Duration};
 
 // Return None if the result is an error or there are no settlements remaining after removing
@@ -51,10 +49,9 @@ impl RatedSettlement {
 pub fn merge_settlements(
     max_merged_settlements: usize,
     prices: &HashMap<H160, BigRational>,
-    pmm_order_ids: HashSet<OrderUid>,
     settlements: &mut Vec<Settlement>,
 ) {
-    settlements.sort_by_cached_key(|a| -a.total_surplus(pmm_order_ids.clone(), prices));
+    settlements.sort_by_cached_key(|a| -a.total_surplus(prices));
 
     if let Some(settlement) =
         merge_at_most_settlements(max_merged_settlements, settlements.clone().into_iter())
@@ -159,7 +156,7 @@ mod tests {
             settlement(2.into(), 2),
             settlement(3.into(), 3),
         ];
-        merge_settlements(2, &prices_rational, HashSet::new(), &mut settlements);
+        merge_settlements(2, &prices_rational, &mut settlements);
 
         assert_eq!(settlements.len(), 4);
         assert!(settlements.iter().any(|settlement| {

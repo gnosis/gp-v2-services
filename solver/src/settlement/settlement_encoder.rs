@@ -1,7 +1,7 @@
 use super::{Interaction, Trade, TradeExecution};
 use crate::{encoding::EncodedSettlement, interactions::UnwrapWethInteraction};
 use anyhow::{bail, ensure, Context as _, Result};
-use model::order::{Order, OrderKind, OrderUid};
+use model::order::{Order, OrderKind};
 use num::{BigRational, One, Zero};
 use primitive_types::{H160, U256};
 use shared::conversions::{big_rational_to_u256, U256Ext};
@@ -93,6 +93,7 @@ impl SettlementEncoder {
         order: Order,
         executed_amount: U256,
         scaled_fee_amount: U256,
+        is_liquidity_order: bool,
     ) -> Result<TradeExecution> {
         let sell_price = self
             .clearing_prices
@@ -116,6 +117,7 @@ impl SettlementEncoder {
             buy_token_index,
             executed_amount,
             scaled_fee_amount,
+            is_liquidity_order,
         };
         let execution = trade
             .executed_amounts(*sell_price, *buy_price)
@@ -189,12 +191,11 @@ impl SettlementEncoder {
 
     pub fn total_surplus(
         &self,
-        pmm_order_ids: HashSet<OrderUid>,
         normalizing_prices: &HashMap<H160, BigRational>,
     ) -> Option<BigRational> {
         self.trades
             .iter()
-            .filter(|trade| !pmm_order_ids.contains(&trade.order.order_meta_data.uid))
+            .filter(|trade| !trade.is_liquidity_order)
             .fold(Some(num::zero()), |acc, trade| {
                 let order = trade.order.clone();
                 let sell_token_clearing_price = self
@@ -381,8 +382,8 @@ pub mod tests {
             token1 => 1.into(),
         });
 
-        assert!(settlement.add_trade(order0, 1.into(), 1.into()).is_ok());
-        assert!(settlement.add_trade(order1, 1.into(), 0.into()).is_ok());
+        assert!(settlement.add_trade(order0, 1.into(), 1.into(), false).is_ok());
+        assert!(settlement.add_trade(order1, 1.into(), 0.into(), false).is_ok());
     }
 
     #[test]
@@ -471,6 +472,7 @@ pub mod tests {
                 },
                 0.into(),
                 0.into(),
+                false,
             )
             .unwrap();
 
@@ -526,7 +528,7 @@ pub mod tests {
             .with_buy_amount(11.into())
             .build();
         order13.order_meta_data.uid.0[0] = 0;
-        encoder0.add_trade(order13, 13.into(), 0.into()).unwrap();
+        encoder0.add_trade(order13, 13.into(), 0.into(), false).unwrap();
         encoder0.append_to_execution_plan(NoopInteraction {});
         encoder0.add_unwrap(UnwrapWethInteraction {
             weth: weth.clone(),
@@ -542,7 +544,7 @@ pub mod tests {
             .with_buy_amount(22.into())
             .build();
         order24.order_meta_data.uid.0[0] = 1;
-        encoder1.add_trade(order24, 24.into(), 0.into()).unwrap();
+        encoder1.add_trade(order24, 24.into(), 0.into(), false).unwrap();
         encoder1.append_to_execution_plan(NoopInteraction {});
         encoder1.add_unwrap(UnwrapWethInteraction {
             weth,
@@ -616,11 +618,11 @@ pub mod tests {
 
         let mut encoder0 = SettlementEncoder::new(prices.clone());
         encoder0
-            .add_trade(order13.clone(), 13.into(), 0.into())
+            .add_trade(order13.clone(), 13.into(), 0.into(), false)
             .unwrap();
 
         let mut encoder1 = SettlementEncoder::new(prices);
-        encoder1.add_trade(order13, 24.into(), 0.into()).unwrap();
+        encoder1.add_trade(order13, 24.into(), 0.into(), false).unwrap();
 
         assert!(encoder0.merge(encoder1).is_err());
     }

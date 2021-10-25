@@ -19,7 +19,7 @@ use ethcontract::errors::{ExecutionError, MethodError};
 use futures::future::join_all;
 use gas_estimation::{EstimatedGasPrice, GasPriceEstimating};
 use itertools::{Either, Itertools};
-use model::order::{OrderUid, BUY_ETH_ADDRESS};
+use model::order::BUY_ETH_ADDRESS;
 use num::BigRational;
 use primitive_types::{H160, U256};
 use rand::prelude::SliceRandom;
@@ -30,7 +30,6 @@ use shared::{
     token_list::TokenList,
     Web3,
 };
-use std::str::FromStr;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -304,7 +303,6 @@ impl Driver {
         settlements: Vec<SettlementWithSolver>,
         prices: &HashMap<H160, BigRational>,
         gas_price: EstimatedGasPrice,
-        pmm_order_ids: HashSet<OrderUid>,
     ) -> Result<(
         Vec<(Arc<dyn Solver>, RatedSettlement)>,
         Vec<(Arc<dyn Solver>, Settlement, ExecutionError)>,
@@ -327,18 +325,17 @@ impl Driver {
                 .get(&self.native_token)
                 .expect("Price of native token must be known.");
 
-        let rate_settlement =
-            |solver, settlement: Settlement, gas_estimate, pmm_order_ids: HashSet<OrderUid>| {
-                let surplus = settlement.total_surplus(pmm_order_ids, prices);
-                let scaled_solver_fees = settlement.total_scaled_unsubsidized_fees(prices);
-                let rated_settlement = RatedSettlement {
-                    settlement,
-                    surplus,
-                    solver_fees: scaled_solver_fees,
-                    gas_estimate,
-                    gas_price: gas_price_normalized.clone(),
-                };
-                tracing::info!(
+        let rate_settlement = |solver, settlement: Settlement, gas_estimate| {
+            let surplus = settlement.total_surplus(prices);
+            let scaled_solver_fees = settlement.total_scaled_unsubsidized_fees(prices);
+            let rated_settlement = RatedSettlement {
+                settlement,
+                surplus,
+                solver_fees: scaled_solver_fees,
+                gas_estimate,
+                gas_price: gas_price_normalized.clone(),
+            };
+            tracing::info!(
                 "Objective value for solver {} is {}: surplus={}, gas_estimate={}, gas_price={}",
                 solver,
                 rated_settlement.objective_value(),
@@ -346,18 +343,13 @@ impl Driver {
                 rated_settlement.gas_estimate,
                 rated_settlement.gas_price,
             );
-                rated_settlement
-            };
+            rated_settlement
+        };
         Ok(settlements.into_iter().zip(simulations).partition_map(
             |((solver, settlement), result)| match result {
                 Ok(gas_estimate) => Either::Left((
                     solver.clone(),
-                    rate_settlement(
-                        solver.name(),
-                        settlement,
-                        gas_estimate,
-                        pmm_order_ids.clone(),
-                    ),
+                    rate_settlement(solver.name(), settlement, gas_estimate),
                 )),
                 Err(err) => Either::Right((solver, settlement, err)),
             },
@@ -399,18 +391,8 @@ impl Driver {
         .await;
         tracing::debug!("estimated prices: {:?}", estimated_prices);
 
-        let (user_orders, pmm_orders): (Vec<_>, Vec<_>) = orders
-            .to_vec()
-            .into_iter()
-            .partition(|order| !order.is_liquidity_order);
-        let pmm_order_ids: HashSet<_> = pmm_orders
-            .iter()
-            .map(|order| {
-                OrderUid::from_str(&order.id).expect("Limit Orders have well defined order ids")
-            })
-            .collect();
         // At this point the orders list is now reduced to just user orders
-        let orders = orders_with_price_estimates(user_orders, &estimated_prices);
+        let orders = orders_with_price_estimates(orders, &estimated_prices);
 
         self.metrics.orders_fetched(&orders);
         self.metrics.liquidity_fetched(&liquidity);
@@ -466,7 +448,6 @@ impl Driver {
             solver_settlements::merge_settlements(
                 self.max_merged_settlements,
                 &estimated_prices,
-                pmm_order_ids.clone(),
                 &mut settlements,
             );
 
@@ -482,12 +463,7 @@ impl Driver {
         }
 
         let (rated_settlements, errors) = self
-            .rate_settlements(
-                solver_settlements,
-                &estimated_prices,
-                gas_price,
-                pmm_order_ids,
-            )
+            .rate_settlements(solver_settlements, &estimated_prices, gas_price)
             .await?;
         tracing::info!(
             "{} settlements passed simulation and {} failed",
