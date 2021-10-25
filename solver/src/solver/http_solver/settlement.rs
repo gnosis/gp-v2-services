@@ -96,9 +96,6 @@ impl IntermediateSettlement {
                 Liquidity::BalancerStable(liquidity) => {
                     settlement.with_liquidity(liquidity, execution)?
                 }
-                Liquidity::PrivateMarketMaker(_limit_order) => {
-                    // TODO - This should somehow be handled above with executed_limit_orders.
-                }
             }
         }
         Ok(settlement)

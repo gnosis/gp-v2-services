@@ -154,9 +154,6 @@ impl BaselineSolver {
                             // TODO - https://github.com/gnosis/gp-v2-services/issues/1074
                             tracing::debug!("Excluded stable pool from baseline solving.")
                         }
-                        Liquidity::PrivateMarketMaker(_order) => {
-                            tracing::debug!("Excluded PMM order from baseline solving.")
-                        }
                     }
                     amm_map
                 });

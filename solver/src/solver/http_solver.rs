@@ -11,7 +11,7 @@ use crate::{
 };
 use ::model::order::OrderKind;
 use anyhow::{anyhow, ensure, Context, Result};
-use bigdecimal::{ToPrimitive, Zero};
+use bigdecimal::ToPrimitive;
 use buffers::{BufferRetrievalError, BufferRetrieving};
 use ethcontract::{Account, U256};
 use futures::{join, lock::Mutex};
@@ -312,9 +312,6 @@ fn map_tokens_for_solver(orders: &[LimitOrder], liquidity: &[Liquidity]) -> Vec<
             Liquidity::ConstantProduct(amm) => token_set.extend(amm.tokens),
             Liquidity::BalancerWeighted(amm) => token_set.extend(amm.reserves.keys()),
             Liquidity::BalancerStable(amm) => token_set.extend(amm.reserves.keys()),
-            Liquidity::PrivateMarketMaker(pmm_order) => {
-                token_set.extend([pmm_order.sell_token, pmm_order.buy_token])
-            }
         }
     }
 
@@ -481,26 +478,6 @@ fn amm_models(liquidity: &[Liquidity], gas_model: &GasModel) -> BTreeMap<usize, 
                     cost: gas_model.balancer_cost(),
                     mandatory: false,
                 },
-                Liquidity::PrivateMarketMaker(limit_order) => {
-                    // TODO - construct new AMM Model for PMM orders
-                    AmmModel {
-                        parameters: AmmParameters::PrivateMarketMaker(LimitOrderParameters {
-                            id: limit_order.id.clone(),
-                            sell_token: limit_order.sell_token,
-                            buy_token: limit_order.buy_token,
-                            sell_amount: limit_order.sell_amount,
-                            buy_amount: limit_order.buy_amount,
-                            kind: limit_order.kind,
-                            partially_fillable: false,
-                        }),
-                        // TODO - fee is probably zero here.
-                        fee: BigRational::zero(),
-                        // fee: limit_order.scaled_fee_amount.into(),
-                        cost: gas_model.order_cost(),
-                        // TODO - Shouldn't be mandatory. Especially if there are many of the same.
-                        mandatory: false,
-                    }
-                }
             })
         })
         .enumerate()
