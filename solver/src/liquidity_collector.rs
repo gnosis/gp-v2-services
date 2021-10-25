@@ -24,7 +24,7 @@ impl LiquidityCollector {
         for liquidity in &self.uniswap_like_liquidity {
             amms.extend(
                 liquidity
-                    .get_liquidity(user_orders.as_slice(), at_block)
+                    .get_liquidity(&user_orders, at_block)
                     .await
                     .context("failed to get UniswapLike liquidity")?
                     .into_iter()
@@ -33,7 +33,7 @@ impl LiquidityCollector {
         }
         if let Some(balancer_v2_liquidity) = self.balancer_v2_liquidity.as_ref() {
             let (stable_orders, weighted_orders) = balancer_v2_liquidity
-                .get_liquidity(user_orders.as_slice(), at_block)
+                .get_liquidity(&user_orders, at_block)
                 .await
                 .context("failed to get Balancer liquidity")?;
 
