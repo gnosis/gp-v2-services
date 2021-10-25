@@ -870,12 +870,12 @@ pub mod tests {
         };
 
         let trade0 = Trade {
-            order: order0.clone(),
+            order: order0,
             executed_amount: 10.into(),
             ..Default::default()
         };
         let trade1 = Trade {
-            order: order1.clone(),
+            order: order1,
             executed_amount: 9.into(),
             ..Default::default()
         };
