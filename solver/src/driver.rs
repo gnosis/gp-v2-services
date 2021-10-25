@@ -339,13 +339,13 @@ impl Driver {
                     gas_price: gas_price_normalized.clone(),
                 };
                 tracing::info!(
-                "Objective value for solver {} is {}: surplus={}, gas_estimate={}, gas_price={}",
-                solver,
-                rated_settlement.objective_value(),
-                rated_settlement.surplus,
-                rated_settlement.gas_estimate,
-                rated_settlement.gas_price,
-            );
+                    "Objective value for solver {} is {}: surplus={}, gas_estimate={}, gas_price={}",
+                    solver,
+                    rated_settlement.objective_value(),
+                    rated_settlement.surplus,
+                    rated_settlement.gas_estimate,
+                    rated_settlement.gas_price,
+                );
                 rated_settlement
             };
         Ok(settlements.into_iter().zip(simulations).partition_map(
