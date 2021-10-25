@@ -2,9 +2,11 @@ pub mod solver_settlements;
 
 use self::solver_settlements::RatedSettlement;
 use crate::{
-    liquidity::LimitOrder,
+    in_flight_orders::InFlightOrders,
+    liquidity::{order_converter::OrderConverter, LimitOrder},
     liquidity_collector::LiquidityCollector,
     metrics::SolverMetrics,
+    orderbook::OrderBookApi,
     settlement::Settlement,
     settlement_simulation,
     settlement_submission::{retry::is_transaction_failure, SolutionSubmitter},
@@ -17,9 +19,10 @@ use ethcontract::errors::{ExecutionError, MethodError};
 use futures::future::join_all;
 use gas_estimation::{EstimatedGasPrice, GasPriceEstimating};
 use itertools::{Either, Itertools};
-use model::order::{OrderUid, BUY_ETH_ADDRESS};
+use model::order::BUY_ETH_ADDRESS;
 use num::BigRational;
 use primitive_types::{H160, U256};
+use rand::prelude::SliceRandom;
 use shared::{
     current_block::{self, CurrentBlockStream},
     price_estimation::{self, PriceEstimating},
@@ -32,6 +35,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use web3::types::TransactionReceipt;
 
 pub struct Driver {
     settlement_contract: GPv2Settlement,
@@ -39,7 +43,6 @@ pub struct Driver {
     price_estimator: Arc<dyn PriceEstimating>,
     solvers: Solvers,
     gas_price_estimator: Arc<dyn GasPriceEstimating>,
-    settle_interval: Duration,
     native_token: H160,
     min_order_age: Duration,
     metrics: Arc<dyn SolverMetrics>,
@@ -48,11 +51,14 @@ pub struct Driver {
     max_merged_settlements: usize,
     solver_time_limit: Duration,
     market_makable_token_list: Option<TokenList>,
-    inflight_trades: HashSet<OrderUid>,
     block_stream: CurrentBlockStream,
     solution_submitter: SolutionSubmitter,
     solve_id: u64,
     native_token_amount_to_estimate_prices_with: U256,
+    max_settlements_per_solver: usize,
+    api: OrderBookApi,
+    order_converter: OrderConverter,
+    in_flight_orders: InFlightOrders,
 }
 impl Driver {
     #[allow(clippy::too_many_arguments)]
@@ -62,7 +68,6 @@ impl Driver {
         price_estimator: Arc<dyn PriceEstimating>,
         solvers: Solvers,
         gas_price_estimator: Arc<dyn GasPriceEstimating>,
-        settle_interval: Duration,
         native_token: H160,
         min_order_age: Duration,
         metrics: Arc<dyn SolverMetrics>,
@@ -74,6 +79,9 @@ impl Driver {
         block_stream: CurrentBlockStream,
         solution_submitter: SolutionSubmitter,
         native_token_amount_to_estimate_prices_with: U256,
+        max_settlements_per_solver: usize,
+        api: OrderBookApi,
+        order_converter: OrderConverter,
     ) -> Self {
         Self {
             settlement_contract,
@@ -81,7 +89,6 @@ impl Driver {
             price_estimator,
             solvers,
             gas_price_estimator,
-            settle_interval,
             native_token,
             min_order_age,
             metrics,
@@ -90,11 +97,14 @@ impl Driver {
             max_merged_settlements,
             solver_time_limit,
             market_makable_token_list,
-            inflight_trades: HashSet::new(),
             block_stream,
             solution_submitter,
             solve_id: 0,
             native_token_amount_to_estimate_prices_with,
+            max_settlements_per_solver,
+            api,
+            order_converter,
+            in_flight_orders: InFlightOrders::default(),
         }
     }
 
@@ -105,7 +115,7 @@ impl Driver {
                 Err(err) => tracing::error!("single run errored: {:?}", err),
             }
             self.metrics.runloop_completed();
-            tokio::time::sleep(self.settle_interval).await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
 
@@ -137,7 +147,7 @@ impl Driver {
         &self,
         solver: Arc<dyn Solver>,
         rated_settlement: RatedSettlement,
-    ) -> Result<()> {
+    ) -> Result<TransactionReceipt> {
         let settlement = rated_settlement.settlement;
         let trades = settlement.trades().to_vec();
         match self
@@ -149,14 +159,18 @@ impl Driver {
             )
             .await
         {
-            Ok(hash) => {
+            Ok(receipt) => {
                 let name = solver.name();
-                tracing::info!("Successfully submitted {} settlement: {:?}", name, hash);
+                tracing::info!(
+                    "Successfully submitted {} settlement: {:?}",
+                    name,
+                    receipt.transaction_hash
+                );
                 trades
                     .iter()
                     .for_each(|trade| self.metrics.order_settled(&trade.order, name));
                 self.metrics.settlement_submitted(true, name);
-                Ok(())
+                Ok(receipt)
             }
             Err(err) => {
                 // Since we simulate and only submit solutions when they used to pass before, there is no
@@ -212,51 +226,46 @@ impl Driver {
     // worked correctly and the error doesn't have to be reported.
     // Note that we could still report a false positive because the earlier block might be off by if
     // the block has changed just as were were querying the node.
-    async fn report_simulation_errors(
+    fn report_simulation_errors(
         &self,
-        errors: &[(Arc<dyn Solver>, Settlement, ExecutionError)],
+        errors: Vec<(Arc<dyn Solver>, Settlement, ExecutionError)>,
         current_block_during_liquidity_fetch: u64,
         gas_price: EstimatedGasPrice,
     ) {
-        let simulations = match settlement_simulation::simulate_and_error_with_tenderly_link(
-            errors
-                .iter()
-                .map(|(solver, settlement, _)| (solver.account().clone(), settlement.clone())),
-            &self.settlement_contract,
-            &self.web3,
-            gas_price,
-            &self.network_id,
-            current_block_during_liquidity_fetch,
-        )
-        .await
-        {
-            Ok(simulations) => simulations,
-            Err(err) => {
-                tracing::error!(
-                    "unable to complete simulation of settlements at earlier block {}: {:?}",
-                    current_block_during_liquidity_fetch,
-                    err
-                );
-                return;
+        let contract = self.settlement_contract.clone();
+        let web3 = self.web3.clone();
+        let network_id = self.network_id.clone();
+        let metrics = self.metrics.clone();
+        let task = async move {
+            let simulations = settlement_simulation::simulate_and_error_with_tenderly_link(
+                errors
+                    .iter()
+                    .map(|(solver, settlement, _)| (solver.account().clone(), settlement.clone())),
+                &contract,
+                &web3,
+                gas_price,
+                &network_id,
+                current_block_during_liquidity_fetch,
+            )
+            .await;
+
+            for ((solver, settlement, _previous_error), result) in errors.iter().zip(simulations) {
+                metrics.settlement_simulation_failed_on_latest(solver.name());
+                if let Err(error_at_earlier_block) = result {
+                    tracing::warn!(
+                        "{} settlement simulation failed at submission and block {}:\n{:?}",
+                        solver.name(),
+                        current_block_during_liquidity_fetch,
+                        error_at_earlier_block,
+                    );
+                    // split warning into separate logs so that the messages aren't too long.
+                    tracing::warn!("settlement failure for: \n{:#?}", settlement);
+
+                    metrics.settlement_simulation_failed(solver.name());
+                }
             }
         };
-
-        for ((solver, settlement, _previous_error), result) in errors.iter().zip(simulations) {
-            self.metrics
-                .settlement_simulation_failed_on_latest(solver.name());
-            if let Err(error_at_earlier_block) = result {
-                tracing::warn!(
-                    "{} settlement simulation failed at submission and block {}:\n{:?}",
-                    solver.name(),
-                    current_block_during_liquidity_fetch,
-                    error_at_earlier_block,
-                );
-                // split warning into separate logs so that the messages aren't too long.
-                tracing::warn!("settlement failure for: \n{:#?}", settlement);
-
-                self.metrics.settlement_simulation_failed(solver.name());
-            }
-        }
+        tokio::task::spawn(task);
     }
 
     /// Record metrics on the matched orders from a single batch. Specifically we report on
@@ -349,33 +358,41 @@ impl Driver {
     }
 
     pub async fn single_run(&mut self) -> Result<()> {
+        let start = Instant::now();
         tracing::debug!("starting single run");
         let current_block_during_liquidity_fetch =
             current_block::block_number(&self.block_stream.borrow())?;
 
-        let limit_orders = self
-            .liquidity_collector
-            .get_orders(&self.inflight_trades)
-            .await?;
-        // Liquidity now contains pmm_orders.
+        let orders = self.api.get_orders().await.context("get_orders")?;
+        let (before_count, block) = (orders.orders.len(), orders.latest_settlement_block);
+        let orders = self.in_flight_orders.update_and_filter(orders);
+        if before_count != orders.len() {
+            tracing::debug!(
+                "reduced {} orders to {} because in flight at last seen block {}",
+                before_count,
+                orders.len(),
+                block
+            );
+        }
+        let orders = orders
+            .into_iter()
+            .map(|order| self.order_converter.normalize_limit_order(order))
+            .collect::<Vec<_>>();
         let liquidity = self
             .liquidity_collector
-            .get_liquidity_for_orders(
-                &limit_orders,
-                Block::Number(current_block_during_liquidity_fetch),
-            )
+            .get_liquidity_for_orders(&orders, Block::Number(current_block_during_liquidity_fetch))
             .await?;
         // TODO - should we estimate prices for all limit orders or just user orders?
         let estimated_prices = collect_estimated_prices(
             self.price_estimator.as_ref(),
             self.native_token_amount_to_estimate_prices_with,
             self.native_token,
-            &limit_orders,
+            &orders,
         )
         .await;
         tracing::debug!("estimated prices: {:?}", estimated_prices);
 
-        let user_orders = limit_orders
+        let user_orders = orders
             .into_iter()
             .filter(|order| !order.is_liquidity_order)
             .collect();
@@ -408,9 +425,13 @@ impl Driver {
             let name = solver.name();
 
             let mut settlements = match settlements {
-                Ok(settlement) => settlement,
+                Ok(settlement) => {
+                    self.metrics.solver_run_succeeded(name);
+                    settlement
+                }
                 Err(err) => {
-                    tracing::error!("solver {} error: {:?}", name, err);
+                    self.metrics.solver_run_failed(name);
+                    tracing::warn!("solver {} error: {:?}", name, err);
                     continue;
                 }
             };
@@ -420,6 +441,14 @@ impl Driver {
             for settlement in &settlements {
                 tracing::debug!("solver {} found solution:\n{:?}", name, settlement);
             }
+
+            // Keep at most this many settlements. This is important in case where a solver produces
+            // a large number of settlements which would hold up the driver logic when simulating
+            // them.
+            // Shuffle first so that in the case a buggy solver keeps returning some amount of
+            // invalid settlements first we have a chance to make progress.
+            settlements.shuffle(&mut rand::thread_rng());
+            settlements.truncate(self.max_settlements_per_solver);
 
             solver_settlements::merge_settlements(
                 self.max_merged_settlements,
@@ -450,7 +479,6 @@ impl Driver {
             self.metrics.settlement_simulation_succeeded(solver.name());
         }
 
-        self.inflight_trades.clear();
         if let Some((solver, mut settlement)) = rated_settlements
             .clone()
             .into_iter()
@@ -467,18 +495,25 @@ impl Driver {
             }
 
             tracing::info!("winning settlement: {:?}", settlement);
-            if self
-                .submit_settlement(solver, settlement.clone())
-                .await
-                .is_ok()
-            {
-                self.inflight_trades = settlement
+            self.metrics
+                .complete_runloop_until_transaction(start.elapsed());
+            let start = Instant::now();
+            if let Ok(receipt) = self.submit_settlement(solver, settlement.clone()).await {
+                let orders = settlement
                     .settlement
                     .trades()
                     .iter()
-                    .map(|t| t.order.order_meta_data.uid)
-                    .collect::<HashSet<OrderUid>>();
+                    .map(|t| t.order.order_meta_data.uid);
+                let block = match receipt.block_number {
+                    Some(block) => block.as_u64(),
+                    None => {
+                        tracing::error!("tx receipt does not contain block number");
+                        0
+                    }
+                };
+                self.in_flight_orders.mark_settled_orders(block, orders);
             }
+            self.metrics.transaction_submission(start.elapsed());
 
             self.report_matched_orders(
                 &settlement.settlement,
@@ -487,8 +522,7 @@ impl Driver {
         }
 
         // Happens after settlement submission so that we do not delay it.
-        self.report_simulation_errors(&errors, current_block_during_liquidity_fetch, gas_price)
-            .await;
+        self.report_simulation_errors(errors, current_block_during_liquidity_fetch, gas_price);
 
         Ok(())
     }

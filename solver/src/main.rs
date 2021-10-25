@@ -27,11 +27,12 @@ use shared::{
 use solver::{
     driver::Driver,
     liquidity::{
-        balancer::BalancerV2Liquidity, offchain_orderbook::OrderbookLiquidity,
+        balancer::BalancerV2Liquidity, order_converter::OrderConverter,
         uniswap::UniswapLikeLiquidity,
     },
     liquidity_collector::LiquidityCollector,
     metrics::Metrics,
+    orderbook::OrderBookApi,
     settlement_submission::{archer_api::ArcherApi, SolutionSubmitter, TransactionStrategy},
     solver::SolverType,
 };
@@ -69,15 +70,6 @@ struct Arguments {
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
     target_confirm_time: Duration,
-
-    /// Every how often in seconds we should execute the driver's run loop
-    #[structopt(
-        long,
-        env,
-        default_value = "10",
-        parse(try_from_str = shared::arguments::duration_from_seconds),
-    )]
-    settle_interval: Duration,
 
     /// Which type of solver to use
     #[structopt(
@@ -199,6 +191,10 @@ struct Arguments {
     /// likely, promoting more aggressive merging of single order settlements.
     #[structopt(long, env, default_value = "1", parse(try_from_str = shared::arguments::parse_fee_factor))]
     pub fee_objective_scaling_factor: f64,
+
+    /// The maximum number of settlements the driver considers per solver.
+    #[structopt(long, env, default_value = "20")]
+    max_settlements_per_solver: usize,
 }
 
 arg_enum! {
@@ -281,14 +277,6 @@ async fn main() {
     let native_token_contract = WETH9::deployed(&web3)
         .await
         .expect("couldn't load deployed native token");
-    let orderbook_liquidity = OrderbookLiquidity::new(
-        args.orderbook_url,
-        client.clone(),
-        native_token_contract.clone(),
-        args.liquidity_order_owners.into_iter().collect(),
-        args.fee_objective_scaling_factor,
-    );
-
     let base_tokens = Arc::new(BaseTokens::new(
         native_token_contract.address(),
         &args.shared.base_tokens,
@@ -448,7 +436,6 @@ async fn main() {
     )
     .expect("failure creating solvers");
     let liquidity_collector = LiquidityCollector {
-        orderbook_liquidity,
         uniswap_like_liquidity,
         balancer_v2_liquidity,
     };
@@ -504,13 +491,18 @@ async fn main() {
             TransactionStrategyArg::DryRun => TransactionStrategy::DryRun,
         },
     };
+    let api = OrderBookApi::new(args.orderbook_url, client.clone());
+    let order_converter = OrderConverter {
+        native_token: native_token_contract.clone(),
+        liquidity_order_owners: args.liquidity_order_owners.into_iter().collect(),
+        fee_objective_scaling_factor: args.fee_objective_scaling_factor,
+    };
     let mut driver = Driver::new(
         settlement_contract,
         liquidity_collector,
         price_estimator,
         solver,
         gas_price_estimator,
-        args.settle_interval,
         native_token_contract.address(),
         args.min_order_age,
         metrics.clone(),
@@ -522,6 +514,9 @@ async fn main() {
         current_block_stream.clone(),
         solution_submitter,
         native_token_price_estimation_amount,
+        args.max_settlements_per_solver,
+        api,
+        order_converter,
     );
 
     let maintainer = ServiceMaintenance {

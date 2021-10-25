@@ -1,6 +1,8 @@
 pub mod baseline;
+pub mod instrumented;
 pub mod paraswap;
 pub mod priority;
+pub mod zeroex;
 
 use crate::{bad_token::BadTokenDetecting, conversions::U256Ext};
 use anyhow::Result;
@@ -15,6 +17,7 @@ arg_enum! {
     pub enum PriceEstimatorType {
         Baseline,
         Paraswap,
+        ZeroEx,
     }
 }
 
@@ -44,7 +47,7 @@ impl Clone for PriceEstimationError {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Query {
     pub sell_token: H160,
     pub buy_token: H160,
