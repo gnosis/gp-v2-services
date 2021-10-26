@@ -381,7 +381,6 @@ impl Driver {
             .liquidity_collector
             .get_liquidity_for_orders(&orders, Block::Number(current_block_during_liquidity_fetch))
             .await?;
-        // TODO - should we estimate prices for all limit orders or just user orders?
         let estimated_prices = collect_estimated_prices(
             self.price_estimator.as_ref(),
             self.native_token_amount_to_estimate_prices_with,
@@ -391,7 +390,6 @@ impl Driver {
         .await;
         tracing::debug!("estimated prices: {:?}", estimated_prices);
 
-        // At this point the orders list is now reduced to just user orders
         let orders = orders_with_price_estimates(orders, &estimated_prices);
 
         self.metrics.orders_fetched(&orders);
