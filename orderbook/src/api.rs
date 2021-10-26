@@ -134,7 +134,7 @@ where
         Err(err) => {
             tracing::error!(?self, "response error");
             err.into_warp_reply()
-        },
+        }
     }
 }
 
