@@ -1,7 +1,6 @@
 //! Contains models that are shared between the orderbook and the solver.
 
 pub mod app_id;
-pub mod h160_hexadecimal;
 pub mod order;
 pub mod ratio_as_decimal;
 pub mod signature;
@@ -130,6 +129,13 @@ impl DomainSeparator {
 
         DomainSeparator(signing::keccak256(abi_encode_string.as_slice()))
     }
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SolvableOrders {
+    pub orders: Vec<order::Order>,
+    pub latest_settlement_block: u64,
 }
 
 #[cfg(test)]

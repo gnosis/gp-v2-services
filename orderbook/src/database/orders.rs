@@ -4,7 +4,8 @@ use anyhow::{anyhow, Context, Result};
 use bigdecimal::{BigDecimal, Zero};
 use chrono::{DateTime, Utc};
 use const_format::concatcp;
-use futures::stream::TryStreamExt;
+use ethcontract::H256;
+use futures::{stream::TryStreamExt, FutureExt};
 use model::{
     app_id::AppId,
     order::{
@@ -14,6 +15,7 @@ use model::{
     signature::{Signature, SigningScheme},
 };
 use primitive_types::H160;
+use sqlx::Connection;
 use std::{borrow::Cow, convert::TryInto};
 
 #[cfg_attr(test, mockall::automock)]
@@ -23,9 +25,10 @@ pub trait OrderStoring: Send + Sync {
     async fn cancel_order(&self, order_uid: &OrderUid, now: DateTime<Utc>) -> Result<()>;
     // Legacy generic orders route that we are phasing out.
     async fn orders(&self, filter: &OrderFilter) -> Result<Vec<Order>>;
+    async fn orders_for_tx(&self, tx_hash: &H256) -> Result<Vec<Order>>;
     async fn single_order(&self, uid: &OrderUid) -> Result<Option<Order>>;
     /// Orders that are solvable: minimum valid to, not fully executed, not invalidated.
-    async fn solvable_orders(&self, min_valid_to: u32) -> Result<Vec<Order>>;
+    async fn solvable_orders(&self, min_valid_to: u32) -> Result<SolvableOrders>;
     /// All orders of a single user ordered by creation date descending (newest orders first).
     async fn user_orders(
         &self,
@@ -33,6 +36,11 @@ pub trait OrderStoring: Send + Sync {
         offset: u64,
         limit: Option<u64>,
     ) -> Result<Vec<Order>>;
+}
+
+pub struct SolvableOrders {
+    pub orders: Vec<Order>,
+    pub latest_settlement_block: u64,
 }
 
 /// Any default value means that this field is unfiltered.
@@ -322,6 +330,50 @@ impl OrderStoring for Postgres {
             .await
     }
 
+    async fn orders_for_tx(&self, tx_hash: &H256) -> Result<Vec<Order>> {
+        // TODO - This query assumes there is only one settlement per block.
+        //  when there are two, we would want all trades for which the log index is between
+        //  that of the correct settlement and the next. For this we would have to
+        //  - fetch all settlements for the block containing the specified txHash
+        //  - sort them by log index
+        //  - pick out the target settlement and get all trades with log index between target's and next.
+        //  I believe this would require a string of queries something like
+        // with target_block_number as (
+        //     SELECT block_number from settlements where tx_hash = $1
+        // ),
+        // with next_log_index as (
+        //     SELECT log_index from settlements
+        //     WHERE block_number > target_block_number
+        //     ORDER BY block_number asc
+        //     LIMIT 1
+        // )
+        // "SELECT ", ORDERS_SELECT,
+        // "FROM ", ORDERS_FROM,
+        // "JOIN trades t \
+        //     ON t.order_uid = o.uid \
+        //  JOIN settlements s \
+        //     ON s.block_number = t.block_number \
+        //  WHERE s.tx_hash = $1 \
+        //  AND t.log_index BETWEEN s.log_index AND next_log_index"
+        #[rustfmt::skip]
+        const QUERY: &str = concatcp!(
+            "SELECT ", ORDERS_SELECT,
+            "FROM ", ORDERS_FROM,
+            "JOIN trades t \
+                ON t.order_uid = o.uid \
+             JOIN settlements s \
+                ON s.block_number = t.block_number \
+             WHERE s.tx_hash = $1 ",
+        );
+        sqlx::query_as(QUERY)
+            .bind(tx_hash.0.as_ref())
+            .fetch(&self.pool)
+            .err_into()
+            .and_then(|row: OrdersQueryRow| async move { row.into_order() })
+            .try_collect()
+            .await
+    }
+
     async fn single_order(&self, uid: &OrderUid) -> Result<Option<Order>> {
         #[rustfmt::skip]
         const QUERY: &str = concatcp!(
@@ -336,7 +388,7 @@ impl OrderStoring for Postgres {
         order.map(OrdersQueryRow::into_order).transpose()
     }
 
-    async fn solvable_orders(&self, min_valid_to: u32) -> Result<Vec<Order>> {
+    async fn solvable_orders(&self, min_valid_to: u32) -> Result<SolvableOrders> {
         #[rustfmt::skip]
         const QUERY: &str = concatcp!(
             "SELECT * FROM ( ",
@@ -352,12 +404,30 @@ impl OrderStoring for Postgres {
                 (NOT invalidated) AND \
                 (NOT presignature_pending);"
         );
-        sqlx::query_as(QUERY)
-            .bind(min_valid_to as i64)
-            .fetch(&self.pool)
-            .err_into()
-            .and_then(|row: OrdersQueryRow| async move { row.into_order() })
-            .try_collect()
+        let mut connection = self.pool.acquire().await?;
+
+        connection
+            .transaction(move |transaction| {
+                async move {
+                    let orders = sqlx::query_as(QUERY)
+                        .bind(min_valid_to as i64)
+                        .fetch(&mut *transaction)
+                        .err_into()
+                        .and_then(|row: OrdersQueryRow| async move { row.into_order() })
+                        .try_collect()
+                        .await?;
+                    let settlement: i64 = sqlx::query_scalar(
+                        "SELECT COALESCE(MAX(block_number), 0) FROM settlements",
+                    )
+                    .fetch_one(&mut *transaction)
+                    .await?;
+                    Ok(SolvableOrders {
+                        orders,
+                        latest_settlement_block: settlement as u64,
+                    })
+                }
+                .boxed()
+            })
             .await
     }
 
@@ -1226,7 +1296,7 @@ mod tests {
             let db = db.clone();
             async move {
                 let orders = db.solvable_orders(0).await.unwrap();
-                orders.into_iter().next()
+                orders.orders.into_iter().next()
             }
         };
         let pre_signature_event = |block_number: u64, signed: bool| {
@@ -1265,6 +1335,44 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
+    async fn postgres_solvable_orders_settlement_block() {
+        let db = Postgres::new("postgresql://").unwrap();
+        db.clear().await.unwrap();
+
+        assert_eq!(
+            db.solvable_orders(0).await.unwrap().latest_settlement_block,
+            0
+        );
+        db.append_events_(vec![(
+            EventIndex {
+                block_number: 1,
+                log_index: 0,
+            },
+            Event::Settlement(Settlement::default()),
+        )])
+        .await
+        .unwrap();
+        assert_eq!(
+            db.solvable_orders(0).await.unwrap().latest_settlement_block,
+            1
+        );
+        db.append_events_(vec![(
+            EventIndex {
+                block_number: 5,
+                log_index: 3,
+            },
+            Event::Settlement(Settlement::default()),
+        )])
+        .await
+        .unwrap();
+        assert_eq!(
+            db.solvable_orders(0).await.unwrap().latest_settlement_block,
+            5
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
     async fn postgres_solvable_orders() {
         let db = Postgres::new("postgresql://").unwrap();
         db.clear().await.unwrap();
@@ -1286,7 +1394,7 @@ mod tests {
             let db = db.clone();
             async move {
                 let orders = db.solvable_orders(min_valid_to).await.unwrap();
-                orders.into_iter().next()
+                orders.orders.into_iter().next()
             }
         };
 
@@ -1620,5 +1728,60 @@ mod tests {
 
         let result = db.user_orders(&owners[0], 2, Some(1)).await.unwrap();
         assert_eq!(result, vec![]);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn postgres_returns_expected_orders_for_tx_hash_request() {
+        let db = Postgres::new("postgresql://").unwrap();
+        db.clear().await.unwrap();
+
+        let orders: Vec<Order> = (0..=3)
+            .map(|i| Order {
+                order_meta_data: OrderMetaData {
+                    uid: OrderUid::from_integer(i),
+                    ..Default::default()
+                },
+                order_creation: Default::default(),
+            })
+            .collect();
+
+        // Each order was traded in the consecutive blocks.
+        for (i, order) in orders.clone().iter().enumerate() {
+            db.insert_order(order).await.unwrap();
+            db.append_events_(vec![
+                // Add settlement
+                (
+                    EventIndex {
+                        block_number: i as u64,
+                        log_index: 0,
+                    },
+                    Event::Settlement(Settlement {
+                        solver: Default::default(),
+                        transaction_hash: H256::from_low_u64_be(i as u64),
+                    }),
+                ),
+                // Add trade
+                (
+                    EventIndex {
+                        block_number: i as u64,
+                        log_index: 1,
+                    },
+                    Event::Trade(Trade {
+                        order_uid: order.order_meta_data.uid,
+                        ..Default::default()
+                    }),
+                ),
+            ])
+            .await
+            .unwrap();
+        }
+        for (i, order) in orders.into_iter().enumerate() {
+            let res = db
+                .orders_for_tx(&H256::from_low_u64_be(i as u64))
+                .await
+                .unwrap();
+            assert_eq!(res, vec![order]);
+        }
     }
 }

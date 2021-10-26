@@ -39,11 +39,13 @@ pub struct MinFeeCalculator {
 #[cfg_attr(test, mockall::automock)]
 #[async_trait::async_trait]
 pub trait MinFeeCalculating: Send + Sync {
-    /// Returns the minimum amount of fee required to accept an order selling the specified order
-    /// and an expiry date for the estimate.
-    /// Returns an error if there is some estimation error and Ok(None) if no information about the given
-    /// token exists
-    async fn compute_unsubsidized_min_fee(
+    /// Returns the minimum amount of fee required to accept an order selling
+    /// the specified order and an expiry date for the estimate. The returned
+    /// amount applies configured "fee factors" for subsidizing user trades.
+    ///
+    /// Returns an error if there is some estimation error and `Ok(None)` if no
+    /// information about the given token exists
+    async fn compute_subsidized_min_fee(
         &self,
         sell_token: H160,
         buy_token: Option<H160>,
@@ -63,6 +65,7 @@ pub trait MinFeeCalculating: Send + Sync {
     ) -> Result<U256, ()>;
 }
 
+#[cfg_attr(test, mockall::automock)]
 #[async_trait::async_trait]
 pub trait MinFeeStoring: Send + Sync {
     // Stores the given measurement. Returns an error if this fails
@@ -78,7 +81,7 @@ pub trait MinFeeStoring: Send + Sync {
 
     // Return a vector of previously stored measurements for the given token that have an expiry >= min expiry
     // If buy_token or sell_amount is not specified, it will return the lowest estimate matching the values provided.
-    async fn get_min_fee(
+    async fn read_fee_measurement(
         &self,
         sell_token: H160,
         buy_token: Option<H160>,
@@ -88,7 +91,7 @@ pub trait MinFeeStoring: Send + Sync {
     ) -> Result<Option<U256>>;
 }
 
-const GAS_PER_ORDER: f64 = 100_000.0;
+const GAS_PER_ORDER: f64 = 300_000.0;
 
 // We use a longer validity internally for persistence to avoid writing a value to storage on every request
 // This way we can serve a previous estimate if the same token is queried again shortly after
@@ -136,7 +139,7 @@ impl<T> MinFeeCalculating for EthAdapter<T>
 where
     T: MinFeeCalculating + Send + Sync,
 {
-    async fn compute_unsubsidized_min_fee(
+    async fn compute_subsidized_min_fee(
         &self,
         sell_token: H160,
         buy_token: Option<H160>,
@@ -145,7 +148,7 @@ where
         app_data: Option<AppId>,
     ) -> Result<Measurement, PriceEstimationError> {
         self.calculator
-            .compute_unsubsidized_min_fee(
+            .compute_subsidized_min_fee(
                 sell_token,
                 buy_token.map(|token| normalize_buy_token(token, self.weth)),
                 amount,
@@ -193,14 +196,19 @@ impl MinFeeCalculator {
     }
 
     /// Computes unsubsidized min fee.
-    async fn compute_min_fee(
+    async fn compute_unsubsidized_min_fee(
         &self,
         sell_token: H160,
         buy_token: Option<H160>,
         amount: Option<U256>,
         kind: Option<OrderKind>,
     ) -> Result<U256, PriceEstimationError> {
-        let gas_price = self.gas_estimator.estimate().await?;
+        let gas_price = self.gas_estimator.estimate().await?.effective_gas_price();
+        tracing::debug!(
+            "estimated effective gas price of {:.2} Gwei",
+            gas_price / 1e9
+        );
+
         let gas_amount =
             if let (Some(buy_token), Some(amount), Some(kind)) = (buy_token, amount, kind) {
                 self.price_estimator
@@ -218,39 +226,38 @@ impl MinFeeCalculator {
             };
 
         let fee_in_eth = gas_price * gas_amount;
-
-        // Use a sell order instead of a buy order as some DEXs specifically
-        // used by Paraswap don't support buy orders natively.
         let query = price_estimation::Query {
-            buy_token: sell_token,
-            sell_token: self.native_token,
+            sell_token,
+            buy_token: self.native_token,
             in_amount: self.native_token_price_estimation_amount,
-            kind: OrderKind::Sell,
+            kind: OrderKind::Buy,
         };
         let estimate = self.price_estimator.estimate(&query).await?;
-
-        // The price denominated in native token (since we **used a native token
-        // sell order** when estimating prices). This is the amount of native
-        // token needed to buy one unit of the order's sell token.
         let price = estimate.price_in_sell_token_f64(&query);
-        Ok(U256::from_f64_lossy(fee_in_eth / price))
+
+        tracing::debug!(
+            "computed unsubsidized fee amount of {} ETH at a price of {} ETH/{:?}",
+            fee_in_eth,
+            price,
+            sell_token,
+        );
+
+        Ok(U256::from_f64_lossy(fee_in_eth * price))
     }
 
-    fn calculate_fee_factor(&self, app_data: Option<AppId>) -> f64 {
-        app_data
-            .and_then(|app_data| self.partner_additional_fee_factors.get(&app_data).cloned())
+    fn apply_fee_factor(&self, fee: U256, app_data: Option<AppId>) -> U256 {
+        let factor = app_data
+            .and_then(|app_data| self.partner_additional_fee_factors.get(&app_data))
+            .copied()
             .unwrap_or(1.0)
-            * self.fee_factor
-    }
-
-    fn apply_fee_factor(fee: U256, factor: f64) -> U256 {
+            * self.fee_factor;
         U256::from_f64_lossy(fee.to_f64_lossy() * factor)
     }
 }
 
 #[async_trait::async_trait]
 impl MinFeeCalculating for MinFeeCalculator {
-    async fn compute_unsubsidized_min_fee(
+    async fn compute_subsidized_min_fee(
         &self,
         sell_token: H160,
         buy_token: Option<H160>,
@@ -267,35 +274,49 @@ impl MinFeeCalculating for MinFeeCalculator {
         let official_valid_until = now + Duration::seconds(STANDARD_VALIDITY_FOR_FEE_IN_SEC);
         let internal_valid_until = now + Duration::seconds(PERSISTED_VALIDITY_FOR_FEE_IN_SEC);
 
-        if let Ok(Some(past_fee)) = self
+        tracing::debug!(
+            "computing subsidized fee for {:?}",
+            (sell_token, buy_token, amount, kind, app_data),
+        );
+
+        let unsubsidized_min_fee = if let Ok(Some(past_fee)) = self
             .measurements
-            .get_min_fee(sell_token, buy_token, amount, kind, official_valid_until)
+            .read_fee_measurement(sell_token, buy_token, amount, kind, official_valid_until)
             .await
         {
-            return Ok((past_fee, official_valid_until));
-        }
+            tracing::debug!("using existing fee measurement {}", past_fee);
+            past_fee
+        } else {
+            let current_fee = self
+                .compute_unsubsidized_min_fee(sell_token, buy_token, amount, kind)
+                .await?;
 
-        let min_fee = self
-            .compute_min_fee(sell_token, buy_token, amount, kind)
-            .await?;
+            if let Err(err) = self
+                .measurements
+                .save_fee_measurement(
+                    sell_token,
+                    buy_token,
+                    amount,
+                    kind,
+                    internal_valid_until,
+                    current_fee,
+                )
+                .await
+            {
+                tracing::warn!(?err, "error saving fee measurement");
+            }
 
-        let _ = self
-            .measurements
-            .save_fee_measurement(
-                sell_token,
-                buy_token,
-                amount,
-                kind,
-                internal_valid_until,
-                min_fee,
-            )
-            .await;
+            tracing::debug!("using new fee measurement {}", current_fee);
+            current_fee
+        };
 
-        let fee_factor = self.calculate_fee_factor(app_data);
-        Ok((
-            Self::apply_fee_factor(min_fee, fee_factor),
-            official_valid_until,
-        ))
+        let subsidized_min_fee = self.apply_fee_factor(unsubsidized_min_fee, app_data);
+        tracing::debug!(
+            "computed subsidized fee of {:?}",
+            (subsidized_min_fee, sell_token),
+        );
+
+        Ok((subsidized_min_fee, official_valid_until))
     }
 
     async fn get_unsubsidized_min_fee(
@@ -304,20 +325,21 @@ impl MinFeeCalculating for MinFeeCalculator {
         fee: U256,
         app_data: Option<AppId>,
     ) -> Result<U256, ()> {
-        let fee_factor = self.calculate_fee_factor(app_data);
-
         if let Ok(Some(past_fee)) = self
             .measurements
-            .get_min_fee(sell_token, None, None, None, (self.now)())
+            .read_fee_measurement(sell_token, None, None, None, (self.now)())
             .await
         {
-            if fee >= Self::apply_fee_factor(past_fee, fee_factor) {
+            if fee >= self.apply_fee_factor(past_fee, app_data) {
                 return Ok(std::cmp::max(fee, past_fee));
             }
         }
 
-        if let Ok(current_fee) = self.compute_min_fee(sell_token, None, None, None).await {
-            if fee >= Self::apply_fee_factor(current_fee, fee_factor) {
+        if let Ok(current_fee) = self
+            .compute_unsubsidized_min_fee(sell_token, None, None, None)
+            .await
+        {
+            if fee >= self.apply_fee_factor(current_fee, app_data) {
                 return Ok(std::cmp::max(fee, current_fee));
             }
         }
@@ -336,6 +358,7 @@ struct FeeMeasurement {
 
 #[derive(Default)]
 struct InMemoryFeeStore(Mutex<HashMap<H160, Vec<FeeMeasurement>>>);
+
 #[async_trait::async_trait]
 impl MinFeeStoring for InMemoryFeeStore {
     async fn save_fee_measurement(
@@ -362,7 +385,7 @@ impl MinFeeStoring for InMemoryFeeStore {
         Ok(())
     }
 
-    async fn get_min_fee(
+    async fn read_fee_measurement(
         &self,
         sell_token: H160,
         buy_token: Option<H160>,
@@ -394,12 +417,12 @@ impl MinFeeStoring for InMemoryFeeStore {
 #[cfg(test)]
 mod tests {
     use chrono::{Duration, NaiveDateTime};
+    use gas_estimation::{gas_price::EstimatedGasPrice, GasPrice1559};
     use maplit::hashmap;
-    use mockall::predicate::*;
+    use mockall::{predicate::*, Sequence};
     use shared::{
-        bad_token::list_based::ListBasedDetector,
-        gas_price_estimation::FakeGasPriceEstimator,
-        price_estimation::{mocks::FakePriceEstimator, MockPriceEstimating},
+        bad_token::list_based::ListBasedDetector, gas_price_estimation::FakeGasPriceEstimator,
+        price_estimation::mocks::FakePriceEstimator,
     };
     use std::sync::Arc;
 
@@ -411,7 +434,7 @@ mod tests {
         let token = H160([0x21; 20]);
         let mut calculator = MockMinFeeCalculating::default();
         calculator
-            .expect_compute_unsubsidized_min_fee()
+            .expect_compute_subsidized_min_fee()
             .withf(move |&sell_token, &buy_token, &amount, &kind, &app_data| {
                 sell_token == token
                     && buy_token == Some(weth)
@@ -429,7 +452,7 @@ mod tests {
 
         let eth_aware = EthAdapter { calculator, weth };
         assert!(eth_aware
-            .compute_unsubsidized_min_fee(
+            .compute_subsidized_min_fee(
                 token,
                 Some(BUY_ETH_ADDRESS),
                 Some(1337.into()),
@@ -484,7 +507,14 @@ mod tests {
 
     #[tokio::test]
     async fn accepts_min_fee_if_validated_before_expiry() {
-        let gas_price = Arc::new(Mutex::new(100.0));
+        let gas_price = Arc::new(Mutex::new(EstimatedGasPrice {
+            eip1559: Some(GasPrice1559 {
+                max_fee_per_gas: 100.0,
+                max_priority_fee_per_gas: 50.0,
+                base_fee_per_gas: 30.0,
+            }),
+            ..Default::default()
+        }));
         let time = Arc::new(Mutex::new(Utc::now()));
 
         let gas_price_estimator = Arc::new(FakeGasPriceEstimator(gas_price.clone()));
@@ -503,11 +533,12 @@ mod tests {
 
         let token = H160::from_low_u64_be(1);
         let (fee, expiry) = fee_estimator
-            .compute_unsubsidized_min_fee(token, None, None, None, None)
+            .compute_subsidized_min_fee(token, None, None, None, None)
             .await
             .unwrap();
         // Gas price increase after measurement
-        *gas_price.lock().unwrap() *= 2.0;
+        let new_gas_price = gas_price.lock().unwrap().bump(2.0);
+        *gas_price.lock().unwrap() = new_gas_price;
 
         // fee is valid before expiry
         *time.lock().unwrap() = expiry - Duration::seconds(10);
@@ -526,7 +557,14 @@ mod tests {
 
     #[tokio::test]
     async fn accepts_fee_if_higher_than_current_min_fee() {
-        let gas_price = Arc::new(Mutex::new(100.0));
+        let gas_price = Arc::new(Mutex::new(EstimatedGasPrice {
+            eip1559: Some(GasPrice1559 {
+                max_fee_per_gas: 100.0,
+                max_priority_fee_per_gas: 50.0,
+                base_fee_per_gas: 30.0,
+            }),
+            ..Default::default()
+        }));
 
         let gas_price_estimator = Arc::new(FakeGasPriceEstimator(gas_price.clone()));
         let price_estimator = FakePriceEstimator(price_estimation::Estimate {
@@ -542,7 +580,7 @@ mod tests {
 
         let token = H160::from_low_u64_be(1);
         let (fee, _) = fee_estimator
-            .compute_unsubsidized_min_fee(token, None, None, None, None)
+            .compute_subsidized_min_fee(token, None, None, None, None)
             .await
             .unwrap();
 
@@ -555,7 +593,8 @@ mod tests {
             .is_err());
 
         // Gas price reduces, and slightly lower fee is now valid
-        *gas_price.lock().unwrap() /= 2.0;
+        let new_gas_price = gas_price.lock().unwrap().bump(0.5);
+        *gas_price.lock().unwrap() = new_gas_price;
         assert!(fee_estimator
             .get_unsubsidized_min_fee(token, lower_fee, None)
             .await
@@ -567,7 +606,16 @@ mod tests {
         let unsupported_token = H160::from_low_u64_be(1);
         let supported_token = H160::from_low_u64_be(2);
 
-        let gas_price_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(100.0))));
+        let gas_price_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(
+            EstimatedGasPrice {
+                eip1559: Some(GasPrice1559 {
+                    max_fee_per_gas: 100.0,
+                    max_priority_fee_per_gas: 50.0,
+                    base_fee_per_gas: 30.0,
+                }),
+                ..Default::default()
+            },
+        ))));
         let price_estimator = Arc::new(FakePriceEstimator(price_estimation::Estimate {
             out_amount: 1.into(),
             gas: 1000.into(),
@@ -588,7 +636,7 @@ mod tests {
         // Selling unsupported token
         assert!(matches!(
             fee_estimator
-                .compute_unsubsidized_min_fee(
+                .compute_subsidized_min_fee(
                     unsupported_token,
                     Some(supported_token),
                     Some(100.into()),
@@ -602,7 +650,7 @@ mod tests {
         // Buying unsupported token
         assert!(matches!(
             fee_estimator
-                .compute_unsubsidized_min_fee(
+                .compute_subsidized_min_fee(
                     supported_token,
                     Some(unsupported_token),
                     Some(100.into()),
@@ -618,7 +666,16 @@ mod tests {
     async fn is_valid_fee() {
         let sell_token = H160::from_low_u64_be(1);
 
-        let gas_price_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(100.0))));
+        let gas_price_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(
+            EstimatedGasPrice {
+                eip1559: Some(GasPrice1559 {
+                    max_fee_per_gas: 100.0,
+                    max_priority_fee_per_gas: 50.0,
+                    base_fee_per_gas: 30.0,
+                }),
+                ..Default::default()
+            },
+        ))));
         let price_estimator = Arc::new(FakePriceEstimator(price_estimation::Estimate {
             out_amount: 1.into(),
             gas: 1000.into(),
@@ -636,7 +693,7 @@ mod tests {
             native_token_price_estimation_amount: 1.into(),
         };
         let (fee, _) = fee_estimator
-            .compute_unsubsidized_min_fee(sell_token, None, None, None, Some(app_data))
+            .compute_subsidized_min_fee(sell_token, None, None, None, Some(app_data))
             .await
             .unwrap();
         assert_eq!(
@@ -657,81 +714,87 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn computes_min_fee() {
-        let native_token = H160([0x42; 20]);
-        let native_token_price_estimation_amount = U256::from(1337);
+    async fn applies_fee_factor_to_past_and_new_fees() {
+        let sell_token = H160::from_low_u64_be(1);
+        let native_token_price_estimation_amount = 100.;
+        let sell_token_price = 1.25;
+        let gas_estimate = 42.;
 
-        let sell_token = H160([1; 20]);
-        let buy_token = H160([2; 20]);
-        let in_amount = U256::from(1_000_000_000_000_000_000_u128);
-        let kind = OrderKind::Sell;
+        let unsubsidized_min_fee =
+            U256::from_f64_lossy(GAS_PER_ORDER * sell_token_price * gas_estimate);
 
-        let gas_estimate = 100_000.;
-        let gas_price = 100.;
-        // The amount of sell token you receive per native token. This means
-        // that 1 WETH would give you 3000.0 SELLTOKEN.
-        let sell_token_price = 3000.;
+        let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(
+            EstimatedGasPrice {
+                legacy: 42.,
+                ..Default::default()
+            },
+        ))));
+        let price_estimator = Arc::new(FakePriceEstimator(price_estimation::Estimate {
+            out_amount: U256::from_f64_lossy(
+                native_token_price_estimation_amount * sell_token_price,
+            ),
+            gas: 1337.into(),
+        }));
 
-        let mut sequence = mockall::Sequence::new();
-        let mut price_estimator = MockPriceEstimating::new();
-        price_estimator
-            .expect_estimate()
+        let mut measurements = MockMinFeeStoring::new();
+        let mut seq = Sequence::new();
+        measurements
+            .expect_read_fee_measurement()
             .times(1)
-            .with(eq(price_estimation::Query {
-                sell_token,
-                buy_token,
-                in_amount,
-                kind,
-            }))
-            .returning(move |_| {
-                Ok(price_estimation::Estimate {
-                    out_amount: U256::from(123_456_789_012_345_567_u128),
-                    gas: U256::from_f64_lossy(gas_estimate),
-                })
-            })
-            .in_sequence(&mut sequence);
-        price_estimator
-            .expect_estimate()
+            .in_sequence(&mut seq)
+            .with(eq(sell_token), eq(None), eq(None), eq(None), always())
+            .returning(|_, _, _, _, _| Ok(None));
+        measurements
+            .expect_save_fee_measurement()
             .times(1)
-            .with(eq(price_estimation::Query {
-                sell_token: native_token,
-                buy_token: sell_token,
-                in_amount: native_token_price_estimation_amount,
-                kind,
-            }))
-            .returning(move |_| {
-                Ok(price_estimation::Estimate {
-                    // Given an input of X WETH, we expect 3000*X SELLTOKEN output
-                    // because, in this example the native token is more valuable
-                    // than the sell token.
-                    out_amount: U256::from_f64_lossy(
-                        native_token_price_estimation_amount.to_f64_lossy() * sell_token_price,
-                    ),
-                    gas: U256::from(1_000_000),
-                })
-            })
-            .in_sequence(&mut sequence);
-
-        let calculator = MinFeeCalculator {
-            native_token,
-            native_token_price_estimation_amount,
-            ..MinFeeCalculator::new_for_test(
-                Arc::new(FakeGasPriceEstimator::new(gas_price)),
-                Arc::new(price_estimator),
-                Box::new(Utc::now),
+            .in_sequence(&mut seq)
+            .with(
+                eq(sell_token),
+                eq(None),
+                eq(None),
+                eq(None),
+                always(),
+                eq(unsubsidized_min_fee),
             )
+            .returning(|_, _, _, _, _, _| Ok(()));
+        measurements
+            .expect_read_fee_measurement()
+            .times(1)
+            .in_sequence(&mut seq)
+            .with(eq(sell_token), eq(None), eq(None), eq(None), always())
+            .returning(move |_, _, _, _, _| Ok(Some(unsubsidized_min_fee)));
+
+        let app_data = AppId([1u8; 32]);
+        let fee_estimator = MinFeeCalculator {
+            price_estimator,
+            gas_estimator,
+            native_token: Default::default(),
+            measurements: Arc::new(measurements),
+            now: Box::new(Utc::now),
+            fee_factor: 0.8,
+            bad_token_detector: Arc::new(ListBasedDetector::deny_list(vec![])),
+            partner_additional_fee_factors: hashmap! { app_data => 0.5 },
+            native_token_price_estimation_amount: U256::from_f64_lossy(
+                native_token_price_estimation_amount,
+            ),
         };
-        let min_fee = calculator
-            .compute_min_fee(sell_token, Some(buy_token), Some(in_amount), Some(kind))
+
+        let (fee, _) = fee_estimator
+            .compute_subsidized_min_fee(sell_token, None, None, None, Some(app_data))
             .await
             .unwrap();
-
         assert_eq!(
-            min_fee,
-            // We expect to pay `gas_estimate * gas_price` WETH total in gas,
-            // and to convert that into SELLTOKEN, we multiply by the sell
-            // token price.
-            U256::from_f64_lossy(gas_estimate * gas_price * sell_token_price)
+            fee,
+            U256::from_f64_lossy(unsubsidized_min_fee.to_f64_lossy() * 0.8 * 0.5)
+        );
+
+        let (fee, _) = fee_estimator
+            .compute_subsidized_min_fee(sell_token, None, None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            fee,
+            U256::from_f64_lossy(unsubsidized_min_fee.to_f64_lossy() * 0.8)
         );
     }
 }

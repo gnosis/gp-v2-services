@@ -1,80 +1,15 @@
 use super::{LimitOrder, SettlementHandling};
-use crate::{
-    interactions::UnwrapWethInteraction, orderbook::OrderBookApi, settlement::SettlementEncoder,
-};
-use anyhow::{Context as _, Result};
+use crate::{interactions::UnwrapWethInteraction, settlement::SettlementEncoder};
+use anyhow::Result;
 use contracts::WETH9;
 use ethcontract::{H160, U256};
-use model::order::{Order, OrderUid, BUY_ETH_ADDRESS};
-use reqwest::{Client, Url};
+use model::order::{Order, BUY_ETH_ADDRESS};
 use std::{collections::HashSet, sync::Arc};
 
-pub struct OrderbookLiquidity {
-    api: OrderBookApi,
-    converter: OrderConverter,
-}
-
-impl OrderbookLiquidity {
-    /// Creates a new liquidity fetcher for GPv2 off-chain orderbook.
-    pub fn new(
-        base: Url,
-        client: Client,
-        native_token: WETH9,
-        liquidity_order_owners: HashSet<H160>,
-        fee_factor: f64,
-        fee_objective_scaling_factor: f64,
-    ) -> Self {
-        Self {
-            api: OrderBookApi::new(base, client),
-            converter: OrderConverter {
-                native_token,
-                liquidity_order_owners,
-                fee_factor,
-                fee_objective_scaling_factor,
-            },
-        }
-    }
-
-    /// Returns a list of limit orders coming from the offchain orderbook API
-    pub async fn get_liquidity(
-        &self,
-        inflight_trades: &HashSet<OrderUid>,
-    ) -> Result<Vec<LimitOrder>> {
-        Ok(self
-            .api
-            .get_orders()
-            .await
-            .context("failed to get orderbook")?
-            .into_iter()
-            .filter_map(|order| inflight_order_filter(order, inflight_trades))
-            .map(|altered_order| self.converter.normalize_limit_order(altered_order))
-            .collect())
-    }
-}
-
-fn inflight_order_filter(order: Order, inflight_trades: &HashSet<OrderUid>) -> Option<Order> {
-    // TODO - could model inflight_trades as HashMap<OrderUid, Vec<Trade>>
-    // https://github.com/gnosis/gp-v2-services/issues/673
-    if inflight_trades.contains(&order.order_meta_data.uid) {
-        return if order.order_creation.partially_fillable {
-            // TODO - driver logic for Partially Fillable Orders
-            // https://github.com/gnosis/gp-v2-services/issues/673
-            // Note that this will result in simulation error "GPv2: order filled" if the
-            // next solver run loop tries to match the order again beyond its remaining amount.
-            Some(order)
-        } else {
-            // Fully filled, inflight orders are excluded from consideration
-            None
-        };
-    }
-    Some(order)
-}
-
 pub struct OrderConverter {
-    native_token: WETH9,
-    liquidity_order_owners: HashSet<H160>,
-    fee_factor: f64,
-    fee_objective_scaling_factor: f64,
+    pub native_token: WETH9,
+    pub liquidity_order_owners: HashSet<H160>,
+    pub fee_objective_scaling_factor: f64,
 }
 
 impl OrderConverter {
@@ -85,7 +20,6 @@ impl OrderConverter {
         Self {
             native_token: shared::dummy_contract!(WETH9, native_token),
             liquidity_order_owners: HashSet::new(),
-            fee_factor: 1.,
             fee_objective_scaling_factor: 1.,
         }
     }
@@ -99,24 +33,15 @@ impl OrderConverter {
             order.order_creation.buy_token
         };
 
-        // In order to maintain backwards compatibility with orders created
-        // before the full fee amount was recorded, guess the full amount based
-        // on the actual fee amount and the global fee scaling factor. This can
-        // be removed once there are no more active orders without a full fee
-        // amount.
-        // <https://github.com/gnosis/gp-v2-services/issues/1219>
-        let full_fee_amount = if order.order_meta_data.full_fee_amount.is_zero() {
-            U256::from_f64_lossy(order.order_creation.fee_amount.to_f64_lossy() / self.fee_factor)
-        } else {
-            order.order_meta_data.full_fee_amount
-        };
-
         // The reported fee amount that is used for objective computation is the
         // order's full full amount scaled by a constant factor.
         let scaled_fee_amount = U256::from_f64_lossy(
-            full_fee_amount.to_f64_lossy() * self.fee_objective_scaling_factor,
+            order.order_meta_data.full_fee_amount.to_f64_lossy()
+                * self.fee_objective_scaling_factor,
         );
-
+        let is_liquidity_order = self
+            .liquidity_order_owners
+            .contains(&order.order_meta_data.owner);
         LimitOrder {
             id: order.order_meta_data.uid.to_string(),
             sell_token: order.order_creation.sell_token,
@@ -128,13 +53,12 @@ impl OrderConverter {
             kind: order.order_creation.kind,
             partially_fillable: order.order_creation.partially_fillable,
             scaled_fee_amount,
-            is_liquidity_order: self
-                .liquidity_order_owners
-                .contains(&order.order_meta_data.owner),
+            is_liquidity_order,
             settlement_handling: Arc::new(OrderSettlementHandler {
                 order,
                 native_token,
                 scaled_fee_amount,
+                is_liquidity_order,
             }),
         }
     }
@@ -144,6 +68,7 @@ struct OrderSettlementHandler {
     order: Order,
     native_token: WETH9,
     scaled_fee_amount: U256,
+    is_liquidity_order: bool,
 }
 
 impl SettlementHandling<LimitOrder> for OrderSettlementHandler {
@@ -154,8 +79,12 @@ impl SettlementHandling<LimitOrder> for OrderSettlementHandler {
             encoder.add_token_equivalency(self.native_token.address(), BUY_ETH_ADDRESS)?;
         }
 
-        let trade =
-            encoder.add_trade(self.order.clone(), executed_amount, self.scaled_fee_amount)?;
+        let trade = encoder.add_trade(
+            self.order.clone(),
+            executed_amount,
+            self.scaled_fee_amount,
+            self.is_liquidity_order,
+        )?;
 
         if is_native_token_buy_order {
             encoder.add_unwrap(UnwrapWethInteraction {
@@ -173,11 +102,8 @@ pub mod tests {
     use super::*;
     use crate::settlement::tests::assert_settlement_encoded_with;
     use ethcontract::H160;
-    use maplit::{hashmap, hashset};
-    use model::{
-        order::{OrderCreation, OrderKind, OrderMetaData},
-        DomainSeparator,
-    };
+    use maplit::hashmap;
+    use model::order::{OrderCreation, OrderKind, OrderMetaData};
     use shared::dummy_contract;
 
     #[test]
@@ -214,46 +140,8 @@ pub mod tests {
     }
 
     #[test]
-    fn computes_full_fee_amount_if_missing() {
-        let converter = OrderConverter {
-            fee_factor: 0.5,
-            ..OrderConverter::test(H160::default())
-        };
-
-        assert_eq!(
-            converter
-                .normalize_limit_order(Order {
-                    order_creation: OrderCreation {
-                        fee_amount: 10.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                })
-                .scaled_fee_amount,
-            20.into(),
-        );
-
-        assert_eq!(
-            converter
-                .normalize_limit_order(Order {
-                    order_creation: OrderCreation {
-                        fee_amount: 10.into(),
-                        ..Default::default()
-                    },
-                    order_meta_data: OrderMetaData {
-                        full_fee_amount: 50.into(),
-                        ..Default::default()
-                    },
-                })
-                .scaled_fee_amount,
-            50.into(),
-        );
-    }
-
-    #[test]
     fn applies_objective_scaling_factor() {
         let converter = OrderConverter {
-            fee_factor: 0.5,
             fee_objective_scaling_factor: 1.5,
             ..OrderConverter::test(H160::default())
         };
@@ -265,7 +153,10 @@ pub mod tests {
                         fee_amount: 10.into(),
                         ..Default::default()
                     },
-                    ..Default::default()
+                    order_meta_data: OrderMetaData {
+                        full_fee_amount: 20.into(),
+                        ..Default::default()
+                    }
                 })
                 .scaled_fee_amount,
             30.into(),
@@ -318,6 +209,7 @@ pub mod tests {
             order: order.clone(),
             native_token: native_token.clone(),
             scaled_fee_amount,
+            is_liquidity_order: false,
         };
 
         assert_settlement_encoded_with(
@@ -333,7 +225,7 @@ pub mod tests {
                     amount: executed_buy_amount,
                 });
                 assert!(encoder
-                    .add_trade(order, executed_amount, scaled_fee_amount)
+                    .add_trade(order, executed_amount, scaled_fee_amount, false)
                     .is_ok());
             },
         );
@@ -365,6 +257,7 @@ pub mod tests {
             order: order.clone(),
             native_token: native_token.clone(),
             scaled_fee_amount: 0.into(),
+            is_liquidity_order: false,
         };
 
         assert_settlement_encoded_with(
@@ -375,7 +268,9 @@ pub mod tests {
                 encoder
                     .add_token_equivalency(native_token.address(), BUY_ETH_ADDRESS)
                     .unwrap();
-                assert!(encoder.add_trade(order, executed_amount, 0.into()).is_ok());
+                assert!(encoder
+                    .add_trade(order, executed_amount, 0.into(), false)
+                    .is_ok());
                 encoder.add_unwrap(UnwrapWethInteraction {
                     weth: native_token,
                     amount: executed_amount,
@@ -412,6 +307,7 @@ pub mod tests {
             order: order.clone(),
             native_token,
             scaled_fee_amount: 0.into(),
+            is_liquidity_order: false,
         };
 
         assert_settlement_encoded_with(
@@ -419,50 +315,10 @@ pub mod tests {
             order_settlement_handler,
             executed_amount,
             |encoder| {
-                assert!(encoder.add_trade(order, executed_amount, 0.into()).is_ok());
+                assert!(encoder
+                    .add_trade(order, executed_amount, 0.into(), false)
+                    .is_ok());
             },
         );
-    }
-
-    #[test]
-    fn inflight_order_filter_() {
-        let fully_fillable_order = Order::from_order_creation(
-            OrderCreation {
-                partially_fillable: false,
-                ..Default::default()
-            },
-            &DomainSeparator::default(),
-            H160::default(),
-            U256::default(),
-        )
-        .unwrap();
-        assert!(inflight_order_filter(
-            fully_fillable_order.clone(),
-            &hashset!(fully_fillable_order.order_meta_data.uid)
-        )
-        .is_none());
-        let order = inflight_order_filter(fully_fillable_order.clone(), &hashset!());
-        assert!(order.is_some());
-        assert_eq!(order.unwrap(), fully_fillable_order);
-
-        let partially_fillable_order = Order::from_order_creation(
-            OrderCreation {
-                partially_fillable: true,
-                ..Default::default()
-            },
-            &DomainSeparator::default(),
-            H160::default(),
-            U256::default(),
-        )
-        .unwrap();
-        let adjusted_order = inflight_order_filter(
-            partially_fillable_order.clone(),
-            &hashset!(partially_fillable_order.order_meta_data.uid),
-        );
-        assert!(adjusted_order.is_some());
-
-        // TODO - The following assertion will fail and need to be adapted in
-        // https://github.com/gnosis/gp-v2-services/issues/673
-        assert_eq!(adjusted_order.unwrap(), partially_fillable_order);
     }
 }

@@ -1,5 +1,7 @@
 use super::{orders::OrderStoring, trades::TradeRetrieving, Postgres};
 use crate::fee::MinFeeStoring;
+use ethcontract::H256;
+use model::order::Order;
 use prometheus::Histogram;
 use shared::{event_handling::EventStoring, maintenance::Maintaining};
 use std::sync::Arc;
@@ -75,7 +77,7 @@ impl MinFeeStoring for Instrumented {
             .await
     }
 
-    async fn get_min_fee(
+    async fn read_fee_measurement(
         &self,
         sell_token: ethcontract::H160,
         buy_token: Option<ethcontract::H160>,
@@ -85,10 +87,10 @@ impl MinFeeStoring for Instrumented {
     ) -> anyhow::Result<Option<ethcontract::U256>> {
         let _timer = self
             .metrics
-            .database_query_histogram("get_min_fee")
+            .database_query_histogram("read_fee_measurement")
             .start_timer();
         self.inner
-            .get_min_fee(sell_token, buy_token, amount, kind, min_expiry)
+            .read_fee_measurement(sell_token, buy_token, amount, kind, min_expiry)
             .await
     }
 }
@@ -129,6 +131,14 @@ impl OrderStoring for Instrumented {
         self.inner.orders(filter).await
     }
 
+    async fn orders_for_tx(&self, tx_hash: &H256) -> anyhow::Result<Vec<Order>> {
+        let _timer = self
+            .metrics
+            .database_query_histogram("orders_for_tx")
+            .start_timer();
+        self.inner.orders_for_tx(tx_hash).await
+    }
+
     async fn single_order(
         &self,
         uid: &model::order::OrderUid,
@@ -140,7 +150,10 @@ impl OrderStoring for Instrumented {
         self.inner.single_order(uid).await
     }
 
-    async fn solvable_orders(&self, min_valid_to: u32) -> anyhow::Result<Vec<model::order::Order>> {
+    async fn solvable_orders(
+        &self,
+        min_valid_to: u32,
+    ) -> anyhow::Result<super::orders::SolvableOrders> {
         let _timer = self
             .metrics
             .database_query_histogram("solvable_orders")

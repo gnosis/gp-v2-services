@@ -15,6 +15,7 @@ pub mod network;
 pub mod paraswap_api;
 pub mod price_estimation;
 pub mod recent_block_cache;
+pub mod solver_utils;
 pub mod sources;
 pub mod subgraph;
 pub mod time;
@@ -24,34 +25,17 @@ pub mod trace_many;
 pub mod tracing;
 pub mod transport;
 pub mod web3_traits;
+pub mod zeroex_api;
 
 use ethcontract::dyns::{DynTransport, DynWeb3};
-use ethcontract::H160;
-use hex::{FromHex, FromHexError};
-use model::h160_hexadecimal;
-use serde::Deserialize;
-use std::fmt::Debug;
 use std::{
     future::Future,
-    str::FromStr,
     time::{Duration, Instant},
 };
 use web3::types::Bytes;
 
 pub type Web3Transport = DynTransport;
 pub type Web3 = DynWeb3;
-
-/// Wraps H160 with FromStr and Deserialize that can handle a `0x` prefix.
-#[derive(Debug, Deserialize)]
-#[serde(transparent)]
-pub struct H160Wrapper(#[serde(with = "h160_hexadecimal")] pub H160);
-impl FromStr for H160Wrapper {
-    type Err = FromHexError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let s = s.strip_prefix("0x").unwrap_or(s);
-        Ok(H160Wrapper(H160(FromHex::from_hex(s)?)))
-    }
-}
 
 /// The standard http client we use in the api and driver.
 pub fn http_client(timeout: Duration) -> reqwest::Client {

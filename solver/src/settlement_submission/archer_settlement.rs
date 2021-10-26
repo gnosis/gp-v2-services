@@ -31,13 +31,13 @@ use crate::{interactions::block_coinbase, settlement::Settlement};
 use anyhow::{anyhow, ensure, Context, Result};
 use chrono::{DateTime, Utc};
 use contracts::GPv2Settlement;
-use ethcontract::{errors::MethodError, transaction::Transaction, Account, GasPrice};
+use ethcontract::{errors::MethodError, transaction::Transaction, Account};
 use futures::FutureExt;
-use gas_estimation::GasPriceEstimating;
+use gas_estimation::{EstimatedGasPrice, GasPriceEstimating};
 use primitive_types::{H256, U256};
 use shared::Web3;
 use std::time::{Duration, Instant, SystemTime};
-use web3::types::TransactionId;
+use web3::types::TransactionReceipt;
 
 pub struct ArcherSolutionSubmitter<'a> {
     web3: &'a Web3,
@@ -89,7 +89,7 @@ impl<'a> ArcherSolutionSubmitter<'a> {
         deadline: SystemTime,
         settlement: Settlement,
         gas_estimate: U256,
-    ) -> Result<Option<H256>> {
+    ) -> Result<Option<TransactionReceipt>> {
         let nonce = self.nonce().await?;
 
         tracing::info!(
@@ -136,9 +136,9 @@ impl<'a> ArcherSolutionSubmitter<'a> {
             );
 
             loop {
-                if let Some(hash) = find_mined_transaction(self.web3, &transactions).await {
-                    tracing::info!("found mined transaction {}", hash);
-                    return Ok(Some(hash));
+                if let Some(receipt) = find_mined_transaction(self.web3, &transactions).await {
+                    tracing::info!("found mined transaction {}", receipt.transaction_hash);
+                    return Ok(Some(receipt));
                 }
                 if Instant::now() + MINED_TX_CHECK_INTERVAL > tx_to_propagate_deadline {
                     break;
@@ -173,16 +173,16 @@ impl<'a> ArcherSolutionSubmitter<'a> {
         }
     }
 
-    async fn gas_price(&self, gas_limit: f64, time_limit: Duration) -> Result<f64> {
+    async fn gas_price(&self, gas_limit: f64, time_limit: Duration) -> Result<EstimatedGasPrice> {
         match self
             .gas_price_estimator
             .estimate_with_limits(gas_limit, time_limit)
             .await
         {
-            Ok(gas_price) if gas_price <= self.gas_price_cap => Ok(gas_price),
+            Ok(gas_price) if gas_price.cap() <= self.gas_price_cap => Ok(gas_price),
             Ok(gas_price) => Err(anyhow!(
                 "gas station gas price {} is larger than cap {}",
-                gas_price,
+                gas_price.cap(),
                 self.gas_price_cap
             )),
             Err(err) => Err(err),
@@ -212,7 +212,7 @@ impl<'a> ArcherSolutionSubmitter<'a> {
         let target_confirm_time = Instant::now() + target_confirm_time;
 
         // gas price and raw signed transaction
-        let mut previous_tx: Option<(f64, Vec<u8>)> = None;
+        let mut previous_tx: Option<(EstimatedGasPrice, Vec<u8>)> = None;
 
         loop {
             // get gas price
@@ -230,7 +230,8 @@ impl<'a> ArcherSolutionSubmitter<'a> {
 
             // create transaction
 
-            let tx_gas_cost_in_ether_wei = U256::from_f64_lossy(gas_price) * gas_estimate;
+            let tx_gas_cost_in_ether_wei =
+                U256::from_f64_lossy(gas_price.effective_gas_price()) * gas_estimate;
             let mut settlement = settlement.clone();
             settlement
                 .encoder
@@ -246,7 +247,7 @@ impl<'a> ArcherSolutionSubmitter<'a> {
             // Wouldn't work because the function isn't payable.
             // .value(tx_gas_cost_in_ether_wei)
             .gas(U256::from_f64_lossy(gas_limit))
-            .gas_price(GasPrice::Value(U256::zero()));
+            .gas_price(0.0.into());
 
             // simulate transaction
 
@@ -262,7 +263,7 @@ impl<'a> ArcherSolutionSubmitter<'a> {
             // If gas price has increased cancel old and submit new new transaction.
 
             if let Some((previous_gas_price, previous_tx)) = previous_tx.as_ref() {
-                if gas_price > *previous_gas_price {
+                if gas_price.cap() > previous_gas_price.cap() {
                     if let Err(err) = self.archer_api.cancel(previous_tx).await {
                         tracing::error!("archer cancellation failed: {:?}", err);
                     }
@@ -280,7 +281,7 @@ impl<'a> ArcherSolutionSubmitter<'a> {
                 };
 
             tracing::info!(
-                "creating archer transaction with hash {:?}, tip to miner {:.3e}, gas price {:.3e}, gas estimate {}",
+                "creating archer transaction with hash {:?}, tip to miner {:.3e}, gas price {:?}, gas estimate {}",
                 hash,
                 tx_gas_cost_in_ether_wei.to_f64_lossy(),
                 gas_price,
@@ -305,13 +306,13 @@ impl<'a> ArcherSolutionSubmitter<'a> {
 }
 
 /// From a list of potential hashes find one that was mined.
-async fn find_mined_transaction(web3: &Web3, hashes: &[H256]) -> Option<H256> {
+async fn find_mined_transaction(web3: &Web3, hashes: &[H256]) -> Option<TransactionReceipt> {
     // It would be nice to use the nonce and account address to find the transaction hash but there
     // is no way to do this in ethrpc api so we have to check the candidates one by one.
     let web3 = web3::Web3::new(web3::transports::Batch::new(web3.transport()));
     let futures = hashes
         .iter()
-        .map(|&hash| web3.eth().transaction(TransactionId::Hash(hash)))
+        .map(|&hash| web3.eth().transaction_receipt(hash))
         .collect::<Vec<_>>();
     if let Err(err) = web3.transport().submit_batch().await {
         tracing::error!("mined transaction batch failed: {:?}", err);
@@ -322,9 +323,7 @@ async fn find_mined_transaction(web3: &Web3, hashes: &[H256]) -> Option<H256> {
             Err(err) => {
                 tracing::error!("mined transaction individual failed: {:?}", err);
             }
-            Ok(Some(transaction)) if transaction.block_hash.is_some() => {
-                return Some(transaction.hash)
-            }
+            Ok(Some(transaction)) if transaction.block_hash.is_some() => return Some(transaction),
             Ok(_) => (),
         }
     }
@@ -343,6 +342,7 @@ mod tests {
         gas_price_estimation::FakeGasPriceEstimator,
         transport::{create_env_test_transport, dummy::DummyTransport},
     };
+    use tracing::level_filters::LevelFilter;
 
     #[tokio::test]
     async fn cannot_create_archer_submitter_with_local_account() {
@@ -350,7 +350,10 @@ mod tests {
         let account = Account::Local(H160([0x42; 20]), None);
         let contract = dummy_contract!(GPv2Settlement, H160([0x01; 20]));
         let archer_api = ArcherApi::new("unused".to_string(), Client::new());
-        let gas_price_estimator = FakeGasPriceEstimator::new(1e9);
+        let gas_price_estimator = FakeGasPriceEstimator::new(EstimatedGasPrice {
+            legacy: 1e9,
+            ..Default::default()
+        });
         let gas_price_cap = 100e9;
 
         assert!(ArcherSolutionSubmitter::new(
@@ -378,14 +381,23 @@ mod tests {
                 "b9752d57ea49d8055bf50a1361f066691d7b4f2abd555e71896370d1eccda526"
             )),
         ];
-        assert_eq!(find_mined_transaction(&web3, hashes).await, Some(hashes[1]));
+        assert_eq!(
+            find_mined_transaction(&web3, hashes)
+                .await
+                .unwrap()
+                .transaction_hash,
+            hashes[1]
+        );
     }
 
     // env NODE_URL=... PRIVATE_KEY=... ARCHER_AUTHORIZATION=... cargo test -p solver mainnet_settlement -- --ignored --nocapture
     #[tokio::test]
     #[ignore]
     async fn mainnet_settlement() {
-        shared::tracing::initialize("solver=debug,shared=debug,shared::transport::http=info");
+        shared::tracing::initialize(
+            "solver=debug,shared=debug,shared::transport::http=info",
+            LevelFilter::OFF,
+        );
 
         let web3 = Web3::new(create_env_test_transport());
         let chain_id = web3.eth().chain_id().await.unwrap().as_u64();
@@ -402,13 +414,19 @@ mod tests {
         let gas_price_cap = 100e9;
 
         let settlement = Settlement::new(Default::default());
-        let gas_estimate = crate::settlement_submission::estimate_gas(
-            &contract,
-            &settlement.clone().into(),
-            account.clone(),
-        )
-        .await
-        .unwrap();
+        let gas_estimate =
+            crate::settlement_simulation::simulate_and_estimate_gas_at_current_block(
+                std::iter::once((account.clone(), settlement.clone())),
+                &contract,
+                &web3,
+                Default::default(),
+            )
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap()
+            .unwrap();
 
         let submitter = ArcherSolutionSubmitter::new(
             &web3,

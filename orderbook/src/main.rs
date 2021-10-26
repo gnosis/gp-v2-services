@@ -7,10 +7,11 @@ use model::{
 };
 use orderbook::{
     account_balances::Web3BalanceFetcher,
-    api::order_validation::OrderValidator,
+    api::{order_validation::OrderValidator, post_quote::OrderQuoter},
     database::{self, orders::OrderFilter, Postgres},
     event_updater::EventUpdater,
     fee::EthAwareMinFeeCalculator,
+    gas_price::InstrumentedGasEstimator,
     metrics::Metrics,
     orderbook::Orderbook,
     serve_api,
@@ -18,6 +19,8 @@ use orderbook::{
     verify_deployed_contract_constants,
 };
 use primitive_types::H160;
+use shared::price_estimation::zeroex::ZeroExPriceEstimator;
+use shared::zeroex_api::DefaultZeroExApi;
 use shared::{
     bad_token::{
         cache::CachingDetector,
@@ -32,8 +35,9 @@ use shared::{
     metrics::{serve_metrics, setup_metrics_registry, DEFAULT_METRICS_PORT},
     paraswap_api::DefaultParaswapApi,
     price_estimation::{
-        baseline::BaselinePriceEstimator, paraswap::ParaswapPriceEstimator,
-        priority::PriorityPriceEstimator, PriceEstimating, PriceEstimatorType,
+        baseline::BaselinePriceEstimator, instrumented::InstrumentedPriceEstimator,
+        paraswap::ParaswapPriceEstimator, priority::PriorityPriceEstimator, PriceEstimating,
+        PriceEstimatorType,
     },
     recent_block_cache::CacheConfig,
     sources::{
@@ -126,6 +130,11 @@ struct Arguments {
     )]
     solvable_orders_max_update_age: Duration,
 
+    /// Gas Fee Factor: 1.0 means cost is forwarded to users alteration, 0.9 means there is a 10%
+    /// subsidy, 1.1 means users pay 10% in fees than what we estimate we pay for gas.
+    #[structopt(long, env, default_value = "1", parse(try_from_str = shared::arguments::parse_fee_factor))]
+    pub fee_factor: f64,
+
     /// Used to specify additional fee subsidy factor based on app_ids contained in orders.
     /// Should take the form of a json string as shown in the following example:
     ///
@@ -160,7 +169,10 @@ pub async fn database_metrics(metrics: Arc<Metrics>, database: Postgres) -> ! {
 #[tokio::main]
 async fn main() {
     let args = Arguments::from_args();
-    shared::tracing::initialize(args.shared.log_filter.as_str());
+    shared::tracing::initialize(
+        args.shared.log_filter.as_str(),
+        args.shared.log_stderr_threshold,
+    );
     tracing::info!("running order book with validated {:#?}", args);
 
     setup_metrics_registry(Some("gp_v2_api".into()), None);
@@ -251,15 +263,17 @@ async fn main() {
         settlement_contract.address(),
     ));
 
-    let gas_price_estimator = Arc::new(
+    let gas_price_estimator = Arc::new(InstrumentedGasEstimator::new(
         shared::gas_price_estimation::create_priority_estimator(
             client.clone(),
             &web3,
             args.shared.gas_estimators.as_slice(),
+            args.shared.blocknative_api_key.clone(),
         )
         .await
         .expect("failed to create gas price estimator"),
-    );
+        metrics.clone(),
+    ));
 
     let pair_providers = sources::pair_providers(&args.shared.baseline_sources, chain_id, &web3)
         .await
@@ -346,24 +360,42 @@ async fn main() {
         .shared
         .price_estimators
         .iter()
-        .map(|estimator| match estimator {
-            PriceEstimatorType::Baseline => Box::new(BaselinePriceEstimator::new(
-                pool_fetcher.clone(),
-                gas_price_estimator.clone(),
-                base_tokens.clone(),
-                bad_token_detector.clone(),
-                native_token.address(),
-                native_token_price_estimation_amount,
-            )) as Box<dyn PriceEstimating>,
-            PriceEstimatorType::Paraswap => Box::new(ParaswapPriceEstimator {
-                paraswap: Arc::new(DefaultParaswapApi {
-                    client: client.clone(),
-                    partner: args.shared.paraswap_partner.clone().unwrap_or_default(),
-                }),
-                token_info: token_info_fetcher.clone(),
-                bad_token_detector: bad_token_detector.clone(),
-                disabled_paraswap_dexs: args.shared.disabled_paraswap_dexs.clone(),
-            }),
+        .map(|estimator| -> Box<dyn PriceEstimating> {
+            match estimator {
+                PriceEstimatorType::Baseline => Box::new(InstrumentedPriceEstimator::new(
+                    BaselinePriceEstimator::new(
+                        pool_fetcher.clone(),
+                        gas_price_estimator.clone(),
+                        base_tokens.clone(),
+                        bad_token_detector.clone(),
+                        native_token.address(),
+                        native_token_price_estimation_amount,
+                    ),
+                    "Baseline",
+                    metrics.clone(),
+                )),
+                PriceEstimatorType::Paraswap => Box::new(InstrumentedPriceEstimator::new(
+                    ParaswapPriceEstimator {
+                        paraswap: Arc::new(DefaultParaswapApi {
+                            client: client.clone(),
+                            partner: args.shared.paraswap_partner.clone().unwrap_or_default(),
+                        }),
+                        token_info: token_info_fetcher.clone(),
+                        bad_token_detector: bad_token_detector.clone(),
+                        disabled_paraswap_dexs: args.shared.disabled_paraswap_dexs.clone(),
+                    },
+                    "ParaSwap",
+                    metrics.clone(),
+                )),
+                PriceEstimatorType::ZeroEx => Box::new(InstrumentedPriceEstimator::new(
+                    ZeroExPriceEstimator {
+                        client: Arc::new(DefaultZeroExApi::with_default_url(client.clone())),
+                        bad_token_detector: bad_token_detector.clone(),
+                    },
+                    "ZeroEx",
+                    metrics.clone(),
+                )),
+            }
         })
         .collect::<Vec<_>>();
     let price_estimator = Arc::new(PriorityPriceEstimator::new(price_estimators));
@@ -372,7 +404,7 @@ async fn main() {
         gas_price_estimator,
         native_token.address(),
         database.clone(),
-        args.shared.fee_factor,
+        args.fee_factor,
         bad_token_detector.clone(),
         args.partner_additional_fee_factors,
         native_token_price_estimation_amount,
@@ -407,19 +439,22 @@ async fn main() {
         args.enable_presign_orders,
         solvable_orders_cache,
         args.solvable_orders_max_update_age,
-        order_validator,
+        order_validator.clone(),
     ));
     let service_maintainer = ServiceMaintenance {
         maintainers: vec![database.clone(), Arc::new(event_updater), pool_fetcher],
     };
     check_database_connection(orderbook.as_ref()).await;
-
+    let quoter = Arc::new(OrderQuoter::new(
+        fee_calculator,
+        price_estimator,
+        order_validator,
+    ));
     let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel();
     let serve_api = serve_api(
         database.clone(),
         orderbook.clone(),
-        fee_calculator,
-        price_estimator,
+        quoter,
         args.bind_address,
         async {
             let _ = shutdown_receiver.await;

@@ -1,10 +1,11 @@
 use crate::{
     api::order_validation::{OrderValidating, OrderValidator, ValidationError},
     database::orders::{InsertionError, OrderFilter, OrderStoring},
-    solvable_orders::SolvableOrdersCache,
+    solvable_orders::{SolvableOrders, SolvableOrdersCache},
 };
 use anyhow::{ensure, Result};
 use chrono::Utc;
+use ethcontract::H256;
 use model::{
     order::{Order, OrderCancellation, OrderCreationPayload, OrderStatus, OrderUid},
     signature::SigningScheme,
@@ -156,7 +157,7 @@ impl Orderbook {
             let solvable_orders = self
                 .solvable_orders
                 .cached_solvable_orders()
-                .0
+                .orders
                 .iter()
                 .map(Query::from_order)
                 .collect::<HashSet<_>>();
@@ -178,13 +179,19 @@ impl Orderbook {
         Ok(Some(order))
     }
 
-    pub async fn get_solvable_orders(&self) -> Result<Vec<Order>> {
-        let (orders, timestamp) = self.solvable_orders.cached_solvable_orders();
+    pub async fn get_orders_for_tx(&self, hash: &H256) -> Result<Vec<Order>> {
+        let mut orders = self.database.orders_for_tx(hash).await?;
+        set_available_balances(orders.as_mut_slice(), &self.solvable_orders);
+        Ok(orders)
+    }
+
+    pub async fn get_solvable_orders(&self) -> Result<SolvableOrders> {
+        let solvable_orders = self.solvable_orders.cached_solvable_orders();
         ensure!(
-            timestamp.elapsed() <= self.solvable_orders_max_update_age,
+            solvable_orders.update_time.elapsed() <= self.solvable_orders_max_update_age,
             "solvable orders are out of date"
         );
-        Ok(orders)
+        Ok(solvable_orders)
     }
 
     pub async fn get_user_orders(

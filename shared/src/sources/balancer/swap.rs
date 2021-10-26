@@ -40,43 +40,9 @@ trait BalancerPoolSwapping {
             .map(|amount_without_fees| amount_without_fees.as_uint256())
     }
 
-    fn checked_get_amount_in(
-        &self,
-        in_token: H160,
-        out_amount: U256,
-        out_token: H160,
-    ) -> Option<U256> {
-        let in_amount = self.unchecked_get_amount_in(in_token, out_amount, out_token)?;
-        // We double check that resulting amount in can symmetrically provide an amount out.
-        self.unchecked_get_amount_out(out_token, in_amount, in_token)?;
-        Some(in_amount)
-    }
+    fn get_amount_in_(&self, in_token: H160, out_amount: U256, out_token: H160) -> Option<U256>;
 
-    fn checked_get_amount_out(
-        &self,
-        out_token: H160,
-        in_amount: U256,
-        in_token: H160,
-    ) -> Option<U256> {
-        let out_amount = self.unchecked_get_amount_out(out_token, in_amount, in_token)?;
-        // We double check that resulting amount out can symmetrically provide an amount in.
-        self.unchecked_get_amount_in(in_token, out_amount, out_token)?;
-        Some(out_amount)
-    }
-
-    fn unchecked_get_amount_in(
-        &self,
-        in_token: H160,
-        out_amount: U256,
-        out_token: H160,
-    ) -> Option<U256>;
-
-    fn unchecked_get_amount_out(
-        &self,
-        out_token: H160,
-        in_amount: U256,
-        in_token: H160,
-    ) -> Option<U256>;
+    fn get_amount_out_(&self, out_token: H160, in_amount: U256, in_token: H160) -> Option<U256>;
 }
 
 impl TokenState {
@@ -114,12 +80,7 @@ pub struct WeightedPoolRef<'a> {
 }
 
 impl BalancerPoolSwapping for WeightedPoolRef<'_> {
-    fn unchecked_get_amount_in(
-        &self,
-        in_token: H160,
-        out_amount: U256,
-        out_token: H160,
-    ) -> Option<U256> {
+    fn get_amount_in_(&self, in_token: H160, out_amount: U256, out_token: H160) -> Option<U256> {
         // Note that the output of this function does not depend on the pool
         // specialization. All contract branches compute this amount with:
         // https://github.com/balancer-labs/balancer-v2-monorepo/blob/6c9e24e22d0c46cca6dd15861d3d33da61a60b98/pkg/core/contracts/pools/BaseMinimalSwapInfoPool.sol#L75-L88
@@ -135,17 +96,11 @@ impl BalancerPoolSwapping for WeightedPoolRef<'_> {
         .ok()
         .map(|bfp| in_reserves.token_state.downscale(bfp))
         .flatten()?;
-
         self.add_swap_fee_amount(amount_in_before_fee, self.swap_fee_percentage)
             .ok()
     }
 
-    fn unchecked_get_amount_out(
-        &self,
-        out_token: H160,
-        in_amount: U256,
-        in_token: H160,
-    ) -> Option<U256> {
+    fn get_amount_out_(&self, out_token: H160, in_amount: U256, in_token: H160) -> Option<U256> {
         // Note that the output of this function does not depend on the pool
         // specialization. All contract branches compute this amount with:
         // https://github.com/balancer-labs/balancer-v2-monorepo/blob/6c9e24e22d0c46cca6dd15861d3d33da61a60b98/pkg/core/contracts/pools/BaseMinimalSwapInfoPool.sol#L62-L75
@@ -171,11 +126,11 @@ impl BalancerPoolSwapping for WeightedPoolRef<'_> {
 
 impl BaselineSolvable for WeightedPoolRef<'_> {
     fn get_amount_out(&self, out_token: H160, (in_amount, in_token): (U256, H160)) -> Option<U256> {
-        self.checked_get_amount_out(out_token, in_amount, in_token)
+        self.get_amount_out_(out_token, in_amount, in_token)
     }
 
     fn get_amount_in(&self, in_token: H160, (out_amount, out_token): (U256, H160)) -> Option<U256> {
-        self.checked_get_amount_in(in_token, out_amount, out_token)
+        self.get_amount_in_(in_token, out_amount, out_token)
     }
 
     fn get_spot_price(&self, base_token: H160, quote_token: H160) -> Option<BigRational> {
@@ -233,12 +188,7 @@ struct BalancesWithIndices {
 }
 
 impl BalancerPoolSwapping for StablePoolRef<'_> {
-    fn unchecked_get_amount_in(
-        &self,
-        in_token: H160,
-        out_amount: U256,
-        out_token: H160,
-    ) -> Option<U256> {
+    fn get_amount_in_(&self, in_token: H160, out_amount: U256, out_token: H160) -> Option<U256> {
         let in_reserves = self.reserves.get(&in_token)?;
         let out_reserves = self.reserves.get(&out_token)?;
         let BalancesWithIndices {
@@ -260,12 +210,7 @@ impl BalancerPoolSwapping for StablePoolRef<'_> {
             .ok()
     }
 
-    fn unchecked_get_amount_out(
-        &self,
-        out_token: H160,
-        in_amount: U256,
-        in_token: H160,
-    ) -> Option<U256> {
+    fn get_amount_out_(&self, out_token: H160, in_amount: U256, in_token: H160) -> Option<U256> {
         // Note that the output of this function does not depend on the pool
         // specialization. All contract branches compute this amount with:
         // https://github.com/balancer-labs/balancer-v2-monorepo/blob/6c9e24e22d0c46cca6dd15861d3d33da61a60b98/pkg/core/contracts/pools/BaseMinimalSwapInfoPool.sol#L62-L75
@@ -324,11 +269,11 @@ impl StablePoolRef<'_> {
 
 impl BaselineSolvable for StablePoolRef<'_> {
     fn get_amount_out(&self, out_token: H160, (in_amount, in_token): (U256, H160)) -> Option<U256> {
-        self.checked_get_amount_out(out_token, in_amount, in_token)
+        self.get_amount_out_(out_token, in_amount, in_token)
     }
 
     fn get_amount_in(&self, in_token: H160, (out_amount, out_token): (U256, H160)) -> Option<U256> {
-        self.checked_get_amount_in(in_token, out_amount, out_token)
+        self.get_amount_in_(in_token, out_amount, out_token)
     }
 
     fn get_spot_price(&self, base_token: H160, quote_token: H160) -> Option<BigRational> {

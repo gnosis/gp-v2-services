@@ -10,6 +10,7 @@ use std::{
     str::FromStr,
     time::Duration,
 };
+use tracing::level_filters::LevelFilter;
 use url::Url;
 
 #[derive(Debug, structopt::StructOpt)]
@@ -20,6 +21,9 @@ pub struct Arguments {
         default_value = "warn,orderbook=debug,solver=debug,shared=debug,shared::transport::http=info,archerapi=info"
     )]
     pub log_filter: String,
+
+    #[structopt(long, env, default_value = "error", parse(try_from_str))]
+    pub log_stderr_threshold: LevelFilter,
 
     /// The Ethereum node URL to connect to.
     #[structopt(long, env, default_value = "http://localhost:8545")]
@@ -49,15 +53,14 @@ pub struct Arguments {
     )]
     pub gas_estimators: Vec<GasEstimatorType>,
 
+    /// BlockNative requires api key to work. Optional since BlockNative could be skipped in gas estimators.
+    #[structopt(long, env)]
+    pub blocknative_api_key: Option<String>,
+
     /// Base tokens used for finding multi-hop paths between multiple AMMs
     /// Should be the most liquid tokens of the given network.
     #[structopt(long, env, use_delimiter = true)]
     pub base_tokens: Vec<H160>,
-
-    /// Gas Fee Factor: 1.0 means cost is forwarded to users alteration, 0.9 means there is a 10%
-    /// subsidy, 1.1 means users pay 10% in fees than what we estimate we pay for gas.
-    #[structopt(long, env, default_value = "1", parse(try_from_str = parse_fee_factor))]
-    pub fee_factor: f64,
 
     /// Which Liquidity sources to be used by Price Estimator.
     #[structopt(
@@ -126,9 +129,9 @@ pub struct Arguments {
 }
 
 pub fn parse_fee_factor(s: &str) -> Result<f64> {
-    let f64 = f64::from_str(s)?;
-    ensure!(f64.is_finite() && f64 >= 0.);
-    Ok(f64)
+    let fee = f64::from_str(s)?;
+    ensure!(fee.is_finite() && fee >= 0.);
+    Ok(fee)
 }
 
 pub fn duration_from_seconds(s: &str) -> Result<Duration, ParseFloatError> {

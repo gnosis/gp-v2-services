@@ -1,15 +1,16 @@
 use crate::settlement::Settlement;
-use crate::solver::Solver;
 use anyhow::{Error, Result};
 use contracts::GPv2Settlement;
 use ethcontract::{
-    batch::CallBatch, dyns::DynTransport, transaction::TransactionBuilder, GasPrice,
+    batch::CallBatch, contract::MethodBuilder, dyns::DynTransport, errors::ExecutionError,
+    transaction::TransactionBuilder, Account,
 };
 use futures::FutureExt;
+use gas_estimation::EstimatedGasPrice;
+use itertools::Itertools;
 use primitive_types::U256;
 use shared::Web3;
-use std::sync::Arc;
-use web3::types::{BlockId, BlockNumber};
+use web3::types::{BlockId, CallRequest};
 
 const SIMULATE_BATCH_SIZE: usize = 10;
 
@@ -29,72 +30,107 @@ const SIMULATE_BATCH_SIZE: usize = 10;
 /// Next [block 12998226](https://etherscan.io/block/12998226) has base fee of `48.771904644` which is an increase of ~12.5%.
 const MAX_BASE_GAS_FEE_INCREASE: f64 = 1.125;
 
-pub enum Block {
-    // Simulate the transactions at this block and attach a tenderly link to errors.
-    FixedWithTenderly(u64),
-    // Simulate the transactions at the latest block and do not attach a tenderly link.
-    LatestWithoutTenderly,
-}
-
-/// Simulate the settlement using a web3 `call`.
-// Clippy claims we don't need to collect `futures` but we do or the lifetimes with `join!` don't
-// work out.
-#[allow(clippy::needless_collect)]
-pub async fn simulate_settlements(
-    settlements: impl Iterator<Item = &(Arc<dyn Solver>, Settlement)>,
+pub async fn simulate_and_estimate_gas_at_current_block(
+    settlements: impl Iterator<Item = (Account, Settlement)>,
     contract: &GPv2Settlement,
     web3: &Web3,
+    gas_price: EstimatedGasPrice,
+) -> Result<Vec<Result<U256, ExecutionError>>> {
+    // Needed because sending an empty batch request gets an empty response which doesn't
+    // deserialize correctly.
+    let mut settlements = settlements.peekable();
+    if settlements.peek().is_none() {
+        return Ok(Vec::new());
+    }
+
+    let web3 = web3::Web3::new(web3::transports::Batch::new(web3.transport().clone()));
+    let mut results = Vec::new();
+    for chunk in &settlements.chunks(SIMULATE_BATCH_SIZE) {
+        let calls = chunk
+            .map(|(account, settlement)| {
+                let tx = settle_method(gas_price, contract, settlement, account).tx;
+                let resolved_gas_price = tx
+                    .gas_price
+                    .map(|gas_price| gas_price.resolve_for_transaction())
+                    .unwrap_or_default();
+                let call_request = CallRequest {
+                    from: tx.from.map(|account| account.address()),
+                    to: tx.to,
+                    gas: None,
+                    gas_price: resolved_gas_price.gas_price,
+                    value: tx.value,
+                    data: tx.data,
+                    transaction_type: resolved_gas_price.transaction_type,
+                    access_list: None,
+                    max_fee_per_gas: resolved_gas_price.max_fee_per_gas,
+                    max_priority_fee_per_gas: resolved_gas_price.max_priority_fee_per_gas,
+                };
+                web3.eth().estimate_gas(call_request, None)
+            })
+            .collect::<Vec<_>>();
+        web3.transport().submit_batch().await?;
+        for call in calls {
+            results.push(call.await.map_err(ExecutionError::from));
+        }
+    }
+    Ok(results)
+}
+
+#[allow(clippy::needless_collect)]
+pub async fn simulate_and_error_with_tenderly_link(
+    settlements: impl Iterator<Item = (Account, Settlement)>,
+    contract: &GPv2Settlement,
+    web3: &Web3,
+    gas_price: EstimatedGasPrice,
     network_id: &str,
-    block: Block,
-    gas_price: f64,
-) -> Result<Vec<Result<()>>> {
+    block: u64,
+) -> Vec<Result<()>> {
     let mut batch = CallBatch::new(web3.transport());
     let futures = settlements
-        .map(|(solver, settlement)| {
-            // Increase the gas price by the highest possible base gas fee increase. This
-            // is done because the between retrieving the gas price and executing the simulation,
-            // a block may have been mined that increases the base gas fee and causes the
-            // `eth_call` simulation to fail with `max fee per gas less than block base fee`.
-            let gas_price =
-                GasPrice::Value(U256::from_f64_lossy(gas_price * MAX_BASE_GAS_FEE_INCREASE));
-            // TODO: can we get rid of this settlement clone?
-            let method = crate::settlement_submission::retry::settle_method_builder(
-                contract,
-                settlement.clone().into(),
-                solver.account().clone(),
-            )
-            .gas_price(gas_price);
+        .map(|(account, settlement)| {
+            let method = settle_method(gas_price, contract, settlement, account);
             let transaction_builder = method.tx.clone();
             let view = method
                 .view()
-                .block(match block {
-                    Block::FixedWithTenderly(block) => BlockId::Number(block.into()),
-                    Block::LatestWithoutTenderly => BlockId::Number(BlockNumber::Latest),
-                })
+                .block(BlockId::Number(block.into()))
                 // Since we now supply the gas price for the simulation, make sure to also
                 // set a gas limit so we don't get failed simulations because of insufficient
                 // solver balance for the default ~150M gas limit. Limit to around the
                 // block gas limit (since we can't fit more anyway).
-                .gas(15_000_000.into());
+                .gas(30_000_000.into());
             (view.batch_call(&mut batch), transaction_builder)
         })
         .collect::<Vec<_>>();
     batch.execute_all(SIMULATE_BATCH_SIZE).await;
 
-    Ok(futures
+    futures
         .into_iter()
         .map(|(future, transaction_builder)| {
             future.now_or_never().unwrap().map(|_| ()).map_err(|err| {
-                let err = Error::new(err);
-                match block {
-                    Block::FixedWithTenderly(block) => {
-                        err.context(tenderly_link(block, network_id, transaction_builder))
-                    }
-                    Block::LatestWithoutTenderly => err,
-                }
+                Error::new(err).context(tenderly_link(block, network_id, transaction_builder))
             })
         })
-        .collect())
+        .collect()
+}
+
+fn settle_method(
+    gas_price: EstimatedGasPrice,
+    contract: &GPv2Settlement,
+    settlement: Settlement,
+    account: Account,
+) -> MethodBuilder<DynTransport, ()> {
+    // Increase the gas price by the highest possible base gas fee increase. This
+    // is done because the between retrieving the gas price and executing the simulation,
+    // a block may have been mined that increases the base gas fee and causes the
+    // `eth_call` simulation to fail with `max fee per gas less than block base fee`.
+    let gas_price = gas_price.bump(MAX_BASE_GAS_FEE_INCREASE);
+    let gas_price = if let Some(eip1559) = gas_price.eip1559 {
+        (eip1559.max_fee_per_gas, eip1559.max_priority_fee_per_gas).into()
+    } else {
+        gas_price.legacy.into()
+    };
+    crate::settlement_submission::retry::settle_method_builder(contract, settlement.into(), account)
+        .gas_price(gas_price)
 }
 
 // Creates a simulation link in the gp-v2 tenderly workspace
@@ -124,30 +160,77 @@ mod tests {
     #[ignore]
     async fn mainnet() {
         // Create some bogus settlements to see that the simulation returns an error.
+        shared::tracing::initialize("solver=debug,shared=debug", tracing::Level::ERROR.into());
         let transport = create_env_test_transport();
         let web3 = Web3::new(transport);
         let block = web3.eth().block_number().await.unwrap().as_u64();
         let network_id = web3.net().version().await.unwrap();
         let contract = GPv2Settlement::deployed(&web3).await.unwrap();
         let account = Account::Offline(PrivateKey::from_raw([1; 32]).unwrap(), None);
-        let solver = crate::solver::naive_solver(account);
 
         let settlements = vec![
             (
-                solver.clone(),
+                account.clone(),
                 Settlement::with_trades(Default::default(), vec![Default::default()]),
             ),
-            (solver.clone(), Settlement::new(Default::default())),
+            (account.clone(), Settlement::new(Default::default())),
         ];
-        let result = simulate_settlements(
-            settlements.iter(),
+        let result = simulate_and_error_with_tenderly_link(
+            settlements.iter().cloned(),
             &contract,
             &web3,
+            Default::default(),
             network_id.as_str(),
-            Block::FixedWithTenderly(block),
-            0.0,
+            block,
         )
         .await;
+        let _ = dbg!(result);
+
+        let result = simulate_and_estimate_gas_at_current_block(
+            settlements.iter().cloned(),
+            &contract,
+            &web3,
+            Default::default(),
+        )
+        .await
+        .unwrap();
+        let _ = dbg!(result);
+
+        let result = simulate_and_estimate_gas_at_current_block(
+            std::iter::empty(),
+            &contract,
+            &web3,
+            Default::default(),
+        )
+        .await
+        .unwrap();
+        let _ = dbg!(result);
+    }
+
+    // cargo test -p solver settlement_simulation::tests::mainnet_chunked -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn mainnet_chunked() {
+        shared::tracing::initialize("solver=debug,shared=debug", tracing::Level::ERROR.into());
+        let transport = create_env_test_transport();
+        let web3 = Web3::new(transport);
+        let contract = GPv2Settlement::deployed(&web3).await.unwrap();
+        let account = Account::Offline(PrivateKey::from_raw([1; 32]).unwrap(), None);
+
+        // 12 so that we hit more than one chunk.
+        let settlements =
+            vec![(account.clone(), Settlement::new(Default::default())); SIMULATE_BATCH_SIZE + 2];
+        let result = simulate_and_estimate_gas_at_current_block(
+            settlements.iter().cloned(),
+            &contract,
+            &web3,
+            EstimatedGasPrice {
+                legacy: 0.0,
+                eip1559: None,
+            },
+        )
+        .await
+        .unwrap();
         let _ = dbg!(result);
     }
 }
