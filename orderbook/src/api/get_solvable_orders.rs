@@ -1,5 +1,5 @@
 use crate::orderbook::Orderbook;
-use crate::{api::convert_get_orders_error_to_reply, solvable_orders::SolvableOrders};
+use crate::{api::WarpReplyConverting, solvable_orders::SolvableOrders};
 use anyhow::Result;
 use std::{convert::Infallible, sync::Arc};
 use warp::{hyper::StatusCode, reply, Filter, Rejection, Reply};
@@ -14,7 +14,7 @@ fn get_solvable_orders_response(result: Result<SolvableOrders>) -> impl Reply {
             reply::json(&orders.orders),
             StatusCode::OK,
         )),
-        Err(err) => Ok(convert_get_orders_error_to_reply(err)),
+        Err(err) => Ok(err.into_warp_reply()),
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::api::price_estimation_error_to_warp_reply;
+use crate::api::WarpReplyConverting;
 use crate::fee::MinFeeCalculating;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -45,10 +45,7 @@ pub fn get_fee_info_response(
             };
             Ok(reply::with_status(reply::json(&fee_info), StatusCode::OK))
         }
-        Err(err) => {
-            let (json, status_code) = price_estimation_error_to_warp_reply(err);
-            Ok(reply::with_status(json, status_code))
-        }
+        Err(err) => Ok(err.into_warp_reply()),
     }
 }
 
@@ -100,10 +97,7 @@ pub fn legacy_get_fee_info_response(
             };
             Ok(reply::with_status(reply::json(&fee_info), StatusCode::OK))
         }
-        Err(err) => {
-            let (json, status_code) = price_estimation_error_to_warp_reply(err);
-            Ok(reply::with_status(json, status_code))
-        }
+        Err(err) => Ok(err.into_warp_reply()),
     }
 }
 

@@ -126,48 +126,57 @@ fn internal_error() -> Json {
     })
 }
 
-pub fn convert_response<T>(result: Result<T>) -> impl Reply
+pub fn convert_response_ok<T>(result: Result<T>) -> impl Reply
 where
     T: WarpReplyConverting,
 {
-    let (body, status_code) = match result {
+    match result {
         Ok(result) => result.into_warp_reply(),
-        Err(_) => (internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
-    };
-    warp::reply::with_status(body, status_code)
+        Err(_) => with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+pub fn convert_response_err<T, E>(result: Result<T, E>) -> WithStatus<Json>
+where
+    T: Serialize,
+    E: WarpReplyConverting,
+{
+    match result {
+        Ok(response) => with_status(warp::reply::json(&response), StatusCode::OK),
+        Err(err) => err.into_warp_reply(),
+    }
 }
 
 pub trait WarpReplyConverting {
-    fn into_warp_reply(self) -> (Json, StatusCode);
+    fn into_warp_reply(self) -> WithStatus<Json>;
 }
 
-pub fn convert_get_orders_error_to_reply(err: anyhowError) -> WithStatus<Json> {
-    tracing::error!(?err, "get_orders error");
-    with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
+impl WarpReplyConverting for anyhowError {
+    fn into_warp_reply(self) -> WithStatus<Json> {
+        tracing::error!(?self, "response error");
+        with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
+    }
 }
 
-pub fn convert_get_trades_error_to_reply(err: anyhowError) -> WithStatus<Json> {
-    tracing::error!(?err, "get_trades error");
-    with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
-}
-
-pub fn price_estimation_error_to_warp_reply(err: PriceEstimationError) -> (Json, StatusCode) {
-    match err {
-        PriceEstimationError::UnsupportedToken(token) => (
-            error("UnsupportedToken", format!("Token address {:?}", token)),
-            StatusCode::BAD_REQUEST,
-        ),
-        PriceEstimationError::NoLiquidity => (
-            error("NoLiquidity", "not enough liquidity"),
-            StatusCode::NOT_FOUND,
-        ),
-        PriceEstimationError::ZeroAmount => (
-            error("ZeroAmount", "Please use non-zero amount field"),
-            StatusCode::BAD_REQUEST,
-        ),
-        PriceEstimationError::Other(err) => {
-            tracing::error!(?err, "get_market error");
-            (internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
+impl WarpReplyConverting for PriceEstimationError {
+    fn into_warp_reply(self) -> WithStatus<Json> {
+        match self {
+            Self::UnsupportedToken(token) => with_status(
+                error("UnsupportedToken", format!("Token address {:?}", token)),
+                StatusCode::BAD_REQUEST,
+            ),
+            Self::NoLiquidity => with_status(
+                error("NoLiquidity", "not enough liquidity"),
+                StatusCode::NOT_FOUND,
+            ),
+            Self::ZeroAmount => with_status(
+                error("ZeroAmount", "Please use non-zero amount field"),
+                StatusCode::BAD_REQUEST,
+            ),
+            Self::Other(err) => {
+                tracing::error!(?err, "get_market error");
+                with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
+            }
         }
     }
 }

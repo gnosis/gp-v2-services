@@ -1,6 +1,4 @@
-use crate::api::post_quote::{
-    response, OrderQuoteRequest, OrderQuoteResponse, OrderQuoteSide, OrderQuoter, SellAmount,
-};
+use crate::api::{convert_response_err, post_quote::{OrderQuoteRequest, OrderQuoteResponse, OrderQuoteSide, OrderQuoter, SellAmount}};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use ethcontract::{H160, U256};
@@ -120,7 +118,7 @@ pub fn get_fee_and_quote_sell(
     sell_request().and_then(move |query: SellQuery| {
         let quoter = quoter.clone();
         async move {
-            Result::<_, Infallible>::Ok(response(
+            Result::<_, Infallible>::Ok(convert_response_err(
                 quoter
                     .calculate_quote(&query.into())
                     .await
@@ -136,7 +134,7 @@ pub fn get_fee_and_quote_buy(
     buy_request().and_then(move |query: BuyQuery| {
         let quoter = quoter.clone();
         async move {
-            Result::<_, Infallible>::Ok(response(
+            Result::<_, Infallible>::Ok(convert_response_err(
                 quoter
                     .calculate_quote(&query.into())
                     .await

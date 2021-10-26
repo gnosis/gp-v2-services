@@ -5,6 +5,7 @@ use model::order::{BuyTokenDestination, Order, OrderCreation, SellTokenSource, B
 use model::DomainSeparator;
 use shared::{bad_token::BadTokenDetecting, web3_traits::CodeFetching};
 use std::{sync::Arc, time::Duration};
+use warp::reply::{with_status, WithStatus};
 use warp::{http::StatusCode, reply::Json};
 
 #[cfg_attr(test, mockall::automock)]
@@ -55,42 +56,44 @@ pub enum PartialValidationError {
 }
 
 impl WarpReplyConverting for PartialValidationError {
-    fn into_warp_reply(self) -> (Json, StatusCode) {
+    fn into_warp_reply(self) -> WithStatus<Json> {
         match self {
-            Self::UnsupportedBuyTokenDestination(dest) => (
+            Self::UnsupportedBuyTokenDestination(dest) => with_status(
                 super::error("UnsupportedBuyTokenDestination", format!("Type {:?}", dest)),
                 StatusCode::BAD_REQUEST,
             ),
-            Self::UnsupportedSellTokenSource(src) => (
+            Self::UnsupportedSellTokenSource(src) => with_status(
                 super::error("UnsupportedSellTokenSource", format!("Type {:?}", src)),
                 StatusCode::BAD_REQUEST,
             ),
-            Self::Forbidden => (
+            Self::Forbidden => with_status(
                 super::error("Forbidden", "Forbidden, your account is deny-listed"),
                 StatusCode::FORBIDDEN,
             ),
-            Self::InsufficientValidTo => (
+            Self::InsufficientValidTo => with_status(
                 super::error(
                     "InsufficientValidTo",
                     "validTo is not far enough in the future",
                 ),
                 StatusCode::BAD_REQUEST,
             ),
-            Self::TransferEthToContract => (
+            Self::TransferEthToContract => with_status(
                 super::error(
                     "TransferEthToContract",
                     "Sending Ether to smart contract wallets is currently not supported",
                 ),
                 StatusCode::BAD_REQUEST,
             ),
-            Self::SameBuyAndSellToken => (
+            Self::SameBuyAndSellToken => with_status(
                 super::error(
                     "SameBuyAndSellToken",
                     "Buy token is the same as the sell token.",
                 ),
                 StatusCode::BAD_REQUEST,
             ),
-            Self::Other(_) => (super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
+            Self::Other(_) => {
+                with_status(super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
+            }
         }
     }
 }
@@ -108,14 +111,14 @@ pub enum ValidationError {
 }
 
 impl WarpReplyConverting for ValidationError {
-    fn into_warp_reply(self) -> (Json, StatusCode) {
+    fn into_warp_reply(self) -> WithStatus<Json> {
         match self {
             ValidationError::Partial(pre) => pre.into_warp_reply(),
-            Self::UnsupportedToken(token) => (
+            Self::UnsupportedToken(token) => with_status(
                 super::error("UnsupportedToken", format!("Token address {}", token)),
                 StatusCode::BAD_REQUEST,
             ),
-            Self::WrongOwner(owner) => (
+            Self::WrongOwner(owner) => with_status(
                 super::error(
                     "WrongOwner",
                     format!(
@@ -125,26 +128,28 @@ impl WarpReplyConverting for ValidationError {
                 ),
                 StatusCode::BAD_REQUEST,
             ),
-            Self::InsufficientFunds => (
+            Self::InsufficientFunds => with_status(
                 super::error(
                     "InsufficientFunds",
                     "order owner must have funds worth at least x in his account",
                 ),
                 StatusCode::BAD_REQUEST,
             ),
-            Self::InvalidSignature => (
+            Self::InvalidSignature => with_status(
                 super::error("InvalidSignature", "invalid signature"),
                 StatusCode::BAD_REQUEST,
             ),
-            Self::InsufficientFee => (
+            Self::InsufficientFee => with_status(
                 super::error("InsufficientFee", "Order does not include sufficient fee"),
                 StatusCode::BAD_REQUEST,
             ),
-            Self::ZeroAmount => (
+            Self::ZeroAmount => with_status(
                 super::error("ZeroAmount", "Buy or sell amount is zero."),
                 StatusCode::BAD_REQUEST,
             ),
-            Self::Other(_) => (super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
+            Self::Other(_) => {
+                with_status(super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
+            }
         }
     }
 }

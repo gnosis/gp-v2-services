@@ -1,4 +1,4 @@
-use crate::api::price_estimation_error_to_warp_reply;
+use crate::api::WarpReplyConverting;
 use anyhow::{anyhow, Result};
 use ethcontract::{H160, U256};
 use model::order::OrderKind;
@@ -78,10 +78,7 @@ fn get_amount_estimate_response(
             }),
             StatusCode::OK,
         ),
-        Err(err) => {
-            let (json, status_code) = price_estimation_error_to_warp_reply(err);
-            reply::with_status(json, status_code)
-        }
+        Err(err) => err.into_warp_reply(),
     }
 }
 
