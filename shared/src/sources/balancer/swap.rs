@@ -9,6 +9,7 @@ use ethcontract::{H160, U256};
 use fixed_point::Bfp;
 use num::{BigRational, CheckedDiv};
 use std::collections::HashMap;
+use crate::sources::balancer::swap::math::BalU256;
 
 mod error;
 pub mod fixed_point;
@@ -66,10 +67,19 @@ impl TokenState {
 
     /// Returns the token amount corresponding to the internal Balancer
     /// representation for the same amount.
-    fn downscale(&self, amount: Bfp) -> Option<U256> {
+    /// Based on contract code here:
+    /// https://github.com/balancer-labs/balancer-v2-monorepo/blob/c18ff2686c61a8cbad72cdcfc65e9b11476fdbc3/pkg/pool-utils/contracts/BasePool.sol#L560-L562
+    fn downscale_up(&self, amount: Bfp) -> Result<U256, Error> {
+        let scaling_factor = self.scaling_exponent_as_factor().ok_or(Error::MulOverflow)?;
         amount
             .as_uint256()
-            .checked_div(self.scaling_exponent_as_factor()?)
+            .bdiv_up(scaling_factor)
+    }
+
+    /// Similar to downscale up above, but rounded down, this is just checked div.
+    /// https://github.com/balancer-labs/balancer-v2-monorepo/blob/c18ff2686c61a8cbad72cdcfc65e9b11476fdbc3/pkg/pool-utils/contracts/BasePool.sol#L542-L544
+    fn downscale_down(&self, amount: Bfp) -> Option<U256> {
+        amount.as_uint256().checked_div(self.scaling_exponent_as_factor()?)
     }
 }
 
@@ -94,8 +104,7 @@ impl BalancerPoolSwapping for WeightedPoolRef<'_> {
             out_reserves.token_state.upscale(out_amount)?,
         )
         .ok()
-        .map(|bfp| in_reserves.token_state.downscale(bfp))
-        .flatten()?;
+        .map(|bfp| in_reserves.token_state.downscale_up(bfp))?.ok()?;
         self.add_swap_fee_amount(amount_in_before_fee, self.swap_fee_percentage)
             .ok()
     }
@@ -119,8 +128,7 @@ impl BalancerPoolSwapping for WeightedPoolRef<'_> {
             in_reserves.token_state.upscale(in_amount_minus_fees)?,
         )
         .ok()
-        .map(|bfp| out_reserves.token_state.downscale(bfp))
-        .flatten()
+        .map(|bfp| out_reserves.token_state.downscale_down(bfp))?
     }
 }
 
@@ -204,8 +212,7 @@ impl BalancerPoolSwapping for StablePoolRef<'_> {
             out_reserves.upscale(out_amount)?,
         )
         .ok()
-        .map(|bfp| in_reserves.downscale(bfp))
-        .flatten()?;
+        .map(|bfp| in_reserves.downscale_up(bfp))?.ok()?;
         self.add_swap_fee_amount(amount_in_before_fee, self.swap_fee_percentage)
             .ok()
     }
@@ -232,8 +239,7 @@ impl BalancerPoolSwapping for StablePoolRef<'_> {
             in_reserves.upscale(in_amount_minus_fees)?,
         )
         .ok()
-        .map(|bfp| out_reserves.downscale(bfp))
-        .flatten()
+        .map(|bfp| out_reserves.downscale_down(bfp)).flatten()
     }
 }
 
@@ -416,6 +422,17 @@ mod tests {
             reserves,
             amplification_parameter,
         }
+    }
+
+    #[test]
+    fn downscale() {
+        let token_state = TokenState {
+            balance: Default::default(),
+            scaling_exponent: 12
+        };
+        let input = Bfp::from_wei(900_546_079_866_630_330_575_i128.into());
+        assert_eq!(token_state.downscale_up(input).unwrap(),U256::from(900_546_080_u128));
+        assert_eq!(token_state.downscale_down(input).unwrap(),U256::from(900_546_079_u128));
     }
 
     #[test]
