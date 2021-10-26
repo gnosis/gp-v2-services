@@ -22,6 +22,7 @@ impl LiquidityCollector {
             .filter(|order| !order.is_liquidity_order)
             .cloned()
             .collect::<Vec<_>>();
+        tracing::info!("got {} user orders: {:?}", user_orders.len(), user_orders);
         for liquidity in &self.uniswap_like_liquidity {
             amms.extend(
                 liquidity
