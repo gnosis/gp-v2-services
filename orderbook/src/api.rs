@@ -131,7 +131,10 @@ where
 {
     match result {
         Ok(response) => with_status(warp::reply::json(&response), StatusCode::OK),
-        Err(err) => err.into_warp_reply(),
+        Err(err) => {
+            tracing::error!(?self, "response error");
+            err.into_warp_reply()
+        },
     }
 }
 
@@ -141,7 +144,6 @@ pub trait IntoWarpReply {
 
 impl IntoWarpReply for anyhowError {
     fn into_warp_reply(self) -> WithStatus<Json> {
-        tracing::error!(?self, "response error");
         with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
     }
 }
