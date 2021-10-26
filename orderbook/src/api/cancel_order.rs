@@ -101,7 +101,7 @@ mod tests {
                     1b",
                 "signingScheme": "eip712"
             }))
-                .unwrap(),
+            .unwrap(),
             CancellationPayload {
                 signature: EcdsaSignature {
                     r: H256(hex!(

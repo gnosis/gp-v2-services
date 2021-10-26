@@ -1,10 +1,11 @@
 use crate::{
-    api::{extract_payload, WarpReplyConverting},
+    api::{extract_payload, IntoWarpReply},
     orderbook::{AddOrderResult, Orderbook},
 };
 use anyhow::Result;
 use model::order::OrderCreationPayload;
 use std::{convert::Infallible, sync::Arc};
+use warp::reply::with_status;
 use warp::{hyper::StatusCode, Filter, Rejection, Reply};
 
 pub fn create_order_request(
@@ -15,20 +16,19 @@ pub fn create_order_request(
 }
 
 pub fn create_order_response(result: Result<AddOrderResult>) -> impl Reply {
-    let (body, status_code) = match result {
-        Ok(AddOrderResult::Added(uid)) => (warp::reply::json(&uid), StatusCode::CREATED),
+    match result {
+        Ok(AddOrderResult::Added(uid)) => with_status(warp::reply::json(&uid), StatusCode::CREATED),
         Ok(AddOrderResult::OrderValidation(err)) => err.into_warp_reply(),
-        Ok(AddOrderResult::UnsupportedSignature) => (
+        Ok(AddOrderResult::UnsupportedSignature) => with_status(
             super::error("UnsupportedSignature", "signing scheme is not supported"),
             StatusCode::BAD_REQUEST,
         ),
-        Ok(AddOrderResult::DuplicatedOrder) => (
+        Ok(AddOrderResult::DuplicatedOrder) => with_status(
             super::error("DuplicatedOrder", "order already exists"),
             StatusCode::BAD_REQUEST,
         ),
-        Err(_) => (super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
-    };
-    warp::reply::with_status(body, status_code)
+        Err(_) => with_status(super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
+    }
 }
 
 pub fn create_order(
