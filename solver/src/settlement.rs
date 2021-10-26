@@ -229,11 +229,8 @@ impl Settlement {
         self.encoder
             .trades()
             .iter()
+            .filter(|trade| !trade.is_liquidity_order)
             .filter_map(|trade| {
-                if trade.is_liquidity_order {
-                    // Exclude cost for liquidity orders.
-                    return None;
-                }
                 let fee_token_price =
                     external_prices.get(&trade.order.order_creation.sell_token)?;
                 Some(trade.executed_scaled_unsubsidized_fee()?.to_big_rational() * fee_token_price)
