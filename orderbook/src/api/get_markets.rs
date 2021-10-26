@@ -1,11 +1,11 @@
-use crate::api::WarpReplyConverting;
+use crate::api::convert_response_err;
 use anyhow::{anyhow, Result};
 use ethcontract::{H160, U256};
 use model::order::OrderKind;
 use serde::{Deserialize, Serialize};
-use shared::price_estimation::{self, PriceEstimating, PriceEstimationError};
+use shared::price_estimation::{self, PriceEstimating};
 use std::{convert::Infallible, str::FromStr, sync::Arc};
-use warp::{hyper::StatusCode, reply, Filter, Rejection, Reply};
+use warp::{Filter, Rejection, Reply};
 
 #[derive(Clone, Debug, PartialEq)]
 struct AmountEstimateQuery {
@@ -65,22 +65,6 @@ fn get_amount_estimate_request(
         })
 }
 
-fn get_amount_estimate_response(
-    result: Result<price_estimation::Estimate, PriceEstimationError>,
-    query: AmountEstimateQuery,
-) -> impl Reply {
-    match result {
-        Ok(estimate) => reply::with_status(
-            reply::json(&AmountEstimateResult {
-                amount: estimate.out_amount,
-                token: query.market.quote_token,
-            }),
-            StatusCode::OK,
-        ),
-        Err(err) => err.into_warp_reply(),
-    }
-}
-
 pub fn get_amount_estimate(
     price_estimator: Arc<dyn PriceEstimating>,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
@@ -102,7 +86,12 @@ pub fn get_amount_estimate(
                     kind: query.kind,
                 })
                 .await;
-            Result::<_, Infallible>::Ok(get_amount_estimate_response(result, query))
+            Result::<_, Infallible>::Ok(convert_response_err(result.map(|estimate| {
+                AmountEstimateResult {
+                    amount: estimate.out_amount,
+                    token: query.market.quote_token,
+                }
+            })))
         }
     })
 }
@@ -112,6 +101,8 @@ mod tests {
     use super::*;
     use crate::api::response_body;
     use hex_literal::hex;
+    use shared::price_estimation::PriceEstimationError;
+    use warp::hyper::StatusCode;
     use warp::test::request;
 
     #[tokio::test]
@@ -153,13 +144,10 @@ mod tests {
         };
 
         // Sell Order
-        let response = get_amount_estimate_response(
-            Ok(price_estimation::Estimate {
-                out_amount: 2.into(),
-                gas: 0.into(),
-            }),
-            query.clone(),
-        )
+        let response = convert_response_err::<_, PriceEstimationError>(Ok(AmountEstimateResult {
+            amount: 2.into(),
+            token: query.market.quote_token,
+        }))
         .into_response();
         assert_eq!(response.status(), StatusCode::OK);
 
@@ -169,16 +157,10 @@ mod tests {
         assert_eq!(estimate.token, query.market.quote_token);
 
         // Buy Order
-        let response = get_amount_estimate_response(
-            Ok(price_estimation::Estimate {
-                out_amount: 2.into(),
-                gas: 0.into(),
-            }),
-            AmountEstimateQuery {
-                kind: OrderKind::Buy,
-                ..query.clone()
-            },
-        )
+        let response = convert_response_err::<_, PriceEstimationError>(Ok(AmountEstimateResult {
+            amount: 2.into(),
+            token: query.market.quote_token,
+        }))
         .into_response();
 
         let estimate: AmountEstimateResult =
