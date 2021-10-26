@@ -59,7 +59,7 @@ pub fn get_fee_info(
 }
 
 // TODO remove legacy fee endpoint once frontend is updated
-// TODO - This is pretty old (May 21st), I think we can remove this legacy fee endpoint.
+// Removing this in separate PR https://github.com/gnosis/gp-v2-services/pull/1295
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
