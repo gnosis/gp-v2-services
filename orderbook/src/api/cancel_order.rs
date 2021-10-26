@@ -1,5 +1,5 @@
 use crate::{
-    api::{convert_response_ok, extract_payload, WarpReplyConverting},
+    api::{extract_payload, WarpReplyConverting},
     orderbook::{OrderCancellationResult, Orderbook},
 };
 use anyhow::Result;
@@ -83,7 +83,10 @@ pub fn cancel_order(
             if let Err(err) = &result {
                 tracing::error!(?err, ?order, "cancel_order error");
             }
-            Result::<_, Infallible>::Ok(convert_response_ok(result))
+            Result::<_, Infallible>::Ok(match result {
+                Ok(result) => result.into_warp_reply(),
+                Err(_) => with_status(super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
+            })
         }
     })
 }

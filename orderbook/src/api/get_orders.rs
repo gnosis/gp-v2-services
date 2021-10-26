@@ -1,5 +1,5 @@
 use crate::{
-    api::convert_response_err,
+    api::convert_response,
     {database::orders::OrderFilter, orderbook::Orderbook},
 };
 use anyhow::Result;
@@ -72,7 +72,7 @@ pub fn get_orders(
                 }
             };
             let result = orderbook.get_orders(&order_filter).await;
-            Result::<_, Infallible>::Ok(convert_response_err(result))
+            Result::<_, Infallible>::Ok(convert_response(result))
         }
     })
 }

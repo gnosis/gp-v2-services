@@ -1,4 +1,4 @@
-use crate::{api::convert_response_err, orderbook::Orderbook};
+use crate::{api::convert_response, orderbook::Orderbook};
 use anyhow::Result;
 use std::{convert::Infallible, sync::Arc};
 use warp::{Filter, Rejection, Reply};
@@ -14,7 +14,7 @@ pub fn get_solvable_orders(
         let orderbook = orderbook.clone();
         async move {
             let result = orderbook.get_solvable_orders().await;
-            Result::<_, Infallible>::Ok(convert_response_err(
+            Result::<_, Infallible>::Ok(convert_response(
                 result.map(|solvable_orders| solvable_orders.orders),
             ))
         }

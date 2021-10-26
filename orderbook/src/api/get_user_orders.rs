@@ -1,4 +1,4 @@
-use crate::{api::convert_response_err, orderbook::Orderbook};
+use crate::{api::convert_response, orderbook::Orderbook};
 use anyhow::Result;
 use primitive_types::H160;
 use serde::Deserialize;
@@ -39,7 +39,7 @@ pub fn get_user_orders(
                 ));
             }
             let result = orderbook.get_user_orders(&owner, offset, limit).await;
-            Result::<_, Infallible>::Ok(convert_response_err(result))
+            Result::<_, Infallible>::Ok(convert_response(result))
         }
     })
 }

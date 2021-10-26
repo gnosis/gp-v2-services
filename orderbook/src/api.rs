@@ -126,17 +126,7 @@ fn internal_error() -> Json {
     })
 }
 
-pub fn convert_response_ok<T>(result: Result<T>) -> impl Reply
-where
-    T: WarpReplyConverting,
-{
-    match result {
-        Ok(result) => result.into_warp_reply(),
-        Err(_) => with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
-    }
-}
-
-pub fn convert_response_err<T, E>(result: Result<T, E>) -> WithStatus<Json>
+pub fn convert_response<T, E>(result: Result<T, E>) -> WithStatus<Json>
 where
     T: Serialize,
     E: WarpReplyConverting,

@@ -1,5 +1,5 @@
 use crate::{
-    api::{convert_response_ok, extract_payload, WarpReplyConverting},
+    api::{extract_payload, WarpReplyConverting},
     orderbook::{AddOrderResult, Orderbook},
 };
 use anyhow::Result;
@@ -46,7 +46,10 @@ pub fn create_order(
             if let Err(err) = &result {
                 tracing::error!(?err, ?order_payload_clone, "add_order error");
             }
-            Result::<_, Infallible>::Ok(convert_response_ok(result))
+            Result::<_, Infallible>::Ok(match result {
+                Ok(result) => result.into_warp_reply(),
+                Err(_) => with_status(super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR),
+            })
         }
     })
 }
@@ -75,7 +78,7 @@ mod tests {
     #[tokio::test]
     async fn create_order_response_created() {
         let uid = OrderUid([1u8; 56]);
-        let response = convert_response_ok(Ok(AddOrderResult::Added(uid))).into_response();
+        let response = AddOrderResult::Added(uid).into_warp_reply().into_response();
         assert_eq!(response.status(), StatusCode::CREATED);
         let body = response_body(response).await;
         let body: serde_json::Value = serde_json::from_slice(body.as_slice()).unwrap();
@@ -87,7 +90,9 @@ mod tests {
 
     #[tokio::test]
     async fn create_order_response_duplicate() {
-        let response = convert_response_ok(Ok(AddOrderResult::DuplicatedOrder)).into_response();
+        let response = AddOrderResult::DuplicatedOrder
+            .into_warp_reply()
+            .into_response();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         let body = response_body(response).await;
         let body: serde_json::Value = serde_json::from_slice(body.as_slice()).unwrap();

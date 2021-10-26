@@ -1,6 +1,6 @@
 use crate::{
     api::{
-        self, convert_response_err,
+        self, convert_response,
         order_validation::{OrderValidating, PreOrderData, ValidationError},
         WarpReplyConverting,
     },
@@ -346,7 +346,7 @@ pub fn post_quote(
             if let Err(err) = &result {
                 tracing::warn!(?err, ?request, "post_quote error");
             }
-            Result::<_, Infallible>::Ok(convert_response_err(result))
+            Result::<_, Infallible>::Ok(convert_response(result))
         }
     })
 }
@@ -507,7 +507,7 @@ mod tests {
             from: H160::zero(),
             expiration: DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc),
         };
-        let response = convert_response_err::<OrderQuoteResponse, OrderQuoteError>(Ok(
+        let response = convert_response::<OrderQuoteResponse, OrderQuoteError>(Ok(
             order_quote_response.clone(),
         ))
         .into_response();
@@ -520,7 +520,7 @@ mod tests {
 
     #[tokio::test]
     async fn post_quote_response_err() {
-        let response = convert_response_err::<OrderQuoteResponse, OrderQuoteError>(Err(
+        let response = convert_response::<OrderQuoteResponse, OrderQuoteError>(Err(
             OrderQuoteError::Order(ValidationError::Other(anyhow!("Uh oh - error"))),
         ))
         .into_response();

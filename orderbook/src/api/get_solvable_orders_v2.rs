@@ -1,4 +1,4 @@
-use crate::{api::convert_response_err, orderbook::Orderbook};
+use crate::{api::convert_response, orderbook::Orderbook};
 use anyhow::Result;
 use std::{convert::Infallible, sync::Arc};
 use warp::{Filter, Rejection, Reply};
@@ -14,7 +14,7 @@ pub fn get_solvable_orders(
         let orderbook = orderbook.clone();
         async move {
             let result = orderbook.get_solvable_orders().await;
-            Result::<_, Infallible>::Ok(convert_response_err(result.map(|orders| {
+            Result::<_, Infallible>::Ok(convert_response(result.map(|orders| {
                 model::SolvableOrders {
                     orders: orders.orders,
                     latest_settlement_block: orders.latest_settlement_block,
@@ -37,8 +37,7 @@ mod tests {
             orders: vec![],
             latest_settlement_block: 1,
         };
-        let response =
-            convert_response_err::<_, anyhow::Error>(Ok(solvable_orders)).into_response();
+        let response = convert_response::<_, anyhow::Error>(Ok(solvable_orders)).into_response();
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_body(response).await;
         let response: model::SolvableOrders = serde_json::from_slice(body.as_slice()).unwrap();
