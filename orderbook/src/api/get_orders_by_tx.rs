@@ -1,4 +1,4 @@
-use crate::{api::convert_response, orderbook::Orderbook};
+use crate::{api::convert_json_response, orderbook::Orderbook};
 use anyhow::Result;
 use ethcontract::H256;
 use std::{convert::Infallible, sync::Arc};
@@ -15,7 +15,7 @@ pub fn get_orders_by_tx(
         let orderbook = orderbook.clone();
         async move {
             let result = orderbook.get_orders_for_tx(&hash).await;
-            Result::<_, Infallible>::Ok(convert_response(result))
+            Result::<_, Infallible>::Ok(convert_json_response(result))
         }
     })
 }

@@ -1,4 +1,4 @@
-use crate::{api::WarpReplyConverting, orderbook::Orderbook};
+use crate::{api::IntoWarpReply, orderbook::Orderbook};
 use anyhow::Result;
 use model::order::{Order, OrderUid};
 use std::{convert::Infallible, sync::Arc};

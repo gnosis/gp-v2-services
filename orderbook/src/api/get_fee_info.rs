@@ -1,4 +1,4 @@
-use crate::api::convert_response;
+use crate::api::convert_json_response;
 use crate::fee::MinFeeCalculating;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -48,7 +48,7 @@ pub fn get_fee_info(
                     None,
                 )
                 .await;
-            Result::<_, Infallible>::Ok(convert_response(result.map(
+            Result::<_, Infallible>::Ok(convert_json_response(result.map(
                 |(amount, expiration_date)| FeeInfo {
                     expiration_date,
                     amount,
@@ -83,7 +83,7 @@ pub fn legacy_get_fee_info(
             let result = fee_calculator
                 .compute_subsidized_min_fee(token, None, None, None, None)
                 .await;
-            Result::<_, Infallible>::Ok(convert_response(result.map(
+            Result::<_, Infallible>::Ok(convert_json_response(result.map(
                 |(minimal_fee, expiration_date)| LegacyFeeInfo {
                     expiration_date,
                     minimal_fee,

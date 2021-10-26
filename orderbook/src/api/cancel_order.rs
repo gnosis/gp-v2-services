@@ -1,5 +1,5 @@
 use crate::{
-    api::{extract_payload, WarpReplyConverting},
+    api::{extract_payload, IntoWarpReply},
     orderbook::{OrderCancellationResult, Orderbook},
 };
 use anyhow::Result;
@@ -34,7 +34,7 @@ pub fn cancel_order_request(
         })
 }
 
-impl WarpReplyConverting for OrderCancellationResult {
+impl IntoWarpReply for OrderCancellationResult {
     fn into_warp_reply(self) -> WithStatus<Json> {
         match self {
             Self::Cancelled => with_status(warp::reply::json(&"Cancelled"), StatusCode::OK),

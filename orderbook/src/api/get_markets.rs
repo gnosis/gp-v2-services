@@ -1,4 +1,4 @@
-use crate::api::convert_response;
+use crate::api::convert_json_response;
 use anyhow::{anyhow, Result};
 use ethcontract::{H160, U256};
 use model::order::OrderKind;
@@ -86,7 +86,7 @@ pub fn get_amount_estimate(
                     kind: query.kind,
                 })
                 .await;
-            Result::<_, Infallible>::Ok(convert_response(result.map(|estimate| {
+            Result::<_, Infallible>::Ok(convert_json_response(result.map(|estimate| {
                 AmountEstimateResult {
                     amount: estimate.out_amount,
                     token: query.market.quote_token,
@@ -144,7 +144,7 @@ mod tests {
         };
 
         // Sell Order
-        let response = convert_response::<_, PriceEstimationError>(Ok(AmountEstimateResult {
+        let response = convert_json_response::<_, PriceEstimationError>(Ok(AmountEstimateResult {
             amount: 2.into(),
             token: query.market.quote_token,
         }))
@@ -157,7 +157,7 @@ mod tests {
         assert_eq!(estimate.token, query.market.quote_token);
 
         // Buy Order
-        let response = convert_response::<_, PriceEstimationError>(Ok(AmountEstimateResult {
+        let response = convert_json_response::<_, PriceEstimationError>(Ok(AmountEstimateResult {
             amount: 2.into(),
             token: query.market.quote_token,
         }))

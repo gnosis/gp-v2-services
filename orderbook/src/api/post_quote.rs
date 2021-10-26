@@ -1,8 +1,8 @@
 use crate::{
     api::{
-        self, convert_response,
+        self, convert_json_response,
         order_validation::{OrderValidating, PreOrderData, ValidationError},
-        WarpReplyConverting,
+        IntoWarpReply,
     },
     fee::MinFeeCalculating,
 };
@@ -128,7 +128,7 @@ pub enum FeeError {
     PriceEstimate(PriceEstimationError),
 }
 
-impl WarpReplyConverting for FeeError {
+impl IntoWarpReply for FeeError {
     fn into_warp_reply(self) -> WithStatus<Json> {
         match self {
             FeeError::PriceEstimate(err) => err.into_warp_reply(),
@@ -149,7 +149,7 @@ pub enum OrderQuoteError {
     Order(ValidationError),
 }
 
-impl WarpReplyConverting for OrderQuoteError {
+impl IntoWarpReply for OrderQuoteError {
     fn into_warp_reply(self) -> WithStatus<Json> {
         match self {
             OrderQuoteError::Fee(err) => err.into_warp_reply(),
@@ -346,7 +346,7 @@ pub fn post_quote(
             if let Err(err) = &result {
                 tracing::warn!(?err, ?request, "post_quote error");
             }
-            Result::<_, Infallible>::Ok(convert_response(result))
+            Result::<_, Infallible>::Ok(convert_json_response(result))
         }
     })
 }
@@ -507,7 +507,7 @@ mod tests {
             from: H160::zero(),
             expiration: DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc),
         };
-        let response = convert_response::<OrderQuoteResponse, OrderQuoteError>(Ok(
+        let response = convert_json_response::<OrderQuoteResponse, OrderQuoteError>(Ok(
             order_quote_response.clone(),
         ))
         .into_response();
@@ -520,7 +520,7 @@ mod tests {
 
     #[tokio::test]
     async fn post_quote_response_err() {
-        let response = convert_response::<OrderQuoteResponse, OrderQuoteError>(Err(
+        let response = convert_json_response::<OrderQuoteResponse, OrderQuoteError>(Err(
             OrderQuoteError::Order(ValidationError::Other(anyhow!("Uh oh - error"))),
         ))
         .into_response();

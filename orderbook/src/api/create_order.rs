@@ -1,5 +1,5 @@
 use crate::{
-    api::{extract_payload, WarpReplyConverting},
+    api::{extract_payload, IntoWarpReply},
     orderbook::{AddOrderResult, Orderbook},
 };
 use anyhow::Result;
@@ -18,7 +18,7 @@ pub fn create_order_request(
         .and(extract_payload())
 }
 
-impl WarpReplyConverting for AddOrderResult {
+impl IntoWarpReply for AddOrderResult {
     fn into_warp_reply(self) -> WithStatus<Json> {
         match self {
             AddOrderResult::Added(uid) => with_status(warp::reply::json(&uid), StatusCode::CREATED),

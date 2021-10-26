@@ -126,10 +126,10 @@ fn internal_error() -> Json {
     })
 }
 
-pub fn convert_response<T, E>(result: Result<T, E>) -> WithStatus<Json>
+pub fn convert_json_response<T, E>(result: Result<T, E>) -> WithStatus<Json>
 where
     T: Serialize,
-    E: WarpReplyConverting,
+    E: IntoWarpReply,
 {
     match result {
         Ok(response) => with_status(warp::reply::json(&response), StatusCode::OK),
@@ -137,18 +137,18 @@ where
     }
 }
 
-pub trait WarpReplyConverting {
+pub trait IntoWarpReply {
     fn into_warp_reply(self) -> WithStatus<Json>;
 }
 
-impl WarpReplyConverting for anyhowError {
+impl IntoWarpReply for anyhowError {
     fn into_warp_reply(self) -> WithStatus<Json> {
         tracing::error!(?self, "response error");
         with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
     }
 }
 
-impl WarpReplyConverting for PriceEstimationError {
+impl IntoWarpReply for PriceEstimationError {
     fn into_warp_reply(self) -> WithStatus<Json> {
         match self {
             Self::UnsupportedToken(token) => with_status(

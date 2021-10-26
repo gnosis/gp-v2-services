@@ -1,4 +1,4 @@
-use crate::{account_balances::BalanceFetching, api::WarpReplyConverting, fee::MinFeeCalculating};
+use crate::{account_balances::BalanceFetching, api::IntoWarpReply, fee::MinFeeCalculating};
 use contracts::WETH9;
 use ethcontract::{H160, U256};
 use model::{
@@ -59,7 +59,7 @@ pub enum PartialValidationError {
     Other(anyhow::Error),
 }
 
-impl WarpReplyConverting for PartialValidationError {
+impl IntoWarpReply for PartialValidationError {
     fn into_warp_reply(self) -> WithStatus<Json> {
         match self {
             Self::UnsupportedBuyTokenDestination(dest) => with_status(
@@ -114,7 +114,7 @@ pub enum ValidationError {
     Other(anyhow::Error),
 }
 
-impl WarpReplyConverting for ValidationError {
+impl IntoWarpReply for ValidationError {
     fn into_warp_reply(self) -> WithStatus<Json> {
         match self {
             ValidationError::Partial(pre) => pre.into_warp_reply(),

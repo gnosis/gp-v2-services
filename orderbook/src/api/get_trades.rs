@@ -1,5 +1,5 @@
 use crate::{
-    api::convert_response,
+    api::convert_json_response,
     database::trades::{TradeFilter, TradeRetrieving},
 };
 use anyhow::Result;
@@ -56,7 +56,7 @@ pub fn get_trades(
             match request_result {
                 Ok(trade_filter) => {
                     let result = database.trades(&trade_filter).await;
-                    Result::<_, Infallible>::Ok(convert_response(result))
+                    Result::<_, Infallible>::Ok(convert_json_response(result))
                 }
                 Err(TradeFilterError::InvalidFilter(msg)) => {
                     let err = super::error("InvalidTradeFilter", msg);
