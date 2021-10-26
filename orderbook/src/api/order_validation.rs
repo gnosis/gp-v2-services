@@ -1,12 +1,16 @@
 use crate::{account_balances::BalanceFetching, api::WarpReplyConverting, fee::MinFeeCalculating};
 use contracts::WETH9;
 use ethcontract::{H160, U256};
-use model::order::{BuyTokenDestination, Order, OrderCreation, SellTokenSource, BUY_ETH_ADDRESS};
-use model::DomainSeparator;
+use model::{
+    order::{BuyTokenDestination, Order, OrderCreation, SellTokenSource, BUY_ETH_ADDRESS},
+    DomainSeparator,
+};
 use shared::{bad_token::BadTokenDetecting, web3_traits::CodeFetching};
 use std::{sync::Arc, time::Duration};
-use warp::reply::{with_status, WithStatus};
-use warp::{http::StatusCode, reply::Json};
+use warp::{
+    http::StatusCode,
+    reply::{with_status, Json, WithStatus},
+};
 
 #[cfg_attr(test, mockall::automock)]
 #[async_trait::async_trait]

@@ -1,13 +1,15 @@
-use crate::api::convert_response_ok;
 use crate::{
-    api::{extract_payload, WarpReplyConverting},
+    api::{convert_response_ok, extract_payload, WarpReplyConverting},
     orderbook::{AddOrderResult, Orderbook},
 };
 use anyhow::Result;
 use model::order::OrderCreationPayload;
 use std::{convert::Infallible, sync::Arc};
-use warp::reply::{with_status, Json, WithStatus};
-use warp::{hyper::StatusCode, Filter, Rejection, Reply};
+use warp::{
+    hyper::StatusCode,
+    reply::{with_status, Json, WithStatus},
+    Filter, Rejection, Reply,
+};
 
 pub fn create_order_request(
 ) -> impl Filter<Extract = (OrderCreationPayload,), Error = Rejection> + Clone {

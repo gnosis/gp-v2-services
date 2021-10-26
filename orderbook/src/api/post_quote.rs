@@ -1,6 +1,6 @@
 use crate::{
     api::{
-        self,
+        self, convert_response_err,
         order_validation::{OrderValidating, PreOrderData, ValidationError},
         WarpReplyConverting,
     },
@@ -17,13 +17,11 @@ use model::{
 use serde::{Deserialize, Serialize};
 use shared::price_estimation::{self, PriceEstimating, PriceEstimationError};
 use std::{convert::Infallible, sync::Arc};
-use warp::reply::WithStatus;
 use warp::{
     hyper::StatusCode,
-    reply::Json,
+    reply::{Json, WithStatus},
     Filter, Rejection, Reply,
 };
-use crate::api::convert_response_err;
 
 /// The order parameters to quote a price and fee for.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -509,7 +507,10 @@ mod tests {
             from: H160::zero(),
             expiration: DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc),
         };
-        let response = convert_response_err::<OrderQuoteResponse, OrderQuoteError>(Ok(order_quote_response.clone())).into_response();
+        let response = convert_response_err::<OrderQuoteResponse, OrderQuoteError>(Ok(
+            order_quote_response.clone(),
+        ))
+        .into_response();
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_body(response).await;
         let body: serde_json::Value = serde_json::from_slice(body.as_slice()).unwrap();
@@ -519,9 +520,9 @@ mod tests {
 
     #[tokio::test]
     async fn post_quote_response_err() {
-        let response = convert_response_err::<OrderQuoteResponse, OrderQuoteError>(Err(OrderQuoteError::Order(
-            ValidationError::Other(anyhow!("Uh oh - error")),
-        )))
+        let response = convert_response_err::<OrderQuoteResponse, OrderQuoteError>(Err(
+            OrderQuoteError::Order(ValidationError::Other(anyhow!("Uh oh - error"))),
+        ))
         .into_response();
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
         let body = response_body(response).await;

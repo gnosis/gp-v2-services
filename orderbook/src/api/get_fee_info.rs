@@ -1,5 +1,4 @@
-use crate::api::WarpReplyConverting;
-use crate::fee::MinFeeCalculating;
+use crate::{api::WarpReplyConverting, fee::MinFeeCalculating};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use model::{order::OrderKind, u256_decimal};

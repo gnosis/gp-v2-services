@@ -4,8 +4,7 @@ use ethcontract::{H160, U256};
 use model::order::OrderKind;
 use serde::{Deserialize, Serialize};
 use shared::price_estimation::{self, PriceEstimating, PriceEstimationError};
-use std::sync::Arc;
-use std::{convert::Infallible, str::FromStr};
+use std::{convert::Infallible, str::FromStr, sync::Arc};
 use warp::{hyper::StatusCode, reply, Filter, Rejection, Reply};
 
 #[derive(Clone, Debug, PartialEq)]

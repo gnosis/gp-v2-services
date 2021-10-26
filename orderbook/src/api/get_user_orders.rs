@@ -3,11 +3,7 @@ use anyhow::Result;
 use primitive_types::H160;
 use serde::Deserialize;
 use std::{convert::Infallible, sync::Arc};
-use warp::{
-    hyper::StatusCode,
-    reply::with_status,
-    Filter, Rejection, Reply,
-};
+use warp::{hyper::StatusCode, reply::with_status, Filter, Rejection, Reply};
 
 #[derive(Clone, Copy, Debug, Deserialize)]
 struct Query {

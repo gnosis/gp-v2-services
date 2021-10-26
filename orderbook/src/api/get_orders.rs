@@ -1,5 +1,7 @@
-use crate::api::convert_response_err;
-use crate::{database::orders::OrderFilter, orderbook::Orderbook};
+use crate::{
+    api::convert_response_err,
+    {database::orders::OrderFilter, orderbook::Orderbook},
+};
 use anyhow::Result;
 use primitive_types::H160;
 use serde::Deserialize;

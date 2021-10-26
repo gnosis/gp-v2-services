@@ -1,5 +1,4 @@
-use crate::orderbook::Orderbook;
-use crate::{api::WarpReplyConverting, solvable_orders::SolvableOrders};
+use crate::{api::WarpReplyConverting, orderbook::Orderbook, solvable_orders::SolvableOrders};
 use anyhow::Result;
 use std::{convert::Infallible, sync::Arc};
 use warp::{hyper::StatusCode, reply, Filter, Rejection, Reply};
