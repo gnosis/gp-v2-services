@@ -61,6 +61,10 @@ pub fn get_fee_info(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::response_body;
+    use chrono::FixedOffset;
+    use shared::price_estimation::PriceEstimationError;
+    use warp::hyper::StatusCode;
     use warp::test::request;
 
     #[tokio::test]
@@ -84,9 +88,11 @@ mod tests {
 
     #[tokio::test]
     async fn get_fee_info_response_() {
-        let response =
-            get_fee_info_response(Ok((U256::zero(), Utc::now() + FixedOffset::east(10))))
-                .into_response();
+        let result = Ok(FeeInfo {
+            expiration_date: Utc::now() + FixedOffset::east(10),
+            amount: U256::zero(),
+        });
+        let response = convert_json_response::<_, PriceEstimationError>(result).into_response();
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_body(response).await;
         let body: FeeInfo = serde_json::from_slice(body.as_slice()).unwrap();
