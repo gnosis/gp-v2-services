@@ -59,7 +59,7 @@ pub fn get_fee_info(
 }
 
 // TODO remove legacy fee endpoint once frontend is updated
-// TODO - This is pretty old, should we remove it now?
+// TODO - This is pretty old (May 21st), I think we can remove this legacy fee endpoint.
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
