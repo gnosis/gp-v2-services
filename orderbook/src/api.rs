@@ -19,6 +19,7 @@ use crate::{
 use anyhow::{Error as anyhowError, Result};
 use serde::{de::DeserializeOwned, Serialize};
 use shared::{metrics::get_metric_storage_registry, price_estimation::PriceEstimationError};
+use std::fmt::Debug;
 use std::{convert::Infallible, sync::Arc};
 use warp::{
     hyper::StatusCode,
@@ -127,12 +128,12 @@ fn internal_error() -> Json {
 pub fn convert_json_response<T, E>(result: Result<T, E>) -> WithStatus<Json>
 where
     T: Serialize,
-    E: IntoWarpReply,
+    E: IntoWarpReply + Debug,
 {
     match result {
         Ok(response) => with_status(warp::reply::json(&response), StatusCode::OK),
         Err(err) => {
-            tracing::error!(?self, "response error");
+            tracing::error!(?err, "response error");
             err.into_warp_reply()
         }
     }
