@@ -1,9 +1,10 @@
-use crate::sources::balancer::pool_fetching::StablePool;
-use crate::sources::balancer::swap::math::BalU256;
 use crate::{
     baseline_solver::BaselineSolvable,
     conversions::u256_to_big_int,
-    sources::balancer::pool_fetching::{TokenState, WeightedPool, WeightedTokenState},
+    sources::balancer::{
+        pool_fetching::{StablePool, TokenState, WeightedPool, WeightedTokenState},
+        swap::math::BalU256,
+    },
 };
 use error::Error;
 use ethcontract::{H160, U256};
