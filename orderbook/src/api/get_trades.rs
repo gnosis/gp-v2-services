@@ -2,7 +2,7 @@ use crate::{
     api::convert_json_response,
     database::trades::{TradeFilter, TradeRetrieving},
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use model::order::OrderUid;
 use primitive_types::H160;
 use serde::Deserialize;
@@ -55,7 +55,7 @@ pub fn get_trades(
         async move {
             match request_result {
                 Ok(trade_filter) => {
-                    let result = database.trades(&trade_filter).await;
+                    let result = database.trades(&trade_filter).await.context("get_trades");
                     Result::<_, Infallible>::Ok(convert_json_response(result))
                 }
                 Err(TradeFilterError::InvalidFilter(msg)) => {

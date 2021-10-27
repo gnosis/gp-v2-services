@@ -2,7 +2,7 @@ use crate::{
     api::convert_json_response,
     {database::orders::OrderFilter, orderbook::Orderbook},
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use primitive_types::H160;
 use serde::Deserialize;
 use shared::time::now_in_epoch_seconds;
@@ -71,7 +71,10 @@ pub fn get_orders(
                     return Ok(warp::reply::with_status(err, StatusCode::BAD_REQUEST));
                 }
             };
-            let result = orderbook.get_orders(&order_filter).await;
+            let result = orderbook
+                .get_orders(&order_filter)
+                .await
+                .context("get_orders");
             Result::<_, Infallible>::Ok(convert_json_response(result))
         }
     })
