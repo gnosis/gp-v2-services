@@ -95,9 +95,10 @@ impl IntoWarpReply for PartialValidationError {
                 ),
                 StatusCode::BAD_REQUEST,
             ),
-            Self::Other(_) => {
-                with_status(super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
-            }
+            Self::Other(err) => with_status(
+                super::internal_error(err.context("partial_validation")),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
         }
     }
 }
@@ -151,9 +152,10 @@ impl IntoWarpReply for ValidationError {
                 super::error("ZeroAmount", "Buy or sell amount is zero."),
                 StatusCode::BAD_REQUEST,
             ),
-            Self::Other(_) => {
-                with_status(super::internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
-            }
+            Self::Other(err) => with_status(
+                super::internal_error(err.context("order_validation")),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
         }
     }
 }

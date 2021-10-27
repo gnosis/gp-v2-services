@@ -118,7 +118,8 @@ fn error(error_type: &str, description: impl AsRef<str>) -> Json {
     })
 }
 
-fn internal_error() -> Json {
+fn internal_error(error: anyhowError) -> Json {
+    tracing::error!(?error, "internal server error");
     json(&Error {
         error_type: "InternalServerError",
         description: "",
@@ -142,8 +143,7 @@ pub trait IntoWarpReply {
 
 impl IntoWarpReply for anyhowError {
     fn into_warp_reply(self) -> WithStatus<Json> {
-        tracing::error!(?self, "response error");
-        with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
+        with_status(internal_error(self), StatusCode::INTERNAL_SERVER_ERROR)
     }
 }
 
@@ -162,10 +162,10 @@ impl IntoWarpReply for PriceEstimationError {
                 error("ZeroAmount", "Please use non-zero amount field"),
                 StatusCode::BAD_REQUEST,
             ),
-            Self::Other(err) => {
-                tracing::error!(?err, "get_market error");
-                with_status(internal_error(), StatusCode::INTERNAL_SERVER_ERROR)
-            }
+            Self::Other(err) => with_status(
+                internal_error(err.context("price_estimation")),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
         }
     }
 }
