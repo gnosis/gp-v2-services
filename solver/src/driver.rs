@@ -378,7 +378,7 @@ impl Driver {
             .map(|order| self.order_converter.normalize_limit_order(order))
             .collect::<Vec<_>>();
         tracing::info!("got {} orders: {:?}", orders.len(), orders);
-        
+
         let liquidity = self
             .liquidity_collector
             .get_liquidity_for_orders(&orders, Block::Number(current_block_during_liquidity_fetch))
