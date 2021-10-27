@@ -550,14 +550,28 @@ mod tests {
             1.into(),
         );
 
-        for (i, token_i) in tokens.iter().enumerate() {
-            for (j, token_j) in tokens.iter().enumerate() {
+        for token_i in tokens.iter() {
+            for token_j in tokens.iter() {
                 let res_ij = pool
                     .as_pool_ref()
                     .construct_balances_and_token_indices(token_i, token_j)
                     .unwrap();
-                assert_eq!(res_ij.token_index_in, i);
-                assert_eq!(res_ij.token_index_out, j);
+                assert_eq!(
+                    res_ij.balances[res_ij.token_index_in],
+                    pool.reserves
+                        .get(token_i)
+                        .unwrap()
+                        .upscaled_balance()
+                        .unwrap()
+                );
+                assert_eq!(
+                    res_ij.balances[res_ij.token_index_out],
+                    pool.reserves
+                        .get(token_j)
+                        .unwrap()
+                        .upscaled_balance()
+                        .unwrap()
+                );
             }
         }
     }
@@ -623,7 +637,6 @@ mod tests {
         let amount_in = 900_816_325_i128;
         let amount_out = 900_000_000_000_000_000_000_u128.into();
         let res_out = pool.get_amount_in(usdc, (amount_out, dai));
-        // TODO - figure out why this is off by 1.
         assert_eq!(res_out.unwrap(), amount_in.into());
     }
 }
