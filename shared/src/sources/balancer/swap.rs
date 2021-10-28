@@ -185,19 +185,14 @@ impl StablePoolRef<'_> {
     ) -> Option<BalancesWithIndices> {
         let mut balances = vec![];
         let (mut token_index_in, mut token_index_out) = (0, 0);
-        for (index, token) in self.reserves.keys().enumerate() {
+        for (index, (token, balance)) in self.reserves.iter().enumerate() {
             if token == in_token {
                 token_index_in = index;
             }
             if token == out_token {
                 token_index_out = index;
             }
-            balances.push(
-                self.reserves
-                    .get(token)
-                    .expect("tokens taken from reserve keys")
-                    .upscaled_balance()?,
-            )
+            balances.push(balance.upscaled_balance()?)
         }
         Some(BalancesWithIndices {
             token_index_in,
