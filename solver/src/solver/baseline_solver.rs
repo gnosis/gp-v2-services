@@ -132,10 +132,11 @@ impl BaselineSolver {
 
     fn solve_(
         &self,
-        mut user_orders: Vec<LimitOrder>,
+        mut limit_orders: Vec<LimitOrder>,
         liquidity: Vec<Liquidity>,
     ) -> Vec<Settlement> {
-        user_orders.retain(|order| !order.is_liquidity_order);
+        limit_orders.retain(|order| !order.is_liquidity_order);
+        let user_orders = limit_orders;
         let amm_map =
             liquidity
                 .into_iter()
