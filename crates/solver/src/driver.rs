@@ -2,6 +2,7 @@ pub mod solver_settlements;
 
 use self::solver_settlements::RatedSettlement;
 use crate::{
+    analytics,
     in_flight_orders::InFlightOrders,
     liquidity::{order_converter::OrderConverter, LimitOrder},
     liquidity_collector::LiquidityCollector,
@@ -273,15 +274,25 @@ impl Driver {
 
     /// Record metrics on the matched orders from a single batch. Specifically we report on
     /// the number of orders that were;
+    ///  - surplus in winning settlement vs unrealized surplus from other feasible solutions.
     ///  - matched but not settled in this runloop (effectively queued for the next one)
-    ///  - matched but coming from known liquidity providers.
     /// Should help us to identify how much we can save by parallelizing execution.
-    fn report_matched_orders(
+    fn report_on_batch(
         &self,
         submitted: &Settlement,
-        all: impl Iterator<Item = RatedSettlement>,
+        all: impl Iterator<Item = RatedSettlement> + Clone,
     ) {
-        let submitted: HashSet<_> = submitted
+        // Report surplus
+        self.metrics.unsettled_orders_with_better_surplus(
+            analytics::num_unsettled_orders_with_better_surplus(
+                submitted,
+                all.clone()
+                    .map(|rated_settlement| rated_settlement.settlement),
+            ),
+        );
+        // Report matched but not settled
+        // TODO - move all this data manipulation into analytics.rs
+        let submitted_orders: HashSet<_> = submitted
             .trades()
             .iter()
             .map(|trade| trade.order.order_meta_data.uid)
@@ -294,10 +305,12 @@ impl Driver {
             .iter()
             .map(|order| order.order_meta_data.uid)
             .collect();
-        let matched_but_not_settled: HashSet<_> =
-            all_matched_ids.difference(&submitted).copied().collect();
+        let matched_but_not_settled: HashSet<_> = all_matched_ids
+            .difference(&submitted_orders)
+            .copied()
+            .collect();
         self.metrics
-            .orders_matched_but_not_settled(matched_but_not_settled.len())
+            .orders_matched_but_not_settled(matched_but_not_settled.len());
     }
 
     // Rate settlements, ignoring those for which the rating procedure failed.
@@ -517,7 +530,7 @@ impl Driver {
             }
             self.metrics.transaction_submission(start.elapsed());
 
-            self.report_matched_orders(
+            self.report_on_batch(
                 &settlement.settlement,
                 rated_settlements.into_iter().map(|(_, solution)| solution),
             );
