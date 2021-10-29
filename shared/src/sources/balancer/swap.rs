@@ -24,18 +24,16 @@ const STABLE_SWAP_GAS_COST: usize = 183_520;
 
 fn add_swap_fee_amount(amount: U256, swap_fee_percentage: Bfp) -> Result<U256, Error> {
     // https://github.com/balancer-labs/balancer-v2-monorepo/blob/6c9e24e22d0c46cca6dd15861d3d33da61a60b98/pkg/core/contracts/pools/BasePool.sol#L454-L457
-    Bfp::from_wei(amount)
-        .div_up(swap_fee_percentage.complement())
-        .map(|amount_with_fees| amount_with_fees.as_uint256())
+    let amount_with_fees = Bfp::from_wei(amount).div_up(swap_fee_percentage.complement())?;
+    Ok(amount_with_fees.as_uint256())
 }
 
 fn subtract_swap_fee_amount(amount: U256, swap_fee_percentage: Bfp) -> Result<U256, Error> {
     // https://github.com/balancer-labs/balancer-v2-monorepo/blob/6c9e24e22d0c46cca6dd15861d3d33da61a60b98/pkg/core/contracts/pools/BasePool.sol#L462-L466
     let amount = Bfp::from_wei(amount);
     let fee_amount = amount.mul_up(swap_fee_percentage)?;
-    amount
-        .sub(fee_amount)
-        .map(|amount_without_fees| amount_without_fees.as_uint256())
+    let amount_without_fees = amount.sub(fee_amount)?;
+    Ok(amount_without_fees.as_uint256())
 }
 
 impl TokenState {
@@ -94,15 +92,15 @@ impl BaselineSolvable for WeightedPoolRef<'_> {
         let in_amount_minus_fees =
             subtract_swap_fee_amount(in_amount, self.swap_fee_percentage).ok()?;
 
-        weighted_math::calc_out_given_in(
+        let bfp = weighted_math::calc_out_given_in(
             in_reserves.token_state.upscaled_balance()?,
             in_reserves.weight,
             out_reserves.token_state.upscaled_balance()?,
             out_reserves.weight,
             in_reserves.token_state.upscale(in_amount_minus_fees)?,
         )
-        .ok()
-        .map(|bfp| out_reserves.token_state.downscale_down(bfp))?
+        .ok()?;
+        out_reserves.token_state.downscale_down(bfp)
     }
 
     fn get_amount_in(&self, in_token: H160, (out_amount, out_token): (U256, H160)) -> Option<U256> {
@@ -111,16 +109,16 @@ impl BaselineSolvable for WeightedPoolRef<'_> {
         // https://github.com/balancer-labs/balancer-v2-monorepo/blob/6c9e24e22d0c46cca6dd15861d3d33da61a60b98/pkg/core/contracts/pools/BaseMinimalSwapInfoPool.sol#L75-L88
         let in_reserves = self.reserves.get(&in_token)?;
         let out_reserves = self.reserves.get(&out_token)?;
-        let amount_in_before_fee = weighted_math::calc_in_given_out(
+
+        let bfp = weighted_math::calc_in_given_out(
             in_reserves.token_state.upscaled_balance()?,
             in_reserves.weight,
             out_reserves.token_state.upscaled_balance()?,
             out_reserves.weight,
             out_reserves.token_state.upscale(out_amount)?,
         )
-        .ok()
-        .map(|bfp| in_reserves.token_state.downscale_up(bfp))?
         .ok()?;
+        let amount_in_before_fee = in_reserves.token_state.downscale_up(bfp).ok()?;
         add_swap_fee_amount(amount_in_before_fee, self.swap_fee_percentage).ok()
     }
 
@@ -214,16 +212,15 @@ impl BaselineSolvable for StablePoolRef<'_> {
         } = self.construct_balances_and_token_indices(&in_token, &out_token)?;
         let in_amount_minus_fees =
             subtract_swap_fee_amount(in_amount, self.swap_fee_percentage).ok()?;
-        stable_math::calc_out_given_in(
+        let bfp = stable_math::calc_out_given_in(
             self.amplification_parameter,
             balances.as_mut_slice(),
             token_index_in,
             token_index_out,
             in_reserves.upscale(in_amount_minus_fees)?,
         )
-        .ok()
-        .map(|bfp| out_reserves.downscale_down(bfp))
-        .flatten()
+        .ok()?;
+        out_reserves.downscale_down(bfp)
     }
 
     fn get_amount_in(&self, in_token: H160, (out_amount, out_token): (U256, H160)) -> Option<U256> {
@@ -234,16 +231,15 @@ impl BaselineSolvable for StablePoolRef<'_> {
             token_index_out,
             mut balances,
         } = self.construct_balances_and_token_indices(&in_token, &out_token)?;
-        let amount_in_before_fee = stable_math::calc_in_given_out(
+        let bfp = stable_math::calc_in_given_out(
             self.amplification_parameter,
             balances.as_mut_slice(),
             token_index_in,
             token_index_out,
             out_reserves.upscale(out_amount)?,
         )
-        .ok()
-        .map(|bfp| in_reserves.downscale_up(bfp))?
         .ok()?;
+        let amount_in_before_fee = in_reserves.downscale_up(bfp).ok()?;
         add_swap_fee_amount(amount_in_before_fee, self.swap_fee_percentage).ok()
     }
 
