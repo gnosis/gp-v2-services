@@ -335,7 +335,7 @@ impl Driver {
                 gas_estimate,
                 gas_price: gas_price_normalized.clone(),
             };
-            tracing::info!(
+            tracing::debug!(
                 "Objective value for solver {} is {}: surplus={}, gas_estimate={}, gas_price={}",
                 solver,
                 rated_settlement.objective_value(),
@@ -392,9 +392,6 @@ impl Driver {
         .await;
         tracing::debug!("estimated prices: {:?}", estimated_prices);
         let orders = orders_with_price_estimates(orders, &estimated_prices);
-        if !has_at_least_one_user_order(&orders) {
-            return Ok(());
-        }
 
         self.metrics.orders_fetched(&orders);
         self.metrics.liquidity_fetched(&liquidity);
@@ -493,7 +490,7 @@ impl Driver {
                 .unwrap_or(false)
             {
                 settlement.settlement = settlement.settlement.without_onchain_liquidity();
-                tracing::info!("settlement without onchain liquidity");
+                tracing::debug!("settlement without onchain liquidity");
             }
 
             tracing::info!("winning settlement: {:?}", settlement);
