@@ -346,16 +346,16 @@ mod tests {
     #[test]
     fn amplification_parameter_conversions() {
         assert_eq!(
-            AmplificationParameter::new(1.into(), 2.into())
+            AmplificationParameter::new(2.into(), 3.into())
                 .unwrap()
                 .as_u256(),
-            2.into()
+            6.into()
         );
         assert_eq!(
-            AmplificationParameter::new(1.into(), 2.into())
+            AmplificationParameter::new(7.into(), 8.into())
                 .unwrap()
                 .as_big_rational(),
-            BigRational::new(1.into(), 2.into())
+            BigRational::new(7.into(), 8.into())
         );
 
         assert_eq!(
