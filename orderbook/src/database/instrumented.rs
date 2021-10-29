@@ -61,10 +61,7 @@ impl EventStoring<contracts::gpv2_settlement::Event> for Instrumented {
 impl MinFeeStoring for Instrumented {
     async fn save_fee_measurement(
         &self,
-        sell_token: ethcontract::H160,
-        buy_token: Option<ethcontract::H160>,
-        amount: Option<ethcontract::U256>,
-        kind: Option<model::order::OrderKind>,
+        fee_data: crate::fee::FeeData,
         expiry: chrono::DateTime<chrono::Utc>,
         min_fee: ethcontract::U256,
     ) -> anyhow::Result<()> {
@@ -73,25 +70,20 @@ impl MinFeeStoring for Instrumented {
             .database_query_histogram("save_fee_measurement")
             .start_timer();
         self.inner
-            .save_fee_measurement(sell_token, buy_token, amount, kind, expiry, min_fee)
+            .save_fee_measurement(fee_data, expiry, min_fee)
             .await
     }
 
     async fn read_fee_measurement(
         &self,
-        sell_token: ethcontract::H160,
-        buy_token: Option<ethcontract::H160>,
-        amount: Option<ethcontract::U256>,
-        kind: Option<model::order::OrderKind>,
+        fee_data: crate::fee::FeeData,
         min_expiry: chrono::DateTime<chrono::Utc>,
     ) -> anyhow::Result<Option<ethcontract::U256>> {
         let _timer = self
             .metrics
             .database_query_histogram("read_fee_measurement")
             .start_timer();
-        self.inner
-            .read_fee_measurement(sell_token, buy_token, amount, kind, min_expiry)
-            .await
+        self.inner.read_fee_measurement(fee_data, min_expiry).await
     }
 }
 
