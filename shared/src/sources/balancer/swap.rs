@@ -202,6 +202,11 @@ impl StablePoolRef<'_> {
 }
 
 impl BaselineSolvable for StablePoolRef<'_> {
+    /// Stable pools use the BaseGeneralPool.sol for these methods, called from within `onSwap`
+    /// https://github.com/balancer-labs/balancer-v2-monorepo/blob/589542001aeca5bdc120404874fe0137f6a4c749/pkg/pool-utils/contracts/BaseGeneralPool.sol#L31-L44
+
+    /// This comes from `swapGivenIn`
+    /// https://github.com/balancer-labs/balancer-v2-monorepo/blob/589542001aeca5bdc120404874fe0137f6a4c749/pkg/pool-utils/contracts/BaseGeneralPool.sol#L46-L63
     fn get_amount_out(&self, out_token: H160, (in_amount, in_token): (U256, H160)) -> Option<U256> {
         let in_reserves = self.reserves.get(&in_token)?;
         let out_reserves = self.reserves.get(&out_token)?;
@@ -223,6 +228,8 @@ impl BaselineSolvable for StablePoolRef<'_> {
         out_reserves.downscale_down(out_amount)
     }
 
+    /// Comes from `swapGivenOut`:
+    /// https://github.com/balancer-labs/balancer-v2-monorepo/blob/589542001aeca5bdc120404874fe0137f6a4c749/pkg/pool-utils/contracts/BaseGeneralPool.sol#L65-L82
     fn get_amount_in(&self, in_token: H160, (out_amount, out_token): (U256, H160)) -> Option<U256> {
         let in_reserves = self.reserves.get(&in_token)?;
         let out_reserves = self.reserves.get(&out_token)?;
@@ -243,8 +250,9 @@ impl BaselineSolvable for StablePoolRef<'_> {
         add_swap_fee_amount(amount_in_before_fee, self.swap_fee_percentage).ok()
     }
 
+    /// Here we use the spot price defined in the white paper, assuming pools have equal weight.
+    /// https://balancer.fi/whitepaper.pdf#spot-price
     fn get_spot_price(&self, base_token: H160, quote_token: H160) -> Option<BigRational> {
-        // https://balancer.fi/whitepaper.pdf#spot-price
         // Note that the spot price is defined for weighted pools so we have assumed weights of 1.
         let base_balance = self.reserves.get(&base_token)?.balance;
         let quote_balance = self.reserves.get(&quote_token)?.balance;
