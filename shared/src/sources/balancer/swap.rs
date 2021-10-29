@@ -595,4 +595,9 @@ mod tests {
         let res_out = pool.get_amount_in(usdc, (amount_out, dai));
         assert_eq!(res_out.unwrap(), amount_in.into());
     }
+
+    #[test]
+    fn stable_spot_price() {
+        // TODO - write this test.
+    }
 }
