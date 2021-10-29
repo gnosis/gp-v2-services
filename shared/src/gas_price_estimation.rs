@@ -91,7 +91,7 @@ pub async fn create_priority_estimator(
             GasEstimatorType::Web3 => estimators.push(Box::new(web3.clone())),
             &GasEstimatorType::Native => {
                 ensure!(is_mainnet(&network_id), "Native only supports mainnet");
-                estimators.push(Box::new(web3.clone()))
+                estimators.push(Box::new(web3.clone(), None))
             }
         }
     }
