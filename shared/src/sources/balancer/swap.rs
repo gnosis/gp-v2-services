@@ -177,7 +177,7 @@ struct BalancesWithIndices {
 }
 
 impl StablePoolRef<'_> {
-    fn construct_balances_and_token_indices(
+    fn upscale_balances_with_token_indices(
         &self,
         in_token: &H160,
         out_token: &H160,
@@ -209,7 +209,7 @@ impl BaselineSolvable for StablePoolRef<'_> {
             token_index_in,
             token_index_out,
             mut balances,
-        } = self.construct_balances_and_token_indices(&in_token, &out_token)?;
+        } = self.upscale_balances_with_token_indices(&in_token, &out_token)?;
         let in_amount_minus_fees =
             subtract_swap_fee_amount(in_amount, self.swap_fee_percentage).ok()?;
         let out_amount = stable_math::calc_out_given_in(
@@ -230,7 +230,7 @@ impl BaselineSolvable for StablePoolRef<'_> {
             token_index_in,
             token_index_out,
             mut balances,
-        } = self.construct_balances_and_token_indices(&in_token, &out_token)?;
+        } = self.upscale_balances_with_token_indices(&in_token, &out_token)?;
         let in_amount = stable_math::calc_in_given_out(
             self.amplification_parameter,
             balances.as_mut_slice(),
@@ -510,7 +510,7 @@ mod tests {
             for token_j in tokens.iter() {
                 let res_ij = pool
                     .as_pool_ref()
-                    .construct_balances_and_token_indices(token_i, token_j)
+                    .upscale_balances_with_token_indices(token_i, token_j)
                     .unwrap();
                 assert_eq!(
                     res_ij.balances[res_ij.token_index_in],
