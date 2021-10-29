@@ -285,7 +285,7 @@ impl OrderValidating for OrderValidator {
                     },
                     kind: order_creation.kind,
                 },
-                Some(order_creation.app_data),
+                order_creation.app_data,
                 order_creation.fee_amount,
             )
             .await

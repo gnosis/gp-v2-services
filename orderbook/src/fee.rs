@@ -56,7 +56,7 @@ pub trait MinFeeCalculating: Send + Sync {
     async fn compute_subsidized_min_fee(
         &self,
         fee_data: FeeData,
-        app_data: Option<AppId>,
+        app_data: AppId,
     ) -> Result<Measurement, PriceEstimationError>;
 
     /// Validates that the given subsidized fee is enough to process an order for the given token.
@@ -65,7 +65,7 @@ pub trait MinFeeCalculating: Send + Sync {
     async fn get_unsubsidized_min_fee(
         &self,
         fee_data: FeeData,
-        app_data: Option<AppId>,
+        app_data: AppId,
         subsidized_fee: U256,
     ) -> Result<U256, ()>;
 }
@@ -138,7 +138,7 @@ where
     async fn compute_subsidized_min_fee(
         &self,
         mut fee_data: FeeData,
-        app_data: Option<AppId>,
+        app_data: AppId,
     ) -> Result<Measurement, PriceEstimationError> {
         fee_data.buy_token = normalize_buy_token(fee_data.buy_token, self.weth);
         self.calculator
@@ -149,7 +149,7 @@ where
     async fn get_unsubsidized_min_fee(
         &self,
         mut fee_data: FeeData,
-        app_data: Option<AppId>,
+        app_data: AppId,
         subsidized_fee: U256,
     ) -> Result<U256, ()> {
         fee_data.buy_token = normalize_buy_token(fee_data.buy_token, self.weth);
@@ -220,9 +220,10 @@ impl MinFeeCalculator {
         Ok(U256::from_f64_lossy(fee))
     }
 
-    fn apply_fee_factor(&self, fee: U256, app_data: Option<AppId>) -> U256 {
-        let factor = app_data
-            .and_then(|app_data| self.partner_additional_fee_factors.get(&app_data))
+    fn apply_fee_factor(&self, fee: U256, app_data: AppId) -> U256 {
+        let factor = self
+            .partner_additional_fee_factors
+            .get(&app_data)
             .copied()
             .unwrap_or(1.0)
             * self.fee_factor;
@@ -235,7 +236,7 @@ impl MinFeeCalculating for MinFeeCalculator {
     async fn compute_subsidized_min_fee(
         &self,
         fee_data: FeeData,
-        app_data: Option<AppId>,
+        app_data: AppId,
     ) -> Result<Measurement, PriceEstimationError> {
         ensure_token_supported(fee_data.sell_token, self.bad_token_detector.as_ref()).await?;
         ensure_token_supported(fee_data.buy_token, self.bad_token_detector.as_ref()).await?;
@@ -280,7 +281,7 @@ impl MinFeeCalculating for MinFeeCalculator {
     async fn get_unsubsidized_min_fee(
         &self,
         fee_data: FeeData,
-        app_data: Option<AppId>,
+        app_data: AppId,
         subsidized_fee: U256,
     ) -> Result<U256, ()> {
         if let Ok(Some(past_fee)) = self
@@ -373,7 +374,7 @@ mod tests {
                     && fee_data.buy_token == weth
                     && fee_data.amount == 1337.into()
                     && fee_data.kind == OrderKind::Sell
-                    && app_data == None
+                    && app_data == Default::default()
             })
             .times(1)
             .returning(|_, _| {
@@ -392,7 +393,7 @@ mod tests {
                     amount: 1337.into(),
                     kind: OrderKind::Sell,
                 },
-                None,
+                Default::default(),
             )
             .await
             .is_ok());
@@ -421,7 +422,7 @@ mod tests {
                         sell_token: token,
                         ..Default::default()
                     },
-                    None,
+                    Default::default(),
                     42.into()
                 )
                 .await,
@@ -481,7 +482,7 @@ mod tests {
             ..Default::default()
         };
         let (fee, expiry) = fee_estimator
-            .compute_subsidized_min_fee(fee_data, None)
+            .compute_subsidized_min_fee(fee_data, Default::default())
             .await
             .unwrap();
         // Gas price increase after measurement
@@ -491,7 +492,7 @@ mod tests {
         // fee is valid before expiry
         *time.lock().unwrap() = expiry - Duration::seconds(10);
         assert!(fee_estimator
-            .get_unsubsidized_min_fee(fee_data, None, fee)
+            .get_unsubsidized_min_fee(fee_data, Default::default(), fee)
             .await
             .is_ok());
 
@@ -503,7 +504,7 @@ mod tests {
                     sell_token: token,
                     ..Default::default()
                 },
-                None,
+                Default::default(),
                 fee
             )
             .await
@@ -539,7 +540,7 @@ mod tests {
             ..Default::default()
         };
         let (fee, _) = fee_estimator
-            .compute_subsidized_min_fee(fee_data, None)
+            .compute_subsidized_min_fee(fee_data, Default::default())
             .await
             .unwrap();
 
@@ -547,7 +548,7 @@ mod tests {
         let lower_fee = fee - U256::one();
         // slightly lower fee is not valid
         assert!(fee_estimator
-            .get_unsubsidized_min_fee(fee_data, None, lower_fee)
+            .get_unsubsidized_min_fee(fee_data, Default::default(), lower_fee)
             .await
             .is_err());
 
@@ -555,7 +556,7 @@ mod tests {
         let new_gas_price = gas_price.lock().unwrap().bump(0.5);
         *gas_price.lock().unwrap() = new_gas_price;
         assert!(fee_estimator
-            .get_unsubsidized_min_fee(fee_data, None, lower_fee)
+            .get_unsubsidized_min_fee(fee_data, Default::default(), lower_fee)
             .await
             .is_ok());
     }
@@ -601,7 +602,7 @@ mod tests {
                     amount: 100.into(),
                     kind: OrderKind::Sell,
                 },
-                None,
+                Default::default(),
             )
             .await;
         assert!(matches!(
@@ -618,7 +619,7 @@ mod tests {
                     amount: 100.into(),
                     kind: OrderKind::Sell,
                 },
-                None,
+                Default::default(),
             )
             .await;
         assert!(matches!(
@@ -662,22 +663,22 @@ mod tests {
             native_token_price_estimation_amount: 1.into(),
         };
         let (fee, _) = fee_estimator
-            .compute_subsidized_min_fee(fee_data, Some(app_data))
+            .compute_subsidized_min_fee(fee_data, app_data)
             .await
             .unwrap();
         assert_eq!(
             fee_estimator
-                .get_unsubsidized_min_fee(fee_data, Some(app_data), fee)
+                .get_unsubsidized_min_fee(fee_data, app_data, fee)
                 .await,
             Ok(fee * 2)
         );
         assert!(fee_estimator
-            .get_unsubsidized_min_fee(fee_data, None, fee)
+            .get_unsubsidized_min_fee(fee_data, Default::default(), fee)
             .await
             .is_err());
         let lower_fee = fee - U256::one();
         assert!(fee_estimator
-            .get_unsubsidized_min_fee(fee_data, Some(app_data), lower_fee)
+            .get_unsubsidized_min_fee(fee_data, app_data, lower_fee)
             .await
             .is_err());
     }
@@ -745,7 +746,7 @@ mod tests {
         };
 
         let (fee, _) = fee_estimator
-            .compute_subsidized_min_fee(fee_data, Some(app_data))
+            .compute_subsidized_min_fee(fee_data, app_data)
             .await
             .unwrap();
         assert_eq!(
@@ -754,7 +755,7 @@ mod tests {
         );
 
         let (fee, _) = fee_estimator
-            .compute_subsidized_min_fee(fee_data, None)
+            .compute_subsidized_min_fee(fee_data, Default::default())
             .await
             .unwrap();
         assert_eq!(

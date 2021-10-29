@@ -244,7 +244,7 @@ impl OrderQuoter {
                             amount: sell_amount_before_fee,
                             kind: OrderKind::Sell,
                         },
-                        Some(quote_request.app_data),
+                        quote_request.app_data,
                     )
                     .await
                     .map_err(FeeError::PriceEstimate)?;
@@ -294,7 +294,7 @@ impl OrderQuoter {
                             amount: buy_amount_after_fee,
                             kind: OrderKind::Buy,
                         },
-                        Some(quote_request.app_data),
+                        quote_request.app_data,
                     )
                     .await
                     .map_err(FeeError::PriceEstimate)?;
