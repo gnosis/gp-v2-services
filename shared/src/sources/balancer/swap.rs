@@ -18,8 +18,9 @@ mod math;
 mod stable_math;
 mod weighted_math;
 
-// TODO - Should probably distinguish between a stable / weighted swap
-const BALANCER_SWAP_GAS_COST: usize = 100_000;
+const WEIGHTED_SWAP_GAS_COST: usize = 100_000;
+// See https://dune.xyz/queries/219641 for cost of pure stable swaps
+const STABLE_SWAP_GAS_COST: usize = 183_520;
 
 fn add_swap_fee_amount(amount: U256, swap_fee_percentage: Bfp) -> Result<U256, Error> {
     // https://github.com/balancer-labs/balancer-v2-monorepo/blob/6c9e24e22d0c46cca6dd15861d3d33da61a60b98/pkg/core/contracts/pools/BasePool.sol#L454-L457
@@ -159,7 +160,7 @@ impl BaselineSolvable for WeightedPoolRef<'_> {
     }
 
     fn gas_cost(&self) -> usize {
-        BALANCER_SWAP_GAS_COST
+        WEIGHTED_SWAP_GAS_COST
     }
 }
 
@@ -260,7 +261,7 @@ impl BaselineSolvable for StablePoolRef<'_> {
     }
 
     fn gas_cost(&self) -> usize {
-        BALANCER_SWAP_GAS_COST
+        STABLE_SWAP_GAS_COST
     }
 }
 
