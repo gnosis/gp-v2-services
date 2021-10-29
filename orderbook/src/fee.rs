@@ -190,11 +190,6 @@ impl MinFeeCalculator {
         fee_data: FeeData,
     ) -> Result<U256, PriceEstimationError> {
         let gas_price = self.gas_estimator.estimate().await?.effective_gas_price();
-        tracing::debug!(
-            "estimated effective gas price of {:.2} Gwei",
-            gas_price / 1e9
-        );
-
         let gas_amount = self
             .price_estimator
             .estimate(&price_estimation::Query {
@@ -206,7 +201,6 @@ impl MinFeeCalculator {
             .await?
             .gas
             .to_f64_lossy();
-
         let fee_in_eth = gas_price * gas_amount;
         let query = price_estimation::Query {
             sell_token: fee_data.sell_token,
@@ -219,7 +213,7 @@ impl MinFeeCalculator {
         let fee = fee_in_eth * price;
 
         tracing::debug!(
-            ?fee_data.sell_token, ?fee_data.buy_token, ?fee_data.amount, ?fee_data.kind, %gas_price, %gas_amount, %fee_in_eth, %price, %fee,
+            ?fee_data, %gas_price, %gas_amount, %fee_in_eth, %price, %fee,
             "unsubsidized fee amount"
         );
 
@@ -250,10 +244,7 @@ impl MinFeeCalculating for MinFeeCalculator {
         let official_valid_until = now + Duration::seconds(STANDARD_VALIDITY_FOR_FEE_IN_SEC);
         let internal_valid_until = now + Duration::seconds(PERSISTED_VALIDITY_FOR_FEE_IN_SEC);
 
-        tracing::debug!(
-            ?fee_data.sell_token, ?fee_data.buy_token, ?fee_data.amount, ?fee_data.kind, ?app_data,
-            "computing subsidized fee",
-        );
+        tracing::debug!(?fee_data, ?app_data, "computing subsidized fee",);
 
         let unsubsidized_min_fee = if let Ok(Some(past_fee)) = self
             .measurements
