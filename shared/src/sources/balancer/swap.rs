@@ -92,7 +92,7 @@ impl BaselineSolvable for WeightedPoolRef<'_> {
         let in_amount_minus_fees =
             subtract_swap_fee_amount(in_amount, self.swap_fee_percentage).ok()?;
 
-        let bfp = weighted_math::calc_out_given_in(
+        let out_amount = weighted_math::calc_out_given_in(
             in_reserves.token_state.upscaled_balance()?,
             in_reserves.weight,
             out_reserves.token_state.upscaled_balance()?,
@@ -100,7 +100,7 @@ impl BaselineSolvable for WeightedPoolRef<'_> {
             in_reserves.token_state.upscale(in_amount_minus_fees)?,
         )
         .ok()?;
-        out_reserves.token_state.downscale_down(bfp)
+        out_reserves.token_state.downscale_down(out_amount)
     }
 
     fn get_amount_in(&self, in_token: H160, (out_amount, out_token): (U256, H160)) -> Option<U256> {
@@ -110,7 +110,7 @@ impl BaselineSolvable for WeightedPoolRef<'_> {
         let in_reserves = self.reserves.get(&in_token)?;
         let out_reserves = self.reserves.get(&out_token)?;
 
-        let bfp = weighted_math::calc_in_given_out(
+        let in_amount = weighted_math::calc_in_given_out(
             in_reserves.token_state.upscaled_balance()?,
             in_reserves.weight,
             out_reserves.token_state.upscaled_balance()?,
@@ -118,7 +118,7 @@ impl BaselineSolvable for WeightedPoolRef<'_> {
             out_reserves.token_state.upscale(out_amount)?,
         )
         .ok()?;
-        let amount_in_before_fee = in_reserves.token_state.downscale_up(bfp).ok()?;
+        let amount_in_before_fee = in_reserves.token_state.downscale_up(in_amount).ok()?;
         add_swap_fee_amount(amount_in_before_fee, self.swap_fee_percentage).ok()
     }
 
@@ -212,7 +212,7 @@ impl BaselineSolvable for StablePoolRef<'_> {
         } = self.construct_balances_and_token_indices(&in_token, &out_token)?;
         let in_amount_minus_fees =
             subtract_swap_fee_amount(in_amount, self.swap_fee_percentage).ok()?;
-        let bfp = stable_math::calc_out_given_in(
+        let out_amount = stable_math::calc_out_given_in(
             self.amplification_parameter,
             balances.as_mut_slice(),
             token_index_in,
@@ -220,7 +220,7 @@ impl BaselineSolvable for StablePoolRef<'_> {
             in_reserves.upscale(in_amount_minus_fees)?,
         )
         .ok()?;
-        out_reserves.downscale_down(bfp)
+        out_reserves.downscale_down(out_amount)
     }
 
     fn get_amount_in(&self, in_token: H160, (out_amount, out_token): (U256, H160)) -> Option<U256> {
@@ -231,7 +231,7 @@ impl BaselineSolvable for StablePoolRef<'_> {
             token_index_out,
             mut balances,
         } = self.construct_balances_and_token_indices(&in_token, &out_token)?;
-        let bfp = stable_math::calc_in_given_out(
+        let in_amount = stable_math::calc_in_given_out(
             self.amplification_parameter,
             balances.as_mut_slice(),
             token_index_in,
@@ -239,7 +239,7 @@ impl BaselineSolvable for StablePoolRef<'_> {
             out_reserves.upscale(out_amount)?,
         )
         .ok()?;
-        let amount_in_before_fee = in_reserves.downscale_up(bfp).ok()?;
+        let amount_in_before_fee = in_reserves.downscale_up(in_amount).ok()?;
         add_swap_fee_amount(amount_in_before_fee, self.swap_fee_percentage).ok()
     }
 
