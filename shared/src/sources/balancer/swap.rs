@@ -177,6 +177,15 @@ struct BalancesWithIndices {
 }
 
 impl StablePoolRef<'_> {
+    // TODO - https://github.com/gnosis/gp-v2-services/pull/1225#discussion_r739033527
+    // Based on this discussion, it remains to verify that the non-deterministic ordering
+    // of the Balance array returned by this method cannot give rise to any undesired
+    // rounding/precision errors in the functions which operate on this. Specifically,
+    // the internal methods
+    // - calculate_invariant and
+    // - get_token_balance_given_invariant_and_all_other_balances
+    // which perform balancer-arithmetic on the balances array from inside calc_X_given_Y
+    // See issue for this task here: https://github.com/gnosis/gp-v2-services/issues/1332
     fn upscale_balances_with_token_indices(
         &self,
         in_token: &H160,
@@ -250,18 +259,8 @@ impl BaselineSolvable for StablePoolRef<'_> {
         add_swap_fee_amount(amount_in_before_fee, self.swap_fee_percentage).ok()
     }
 
-    /// Here we use the spot price defined in the white paper, assuming pools have equal weight.
-    /// https://balancer.fi/whitepaper.pdf#spot-price
-    fn get_spot_price(&self, base_token: H160, quote_token: H160) -> Option<BigRational> {
-        // Note that the spot price is defined for weighted pools so we have assumed weights of 1.
-        let base_balance = self.reserves.get(&base_token)?.balance;
-        let quote_balance = self.reserves.get(&quote_token)?.balance;
-
-        // note: no need to scale, as the balances are already stored in token
-        // units and weights are all rescaled by the same amount.
-        let base_rate = BigRational::new(u256_to_big_int(&base_balance), 1.into());
-        let quote_rate = BigRational::new(u256_to_big_int(&quote_balance), 1.into());
-        quote_rate.checked_div(&base_rate)
+    fn get_spot_price(&self, _base_token: H160, _quote_token: H160) -> Option<BigRational> {
+        todo!("https://github.com/gnosis/gp-v2-services/issues/1331")
     }
 
     fn gas_cost(&self) -> usize {
