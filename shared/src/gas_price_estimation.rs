@@ -1,7 +1,7 @@
 use crate::Web3;
 use anyhow::{ensure, Context, Result};
 use gas_estimation::{
-    blocknative::BlockNative, EstimatedGasPrice, EthGasStation, GasNowGasStation,
+    blocknative::BlockNative, nativegasestimator::NativeGasEstimator, EstimatedGasPrice, EthGasStation, GasNowGasStation,
     GasPriceEstimating, GnosisSafeGasStation, PriorityGasPriceEstimating, Transport,
 };
 use serde::de::DeserializeOwned;
@@ -89,9 +89,9 @@ pub async fn create_priority_estimator(
                 GnosisSafeGasStation::with_network_id(&network_id, client.clone())?,
             )),
             GasEstimatorType::Web3 => estimators.push(Box::new(web3.clone())),
-            &GasEstimatorType::Native => {
+            GasEstimatorType::Native => {
                 ensure!(is_mainnet(&network_id), "Native only supports mainnet");
-                estimators.push(Box::new(web3.clone(), None))
+                estimators.push(Box::new(NativeGasEstimator::new(web3.clone(), None)))
             }
         }
     }
