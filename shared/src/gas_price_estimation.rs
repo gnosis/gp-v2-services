@@ -1,8 +1,9 @@
 use crate::Web3;
 use anyhow::{ensure, Context, Result};
 use gas_estimation::{
-    blocknative::BlockNative, nativegasestimator::NativeGasEstimator, EstimatedGasPrice, EthGasStation, GasNowGasStation,
-    GasPriceEstimating, GnosisSafeGasStation, PriorityGasPriceEstimating, Transport,
+    blocknative::BlockNative, nativegasestimator::NativeGasEstimator, EstimatedGasPrice,
+    EthGasStation, GasNowGasStation, GasPriceEstimating, GnosisSafeGasStation,
+    PriorityGasPriceEstimating, Transport,
 };
 use serde::de::DeserializeOwned;
 use std::sync::{Arc, Mutex};
