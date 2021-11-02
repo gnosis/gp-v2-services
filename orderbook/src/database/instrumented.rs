@@ -74,16 +74,32 @@ impl MinFeeStoring for Instrumented {
             .await
     }
 
-    async fn read_fee_measurement(
+    async fn find_measurement_exact(
         &self,
         fee_data: crate::fee::FeeData,
         min_expiry: chrono::DateTime<chrono::Utc>,
     ) -> anyhow::Result<Option<ethcontract::U256>> {
         let _timer = self
             .metrics
-            .database_query_histogram("read_fee_measurement")
+            .database_query_histogram("find_measurement_exact")
             .start_timer();
-        self.inner.read_fee_measurement(fee_data, min_expiry).await
+        self.inner
+            .find_measurement_exact(fee_data, min_expiry)
+            .await
+    }
+
+    async fn find_measurement_including_larger_amount(
+        &self,
+        fee_data: crate::fee::FeeData,
+        min_expiry: chrono::DateTime<chrono::Utc>,
+    ) -> anyhow::Result<Option<ethcontract::U256>> {
+        let _timer = self
+            .metrics
+            .database_query_histogram("find_measurement_including_larger_amount")
+            .start_timer();
+        self.inner
+            .find_measurement_including_larger_amount(fee_data, min_expiry)
+            .await
     }
 }
 

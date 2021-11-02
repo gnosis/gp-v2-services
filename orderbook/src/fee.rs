@@ -40,6 +40,7 @@ pub struct MinFeeCalculator {
 pub struct FeeData {
     pub sell_token: H160,
     pub buy_token: H160,
+    // For sell orders this is the sell amount before fees.
     pub amount: U256,
     pub kind: OrderKind,
 }
@@ -73,7 +74,7 @@ pub trait MinFeeCalculating: Send + Sync {
 #[cfg_attr(test, mockall::automock)]
 #[async_trait::async_trait]
 pub trait MinFeeStoring: Send + Sync {
-    // Stores the given measurement. Returns an error if this fails
+    /// Stores the given measurement. Returns an error if this fails
     async fn save_fee_measurement(
         &self,
         fee_data: FeeData,
@@ -81,8 +82,17 @@ pub trait MinFeeStoring: Send + Sync {
         min_fee: U256,
     ) -> Result<()>;
 
-    // Returns lowest previously stored measurements for the given fee data that hasn't expired.
-    async fn read_fee_measurement(
+    /// Returns lowest previously stored measurements that hasn't expired. FeeData has to match
+    /// exactly.
+    async fn find_measurement_exact(
+        &self,
+        fee_data: FeeData,
+        min_expiry: DateTime<Utc>,
+    ) -> Result<Option<U256>>;
+
+    /// Returns lowest previously stored measurements that hasn't expired. FeeData has to match
+    /// exactly except for the amount which is allowed to be larger than the amount in fee data.
+    async fn find_measurement_including_larger_amount(
         &self,
         fee_data: FeeData,
         min_expiry: DateTime<Utc>,
@@ -249,7 +259,7 @@ impl MinFeeCalculating for MinFeeCalculator {
 
         let unsubsidized_min_fee = if let Ok(Some(past_fee)) = self
             .measurements
-            .read_fee_measurement(fee_data, official_valid_until)
+            .find_measurement_exact(fee_data, official_valid_until)
             .await
         {
             tracing::debug!("using existing fee measurement {}", past_fee);
@@ -284,9 +294,19 @@ impl MinFeeCalculating for MinFeeCalculator {
         app_data: AppId,
         subsidized_fee: U256,
     ) -> Result<U256, ()> {
+        // When validating we allow fees taken for larger amounts because as the amount increases
+        // the fee increases too because it is worth to trade off more gas use for a slightly better
+        // price. Thus it is acceptable if the new order has an amount <= an existing fee
+        // measurement.
+        // We do not use "exact" here because for sell orders the final sell_amount might have been
+        // calculated as original_sell_amount + fee_response or sell_amount
+        // (sell amount before vs after fee).
+        // Once we have removed the `fee` route and moved all fee requests to the `quote` route we
+        // might no longer need this workaround as we will know exactly how the amounts in the order
+        // have been picked.
         if let Ok(Some(past_fee)) = self
             .measurements
-            .read_fee_measurement(fee_data, (self.now)())
+            .find_measurement_including_larger_amount(fee_data, (self.now)())
             .await
         {
             if subsidized_fee >= self.apply_fee_factor(past_fee, app_data) {
@@ -332,7 +352,7 @@ impl MinFeeStoring for InMemoryFeeStore {
         Ok(())
     }
 
-    async fn read_fee_measurement(
+    async fn find_measurement_exact(
         &self,
         fee_data: FeeData,
         min_expiry: DateTime<Utc>,
@@ -342,6 +362,25 @@ impl MinFeeStoring for InMemoryFeeStore {
             .iter()
             .filter(|measurement| {
                 measurement.expiry >= min_expiry && measurement.fee_data == fee_data
+            })
+            .map(|measurement| measurement.min_fee)
+            .min())
+    }
+
+    async fn find_measurement_including_larger_amount(
+        &self,
+        fee_data: FeeData,
+        min_expiry: DateTime<Utc>,
+    ) -> Result<Option<U256>> {
+        let guard = self.0.lock().expect("Thread holding Mutex panicked");
+        Ok(guard
+            .iter()
+            .filter(|measurement| {
+                measurement.expiry >= min_expiry
+                    && measurement.fee_data.sell_token == fee_data.sell_token
+                    && measurement.fee_data.buy_token == fee_data.buy_token
+                    && measurement.fee_data.kind == fee_data.kind
+                    && measurement.fee_data.amount >= fee_data.amount
             })
             .map(|measurement| measurement.min_fee)
             .min())
@@ -712,7 +751,7 @@ mod tests {
         let mut measurements = MockMinFeeStoring::new();
         let mut seq = Sequence::new();
         measurements
-            .expect_read_fee_measurement()
+            .expect_find_measurement_exact()
             .times(1)
             .in_sequence(&mut seq)
             .with(eq(fee_data), always())
@@ -724,7 +763,7 @@ mod tests {
             .with(eq(fee_data), always(), eq(unsubsidized_min_fee))
             .returning(|_, _, _| Ok(()));
         measurements
-            .expect_read_fee_measurement()
+            .expect_find_measurement_exact()
             .times(1)
             .in_sequence(&mut seq)
             .with(eq(fee_data), always())
