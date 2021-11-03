@@ -6,8 +6,7 @@ use model::DomainSeparator;
 use orderbook::{
     account_balances::Web3BalanceFetcher, api::order_validation::OrderValidator,
     api::post_quote::OrderQuoter, database::Postgres, event_updater::EventUpdater,
-    fee::EthAwareMinFeeCalculator, metrics::Metrics, orderbook::Orderbook,
-    solvable_orders::SolvableOrdersCache,
+    fee::EthAwareMinFeeCalculator, orderbook::Orderbook, solvable_orders::SolvableOrdersCache,
 };
 use reqwest::Client;
 use shared::{
@@ -18,7 +17,9 @@ use shared::{
     price_estimation::baseline::BaselinePriceEstimator,
     recent_block_cache::CacheConfig,
     sources::uniswap::{
-        pair_provider::UniswapPairProvider, pool_cache::PoolCache, pool_fetching::PoolFetcher,
+        pair_provider::UniswapPairProvider,
+        pool_cache::{NoopPoolCacheMetrics, PoolCache},
+        pool_fetching::PoolFetcher,
     },
     Web3,
 };
@@ -45,7 +46,7 @@ macro_rules! tx_value {
 #[macro_export]
 macro_rules! tx {
     ($acc:ident, $call:expr) => {
-        tx_value!($acc, U256::zero(), $call)
+        $crate::tx_value!($acc, U256::zero(), $call)
     };
 }
 
@@ -144,7 +145,6 @@ pub struct OrderbookServices {
 
 impl OrderbookServices {
     pub async fn new(web3: &Web3, gpv2: &GPv2, uniswap_factory: &UniswapV2Factory) -> Self {
-        let metrics = Arc::new(Metrics::new().unwrap());
         let chain_id = web3
             .eth()
             .chain_id()
@@ -177,7 +177,7 @@ impl OrderbookServices {
                 web3: web3.clone(),
             }),
             current_block_stream.clone(),
-            metrics,
+            Arc::new(NoopPoolCacheMetrics),
         )
         .unwrap();
         let gas_estimator = Arc::new(web3.clone());
