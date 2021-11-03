@@ -33,7 +33,9 @@ use solver::{
     liquidity_collector::LiquidityCollector,
     metrics::Metrics,
     orderbook::OrderBookApi,
-    settlement_submission::{archer_api::ArcherApi, SolutionSubmitter, TransactionStrategy},
+    settlement_submission::{
+        archer_api::ArcherApi, flashbots_api::FlashbotsApi, SolutionSubmitter, TransactionStrategy,
+    },
     solver::SolverType,
 };
 use std::{collections::HashMap, str::FromStr, sync::Arc, time::Duration};
@@ -202,6 +204,7 @@ arg_enum! {
     enum TransactionStrategyArg {
         PublicMempool,
         ArcherNetwork,
+        Flashbots,
         CustomNodes,
         DryRun,
     }
@@ -461,6 +464,9 @@ async fn main() {
                     client.clone(),
                 ),
                 max_confirm_time: args.max_archer_submission_seconds,
+            },
+            TransactionStrategyArg::Flashbots => TransactionStrategy::Flashbots {
+                flashbots_api: FlashbotsApi::new(client.clone()),
             },
             TransactionStrategyArg::CustomNodes => {
                 assert!(
