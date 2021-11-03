@@ -38,8 +38,15 @@ jobs:
           path: flyway-${{ env.FLYWAY_VERSION }}
           key: ${{ runner.os }}-build-flyway-${{ env.FLYWAY_VERSION }}
       - run: "[[ -d flyway-${FLYWAY_VERSION} ]] || (curl -L https://repo1.maven.org/maven2/org/flywaydb/flyway-commandline/${FLYWAY_VERSION}/flyway-commandline-${FLYWAY_VERSION}.tar.gz -o flyway-commandline-${FLYWAY_VERSION}.tar.gz && tar -xzf flyway-commandline-${FLYWAY_VERSION}.tar.gz && rm flyway-commandline-${FLYWAY_VERSION}.tar.gz)"
-      - run: cargo build --locked --all-features --tests
-      - run: cargo test --locked --all-features
+      # We do not use `cargo test` to prevent building dependencies multiple times as the e2e crate
+      # uses different features and isn't part of the default workspace members.
+      - run: cargo build --locked --workspace --all-features --tests --bin deploy
+      # Crates can have tests in multiple targets like for bin and lib so we make sure to run all of
+      # them.
+      - run: find target/debug/deps -name "model-????????????????" -exec "{}" ";"
+      - run: find target/debug/deps -name "orderbook-????????????????" -exec "{}" ";"
+      - run: find target/debug/deps -name "shared-????????????????" -exec "{}" ";"
+      - run: find target/debug/deps -name "solver-????????????????" -exec "{}" ";"
       - run: |
           sudo systemctl start postgresql.service
           sudo -u postgres createuser $USER
@@ -47,7 +54,7 @@ jobs:
           psql -c "ALTER USER $USER PASSWORD '$FLYWAY_PASSWORD';"
           flyway-${FLYWAY_VERSION}/flyway -url="jdbc:postgresql:///" -user=$USER -locations="filesystem:database/sql/" migrate
         # Postgres tests should not run in parallel because they use the same database.
-      - run: cargo test --locked --all-features postgres -- --ignored --test-threads 1
+      - run: find target/debug/deps -name "orderbook-????????????????" -exec "{}" --ignored --test-threads 1 postgres ";"
       - run: |
           npm install hardhat
           cat > hardhat.config.js <<EOF
@@ -63,8 +70,9 @@ jobs:
           };
           EOF
           node_modules/.bin/hardhat node &
-      - run: cargo run --locked --all-features --bin deploy
-      - run: cargo test --locked --all-features --package e2e
+      - run: target/debug/deploy
+      - run: find target/debug/deps -name "e2e-????????????????" -exec "{}" --test-threads 1 ";"
+
   openapi:
     runs-on: ubuntu-latest
     steps:

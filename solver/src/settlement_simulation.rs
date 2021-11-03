@@ -160,7 +160,7 @@ mod tests {
     #[ignore]
     async fn mainnet() {
         // Create some bogus settlements to see that the simulation returns an error.
-        shared::tracing::initialize("solver=debug,shared=debug", tracing::Level::ERROR.into());
+        shared::tracing::initialize_for_tests("solver=debug,shared=debug");
         let transport = create_env_test_transport();
         let web3 = Web3::new(transport);
         let block = web3.eth().block_number().await.unwrap().as_u64();
@@ -211,7 +211,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn mainnet_chunked() {
-        shared::tracing::initialize("solver=debug,shared=debug", tracing::Level::ERROR.into());
+        shared::tracing::initialize_for_tests("solver=debug,shared=debug");
         let transport = create_env_test_transport();
         let web3 = Web3::new(transport);
         let contract = GPv2Settlement::deployed(&web3).await.unwrap();
