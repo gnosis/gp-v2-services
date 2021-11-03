@@ -20,7 +20,7 @@ use std::{convert::Infallible, sync::Arc};
 use warp::{
     hyper::StatusCode,
     reply::{Json, WithStatus},
-    Filter, Rejection, Reply,
+    Filter, Rejection,
 };
 
 /// The order parameters to quote a price and fee for.
@@ -342,7 +342,7 @@ fn post_quote_request() -> impl Filter<Extract = (OrderQuoteRequest,), Error = R
 
 pub fn post_quote(
     quoter: Arc<OrderQuoter>,
-) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
+) -> impl Filter<Extract = (super::ApiReply,), Error = Rejection> + Clone {
     post_quote_request().and_then(move |request: OrderQuoteRequest| {
         let quoter = quoter.clone();
         async move {
@@ -366,7 +366,7 @@ mod tests {
     use futures::FutureExt;
     use serde_json::json;
     use shared::price_estimation::mocks::FakePriceEstimator;
-    use warp::test::request;
+    use warp::{test::request, Reply};
 
     #[test]
     fn deserializes_sell_after_fees_quote_request() {
