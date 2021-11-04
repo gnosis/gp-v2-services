@@ -10,10 +10,7 @@ use shared::{
     bad_token::BadTokenDetecting,
     price_estimation::{self, ensure_token_supported, PriceEstimating, PriceEstimationError},
 };
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, sync::{Arc, Mutex}};
 
 pub type Measurement = (U256, DateTime<Utc>);
 
@@ -78,6 +75,20 @@ pub struct FeeData {
     pub kind: OrderKind,
 }
 
+/// Everything required to compute the fee amount in sell token
+#[derive(Debug, Clone, Copy)]
+pub struct UnsubsidizedFee {
+    pub gas_amount: f64,
+    pub gas_price: f64,
+    pub sell_token_price: f64,
+}
+
+impl UnsubsidizedFee {
+    fn amount_in_sell_token(&self) -> f64 {
+        self.gas_amount * self.gas_price * self.sell_token_price
+    }
+}
+
 #[cfg_attr(test, mockall::automock)]
 #[async_trait::async_trait]
 pub trait MinFeeCalculating: Send + Sync {
@@ -112,7 +123,7 @@ pub trait MinFeeStoring: Send + Sync {
         &self,
         fee_data: FeeData,
         expiry: DateTime<Utc>,
-        min_fee: U256,
+        estimate: UnsubsidizedFee,
     ) -> Result<()>;
 
     /// Returns lowest previously stored measurements that hasn't expired. FeeData has to match
@@ -121,7 +132,7 @@ pub trait MinFeeStoring: Send + Sync {
         &self,
         fee_data: FeeData,
         min_expiry: DateTime<Utc>,
-    ) -> Result<Option<U256>>;
+    ) -> Result<Option<UnsubsidizedFee>>;
 
     /// Returns lowest previously stored measurements that hasn't expired. FeeData has to match
     /// exactly except for the amount which is allowed to be larger than the amount in fee data.
@@ -129,7 +140,7 @@ pub trait MinFeeStoring: Send + Sync {
         &self,
         fee_data: FeeData,
         min_expiry: DateTime<Utc>,
-    ) -> Result<Option<U256>>;
+    ) -> Result<Option<UnsubsidizedFee>>;
 }
 
 // We use a longer validity internally for persistence to avoid writing a value to storage on every request
@@ -234,7 +245,7 @@ impl MinFeeCalculator {
     async fn compute_unsubsidized_min_fee(
         &self,
         fee_data: FeeData,
-    ) -> Result<U256, PriceEstimationError> {
+    ) -> Result<UnsubsidizedFee, PriceEstimationError> {
         let gas_price = self.gas_estimator.estimate().await?.effective_gas_price();
         let gas_amount = self
             .price_estimator
@@ -255,18 +266,22 @@ impl MinFeeCalculator {
             kind: OrderKind::Buy,
         };
         let estimate = self.price_estimator.estimate(&query).await?;
-        let price = estimate.price_in_sell_token_f64(&query);
-        let fee = fee_in_eth * price;
+        let sell_token_price = estimate.price_in_sell_token_f64(&query);
+        let fee = fee_in_eth * sell_token_price;
 
         tracing::debug!(
-            ?fee_data, %gas_price, %gas_amount, %fee_in_eth, %price, %fee,
+            ?fee_data, %gas_price, %gas_amount, %fee_in_eth, %sell_token_price, %fee,
             "unsubsidized fee amount"
         );
 
-        Ok(U256::from_f64_lossy(fee))
+        Ok(UnsubsidizedFee {
+            gas_amount,
+            gas_price,
+            sell_token_price,
+        })
     }
 
-    fn apply_fee_factor(&self, fee: U256, app_data: AppId) -> U256 {
+    fn apply_fee_factor(&self, fee: UnsubsidizedFee, app_data: AppId) -> U256 {
         let factor = self
             .fee_subsidy
             .partner_additional_fee_factors
@@ -274,7 +289,7 @@ impl MinFeeCalculator {
             .copied()
             .unwrap_or(1.0)
             * self.fee_subsidy.fee_factor;
-        U256::from_f64_lossy(fee.to_f64_lossy() * factor)
+        U256::from_f64_lossy(fee.amount_in_sell_token() * factor)
     }
 }
 
@@ -294,12 +309,12 @@ impl MinFeeCalculating for MinFeeCalculator {
 
         tracing::debug!(?fee_data, ?app_data, "computing subsidized fee",);
 
-        let unsubsidized_min_fee = if let Ok(Some(past_fee)) = self
+        let unsubsidized_min_fee = if let Some(past_fee) = self
             .measurements
             .find_measurement_exact(fee_data, official_valid_until)
-            .await
+            .await?
         {
-            tracing::debug!("using existing fee measurement {}", past_fee);
+            tracing::debug!("using existing fee measurement {:?}", past_fee);
             past_fee
         } else {
             let current_fee = self.compute_unsubsidized_min_fee(fee_data).await?;
@@ -312,7 +327,7 @@ impl MinFeeCalculating for MinFeeCalculator {
                 tracing::warn!(?err, "error saving fee measurement");
             }
 
-            tracing::debug!("using new fee measurement {}", current_fee);
+            tracing::debug!("using new fee measurement {:?}", current_fee);
             current_fee
         };
 
@@ -347,13 +362,13 @@ impl MinFeeCalculating for MinFeeCalculator {
             .await
         {
             if subsidized_fee >= self.apply_fee_factor(past_fee, app_data) {
-                return Ok(std::cmp::max(subsidized_fee, past_fee));
+                return Ok(std::cmp::max(subsidized_fee, U256::from_f64_lossy(past_fee.amount_in_sell_token())));
             }
         }
 
         if let Ok(current_fee) = self.compute_unsubsidized_min_fee(fee_data).await {
             if subsidized_fee >= self.apply_fee_factor(current_fee, app_data) {
-                return Ok(std::cmp::max(subsidized_fee, current_fee));
+                return Ok(std::cmp::max(subsidized_fee, U256::from_f64_lossy(current_fee.amount_in_sell_token())));
             }
         }
 
@@ -364,7 +379,7 @@ impl MinFeeCalculating for MinFeeCalculator {
 struct FeeMeasurement {
     fee_data: FeeData,
     expiry: DateTime<Utc>,
-    min_fee: U256,
+    estimate: UnsubsidizedFee,
 }
 
 #[derive(Default)]
@@ -376,7 +391,7 @@ impl MinFeeStoring for InMemoryFeeStore {
         &self,
         fee_data: FeeData,
         expiry: DateTime<Utc>,
-        min_fee: U256,
+        estimate: UnsubsidizedFee,
     ) -> Result<()> {
         self.0
             .lock()
@@ -384,7 +399,7 @@ impl MinFeeStoring for InMemoryFeeStore {
             .push(FeeMeasurement {
                 fee_data,
                 expiry,
-                min_fee,
+                estimate,
             });
         Ok(())
     }
@@ -393,22 +408,22 @@ impl MinFeeStoring for InMemoryFeeStore {
         &self,
         fee_data: FeeData,
         min_expiry: DateTime<Utc>,
-    ) -> Result<Option<U256>> {
+    ) -> Result<Option<UnsubsidizedFee>> {
         let guard = self.0.lock().expect("Thread holding Mutex panicked");
         Ok(guard
             .iter()
             .filter(|measurement| {
                 measurement.expiry >= min_expiry && measurement.fee_data == fee_data
             })
-            .map(|measurement| measurement.min_fee)
-            .min())
+            .map(|measurement| measurement.estimate)
+            .min_by_key(|estimate| U256::from_f64_lossy(estimate.amount_in_sell_token())))
     }
 
     async fn find_measurement_including_larger_amount(
         &self,
         fee_data: FeeData,
         min_expiry: DateTime<Utc>,
-    ) -> Result<Option<U256>> {
+    ) -> Result<Option<UnsubsidizedFee>> {
         let guard = self.0.lock().expect("Thread holding Mutex panicked");
         Ok(guard
             .iter()
@@ -419,8 +434,8 @@ impl MinFeeStoring for InMemoryFeeStore {
                     && measurement.fee_data.kind == fee_data.kind
                     && measurement.fee_data.amount >= fee_data.amount
             })
-            .map(|measurement| measurement.min_fee)
-            .min())
+            .map(|measurement| measurement.estimate)
+            .min_by_key(|estimate| U256::from_f64_lossy(estimate.amount_in_sell_token())))
     }
 }
 
