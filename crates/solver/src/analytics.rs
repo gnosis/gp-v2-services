@@ -78,9 +78,7 @@ pub fn report_alternative_settlement_surplus(
                     .to_f64()
                     .unwrap_or_default(),
             );
-            // TODO - make comparator a config parameter (i.e. when to log worse trades).
-            let comparator = &BigRational::new(101.into(), 100.into());
-            if alternative.absolute > comparator * &submitted.absolute {
+            if alternative.absolute > submitted.absolute {
                 tracing::warn!("submission surplus worse than lower ranked settlement; order {:?} submitted {}, best alternative {}", order_id, submitted, alternative)
             }
         }

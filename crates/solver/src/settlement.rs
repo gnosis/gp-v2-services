@@ -300,9 +300,6 @@ fn sell_order_surplus(
     if sell_amount_limit.is_zero() {
         return None;
     }
-    // absolute_surplus = exec_buy_amount - (exec_sell_amount * limit_buy_amount/limit_sell_amount)
-    // external_price(buy_token) * absolute_surplus
-    // -------------
     let limit_buy_amount = executed_sell_amount * buy_amount_limit / sell_amount_limit;
     let res = (executed_sell_amount * sell_token_price) - (limit_buy_amount * buy_token_price);
     if res.is_negative() {
@@ -318,7 +315,7 @@ fn surplus_ratio(
     sell_amount_limit: &BigRational,
     buy_amount_limit: &BigRational,
 ) -> Option<BigRational> {
-    if buy_token_price.is_zero() {
+    if buy_token_price.is_zero() || buy_token_price.is_zero() {
         return None;
     }
     let res = (sell_amount_limit * sell_token_price) / (buy_amount_limit * buy_token_price)
