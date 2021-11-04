@@ -24,9 +24,27 @@ pub struct EthAdapter<T> {
     weth: H160,
 }
 
+/// Fee subsidy configuration.
+///
+/// Given an estimated fee for a trade, the mimimum fee required for an order is
+/// computed using the following formula:
+/// ```
+/// (estimated_fee_in_eth - fee_discount) * fee_factor * (partner_additional_fee_factor || 1.0)
+/// ```
 pub struct FeeSubsidyConfiguration {
+    /// A flat discount nominated in the native token to discount from fees.
+    ///
+    /// Flat fee discounts are applied **before** any multiplicative discounts.
     pub fee_discount: f64,
+    /// A factor to multiply the estimated trading fee with in order to compute
+    /// subsidized minimum fee.
+    ///
+    /// Fee factors are applied **after** flat fee discounts.
     pub fee_factor: f64,
+    /// Additional factors per order app ID for computing the subsidized minimum
+    /// fee.
+    ///
+    /// Fee factors are applied **after** flat fee discounts.
     pub partner_additional_fee_factors: HashMap<AppId, f64>,
 }
 
