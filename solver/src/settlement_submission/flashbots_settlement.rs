@@ -76,10 +76,8 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
 impl<'a> FlashbotsSolutionSubmitter<'a> {
     /// Submit a settlement to the contract, updating the transaction with gas prices if they increase.
     ///
-    /// Goes through the archerdao network so that failing transactions do not get mined and thus do
+    /// Goes through the flashbots network so that failing transactions do not get mined and thus do
     /// not cost gas.
-    ///
-    /// Returns None if the deadline is reached without a mined transaction.
     ///
     /// Only works on mainnet.
     pub async fn submit(
@@ -90,7 +88,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
     ) -> Result<Option<TransactionReceipt>> {
         let nonce = self.nonce().await?;
 
-        tracing::info!("starting archer solution submission at nonce {}", nonce,);
+        tracing::info!("starting flashbots solution submission at nonce {}", nonce,);
 
         let mut transactions = Vec::new();
         let submit_future = self.submit_with_increasing_gas_prices_until_simulation_fails(
@@ -175,7 +173,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
         }
     }
 
-    /// Keep submitting the settlement transaction to the archer network as gas price changes.
+    /// Keep submitting the settlement transaction to the flashbots network as gas price changes.
     ///
     /// Returns when simulation of the transaction fails. This likely happens if the settlement
     /// becomes invalid due to changing prices or the account's nonce changes.
@@ -239,7 +237,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
             if let Err(err) = method.clone().view().call().await {
                 if let Some((_, previous_tx)) = previous_tx.as_ref() {
                     if let Err(err) = self.flashbots_api.cancel(previous_tx.to_string()).await {
-                        tracing::error!("archer cancellation failed: {:?}", err);
+                        tracing::error!("flashbots cancellation failed: {:?}", err);
                     }
                 }
                 return err;
@@ -250,7 +248,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
             if let Some((previous_gas_price, previous_tx)) = previous_tx.as_ref() {
                 if gas_price.cap() > previous_gas_price.cap() {
                     if let Err(err) = self.flashbots_api.cancel(previous_tx.to_string()).await {
-                        tracing::error!("archer cancellation failed: {:?}", err);
+                        tracing::error!("flashbots cancellation failed: {:?}", err);
                     }
                 } else {
                     tokio::time::sleep(UPDATE_INTERVAL).await;
@@ -266,7 +264,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
                 };
 
             tracing::info!(
-                "creating archer transaction with hash {:?}, tip to miner {:.3e}, gas price {:?}, gas estimate {}",
+                "creating flashbots transaction with hash {:?}, tip to miner {:.3e}, gas price {:?}, gas estimate {}",
                 hash,
                 tx_gas_cost_in_ether_wei.to_f64_lossy(),
                 gas_price,
@@ -316,65 +314,14 @@ async fn find_mined_transaction(web3: &Web3, hashes: &[H256]) -> Option<Transact
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
-    use ethcontract::{dyns::DynTransport, PrivateKey, H160};
-    use gas_estimation::GasNowGasStation;
-    use hex_literal::hex;
+    use ethcontract::PrivateKey;
+    use gas_estimation::blocknative::BlockNative;
     use reqwest::Client;
-    use shared::{
-        dummy_contract,
-        gas_price_estimation::FakeGasPriceEstimator,
-        transport::{create_env_test_transport, dummy::DummyTransport},
-    };
+    use shared::transport::create_env_test_transport;
     use tracing::level_filters::LevelFilter;
 
-    #[tokio::test]
-    async fn cannot_create_archer_submitter_with_local_account() {
-        let web3 = Web3::new(DynTransport::new(DummyTransport));
-        let account = Account::Local(H160([0x42; 20]), None);
-        let contract = dummy_contract!(GPv2Settlement, H160([0x01; 20]));
-        let archer_api = ArcherApi::new("unused".to_string(), Client::new());
-        let gas_price_estimator = FakeGasPriceEstimator::new(EstimatedGasPrice {
-            legacy: 1e9,
-            ..Default::default()
-        });
-        let gas_price_cap = 100e9;
-
-        assert!(ArcherSolutionSubmitter::new(
-            &web3,
-            &contract,
-            &account,
-            &archer_api,
-            &gas_price_estimator,
-            gas_price_cap,
-        )
-        .is_err());
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn mainnet_find_mined_transaction() {
-        let web3 = Web3::new(create_env_test_transport());
-        let hashes = &[
-            // a non existing transaction
-            H256(hex!(
-                "b9752d57ea49d8055bf50a1361f066691d7b4f2abd555e71896370d1eccda525"
-            )),
-            // an existing transaction
-            H256(hex!(
-                "b9752d57ea49d8055bf50a1361f066691d7b4f2abd555e71896370d1eccda526"
-            )),
-        ];
-        assert_eq!(
-            find_mined_transaction(&web3, hashes)
-                .await
-                .unwrap()
-                .transaction_hash,
-            hashes[1]
-        );
-    }
-
-    // env NODE_URL=... PRIVATE_KEY=... ARCHER_AUTHORIZATION=... cargo test -p solver mainnet_settlement -- --ignored --nocapture
     #[tokio::test]
     #[ignore]
     async fn mainnet_settlement() {
@@ -389,12 +336,19 @@ mod tests {
         let private_key: PrivateKey = std::env::var("PRIVATE_KEY").unwrap().parse().unwrap();
         let account = Account::Offline(private_key, Some(chain_id));
         let contract = crate::get_settlement_contract(&web3).await.unwrap();
-        let archer_api = ArcherApi::new(
-            std::env::var("ARCHER_AUTHORIZATION").unwrap(),
-            Client::new(),
+        let flashbots_api = FlashbotsApi::new(Client::new());
+        let mut header = reqwest::header::HeaderMap::new();
+        header.insert(
+            "AUTHORIZATION",
+            reqwest::header::HeaderValue::from_str(&std::env::var("BLOCKNATIVE_API_KEY").unwrap())
+                .unwrap(), //or replace with api_key
         );
-        let gas_price_estimator =
-            GasNowGasStation::new(shared::gas_price_estimation::Client(reqwest::Client::new()));
+        let gas_price_estimator = BlockNative::new(
+            shared::gas_price_estimation::Client(reqwest::Client::new()),
+            header,
+        )
+        .await
+        .unwrap();
         let gas_price_cap = 100e9;
 
         let settlement = Settlement::new(Default::default());
@@ -412,23 +366,18 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        let submitter = ArcherSolutionSubmitter::new(
+        let submitter = FlashbotsSolutionSubmitter::new(
             &web3,
             &contract,
             &account,
-            &archer_api,
+            &flashbots_api,
             &gas_price_estimator,
             gas_price_cap,
         )
         .unwrap();
 
         let result = submitter
-            .submit(
-                Duration::from_secs(0),
-                SystemTime::now() + Duration::from_secs(1000),
-                settlement,
-                gas_estimate,
-            )
+            .submit(Duration::from_secs(0), settlement, gas_estimate)
             .await;
         tracing::info!("finished with result {:?}", result);
     }
