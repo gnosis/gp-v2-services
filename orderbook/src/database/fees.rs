@@ -134,6 +134,17 @@ mod tests {
     use model::order::OrderKind;
     use primitive_types::H160;
 
+    // Convenience to allow using u32 in tests instead of the struct
+    impl From<u32> for UnsubsidizedFee {
+        fn from(v: u32) -> Self {
+            UnsubsidizedFee {
+                gas_amount: v as f64,
+                gas_price: 1.0,
+                sell_token_price: 1.0,
+            }
+        }
+    }
+
     #[tokio::test]
     #[ignore]
     async fn postgres_save_and_load_fee_measurements() {

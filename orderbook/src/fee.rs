@@ -76,7 +76,7 @@ pub struct FeeData {
 }
 
 /// Everything required to compute the fee amount in sell token
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct UnsubsidizedFee {
     pub gas_amount: f64,
     pub gas_price: f64,
@@ -785,7 +785,11 @@ mod tests {
         let sell_token_price = 1.25;
         let gas_estimate = 42.;
 
-        let unsubsidized_min_fee = U256::from_f64_lossy(1337. * sell_token_price * gas_estimate);
+        let unsubsidized_min_fee = UnsubsidizedFee {
+            gas_amount: 1337.,
+            sell_token_price,
+            gas_price: gas_estimate
+        };
 
         let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(
             EstimatedGasPrice {
@@ -845,7 +849,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             fee,
-            U256::from_f64_lossy(unsubsidized_min_fee.to_f64_lossy() * 0.8 * 0.5)
+            U256::from_f64_lossy(unsubsidized_min_fee.amount_in_sell_token() * 0.8 * 0.5)
         );
 
         let (fee, _) = fee_estimator
@@ -854,7 +858,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             fee,
-            U256::from_f64_lossy(unsubsidized_min_fee.to_f64_lossy() * 0.8)
+            U256::from_f64_lossy(unsubsidized_min_fee.amount_in_sell_token() * 0.8)
         );
     }
 }
