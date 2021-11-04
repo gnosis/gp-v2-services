@@ -1,5 +1,8 @@
 use super::{orders::DbOrderKind, Postgres};
-use crate::{conversions::*, fee::{FeeData, MinFeeStoring, UnsubsidizedFee}};
+use crate::{
+    conversions::*,
+    fee::{FeeData, MinFeeStoring, UnsubsidizedFee},
+};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -62,6 +65,7 @@ impl MinFeeStoring for Postgres {
                 order_kind = $4 AND \
                 expiration_timestamp >= $5 \
             ORDER BY gas_amount * gas_price * sell_token_price ASC \
+            LIMIT 1 \
             ;";
 
         let result: Option<FeeRow> = sqlx::query_as(QUERY)
@@ -91,6 +95,7 @@ impl MinFeeStoring for Postgres {
                 order_kind = $4 AND \
                 expiration_timestamp >= $5 \
             ORDER BY gas_amount * gas_price * sell_token_price ASC \
+            LIMIT 1 \
             ;";
 
         let result: Option<FeeRow> = sqlx::query_as(QUERY)

@@ -10,7 +10,10 @@ use shared::{
     bad_token::BadTokenDetecting,
     price_estimation::{self, ensure_token_supported, PriceEstimating, PriceEstimationError},
 };
-use std::{collections::HashMap, sync::{Arc, Mutex}};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 pub type Measurement = (U256, DateTime<Utc>);
 
@@ -362,13 +365,19 @@ impl MinFeeCalculating for MinFeeCalculator {
             .await
         {
             if subsidized_fee >= self.apply_fee_factor(past_fee, app_data) {
-                return Ok(std::cmp::max(subsidized_fee, U256::from_f64_lossy(past_fee.amount_in_sell_token())));
+                return Ok(std::cmp::max(
+                    subsidized_fee,
+                    U256::from_f64_lossy(past_fee.amount_in_sell_token()),
+                ));
             }
         }
 
         if let Ok(current_fee) = self.compute_unsubsidized_min_fee(fee_data).await {
             if subsidized_fee >= self.apply_fee_factor(current_fee, app_data) {
-                return Ok(std::cmp::max(subsidized_fee, U256::from_f64_lossy(current_fee.amount_in_sell_token())));
+                return Ok(std::cmp::max(
+                    subsidized_fee,
+                    U256::from_f64_lossy(current_fee.amount_in_sell_token()),
+                ));
             }
         }
 
@@ -788,7 +797,7 @@ mod tests {
         let unsubsidized_min_fee = UnsubsidizedFee {
             gas_amount: 1337.,
             sell_token_price,
-            gas_price: gas_estimate
+            gas_price: gas_estimate,
         };
 
         let gas_estimator = Arc::new(FakeGasPriceEstimator(Arc::new(Mutex::new(
