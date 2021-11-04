@@ -36,7 +36,7 @@ pub trait SolverMetrics: Send + Sync {
     fn settlement_simulation_failed(&self, solver: &'static str);
     fn settlement_submitted(&self, successful: bool, solver: &'static str);
     fn orders_matched_but_not_settled(&self, count: usize);
-    fn unsettled_orders_with_better_surplus(&self, count: usize);
+    fn report_order_surplus(&self, winning_solver: &str, best_alternative: &str, surplus_diff: f64);
     fn runloop_completed(&self);
     fn complete_runloop_until_transaction(&self, duration: Duration);
     fn transaction_submission(&self, duration: Duration);
@@ -57,7 +57,7 @@ pub struct Metrics {
     pool_cache_hits: IntCounter,
     pool_cache_misses: IntCounter,
     last_runloop_completed: Mutex<Instant>,
-    unsettled_orders_with_better_surplus: IntCounter,
+    order_surplus_report: HistogramVec,
     complete_runloop_until_transaction: Histogram,
     transaction_submission: Histogram,
 }
@@ -126,11 +126,23 @@ impl Metrics {
         )?;
         registry.register(Box::new(matched_but_unsettled_orders.clone()))?;
 
-        let unsettled_orders_with_better_surplus = IntCounter::new(
-            "orders_with_better_surplus",
-            "Counts the number or orders in a batch for which the surplus submitted was worse than another valid yet lower ranked settlement"
+        let order_surplus_report = HistogramVec::new(
+            HistogramOpts::new(
+                "settlement_surplus_report",
+                "Surplus ratio differences between winning and best settlement per order",
+            )
+            .buckets(vec![
+                -f64::INFINITY,
+                -0.1,
+                -0.01,
+                0.,
+                0.01,
+                0.1,
+                f64::INFINITY,
+            ]),
+            &["winning_settlement", "best_alternative"],
         )?;
-        registry.register(Box::new(unsettled_orders_with_better_surplus.clone()))?;
+        registry.register(Box::new(order_surplus_report.clone()))?;
 
         let opts = HistogramOpts::new(
             "transport_requests",
@@ -185,7 +197,7 @@ impl Metrics {
             pool_cache_hits,
             pool_cache_misses,
             last_runloop_completed: Mutex::new(Instant::now()),
-            unsettled_orders_with_better_surplus,
+            order_surplus_report,
             complete_runloop_until_transaction,
             transaction_submission,
         })
@@ -287,9 +299,15 @@ impl SolverMetrics for Metrics {
         self.matched_but_unsettled_orders.inc_by(count as u64);
     }
 
-    fn unsettled_orders_with_better_surplus(&self, count: usize) {
-        self.unsettled_orders_with_better_surplus
-            .inc_by(count as u64);
+    fn report_order_surplus(
+        &self,
+        winning_solver: &str,
+        best_alternative: &str,
+        surplus_diff: f64,
+    ) {
+        self.order_surplus_report
+            .with_label_values(&[winning_solver, best_alternative])
+            .observe(surplus_diff)
     }
 
     fn runloop_completed(&self) {
@@ -362,7 +380,7 @@ impl SolverMetrics for NoopMetrics {
     fn settlement_simulation_failed(&self, _: &'static str) {}
     fn settlement_submitted(&self, _: bool, _: &'static str) {}
     fn orders_matched_but_not_settled(&self, _: usize) {}
-    fn unsettled_orders_with_better_surplus(&self, _: usize) {}
+    fn report_order_surplus(&self, _: &str, _: &str, _: f64) {}
     fn runloop_completed(&self) {}
     fn complete_runloop_until_transaction(&self, _: Duration) {}
     fn transaction_submission(&self, _: Duration) {}
