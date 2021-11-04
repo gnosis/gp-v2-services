@@ -236,7 +236,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
 
             if let Err(err) = method.clone().view().call().await {
                 if let Some((_, previous_tx)) = previous_tx.as_ref() {
-                    if let Err(err) = self.flashbots_api.cancel(previous_tx.to_string()).await {
+                    if let Err(err) = self.flashbots_api.cancel(previous_tx).await {
                         tracing::error!("flashbots cancellation failed: {:?}", err);
                     }
                 }
@@ -247,7 +247,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
 
             if let Some((previous_gas_price, previous_tx)) = previous_tx.as_ref() {
                 if gas_price.cap() > previous_gas_price.cap() {
-                    if let Err(err) = self.flashbots_api.cancel(previous_tx.to_string()).await {
+                    if let Err(err) = self.flashbots_api.cancel(previous_tx).await {
                         tracing::error!("flashbots cancellation failed: {:?}", err);
                     }
                 } else {

@@ -34,7 +34,7 @@ impl FlashbotsApi {
     }
 
     /// Cancel a previously submitted transaction.
-    pub async fn cancel(&self, bundle_id: String) -> Result<()> {
+    pub async fn cancel(&self, bundle_id: &str) -> Result<()> {
         let body = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
