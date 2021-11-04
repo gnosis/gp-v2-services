@@ -10,9 +10,9 @@ use shared::maintenance::Maintaining;
 
 #[derive(sqlx::FromRow)]
 struct FeeRow {
-    pub gas_amount: f64,
-    pub gas_price: f64,
-    pub sell_token_price: f64,
+    gas_amount: f64,
+    gas_price: f64,
+    sell_token_price: f64,
 }
 
 impl FeeRow {
