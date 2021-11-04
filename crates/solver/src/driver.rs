@@ -285,8 +285,11 @@ impl Driver {
         // Report surplus
         analytics::report_alternative_settlement_surplus(
             self.metrics.clone(),
-            submitted,
-            other_settlements.clone(),
+            (submitted.0.name(), &submitted.1.settlement),
+            other_settlements
+                .iter()
+                .map(|(solver, rated_settlement)| (solver.name(), &rated_settlement.settlement))
+                .collect(),
         );
         // Report matched but not settled
         // TODO - move all this data manipulation into analytics.rs
