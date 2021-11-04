@@ -1,13 +1,17 @@
-use crate::bad_token::BadTokenDetecting;
-use crate::price_estimation::{
-    ensure_token_supported, Estimate, PriceEstimating, PriceEstimationError, Query,
+use super::gas;
+use crate::{
+    bad_token::BadTokenDetecting,
+    price_estimation::{
+        ensure_token_supported, Estimate, PriceEstimating, PriceEstimationError, Query,
+    },
+    zeroex_api::{SwapQuery, ZeroExApi},
 };
-use crate::zeroex_api::{SwapQuery, ZeroExApi};
 use model::order::OrderKind;
+use primitive_types::U256;
 use std::sync::Arc;
 
 pub struct ZeroExPriceEstimator {
-    pub client: Arc<dyn ZeroExApi + Send + Sync>,
+    pub api: Arc<dyn ZeroExApi>,
     pub bad_token_detector: Arc<dyn BadTokenDetecting>,
 }
 
@@ -29,24 +33,23 @@ impl ZeroExPriceEstimator {
         };
 
         let swap = self
-            .client
-            .get_price(SwapQuery {
+            .api
+            .get_swap(SwapQuery {
                 sell_token: query.sell_token,
                 buy_token: query.buy_token,
                 sell_amount,
                 buy_amount,
                 slippage_percentage: Default::default(),
-                skip_validation: Some(true),
             })
             .await
             .map_err(|err| PriceEstimationError::Other(err.into()))?;
 
         Ok(Estimate {
             out_amount: match query.kind {
-                OrderKind::Buy => swap.sell_amount,
-                OrderKind::Sell => swap.buy_amount,
+                OrderKind::Buy => swap.price.sell_amount,
+                OrderKind::Sell => swap.price.buy_amount,
             },
-            gas: swap.estimated_gas,
+            gas: U256::from(gas::SETTLEMENT_SINGLE_TRADE) + swap.price.estimated_gas,
         })
     }
 }
@@ -71,8 +74,8 @@ impl PriceEstimating for ZeroExPriceEstimator {
 mod tests {
     use super::*;
     use crate::bad_token::list_based::ListBasedDetector;
-    use crate::zeroex_api::MockZeroExApi;
     use crate::zeroex_api::{DefaultZeroExApi, PriceResponse};
+    use crate::zeroex_api::{MockZeroExApi, SwapResponse};
     use reqwest::Client;
 
     #[tokio::test]
@@ -86,13 +89,16 @@ mod tests {
         //     buyToken=0x6810e776880c02933d47db1b9fc05908e5386b96&\
         //     slippagePercentage=0&\
         //     sellAmount=100000000000000000"
-        zeroex_api.expect_get_price().return_once(|_| {
-            Ok(PriceResponse {
-                sell_amount: 100000000000000000u64.into(),
-                buy_amount: 1110165823572443613u64.into(),
-                allowance_target: addr!("def1c0ded9bec7f1a1670819833240f027b25eff"),
-                price: 11.101_658_235_724_436,
-                estimated_gas: 111000.into(),
+        zeroex_api.expect_get_swap().return_once(|_| {
+            Ok(SwapResponse {
+                price: PriceResponse {
+                    sell_amount: 100000000000000000u64.into(),
+                    buy_amount: 1110165823572443613u64.into(),
+                    allowance_target: addr!("def1c0ded9bec7f1a1670819833240f027b25eff"),
+                    price: 11.101_658_235_724_436,
+                    estimated_gas: 111000.into(),
+                },
+                ..Default::default()
             })
         });
 
@@ -100,7 +106,7 @@ mod tests {
         let gno = addr!("6810e776880c02933d47db1b9fc05908e5386b96");
 
         let estimator = ZeroExPriceEstimator {
-            client: Arc::new(zeroex_api),
+            api: Arc::new(zeroex_api),
             bad_token_detector: Arc::new(ListBasedDetector::deny_list(Vec::new())),
         };
 
@@ -115,7 +121,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(est.out_amount, 1110165823572443613u64.into());
-        assert_eq!(est.gas, 111000.into());
+        assert!(est.gas > 111000.into());
     }
 
     #[tokio::test]
@@ -129,13 +135,16 @@ mod tests {
         //     buyToken=0x6810e776880c02933d47db1b9fc05908e5386b96&\
         //     slippagePercentage=0&\
         //     buyAmount=100000000000000000"
-        zeroex_api.expect_get_price().return_once(|_| {
-            Ok(PriceResponse {
-                sell_amount: 8986186353137488u64.into(),
-                buy_amount: 100000000000000000u64.into(),
-                allowance_target: addr!("def1c0ded9bec7f1a1670819833240f027b25eff"),
-                price: 0.089_861_863_531_374_87,
-                estimated_gas: 111000.into(),
+        zeroex_api.expect_get_swap().return_once(|_| {
+            Ok(SwapResponse {
+                price: PriceResponse {
+                    sell_amount: 8986186353137488u64.into(),
+                    buy_amount: 100000000000000000u64.into(),
+                    allowance_target: addr!("def1c0ded9bec7f1a1670819833240f027b25eff"),
+                    price: 0.089_861_863_531_374_87,
+                    estimated_gas: 111000.into(),
+                },
+                ..Default::default()
             })
         });
 
@@ -143,7 +152,7 @@ mod tests {
         let gno = addr!("6810e776880c02933d47db1b9fc05908e5386b96");
 
         let estimator = ZeroExPriceEstimator {
-            client: Arc::new(zeroex_api),
+            api: Arc::new(zeroex_api),
             bad_token_detector: Arc::new(ListBasedDetector::deny_list(Vec::new())),
         };
 
@@ -158,13 +167,13 @@ mod tests {
             .unwrap();
 
         assert_eq!(est.out_amount, 8986186353137488u64.into());
-        assert_eq!(est.gas, 111000.into());
+        assert!(est.gas > 111000.into());
     }
 
     #[tokio::test]
     async fn same_token() {
         let estimator = ZeroExPriceEstimator {
-            client: Arc::new(MockZeroExApi::new()),
+            api: Arc::new(MockZeroExApi::new()),
             bad_token_detector: Arc::new(ListBasedDetector::deny_list(Vec::new())),
         };
 
@@ -190,7 +199,7 @@ mod tests {
         let gno = addr!("6810e776880c02933d47db1b9fc05908e5386b96");
 
         let estimator = ZeroExPriceEstimator {
-            client: Arc::new(MockZeroExApi::new()),
+            api: Arc::new(MockZeroExApi::new()),
             // we don't support this shady token -_-
             bad_token_detector: Arc::new(ListBasedDetector::deny_list(vec![gno])),
         };
@@ -219,7 +228,7 @@ mod tests {
         let gno = addr!("6810e776880c02933d47db1b9fc05908e5386b96");
 
         let estimator = ZeroExPriceEstimator {
-            client: Arc::new(DefaultZeroExApi::with_default_url(Client::new())),
+            api: Arc::new(DefaultZeroExApi::with_default_url(Client::new())),
             bad_token_detector: Arc::new(ListBasedDetector::deny_list(Vec::new())),
         };
 
