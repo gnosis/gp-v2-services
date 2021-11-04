@@ -1,7 +1,7 @@
 // Design:
 // As in the traditional transaction submission workflow the main work in this module is checking
 // the gas price in a loop and updating the transaction when the gas price increases. This differs
-// so that we can make use of the property that archer transactions do not cost gas if they fail.
+// so that we can make use of the property that flashbots transactions do not cost gas if they fail.
 // When we detect that the transaction would no longer succeed we stop trying to submit and return
 // so that the solver can run again.
 // In addition to simulation failure we make use of a deadline after which submission attempts also
@@ -12,19 +12,6 @@
 // transactions definitely become invalid (even if the transaction came for whatever reason
 // from outside) so it is only at that point that we need to check the hashes individually to the
 // find the one that got mined (if any).
-
-// Idea:
-// The current driver code is either solving or waiting for a solution to be mined.
-// When using archer we can improve on this by always solving the current order book as if there was
-// no pending transaction and continually updating the transaction we are sending to archer.
-// This is a bigger change so the code here still adheres to the traditional tx submission
-// workflow.
-
-// TODO: Make sure settlement contract always has eth to pay the miner. Could reuse buffers or just
-// manually fund it like we do with other solver accounts and make part of our monitor scripts.
-
-// TODO: Node gas estimates seem a little higher than actual. This can be seen when comparing
-// to tenderly simulations and mined transactions. This causes us to overpay somewhat.
 
 use super::{flashbots_api::FlashbotsApi, ESTIMATE_GAS_LIMIT_FACTOR};
 use crate::{interactions::block_coinbase, settlement::Settlement};
@@ -59,7 +46,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
     ) -> Result<Self> {
         ensure!(
             matches!(account, Account::Offline(..)),
-            "Archer submission requires offline account for signing"
+            "Flashbots submission requires offline account for signing"
         );
 
         Ok(Self {
