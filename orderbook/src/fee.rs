@@ -97,7 +97,11 @@ impl UnsubsidizedFee {
         app_data: AppId,
     ) -> U256 {
         let fee_in_eth = self.gas_amount * self.gas_price;
-        let discounted_fee_in_eth = (0f64).max(fee_in_eth - fee_configuration.fee_discount);
+        let mut discounted_fee_in_eth = fee_in_eth - fee_configuration.fee_discount;
+        if discounted_fee_in_eth < 0. {
+            tracing::warn!("Computed negative fee after applying fee discount: {}, capping at 0", discounted_fee_in_eth);
+            discounted_fee_in_eth = 0.;
+        }
         let factor = fee_configuration
             .partner_additional_fee_factors
             .get(&app_data)
