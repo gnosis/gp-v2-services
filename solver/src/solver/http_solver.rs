@@ -219,7 +219,11 @@ impl HttpSolver {
             orders: order_models,
             amms: amm_models,
             metadata: Some(MetadataModel {
-                environment: Some(self.network_id.clone()),
+                environment: Some(format!(
+                    "{} / {}",
+                    self.network_id.clone(),
+                    self.chain_id.clone()
+                )),
             }),
         };
         Ok((model, SettlementContext { orders, liquidity }))
