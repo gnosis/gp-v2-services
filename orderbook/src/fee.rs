@@ -99,7 +99,10 @@ impl UnsubsidizedFee {
         let fee_in_eth = self.gas_amount * self.gas_price;
         let mut discounted_fee_in_eth = fee_in_eth - fee_configuration.fee_discount;
         if discounted_fee_in_eth < 0. {
-            tracing::warn!("Computed negative fee after applying fee discount: {}, capping at 0", discounted_fee_in_eth);
+            tracing::warn!(
+                "Computed negative fee after applying fee discount: {}, capping at 0",
+                discounted_fee_in_eth
+            );
             discounted_fee_in_eth = 0.;
         }
         let factor = fee_configuration
