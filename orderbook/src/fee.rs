@@ -28,7 +28,7 @@ pub struct EthAdapter<T> {
 ///
 /// Given an estimated fee for a trade, the mimimum fee required for an order is
 /// computed using the following formula:
-/// ```
+/// ```text
 /// (estimated_fee_in_eth - fee_discount) * fee_factor * (partner_additional_fee_factor || 1.0)
 /// ```
 pub struct FeeSubsidyConfiguration {
