@@ -29,11 +29,11 @@ impl Display for SurplusInfo {
     }
 }
 
-fn get_prices(settlement: &Settlement) -> HashMap<&H160, BigRational> {
+fn get_prices(settlement: &Settlement) -> HashMap<H160, BigRational> {
     settlement
         .clearing_prices()
         .iter()
-        .map(|(token, price)| (token, price.to_big_rational()))
+        .map(|(token, price)| (*token, price.to_big_rational()))
         .collect::<HashMap<_, _>>()
 }
 
@@ -78,8 +78,11 @@ pub fn report_alternative_settlement_surplus(
                     .to_f64()
                     .unwrap_or_default(),
             );
-            if alternative.absolute > submitted.absolute {
-                tracing::warn!("submission surplus worse than lower ranked settlement; order {:?} submitted {}, best alternative {}", order_id, submitted, alternative)
+            if alternative.ratio > submitted.ratio {
+                tracing::warn!(
+                    ?order_id, %submitted, %alternative,
+                    "submission surplus worse than lower ranked settlement",
+                );
             }
         }
     }
