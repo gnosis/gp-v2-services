@@ -33,17 +33,21 @@ impl FlashbotsApi {
 
         match serde_json::from_str::<jsonrpc_core::Output>(&body) {
             Ok(body) => {
-                let bundle_id = if let jsonrpc_core::Output::Success(ref x) = body {
-                    x.result.as_str().unwrap_or_default()
+                if let jsonrpc_core::Output::Success(ref x) = body {
+                    match x.result.as_str() {
+                        Some(result) => {
+                            tracing::debug!(
+                                "flashbots bundle id: {}",
+                                serde_json::to_string(&result)
+                                    .unwrap_or_else(|err| format!("error: {:?}", err)),
+                            );
+                            Ok(result.to_string())
+                        }
+                        None => Err(anyhow!("failed to submit: result not a string")),
+                    }
                 } else {
-                    Default::default()
-                };
-                tracing::debug!(
-                    "flashbots bundle id: {}",
-                    serde_json::to_string(&bundle_id)
-                        .unwrap_or_else(|err| format!("error: {:?}", err)),
-                );
-                Ok(bundle_id.to_string())
+                    Err(anyhow!("failed to submit: response not success"))
+                }
             }
             Err(err) => {
                 tracing::debug!("failed to submit: {}", err);
