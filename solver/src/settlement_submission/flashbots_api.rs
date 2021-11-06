@@ -1,4 +1,4 @@
-use anyhow::{ensure, anyhow, Result};
+use anyhow::{anyhow, ensure, Result};
 use reqwest::Client;
 
 const URL: &str = "https://protection.flashbots.net/v1/rpc";
@@ -40,14 +40,15 @@ impl FlashbotsApi {
                 };
                 tracing::debug!(
                     "flashbots bundle id: {}",
-                    serde_json::to_string(&bundle_id).unwrap_or_else(|err| format!("error: {:?}", err)),
+                    serde_json::to_string(&bundle_id)
+                        .unwrap_or_else(|err| format!("error: {:?}", err)),
                 );
                 Ok(bundle_id.to_string())
-            },
+            }
             Err(err) => {
                 tracing::debug!("failed to submit: {}", err);
                 Err(anyhow!("failed to submit"))
-            },
+            }
         }
     }
 
