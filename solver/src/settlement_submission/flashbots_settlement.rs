@@ -14,7 +14,7 @@
 // find the one that got mined (if any).
 
 use super::{flashbots_api::FlashbotsApi, ESTIMATE_GAS_LIMIT_FACTOR};
-use crate::{interactions::block_coinbase, settlement::Settlement};
+use crate::settlement::Settlement;
 use anyhow::{anyhow, ensure, Context, Result};
 use contracts::GPv2Settlement;
 use ethcontract::{errors::MethodError, transaction::Transaction, Account};
@@ -202,15 +202,9 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
 
             let tx_gas_cost_in_ether_wei =
                 U256::from_f64_lossy(gas_price.effective_gas_price()) * gas_estimate;
-            let mut settlement = settlement.clone();
-            settlement
-                .encoder
-                .append_to_execution_plan(block_coinbase::PayBlockCoinbase {
-                    amount: tx_gas_cost_in_ether_wei,
-                });
             let method = super::retry::settle_method_builder(
                 self.contract,
-                settlement.into(),
+                settlement.clone().into(),
                 self.account.clone(),
             )
             .nonce(nonce)

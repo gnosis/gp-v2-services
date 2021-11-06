@@ -1,4 +1,4 @@
-use anyhow::{ensure, Result};
+use anyhow::{ensure, anyhow, Result};
 use reqwest::Client;
 
 const URL: &str = "https://protection.flashbots.net/v1/rpc";
@@ -30,7 +30,25 @@ impl FlashbotsApi {
         let status = response.status();
         let body = response.text().await?;
         ensure!(status.is_success(), "status {}: {:?}", status, body);
-        Ok(body)
+
+        match serde_json::from_str::<jsonrpc_core::Output>(&body) {
+            Ok(body) => {
+                let bundle_id = if let jsonrpc_core::Output::Success(ref x) = body {
+                    x.result.as_str().unwrap_or_default()
+                } else {
+                    Default::default()
+                };
+                tracing::debug!(
+                    "flashbots bundle id: {}",
+                    serde_json::to_string(&bundle_id).unwrap_or_else(|err| format!("error: {:?}", err)),
+                );
+                Ok(bundle_id.to_string())
+            },
+            Err(err) => {
+                tracing::debug!("failed to submit: {}", err);
+                Err(anyhow!("failed to submit"))
+            },
+        }
     }
 
     /// Cancel a previously submitted transaction.
@@ -43,6 +61,25 @@ impl FlashbotsApi {
         });
         tracing::debug!(
             "eth_cancelBundleById body: {}",
+            serde_json::to_string(&body).unwrap_or_else(|err| format!("error: {:?}", err)),
+        );
+        let response = self.client.post(URL).json(&body).send().await?;
+        let status = response.status();
+        let body = response.text().await?;
+        ensure!(status.is_success(), "status {}: {:?}", status, body);
+        Ok(())
+    }
+
+    /// Query status of a previously submitted transaction.
+    pub async fn status(&self, bundle_id: &str) -> Result<()> {
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBundleStatusById",
+            "params": [bundle_id],
+        });
+        tracing::debug!(
+            "eth_getBundleStatusById body: {}",
             serde_json::to_string(&body).unwrap_or_else(|err| format!("error: {:?}", err)),
         );
         let response = self.client.post(URL).json(&body).send().await?;
