@@ -51,7 +51,7 @@ impl FlashbotsApi {
             }
             Err(err) => {
                 tracing::debug!("failed to submit: {}", err);
-                Err(anyhow!("failed to submit"))
+                Err(anyhow!("failed to submit. Error: {}", err))
             }
         }
     }
