@@ -200,8 +200,6 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
 
             // create transaction
 
-            let tx_gas_cost_in_ether_wei =
-                U256::from_f64_lossy(gas_price.effective_gas_price()) * gas_estimate;
             let tx_gas_price = if let Some(eip1559) = gas_price.eip1559 {
                 (eip1559.max_fee_per_gas, 10_000_000_000.0).into()
             } else {
@@ -242,7 +240,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
                             err
                         );
 
-                        // if cancelation fails, we dont want to submit a new tx, rather contine and wait 
+                        // if cancelation fails, we dont want to submit a new tx, rather contine and wait
                         // for a nonce to change and end this function or a next cancelation to succeed.
                         tokio::time::sleep(UPDATE_INTERVAL).await;
                         continue;
@@ -261,9 +259,8 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
                 };
 
             tracing::info!(
-                "creating flashbots transaction with hash {:?}, tip to miner {:.3e}, gas price {:?}, gas estimate {}",
+                "creating flashbots transaction with hash {:?}, gas price {:?}, gas estimate {}",
                 hash,
-                tx_gas_cost_in_ether_wei.to_f64_lossy(),
                 gas_price,
                 gas_estimate,
             );
