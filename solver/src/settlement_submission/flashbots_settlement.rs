@@ -231,9 +231,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
 
             if let Some((previous_gas_price, previous_tx)) = previous_tx.as_ref() {
                 let previous_gas_price = previous_gas_price.bump(1.125);
-                if gas_price.cap() > previous_gas_price.cap()
-                    && gas_price.tip() > previous_gas_price.tip()
-                {
+                if gas_price.cap() > previous_gas_price.cap() {
                     if let Err(err) = self.flashbots_api.cancel(previous_tx).await {
                         tracing::error!(
                             "flashbots cancellation failed, probably already completed: {:?}",
