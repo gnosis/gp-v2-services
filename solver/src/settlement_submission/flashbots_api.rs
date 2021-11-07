@@ -80,7 +80,7 @@ impl FlashbotsApi {
                     }
                     None => Err(anyhow!("result not a string")),
                 },
-                jsonrpc_core::Output::Failure(f) => Err(anyhow!(f.error)),
+                jsonrpc_core::Output::Failure(body) => Err(anyhow!(body.error)),
             },
             Err(err) => Err(anyhow!(err)),
         }
