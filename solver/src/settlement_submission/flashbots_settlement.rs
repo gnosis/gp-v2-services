@@ -22,7 +22,7 @@ use futures::FutureExt;
 use gas_estimation::{EstimatedGasPrice, GasPriceEstimating};
 use primitive_types::{H256, U256};
 use shared::Web3;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use web3::types::TransactionReceipt;
 
 pub struct FlashbotsSolutionSubmitter<'a> {
@@ -66,10 +66,13 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
     /// Goes through the flashbots network so that failing transactions do not get mined and thus do
     /// not cost gas.
     ///
+    /// Returns None if the deadline is reached without a mined transaction.
+    ///
     /// Only works on mainnet.
     pub async fn submit(
         &self,
         target_confirm_time: Duration,
+        deadline: SystemTime,
         settlement: Settlement,
         gas_estimate: U256,
     ) -> Result<Option<TransactionReceipt>> {
@@ -88,9 +91,16 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
 
         let nonce_future = self.wait_for_nonce_to_change(nonce);
 
+        let deadline_future = tokio::time::sleep(
+            deadline
+                .duration_since(SystemTime::now())
+                .unwrap_or_else(|_| Duration::from_secs(0)),
+        );
+
         futures::select! {
             method_error = submit_future.fuse() => tracing::info!("stopping submission because simulation failed: {:?}", method_error),
             new_nonce = nonce_future.fuse() => tracing::info!("stopping submission because account nonce changed to {}", new_nonce),
+            _ = deadline_future.fuse() => tracing::info!("stopping submission because deadline has been reached"),
         };
 
         // After stopping submission of new transactions we wait for some time to give a potentially
@@ -372,7 +382,7 @@ mod tests {
         .unwrap();
 
         let result = submitter
-            .submit(Duration::from_secs(0), settlement, gas_estimate)
+            .submit(Duration::from_secs(0), SystemTime::now() + Duration::from_secs(90), settlement, gas_estimate)
             .await;
         tracing::info!("finished with result {:?}", result);
     }
