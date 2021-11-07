@@ -190,7 +190,12 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
             let gas_limit = gas_estimate.to_f64_lossy() * ESTIMATE_GAS_LIMIT_FACTOR;
             let time_limit = target_confirm_time.saturating_duration_since(Instant::now());
             let gas_price = match self.gas_price(gas_limit, time_limit).await {
-                Ok(gas_price) => gas_price,
+                Ok(mut gas_price) => {
+                    if let Some(ref mut eip1559) = gas_price.eip1559 {
+                        eip1559.max_priority_fee_per_gas = 10_000_000_000.0;
+                    }
+                    gas_price
+                }
                 Err(err) => {
                     tracing::error!("gas estimation failed: {:?}", err);
                     tokio::time::sleep(UPDATE_INTERVAL).await;
@@ -201,7 +206,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
             // create transaction
 
             let tx_gas_price = if let Some(eip1559) = gas_price.eip1559 {
-                (eip1559.max_fee_per_gas, 10_000_000_000.0).into()
+                (eip1559.max_fee_per_gas, eip1559.max_priority_fee_per_gas).into()
             } else {
                 gas_price.legacy.into()
             };
