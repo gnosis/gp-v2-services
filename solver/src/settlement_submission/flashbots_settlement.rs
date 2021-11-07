@@ -382,7 +382,12 @@ mod tests {
         .unwrap();
 
         let result = submitter
-            .submit(Duration::from_secs(0), SystemTime::now() + Duration::from_secs(90), settlement, gas_estimate)
+            .submit(
+                Duration::from_secs(0),
+                SystemTime::now() + Duration::from_secs(90),
+                settlement,
+                gas_estimate,
+            )
             .await;
         tracing::info!("finished with result {:?}", result);
     }
