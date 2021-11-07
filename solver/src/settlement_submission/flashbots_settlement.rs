@@ -173,7 +173,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
         settlement: Settlement,
         gas_estimate: U256,
         transactions: &mut Vec<H256>,
-    ) -> Result<()> {
+    ) -> anyhow::Error {
         const UPDATE_INTERVAL: Duration = Duration::from_secs(5);
 
         // The amount of extra gas it costs to include the payment to block.coinbase interaction in
@@ -229,7 +229,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
                         tracing::error!("flashbots cancellation failed: {:?}", err);
                     }
                 }
-                return Err(anyhow!("flashbots failed simulation: {}", err));
+                return anyhow!("flashbots failed simulation: {}", err);
             }
 
             // If gas price has increased cancel old and submit new new transaction.
@@ -243,8 +243,8 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
                             err
                         );
 
-                        // if cancellation fails, we dont want to submit a new tx
-                        return Err(anyhow!("flashbots failed to cancel: {}", err));
+                        // if cancellation fails, return from function since we can't send any more txs from the same sender
+                        return anyhow!("flashbots failed to cancel: {}", err);
                     }
                 } else {
                     tokio::time::sleep(UPDATE_INTERVAL).await;
