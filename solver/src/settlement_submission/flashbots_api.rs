@@ -82,7 +82,10 @@ impl FlashbotsApi {
                 },
                 jsonrpc_core::Output::Failure(body) => Err(anyhow!(body.error)),
             },
-            Err(err) => Err(anyhow!(err)),
+            Err(err) => {
+                tracing::error!("flashbot cancellation response: {}", body);
+                Err(anyhow!(err))
+            }
         }
     }
 

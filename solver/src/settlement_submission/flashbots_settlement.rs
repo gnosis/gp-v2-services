@@ -17,7 +17,7 @@ use super::{flashbots_api::FlashbotsApi, ESTIMATE_GAS_LIMIT_FACTOR};
 use crate::settlement::Settlement;
 use anyhow::{anyhow, ensure, Context, Result};
 use contracts::GPv2Settlement;
-use ethcontract::{errors::MethodError, transaction::Transaction, Account};
+use ethcontract::{transaction::Transaction, Account};
 use futures::FutureExt;
 use gas_estimation::{EstimatedGasPrice, GasPriceEstimating};
 use primitive_types::{H256, U256};
@@ -173,7 +173,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
         settlement: Settlement,
         gas_estimate: U256,
         transactions: &mut Vec<H256>,
-    ) -> MethodError {
+    ) -> Result<()> {
         const UPDATE_INTERVAL: Duration = Duration::from_secs(5);
 
         // The amount of extra gas it costs to include the payment to block.coinbase interaction in
@@ -229,7 +229,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
                         tracing::error!("flashbots cancellation failed: {:?}", err);
                     }
                 }
-                return err;
+                return Err(anyhow!("flashbots failed simulation: {}", err));
             }
 
             // If gas price has increased cancel old and submit new new transaction.
@@ -243,10 +243,8 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
                             err
                         );
 
-                        // if cancelation fails, we dont want to submit a new tx, rather contine and wait
-                        // for a nonce to change and end this function or a next cancelation to succeed.
-                        tokio::time::sleep(UPDATE_INTERVAL).await;
-                        continue;
+                        // if cancellation fails, we dont want to submit a new tx
+                        return Err(anyhow!("flashbots failed to cancel: {}", err));
                     }
                 } else {
                     tokio::time::sleep(UPDATE_INTERVAL).await;
