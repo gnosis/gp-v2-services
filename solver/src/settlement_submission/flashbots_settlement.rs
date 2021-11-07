@@ -97,7 +97,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
         // mined previously submitted transaction time to propagate to our node.
 
         if !transactions.is_empty() {
-            const MINED_TX_PROPAGATE_TIME: Duration = Duration::from_secs(20);
+            const MINED_TX_PROPAGATE_TIME: Duration = Duration::from_secs(60);
             const MINED_TX_CHECK_INTERVAL: Duration = Duration::from_secs(5);
             let tx_to_propagate_deadline = Instant::now() + MINED_TX_PROPAGATE_TIME;
 
