@@ -17,11 +17,7 @@ use model::{
 use serde::{Deserialize, Serialize};
 use shared::price_estimation::{self, PriceEstimating, PriceEstimationError};
 use std::{convert::Infallible, sync::Arc};
-use warp::{
-    hyper::StatusCode,
-    reply::{Json, WithStatus},
-    Filter, Rejection,
-};
+use warp::{hyper::StatusCode, Filter, Rejection};
 
 /// The order parameters to quote a price and fee for.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -129,7 +125,7 @@ pub enum FeeError {
 }
 
 impl IntoWarpReply for FeeError {
-    fn into_warp_reply(self) -> WithStatus<Json> {
+    fn into_warp_reply(self) -> super::ApiReply {
         match self {
             FeeError::PriceEstimate(err) => err.into_warp_reply(),
             FeeError::SellAmountDoesNotCoverFee => warp::reply::with_status(
@@ -150,7 +146,7 @@ pub enum OrderQuoteError {
 }
 
 impl IntoWarpReply for OrderQuoteError {
-    fn into_warp_reply(self) -> WithStatus<Json> {
+    fn into_warp_reply(self) -> super::ApiReply {
         match self {
             OrderQuoteError::Fee(err) => err.into_warp_reply(),
             OrderQuoteError::Order(err) => err.into_warp_reply(),

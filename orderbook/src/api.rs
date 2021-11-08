@@ -142,11 +142,11 @@ where
 }
 
 pub trait IntoWarpReply {
-    fn into_warp_reply(self) -> WithStatus<Json>;
+    fn into_warp_reply(self) -> ApiReply;
 }
 
 impl IntoWarpReply for anyhowError {
-    fn into_warp_reply(self) -> WithStatus<Json> {
+    fn into_warp_reply(self) -> ApiReply {
         with_status(internal_error(self), StatusCode::INTERNAL_SERVER_ERROR)
     }
 }
