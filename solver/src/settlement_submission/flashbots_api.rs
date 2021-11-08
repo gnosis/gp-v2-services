@@ -1,11 +1,27 @@
 use anyhow::{anyhow, ensure, Result};
+use gas_estimation::{EstimatedGasPrice, GasPrice1559};
 use reqwest::Client;
+use serde::Deserialize;
 
 const URL: &str = "https://protection.flashbots.net/v1/rpc";
 
 #[derive(Clone)]
 pub struct FlashbotsApi {
     client: Client,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Eip1559 {
+    max_fee_per_gas: String,
+    max_priority_fee_per_gas: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FlashbotGasPrice {
+    base_fee_per_gas: String,
+    default: Eip1559,
 }
 
 impl FlashbotsApi {
@@ -34,9 +50,9 @@ impl FlashbotsApi {
         match serde_json::from_str::<jsonrpc_core::Output>(&body) {
             Ok(body) => match body {
                 jsonrpc_core::Output::Success(body) => match body.result.as_str() {
-                    Some(result) => {
-                        tracing::debug!("flashbots bundle id: {}", result);
-                        Ok(result.to_string())
+                    Some(bundle_id) => {
+                        tracing::debug!("flashbots bundle id: {}", bundle_id);
+                        Ok(bundle_id.to_string())
                     }
                     None => Err(anyhow!("result not a string")),
                 },
@@ -66,9 +82,12 @@ impl FlashbotsApi {
         match serde_json::from_str::<jsonrpc_core::Output>(&body) {
             Ok(body) => match body {
                 jsonrpc_core::Output::Success(body) => match body.result.as_bool() {
-                    Some(result) => {
-                        tracing::debug!("flashbots bundle id: {}", result);
-                        Ok(())
+                    Some(success) => {
+                        tracing::debug!("flashbots cancellation request sent: {}", success);
+                        match success {
+                            true => Ok(()),
+                            false => Err(anyhow!("flashbots cancellation response was false")),
+                        }
                     }
                     None => Err(anyhow!("result not a bool")),
                 },
@@ -98,5 +117,126 @@ impl FlashbotsApi {
         let body = response.text().await?;
         ensure!(status.is_success(), "status {}: {:?}", status, body);
         Ok(())
+    }
+
+    /// Query gas_price for the current network state (simplest one for Flashbots)
+    pub async fn gas_price(&self) -> Result<EstimatedGasPrice> {
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_gasFees",
+            "params": [],
+        });
+        let response = self.client.post(URL).json(&body).send().await?;
+        let status = response.status();
+        let body = response.text().await?;
+        ensure!(status.is_success(), "status {}: {:?}", status, body);
+
+        match serde_json::from_str::<jsonrpc_core::Output>(&body) {
+            Ok(body) => match body {
+                jsonrpc_core::Output::Success(body) => {
+                    match serde_json::from_value::<FlashbotGasPrice>(body.result) {
+                        Ok(gas_price) => Ok(EstimatedGasPrice {
+                            eip1559: Some(GasPrice1559 {
+                                base_fee_per_gas: match u64::from_str_radix(
+                                    &gas_price.base_fee_per_gas[2..],
+                                    16,
+                                ) {
+                                    Ok(base_fee) => base_fee as f64,
+                                    Err(err) => {
+                                        return Err(anyhow!(
+                                            "failed to parse base_fee_per_gas: {}",
+                                            err
+                                        ))
+                                    }
+                                },
+                                max_fee_per_gas: match u64::from_str_radix(
+                                    &gas_price.default.max_fee_per_gas[2..],
+                                    16,
+                                ) {
+                                    Ok(max_fee_per_gas) => max_fee_per_gas as f64,
+                                    Err(err) => {
+                                        return Err(anyhow!(
+                                            "failed to parse max_fee_per_gas: {}",
+                                            err
+                                        ))
+                                    }
+                                },
+                                max_priority_fee_per_gas: match u64::from_str_radix(
+                                    &gas_price.default.max_priority_fee_per_gas[2..],
+                                    16,
+                                ) {
+                                    Ok(max_priority_fee_per_gas) => max_priority_fee_per_gas as f64,
+                                    Err(err) => {
+                                        return Err(anyhow!(
+                                            "failed to parse max_priority_fee_per_gas: {}",
+                                            err
+                                        ))
+                                    }
+                                },
+                            }),
+                            ..Default::default()
+                        }),
+                        Err(err) => Err(anyhow!("result not a FlashbotGasPrice: {}", err)),
+                    }
+                }
+                jsonrpc_core::Output::Failure(body) => Err(anyhow!(body.error)),
+            },
+            Err(err) => {
+                tracing::info!("flashbot cancellation response: {}", body);
+                Err(anyhow!(err))
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jsonrpc_core::Output;
+
+    #[test]
+    fn deserialize_flashbot_gas_price() {
+        let body = serde_json::json!({
+          "jsonrpc": "2.0",
+          "id": 1,
+          "result": {
+              "block": 13575331,
+              "baseFeePerGas": "0x10c38ad7b0",
+              "default": {
+                  "maxFeePerGas": "0x1ada38961e",
+                  "maxPriorityFeePerGas": "0x02af6c0f03"
+              },
+              "low": {
+                  "maxFeePerGas": "0x195113e77d",
+                  "maxPriorityFeePerGas": "0x01440dcb93"
+              },
+              "med": {
+                  "maxFeePerGas": "0x1ada38961e",
+                  "maxPriorityFeePerGas": "0x02af6c0f03"
+              },
+              "high": {
+                  "maxFeePerGas": "0x1c7b36646b",
+                  "maxPriorityFeePerGas": "0x0445ae8f10"
+              }
+          },
+        });
+
+        let deserialized = serde_json::from_str::<jsonrpc_core::Output>(&body.to_string()).unwrap();
+        match deserialized {
+            Output::Success(s) => {
+                let deserialized = serde_json::from_value::<FlashbotGasPrice>(s.result).unwrap();
+                assert_eq!(
+                    u64::from_str_radix(&deserialized.default.max_fee_per_gas[2..], 16).unwrap(),
+                    115330291230
+                );
+                assert_eq!(
+                    u64::from_str_radix(&deserialized.default.max_priority_fee_per_gas[2..], 16)
+                        .unwrap(),
+                    11533029123
+                );
+            }
+            Output::Failure(_) => panic!(),
+        }
     }
 }
