@@ -232,7 +232,7 @@ mod tests {
                 trivial_execution_without_plan
             ],
         }
-        .is_non_trivial());
+            .is_non_trivial());
 
         let execution_with_sell = ExecutedAmmModel {
             exec_sell_amount: U256::one(),
@@ -247,18 +247,18 @@ mod tests {
         assert!(UpdatedAmmModel {
             execution: vec![execution_with_buy.clone()]
         }
-        .is_non_trivial());
+            .is_non_trivial());
 
         assert!(UpdatedAmmModel {
             execution: vec![execution_with_sell]
         }
-        .is_non_trivial());
+            .is_non_trivial());
 
         assert!(UpdatedAmmModel {
             // One trivial and one non-trivial -> non-trivial
             execution: vec![execution_with_buy, trivial_execution_with_plan]
         }
-        .is_non_trivial());
+            .is_non_trivial());
     }
 
     #[test]

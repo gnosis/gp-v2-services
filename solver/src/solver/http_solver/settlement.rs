@@ -1,4 +1,4 @@
-use super::model::*;
+use shared::http_solver_api::model::*;
 use crate::{
     liquidity::{AmmOrderExecution, LimitOrder, Liquidity},
     settlement::Settlement,
