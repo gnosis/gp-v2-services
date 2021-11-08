@@ -1,5 +1,6 @@
 use anyhow::{anyhow, ensure, Result};
 use gas_estimation::{EstimatedGasPrice, GasPrice1559};
+use primitive_types::U256;
 use reqwest::Client;
 use serde::Deserialize;
 
@@ -13,14 +14,14 @@ pub struct FlashbotsApi {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Eip1559 {
-    max_fee_per_gas: String,
-    max_priority_fee_per_gas: String,
+    max_fee_per_gas: U256,
+    max_priority_fee_per_gas: U256,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FlashbotGasPrice {
-    base_fee_per_gas: String,
+    base_fee_per_gas: U256,
     default: Eip1559,
 }
 
@@ -138,42 +139,12 @@ impl FlashbotsApi {
                     match serde_json::from_value::<FlashbotGasPrice>(body.result) {
                         Ok(gas_price) => Ok(EstimatedGasPrice {
                             eip1559: Some(GasPrice1559 {
-                                base_fee_per_gas: match u64::from_str_radix(
-                                    &gas_price.base_fee_per_gas[2..],
-                                    16,
-                                ) {
-                                    Ok(base_fee) => base_fee as f64,
-                                    Err(err) => {
-                                        return Err(anyhow!(
-                                            "failed to parse base_fee_per_gas: {}",
-                                            err
-                                        ))
-                                    }
-                                },
-                                max_fee_per_gas: match u64::from_str_radix(
-                                    &gas_price.default.max_fee_per_gas[2..],
-                                    16,
-                                ) {
-                                    Ok(max_fee_per_gas) => max_fee_per_gas as f64,
-                                    Err(err) => {
-                                        return Err(anyhow!(
-                                            "failed to parse max_fee_per_gas: {}",
-                                            err
-                                        ))
-                                    }
-                                },
-                                max_priority_fee_per_gas: match u64::from_str_radix(
-                                    &gas_price.default.max_priority_fee_per_gas[2..],
-                                    16,
-                                ) {
-                                    Ok(max_priority_fee_per_gas) => max_priority_fee_per_gas as f64,
-                                    Err(err) => {
-                                        return Err(anyhow!(
-                                            "failed to parse max_priority_fee_per_gas: {}",
-                                            err
-                                        ))
-                                    }
-                                },
+                                base_fee_per_gas: gas_price.base_fee_per_gas.to_f64_lossy(),
+                                max_fee_per_gas: gas_price.default.max_fee_per_gas.to_f64_lossy(),
+                                max_priority_fee_per_gas: gas_price
+                                    .default
+                                    .max_priority_fee_per_gas
+                                    .to_f64_lossy(),
                             }),
                             ..Default::default()
                         }),
@@ -227,13 +198,12 @@ mod tests {
             Output::Success(s) => {
                 let deserialized = serde_json::from_value::<FlashbotGasPrice>(s.result).unwrap();
                 assert_eq!(
-                    u64::from_str_radix(&deserialized.default.max_fee_per_gas[2..], 16).unwrap(),
-                    115330291230
+                    deserialized.default.max_fee_per_gas,
+                    U256::from(115330291230u64)
                 );
                 assert_eq!(
-                    u64::from_str_radix(&deserialized.default.max_priority_fee_per_gas[2..], 16)
-                        .unwrap(),
-                    11533029123
+                    deserialized.default.max_priority_fee_per_gas,
+                    U256::from(11533029123u64)
                 );
             }
             Output::Failure(_) => panic!(),
