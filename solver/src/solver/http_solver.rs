@@ -297,8 +297,13 @@ impl HttpSolver {
             self.network_name,
             self.chain_id
         )
-        .replace(" ", "_")
-        .replace("/", "_")
+        .chars()
+        .map(|x| match x {
+            ' ' => '_',
+            '/' => '_',
+            _ => x,
+        })
+        .collect()
     }
 }
 
