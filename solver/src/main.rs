@@ -34,7 +34,9 @@ use solver::{
     liquidity_collector::LiquidityCollector,
     metrics::Metrics,
     orderbook::OrderBookApi,
-    settlement_submission::{archer_api::ArcherApi, SolutionSubmitter, TransactionStrategy},
+    settlement_submission::{
+        archer_api::ArcherApi, flashbots_api::FlashbotsApi, SolutionSubmitter, TransactionStrategy,
+    },
     solver::SolverType,
 };
 use std::{collections::HashMap, str::FromStr, sync::Arc, time::Duration};
@@ -177,6 +179,15 @@ struct Arguments {
     )]
     max_archer_submission_seconds: Duration,
 
+    /// The maximum time in seconds we spend trying to settle a transaction through the flashbots
+    /// network before going to back to solving.
+    #[structopt(
+        long,
+        default_value = "90",
+        parse(try_from_str = shared::arguments::duration_from_seconds),
+    )]
+    max_flashbots_submission_seconds: Duration,
+
     /// The RPC endpoints to use for submitting transaction to a custom set of nodes.
     #[structopt(long, env, use_delimiter = true)]
     transaction_submission_nodes: Vec<Url>,
@@ -203,6 +214,7 @@ arg_enum! {
     enum TransactionStrategyArg {
         PublicMempool,
         ArcherNetwork,
+        Flashbots,
         CustomNodes,
         DryRun,
     }
@@ -475,6 +487,10 @@ async fn main() {
                     client.clone(),
                 ),
                 max_confirm_time: args.max_archer_submission_seconds,
+            },
+            TransactionStrategyArg::Flashbots => TransactionStrategy::Flashbots {
+                flashbots_api: FlashbotsApi::new(client.clone()),
+                max_confirm_time: args.max_flashbots_submission_seconds,
             },
             TransactionStrategyArg::CustomNodes => {
                 assert!(
