@@ -186,6 +186,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
     ) -> anyhow::Error {
         const UPDATE_INTERVAL: Duration = Duration::from_secs(5);
         const CANCEL_PROPAGATION_TIME: Duration = Duration::from_secs(2);
+        const MINIMAL_MAX_PRIORITY_FEE: f64 = 10_000_000_000.0;
 
         // The amount of extra gas it costs to include the payment to block.coinbase interaction in
         // an existing settlement.
@@ -209,8 +210,9 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
                     match self.gas_price(gas_limit, time_limit).await {
                         Ok(mut gas_price) => {
                             if let Some(ref mut eip1559) = gas_price.eip1559 {
-                                if eip1559.max_priority_fee_per_gas < 10_000_000_000.0 {
-                                    eip1559.max_priority_fee_per_gas = 10_000_000_000.0;
+                                if eip1559.max_priority_fee_per_gas < MINIMAL_MAX_PRIORITY_FEE {
+                                    tracing::debug!("max_priority_fee_per_gas old value {} replaced with minimal value {}", eip1559.max_priority_fee_per_gas, MINIMAL_MAX_PRIORITY_FEE);
+                                    eip1559.max_priority_fee_per_gas = MINIMAL_MAX_PRIORITY_FEE;
                                 }
                             }
                             gas_price

@@ -1,5 +1,6 @@
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use gas_estimation::{EstimatedGasPrice, GasPrice1559};
+use jsonrpc_core::Output;
 use primitive_types::U256;
 use reqwest::Client;
 use serde::Deserialize;
@@ -48,16 +49,16 @@ impl FlashbotsApi {
         let body = response.text().await?;
         ensure!(status.is_success(), "status {}: {:?}", status, body);
 
-        match serde_json::from_str::<jsonrpc_core::Output>(&body) {
+        match serde_json::from_str::<Output>(&body) {
             Ok(body) => match body {
-                jsonrpc_core::Output::Success(body) => match body.result.as_str() {
+                Output::Success(body) => match body.result.as_str() {
                     Some(bundle_id) => {
                         tracing::debug!("flashbots bundle id: {}", bundle_id);
                         Ok(bundle_id.to_string())
                     }
                     None => Err(anyhow!("result not a string")),
                 },
-                jsonrpc_core::Output::Failure(body) => Err(anyhow!(body.error)),
+                Output::Failure(body) => Err(anyhow!(body.error)),
             },
             Err(err) => Err(anyhow!(err)),
         }
@@ -80,9 +81,9 @@ impl FlashbotsApi {
         let body = response.text().await?;
         ensure!(status.is_success(), "status {}: {:?}", status, body);
 
-        match serde_json::from_str::<jsonrpc_core::Output>(&body) {
+        match serde_json::from_str::<Output>(&body) {
             Ok(body) => match body {
-                jsonrpc_core::Output::Success(body) => match body.result.as_bool() {
+                Output::Success(body) => match body.result.as_bool() {
                     Some(success) => {
                         tracing::debug!("flashbots cancellation request sent: {}", success);
                         match success {
@@ -92,7 +93,7 @@ impl FlashbotsApi {
                     }
                     None => Err(anyhow!("result not a bool")),
                 },
-                jsonrpc_core::Output::Failure(body) => Err(anyhow!(body.error)),
+                Output::Failure(body) => Err(anyhow!(body.error)),
             },
             Err(err) => {
                 tracing::info!("flashbot cancellation response: {}", body);
@@ -133,31 +134,24 @@ impl FlashbotsApi {
         let body = response.text().await?;
         ensure!(status.is_success(), "status {}: {:?}", status, body);
 
-        match serde_json::from_str::<jsonrpc_core::Output>(&body) {
-            Ok(body) => match body {
-                jsonrpc_core::Output::Success(body) => {
-                    match serde_json::from_value::<FlashbotGasPrice>(body.result) {
-                        Ok(gas_price) => Ok(EstimatedGasPrice {
-                            eip1559: Some(GasPrice1559 {
-                                base_fee_per_gas: gas_price.base_fee_per_gas.to_f64_lossy(),
-                                max_fee_per_gas: gas_price.default.max_fee_per_gas.to_f64_lossy(),
-                                max_priority_fee_per_gas: gas_price
-                                    .default
-                                    .max_priority_fee_per_gas
-                                    .to_f64_lossy(),
-                            }),
-                            ..Default::default()
-                        }),
-                        Err(err) => Err(anyhow!("result not a FlashbotGasPrice: {}", err)),
-                    }
-                }
-                jsonrpc_core::Output::Failure(body) => Err(anyhow!(body.error)),
-            },
-            Err(err) => {
+        let gas_price = serde_json::from_str::<Output>(&body)
+            .with_context(|| {
                 tracing::info!("flashbot cancellation response: {}", body);
-                Err(anyhow!(err))
-            }
-        }
+                anyhow!("invalid Flashbots RPC response")
+            })
+            .and_then(|output| match output {
+                Output::Success(body) => serde_json::from_value::<FlashbotGasPrice>(body.result)
+                    .context("result not a FlashbotGasPrice"),
+                Output::Failure(body) => bail!("Flashbots RPC error: {}", body.error),
+            })?;
+        Ok(EstimatedGasPrice {
+            eip1559: Some(GasPrice1559 {
+                base_fee_per_gas: gas_price.base_fee_per_gas.to_f64_lossy(),
+                max_fee_per_gas: gas_price.default.max_fee_per_gas.to_f64_lossy(),
+                max_priority_fee_per_gas: gas_price.default.max_priority_fee_per_gas.to_f64_lossy(),
+            }),
+            ..Default::default()
+        })
     }
 }
 
