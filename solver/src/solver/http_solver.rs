@@ -9,7 +9,6 @@ use crate::{
     solver::{Auction, Solver},
 };
 use anyhow::{anyhow, Context, Result};
-use bigdecimal::ToPrimitive;
 use buffers::{BufferRetrievalError, BufferRetrieving};
 use ethcontract::{Account, U256};
 use futures::{join, lock::Mutex};
