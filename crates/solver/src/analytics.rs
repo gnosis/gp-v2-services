@@ -72,14 +72,12 @@ pub fn report_alternative_settlement_surplus(
     for (order_id, submitted) in submitted_surplus.iter() {
         if let Some(alternative) = best_alternative.get(order_id) {
             metrics.report_order_surplus(
-                winning_solver,
-                alternative.solver_name,
                 (&submitted.ratio - &alternative.ratio)
                     .to_f64()
                     .unwrap_or_default(),
             );
             if alternative.is_better_than(submitted) {
-                tracing::warn!(
+                tracing::debug!(
                     ?order_id, %submitted, %alternative,
                     "submission surplus worse than lower ranked settlement",
                 );
