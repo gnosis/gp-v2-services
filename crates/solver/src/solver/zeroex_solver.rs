@@ -186,6 +186,7 @@ mod tests {
             settlement,
             chain_id,
             Arc::new(DefaultZeroExApi::default()),
+            10u32,
         )
         .unwrap();
         let settlement = solver
@@ -225,6 +226,7 @@ mod tests {
             settlement,
             chain_id,
             Arc::new(DefaultZeroExApi::default()),
+            10u32,
         )
         .unwrap();
         let settlement = solver
@@ -287,6 +289,7 @@ mod tests {
             account: account(),
             api: Arc::new(client),
             allowance_fetcher,
+            zeroex_slippage_bps: 10u32,
         };
 
         let buy_order_passing_limit = LimitOrder {
@@ -375,7 +378,8 @@ mod tests {
             web3,
             settlement,
             chain_id,
-            Arc::new(DefaultZeroExApi::default())
+            Arc::new(DefaultZeroExApi::default()),
+            10u32
         )
         .is_err())
     }
@@ -427,6 +431,7 @@ mod tests {
             account: account(),
             api: Arc::new(client),
             allowance_fetcher,
+            zeroex_slippage_bps: 10u32,
         };
 
         let order = LimitOrder {
@@ -480,6 +485,7 @@ mod tests {
             account: account(),
             api: Arc::new(client),
             allowance_fetcher,
+            zeroex_slippage_bps: 10u32,
         };
 
         let order = LimitOrder {
