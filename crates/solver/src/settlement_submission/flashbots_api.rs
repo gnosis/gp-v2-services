@@ -154,11 +154,6 @@ impl FlashbotsApi {
         Ok(parse_json_rpc_response::<FlashbotStatus>(&body)?.status)
     }
 
-    /// Check if the current submitted tx has failed status.
-    pub async fn is_transaction_failed(&self, bundle_id: &str) -> Result<bool> {
-        Ok(self.status(bundle_id).await? == Status::Failed)
-    }
-
     /// Query gas_price for the current network state (simplest one for Flashbots)
     pub async fn gas_price(&self) -> Result<EstimatedGasPrice> {
         let body = serde_json::json!({
