@@ -4,6 +4,7 @@ use jsonrpc_core::Output;
 use primitive_types::U256;
 use reqwest::Client;
 use serde::{de::DeserializeOwned, Deserialize};
+use std::time::Duration;
 
 const URL: &str = "https://protection.flashbots.net/v1/rpc";
 
@@ -87,7 +88,7 @@ impl FlashbotsApi {
         Ok(bundle_id)
     }
 
-    /// Cancel a previously submitted transaction.
+    /// Send a cancel to a previously submitted transaction. This function does not wait for cancellation result.
     pub async fn cancel(&self, bundle_id: &str) -> Result<()> {
         let body = serde_json::json!({
             "jsonrpc": "2.0",
@@ -111,6 +112,23 @@ impl FlashbotsApi {
             true => Ok(()),
             false => bail!("flashbots cancellation response was false"),
         }
+    }
+
+    /// Send cancel and wait for some time for the cancellation confirmal
+    pub async fn cancel_and_wait(&self, bundle_id: &str) -> Result<bool> {
+        self.cancel(bundle_id).await?;
+
+        const WAIT_FOR_CANCELLATION_RETRIES: usize = 5usize; // will be a strategy parameter after the refactor!
+        const CANCEL_PROPAGATION_TIME: Duration = Duration::from_secs(2); // will be a strategy parameter after the refactor!
+
+        for _ in 0..std::cmp::max(WAIT_FOR_CANCELLATION_RETRIES, 1usize) {
+            if self.status(bundle_id).await? == Status::Cancelled {
+                return Ok(true);
+            }
+
+            tokio::time::sleep(CANCEL_PROPAGATION_TIME).await;
+        }
+        Ok(false)
     }
 
     /// Query status of a previously submitted transaction.

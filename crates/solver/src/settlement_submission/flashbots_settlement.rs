@@ -106,6 +106,14 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
         // After stopping submission of new transactions we wait for some time to give a potentially
         // mined previously submitted transaction time to propagate to our node.
 
+        // Example:
+        // 1. We submit tx to ethereum node, and we start counting 10s pause before new loop iteration.
+        // 2. In the meantime, block A gets mined somewhere in the network (not containing our tx)
+        // 3. After some time block B is mined somewhere in the network (containing our tx)
+        // 4. Our node receives block A.
+        // 5. Our 10s is up but our node received only block A because of the delay in block propagation. We simulate tx and it fails, we return back
+        // 6. If we don't wait another 20s to receive block B, we wont see mined tx.
+
         if !transactions.is_empty() {
             const MINED_TX_PROPAGATE_TIME: Duration = Duration::from_secs(20);
             const MINED_TX_CHECK_INTERVAL: Duration = Duration::from_secs(5);
@@ -185,10 +193,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
         transactions: &mut Vec<H256>,
     ) -> anyhow::Error {
         const UPDATE_INTERVAL: Duration = Duration::from_secs(5);
-        const CANCEL_PROPAGATION_TIME: Duration = Duration::from_secs(2);
         const MINIMAL_MAX_PRIORITY_FEE: f64 = 10_000_000_000.0;
-        const SUBMIT_RETRY_ATTEMPTS: usize = 5usize; // will be a strategy parameter after the refactor!
-        const RETRY_INTERVAL: Duration = Duration::from_secs(2); // will be a strategy parameter after the refactor!
 
         // The amount of extra gas it costs to include the payment to block.coinbase interaction in
         // an existing settlement.
@@ -251,7 +256,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
             if let Err(err) = method.clone().view().call().await {
                 if let Some((_, previous_tx)) = previous_tx.as_ref() {
                     if let Err(err) = self.flashbots_api.cancel(previous_tx).await {
-                        tracing::debug!("flashbots cancellation request not sent: {:?}", err);
+                        tracing::warn!("flashbots cancellation request not sent: {:?}", err);
                     }
                 }
                 return anyhow!("flashbots failed simulation: {}", err);
@@ -262,15 +267,14 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
             if let Some((previous_gas_price, previous_tx)) = previous_tx.as_ref() {
                 let previous_gas_price = previous_gas_price.bump(1.125);
                 if gas_price.cap() > previous_gas_price.cap() {
-                    if let Err(err) = self.flashbots_api.cancel(previous_tx).await {
-                        tracing::debug!("flashbots cancellation request not sent: {:?}", err);
+                    if let Err(err) = self.flashbots_api.cancel_and_wait(previous_tx).await {
+                        // If we are unable to cancel, lets just wait for some time and try again
+                        // Maybe the current tx will get mined in the meantime, of the cancellation will succeed a bit later
 
-                        // if cancellation request was not sent, return from function since we can't send any more txs from the same sender
-                        return anyhow!("flashbots failed to cancel: {}", err);
+                        tracing::warn!("flashbots cancellation failed: {:?}", err);
+                        tokio::time::sleep(UPDATE_INTERVAL).await;
+                        continue;
                     }
-
-                    // wait for a sec to give flashbots api time to update the cancel status before sending a new tx
-                    tokio::time::sleep(CANCEL_PROPAGATION_TIME).await;
                 } else {
                     tokio::time::sleep(UPDATE_INTERVAL).await;
                     continue;
@@ -293,48 +297,16 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
 
             // submit transaction
 
-            let mut retry = std::cmp::max(SUBMIT_RETRY_ATTEMPTS, 1usize);
-            loop {
-                // decrease number of attempts
-                if retry == 0 {
-                    break;
-                } else {
-                    retry -= 1;
+            match self
+                .flashbots_api
+                .submit_transaction(&raw_signed_transaction)
+                .await
+            {
+                Ok(bundle_id) => {
+                    transactions.push(hash);
+                    previous_tx = Some((gas_price, bundle_id));
                 }
-
-                // submit tx and get handle - bundle_id
-                let bundle_id = match self
-                    .flashbots_api
-                    .submit_transaction(&raw_signed_transaction)
-                    .await
-                {
-                    Ok(bundle_id) => {
-                        transactions.push(hash);
-                        previous_tx = Some((gas_price, bundle_id.clone()));
-                        bundle_id
-                    }
-                    Err(err) => {
-                        tracing::error!("flashbots submission failed: {:?}", err);
-                        break;
-                    }
-                };
-
-                // handle retry based on the current status of the submitted tx
-                match self.flashbots_api.is_transaction_failed(&bundle_id).await {
-                    Ok(failed) => {
-                        if failed {
-                            // sleep and retry
-                            tokio::time::sleep(RETRY_INTERVAL).await;
-                        } else {
-                            // no need to retry
-                            break;
-                        }
-                    }
-                    Err(err) => {
-                        tracing::debug!("flashbots status check failed: {:?}", err);
-                        break;
-                    }
-                };
+                Err(err) => tracing::error!("flashbots submission failed: {:?}", err),
             }
             tokio::time::sleep(UPDATE_INTERVAL).await;
         }
