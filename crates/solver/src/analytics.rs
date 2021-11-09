@@ -67,8 +67,7 @@ pub fn report_alternative_settlement_surplus(
         })
         .collect();
 
-    let best_alternative = best_surplus_by_order(alternative_settlements);
-
+    let best_alternative = best_surplus_by_order(&alternative_settlements);
     for (order_id, submitted) in submitted_surplus.iter() {
         if let Some(alternative) = best_alternative.get(order_id) {
             metrics.report_order_surplus(
@@ -87,7 +86,7 @@ pub fn report_alternative_settlement_surplus(
 }
 
 fn best_surplus_by_order(
-    settlements: Vec<(&'static str, &Settlement)>,
+    settlements: &[(&'static str, &Settlement)],
 ) -> HashMap<OrderUid, SurplusInfo> {
     let mut best_surplus: HashMap<OrderUid, SurplusInfo> = HashMap::new();
     for (solver, settlement) in settlements.iter() {
