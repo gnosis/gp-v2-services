@@ -1,11 +1,10 @@
 use crate::{metrics::SolverMetrics, settlement::Settlement};
-use bigdecimal::{ToPrimitive, Zero};
 use ethcontract::H160;
 use model::order::OrderUid;
-use num::BigRational;
+use num::{BigRational, ToPrimitive, Zero};
 use shared::conversions::U256Ext;
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::HashMap,
     fmt::{Display, Formatter},
     sync::Arc,
 };
@@ -100,18 +99,14 @@ fn best_surplus_by_order(
                     .surplus_ratio(sell_token_price, buy_token_price)
                     .unwrap_or_else(BigRational::zero),
             };
-            let entry = best_surplus.entry(order_id);
-            match entry {
-                Entry::Occupied(mut entry) => {
-                    let value = entry.get_mut();
-                    if value.ratio < surplus.ratio {
-                        *value = surplus;
+            best_surplus
+                .entry(order_id)
+                .and_modify(|entry| {
+                    if entry.ratio < surplus.ratio {
+                        *entry = surplus.clone();
                     }
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(surplus);
-                }
-            }
+                })
+                .or_insert(surplus);
         }
     }
     best_surplus

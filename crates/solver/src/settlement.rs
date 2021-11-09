@@ -6,9 +6,8 @@ use crate::{
     liquidity::Settleable,
 };
 use anyhow::Result;
-use bigdecimal::One;
 use model::order::{Order, OrderKind};
-use num::{BigRational, Signed, Zero};
+use num::{BigRational, One, Signed, Zero};
 use primitive_types::{H160, U256};
 use shared::conversions::U256Ext as _;
 use std::collections::HashMap;
@@ -315,7 +314,7 @@ fn surplus_ratio(
     sell_amount_limit: &BigRational,
     buy_amount_limit: &BigRational,
 ) -> Option<BigRational> {
-    if buy_token_price.is_zero() || buy_token_price.is_zero() {
+    if buy_token_price.is_zero() || buy_amount_limit.is_zero() {
         return None;
     }
     let res = (sell_amount_limit * sell_token_price) / (buy_amount_limit * buy_token_price)
