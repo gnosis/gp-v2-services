@@ -107,7 +107,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
         // mined previously submitted transaction time to propagate to our node.
 
         if !transactions.is_empty() {
-            const MINED_TX_PROPAGATE_TIME: Duration = Duration::from_secs(60);
+            const MINED_TX_PROPAGATE_TIME: Duration = Duration::from_secs(20);
             const MINED_TX_CHECK_INTERVAL: Duration = Duration::from_secs(5);
             let tx_to_propagate_deadline = Instant::now() + MINED_TX_PROPAGATE_TIME;
 
@@ -187,6 +187,8 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
         const UPDATE_INTERVAL: Duration = Duration::from_secs(5);
         const CANCEL_PROPAGATION_TIME: Duration = Duration::from_secs(2);
         const MINIMAL_MAX_PRIORITY_FEE: f64 = 10_000_000_000.0;
+        const SUBMIT_RETRY_ATTEMPTS: usize = 5usize; // will be a strategy parameter after the refactor!
+        const RETRY_INTERVAL: Duration = Duration::from_secs(2); // will be a strategy parameter after the refactor!
 
         // The amount of extra gas it costs to include the payment to block.coinbase interaction in
         // an existing settlement.
@@ -249,19 +251,19 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
             if let Err(err) = method.clone().view().call().await {
                 if let Some((_, previous_tx)) = previous_tx.as_ref() {
                     if let Err(err) = self.flashbots_api.cancel(previous_tx).await {
-                        tracing::error!("flashbots cancellation request not sent: {:?}", err);
+                        tracing::debug!("flashbots cancellation request not sent: {:?}", err);
                     }
                 }
                 return anyhow!("flashbots failed simulation: {}", err);
             }
 
-            // If gas price has increased cancel old and submit new new transaction.
+            // If gas price has increased cancel old and submit new transaction.
 
             if let Some((previous_gas_price, previous_tx)) = previous_tx.as_ref() {
                 let previous_gas_price = previous_gas_price.bump(1.125);
                 if gas_price.cap() > previous_gas_price.cap() {
                     if let Err(err) = self.flashbots_api.cancel(previous_tx).await {
-                        tracing::error!("flashbots cancellation request not sent: {:?}", err);
+                        tracing::debug!("flashbots cancellation request not sent: {:?}", err);
 
                         // if cancellation request was not sent, return from function since we can't send any more txs from the same sender
                         return anyhow!("flashbots failed to cancel: {}", err);
@@ -289,16 +291,50 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
                 gas_estimate,
             );
 
-            match self
-                .flashbots_api
-                .submit_transaction(&raw_signed_transaction)
-                .await
-            {
-                Ok(bundle_id) => {
-                    transactions.push(hash);
-                    previous_tx = Some((gas_price, bundle_id));
+            // submit transaction
+
+            let mut retry = std::cmp::max(SUBMIT_RETRY_ATTEMPTS, 1usize);
+            loop {
+                // decrease number of attempts
+                if retry == 0 {
+                    break;
+                } else {
+                    retry -= 1;
                 }
-                Err(err) => tracing::error!("flashbots submission failed: {:?}", err),
+
+                // submit tx and get handle - bundle_id
+                let bundle_id = match self
+                    .flashbots_api
+                    .submit_transaction(&raw_signed_transaction)
+                    .await
+                {
+                    Ok(bundle_id) => {
+                        transactions.push(hash);
+                        previous_tx = Some((gas_price, bundle_id.clone()));
+                        bundle_id
+                    }
+                    Err(err) => {
+                        tracing::error!("flashbots submission failed: {:?}", err);
+                        break;
+                    }
+                };
+
+                // handle retry based on the current status of the submitted tx
+                match self.flashbots_api.is_transaction_failed(&bundle_id).await {
+                    Ok(failed) => {
+                        if failed {
+                            // sleep and retry
+                            tokio::time::sleep(RETRY_INTERVAL).await;
+                        } else {
+                            // no need to retry
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        tracing::debug!("flashbots status check failed: {:?}", err);
+                        break;
+                    }
+                };
             }
             tokio::time::sleep(UPDATE_INTERVAL).await;
         }
