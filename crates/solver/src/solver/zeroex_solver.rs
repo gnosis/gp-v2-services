@@ -44,7 +44,7 @@ pub struct ZeroExSolver {
     account: Account,
     api: Arc<dyn ZeroExApi>,
     allowance_fetcher: Box<dyn AllowanceManaging>,
-    zeroex_slippage_bps: u16,
+    zeroex_slippage_bps: u32,
 }
 
 /// Chain ID for Mainnet.
@@ -57,7 +57,7 @@ impl ZeroExSolver {
         settlement_contract: GPv2Settlement,
         chain_id: u64,
         api: Arc<dyn ZeroExApi>,
-        zeroex_slippage_bps: u16,
+        zeroex_slippage_bps: u32,
     ) -> Result<Self> {
         ensure!(
             chain_id == MAINNET_CHAIN_ID,

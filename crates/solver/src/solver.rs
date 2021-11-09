@@ -157,7 +157,7 @@ pub fn create(
     native_token_amount_to_estimate_prices_with: U256,
     solver_metrics: Arc<dyn SolverMetrics>,
     zeroex_api: Arc<dyn ZeroExApi>,
-    zeroex_slippage_bps: u16,
+    zeroex_slippage_bps: u32,
 ) -> Result<Solvers> {
     // Tiny helper function to help out with type inference. Otherwise, all
     // `Box::new(...)` expressions would have to be cast `as Box<dyn Solver>`.
