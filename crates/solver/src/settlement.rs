@@ -308,6 +308,9 @@ fn sell_order_surplus(
     }
 }
 
+/// Surplus Ratio represents the percentage difference of the executed price with the limit price.
+/// This is calculated for orders with a corresponding trade. This value is always non-negative
+/// since orders are contractually bound to be settled on or beyond their limit price.
 fn surplus_ratio(
     sell_token_price: &BigRational,
     buy_token_price: &BigRational,
@@ -317,6 +320,8 @@ fn surplus_ratio(
     if buy_token_price.is_zero() || buy_amount_limit.is_zero() {
         return None;
     }
+    // We subtract 1 here to give the give the percent beyond limit price instead of the
+    // whole amount according to the definition of "surplus" (that which is more).
     let res = (sell_amount_limit * sell_token_price) / (buy_amount_limit * buy_token_price)
         - BigRational::one();
     if res.is_negative() {
