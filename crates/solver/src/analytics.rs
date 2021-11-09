@@ -13,7 +13,6 @@ use std::{
 #[derive(Clone)]
 struct SurplusInfo {
     solver_name: &'static str,
-    absolute: BigRational,
     ratio: BigRational,
 }
 
@@ -21,9 +20,8 @@ impl Display for SurplusInfo {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Surplus {{solver: {}, absolute: {:.2e}, ratio: {:.2e} }}",
+            "Surplus {{solver: {}, ratio: {:.2e} }}",
             self.solver_name,
-            self.absolute.to_f64().unwrap_or(f64::NAN),
             self.ratio.to_f64().unwrap_or(f64::NAN)
         )
     }
@@ -56,9 +54,6 @@ pub fn report_alternative_settlement_surplus(
                 trade.order.order_meta_data.uid,
                 SurplusInfo {
                     solver_name: winning_solver,
-                    absolute: trade
-                        .surplus(sell_token_price, buy_token_price)
-                        .unwrap_or_else(BigRational::zero),
                     ratio: trade
                         .surplus_ratio(sell_token_price, buy_token_price)
                         .unwrap_or_else(BigRational::zero),
@@ -101,9 +96,6 @@ fn best_surplus_by_order(
             let buy_token_price = &clearing_prices[&trade.order.order_creation.buy_token];
             let surplus = SurplusInfo {
                 solver_name: solver,
-                absolute: trade
-                    .surplus(sell_token_price, buy_token_price)
-                    .unwrap_or_else(BigRational::zero),
                 ratio: trade
                     .surplus_ratio(sell_token_price, buy_token_price)
                     .unwrap_or_else(BigRational::zero),
@@ -112,7 +104,7 @@ fn best_surplus_by_order(
             match entry {
                 Entry::Occupied(mut entry) => {
                     let value = entry.get_mut();
-                    if value.absolute < surplus.absolute {
+                    if value.ratio < surplus.ratio {
                         *value = surplus;
                     }
                 }
