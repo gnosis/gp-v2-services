@@ -74,7 +74,8 @@ impl HttpSolverApi {
                 self.config.max_nr_exec_orders.to_string().as_str(),
             );
         if self.config.has_ucp_policy_parameter {
-            url.query_pairs_mut().append_pair("ucp_policy", "EnforceForOrders");
+            url.query_pairs_mut()
+                .append_pair("ucp_policy", "EnforceForOrders");
         }
 
         let query = url.query().map(ToString::to_string).unwrap_or_default();

@@ -13,6 +13,7 @@ use num::BigRational;
 use oneinch_solver::OneInchSolver;
 use paraswap_solver::ParaswapSolver;
 use reqwest::{Client, Url};
+use shared::http_solver_api::{HttpSolverApi, SolverConfig};
 use shared::zeroex_api::ZeroExApi;
 use shared::{
     baseline_solver::BaseTokens, conversions::U256Ext, price_estimation::PriceEstimating,
@@ -25,7 +26,6 @@ use std::{
     time::{Duration, Instant},
 };
 use structopt::clap::arg_enum;
-use shared::http_solver_api::{HttpSolverApi, SolverConfig};
 use zeroex_solver::ZeroExSolver;
 
 mod baseline_solver;
