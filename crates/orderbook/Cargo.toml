@@ -1,0 +1,52 @@
+[package]
+name = "orderbook"
+version = "0.1.0"
+authors = ["Gnosis Developers <developers@gnosis.io>"]
+edition = "2021"
+license = "GPL-3.0-or-later"
+
+[lib]
+name = "orderbook"
+path = "src/lib.rs"
+doctest = false
+
+[[bin]]
+name = "orderbook"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+assert_approx_eq = "1.1"
+async-trait = "0.1"
+bigdecimal = "0.2"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+const_format = "0.2"
+contracts = { path = "../contracts" }
+ethcontract = { git = "https://github.com/gnosis/ethcontract-rs.git", rev = "cafcac443f37cfe1e0e18b03a987a30b61b54695", default-features = false }
+futures = "0.3.17"
+gas-estimation = { git = "https://github.com/gnosis/gp-gas-estimation.git", tag = "v0.4.0", features = ["web3_"] }
+hex = { version = "0.4", default-features = false }
+hex-literal = "0.3"
+maplit = "1.0"
+model = { path = "../model" }
+num = "0.4"
+primitive-types = { version = "0.10", features = ["fp-conversion"] }
+prometheus = "0.13"
+prometheus-metric-storage = "0.4"
+reqwest = { version = "0.11", features = ["json"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_with = { version = "1.11", default-features = false, features = ["macros"] }
+shared= { path = "../shared" }
+sqlx = { version = "0.5", default-features = false, features = ["bigdecimal", "chrono", "macros", "runtime-tokio-native-tls", "postgres"] }
+structopt = "0.3"
+thiserror = "1.0"
+tokio = { version = "1.13", features = ["macros", "rt-multi-thread", "sync", "time", "signal"] }
+tracing = "0.1"
+url = "2.2"
+warp = { version = "0.3", default-features = false }
+web3 = { git = "https://github.com/tomusdrw/rust-web3.git", rev="a425fa747bca69c7aede4d2c2828f7267d79227e", default-features = false }
+
+[dev-dependencies]
+secp256k1 = "0.20"
+mockall = "0.10"
