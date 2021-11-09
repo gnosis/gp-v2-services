@@ -39,14 +39,12 @@ use std::{
     sync::Arc,
 };
 
-/// Constant maximum slippage of 5 BPS (0.05%) to use for on-chain liquidity.
-pub const STANDARD_ZEROEX_SLIPPAGE_BPS: u16 = 5;
-
 /// A GPv2 solver that matches GP orders to direct 0x swaps.
 pub struct ZeroExSolver {
     account: Account,
     api: Arc<dyn ZeroExApi>,
     allowance_fetcher: Box<dyn AllowanceManaging>,
+    zeroex_slippage_bps: u16,
 }
 
 /// Chain ID for Mainnet.
@@ -59,6 +57,7 @@ impl ZeroExSolver {
         settlement_contract: GPv2Settlement,
         chain_id: u64,
         api: Arc<dyn ZeroExApi>,
+        zeroex_slippage_bps: u16,
     ) -> Result<Self> {
         ensure!(
             chain_id == MAINNET_CHAIN_ID,
@@ -69,6 +68,7 @@ impl ZeroExSolver {
             account,
             allowance_fetcher: Box::new(allowance_fetcher),
             api,
+            zeroex_slippage_bps,
         })
     }
 }
@@ -88,7 +88,7 @@ impl SingleOrderSolving for ZeroExSolver {
             buy_token: order.buy_token,
             sell_amount,
             buy_amount,
-            slippage_percentage: Slippage::number_from_basis_points(STANDARD_ZEROEX_SLIPPAGE_BPS)
+            slippage_percentage: Slippage::number_from_basis_points(self.zeroex_slippage_bps)
                 .unwrap(),
         };
 
