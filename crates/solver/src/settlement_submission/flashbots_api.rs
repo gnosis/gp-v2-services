@@ -3,7 +3,7 @@ use gas_estimation::{EstimatedGasPrice, GasPrice1559};
 use jsonrpc_core::Output;
 use primitive_types::U256;
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{de::DeserializeOwned, Deserialize};
 
 const URL: &str = "https://protection.flashbots.net/v1/rpc";
 
@@ -28,16 +28,35 @@ struct FlashbotGasPrice {
 
 #[derive(Debug, Deserialize)]
 struct FlashbotStatus {
-    status: String,
+    status: Status,
 }
 
-#[derive(Deserialize, PartialEq)]
-#[serde(untagged)]
+#[derive(Debug, Deserialize, PartialEq)]
 enum Status {
+    #[serde(rename = "PENDING_BUNDLE")]
     Pending,
+    #[serde(rename = "FAILED_BUNDLE")]
     Failed,
+    #[serde(rename = "SUCCESSFUL_BUNDLE")]
     Successful,
+    #[serde(rename = "CANCEL_BUNDLE_SUCCESSFUL")]
     Cancelled,
+}
+
+fn parse_json_rpc_response<T>(body: &str) -> Result<T>
+where
+    T: DeserializeOwned,
+{
+    serde_json::from_str::<Output>(body)
+        .with_context(|| {
+            tracing::info!("flashbot response: {}", body);
+            anyhow!("invalid flashbots response")
+        })
+        .and_then(|output| match output {
+            Output::Success(body) => serde_json::from_value::<T>(body.result)
+                .context("flashbots failed conversion to expected type"),
+            Output::Failure(body) => bail!("flashbots rpc error: {}", body.error),
+        })
 }
 
 impl FlashbotsApi {
@@ -63,19 +82,9 @@ impl FlashbotsApi {
         let body = response.text().await?;
         ensure!(status.is_success(), "status {}: {:?}", status, body);
 
-        match serde_json::from_str::<Output>(&body) {
-            Ok(body) => match body {
-                Output::Success(body) => match body.result.as_str() {
-                    Some(bundle_id) => {
-                        tracing::debug!("flashbots bundle id: {}", bundle_id);
-                        Ok(bundle_id.to_string())
-                    }
-                    None => Err(anyhow!("result not a string")),
-                },
-                Output::Failure(body) => Err(anyhow!(body.error)),
-            },
-            Err(err) => Err(anyhow!(err)),
-        }
+        let bundle_id = parse_json_rpc_response::<String>(&body)?;
+        tracing::debug!("flashbots bundle id: {}", bundle_id);
+        Ok(bundle_id)
     }
 
     /// Cancel a previously submitted transaction.
@@ -95,24 +104,12 @@ impl FlashbotsApi {
         let body = response.text().await?;
         ensure!(status.is_success(), "status {}: {:?}", status, body);
 
-        match serde_json::from_str::<Output>(&body) {
-            Ok(body) => match body {
-                Output::Success(body) => match body.result.as_bool() {
-                    Some(success) => {
-                        tracing::debug!("flashbots cancellation request sent: {}", success);
-                        match success {
-                            true => Ok(()),
-                            false => Err(anyhow!("flashbots cancellation response was false")),
-                        }
-                    }
-                    None => Err(anyhow!("result not a bool")),
-                },
-                Output::Failure(body) => Err(anyhow!(body.error)),
-            },
-            Err(err) => {
-                tracing::info!("flashbot cancellation response: {}", body);
-                Err(anyhow!(err))
-            }
+        let success = parse_json_rpc_response::<bool>(&body)?;
+        tracing::debug!("flashbots cancellation request sent: {}", success);
+
+        match success {
+            true => Ok(()),
+            false => bail!("flashbots cancellation response was false"),
         }
     }
 
@@ -136,29 +133,7 @@ impl FlashbotsApi {
         // remove temporary status log in following refactor PR
         tracing::debug!("flashbot status response: {}", body);
 
-        let status = serde_json::from_str::<Output>(&body)
-            .with_context(|| {
-                tracing::info!("flashbot status response: {}", body);
-                anyhow!("invalid Flashbots RPC response")
-            })
-            .and_then(|output| match output {
-                Output::Success(body) => serde_json::from_value::<FlashbotStatus>(body.result)
-                    .context("result not a FlashbotStatus"),
-                Output::Failure(body) => bail!("Flashbots RPC error: {}", body.error),
-            })?;
-
-        let status = match status.status.as_str() {
-            "PENDING_BUNDLE" => Status::Pending,
-            "FAILED_BUNDLE" => Status::Failed,
-            "SUCCESSFUL_BUNDLE" => Status::Successful,
-            "CANCEL_BUNDLE_SUCCESSFUL" => Status::Cancelled,
-            _ => {
-                tracing::debug!("flashbot unexpected status value: {}", status.status);
-                Status::Failed
-            }
-        };
-
-        Ok(status)
+        Ok(parse_json_rpc_response::<FlashbotStatus>(&body)?.status)
     }
 
     /// Check if the current submitted tx has failed status.
@@ -179,16 +154,8 @@ impl FlashbotsApi {
         let body = response.text().await?;
         ensure!(status.is_success(), "status {}: {:?}", status, body);
 
-        let gas_price = serde_json::from_str::<Output>(&body)
-            .with_context(|| {
-                tracing::info!("flashbot cancellation response: {}", body);
-                anyhow!("invalid Flashbots RPC response")
-            })
-            .and_then(|output| match output {
-                Output::Success(body) => serde_json::from_value::<FlashbotGasPrice>(body.result)
-                    .context("result not a FlashbotGasPrice"),
-                Output::Failure(body) => bail!("Flashbots RPC error: {}", body.error),
-            })?;
+        let gas_price = parse_json_rpc_response::<FlashbotGasPrice>(&body)?;
+
         Ok(EstimatedGasPrice {
             eip1559: Some(GasPrice1559 {
                 base_fee_per_gas: gas_price.base_fee_per_gas.to_f64_lossy(),
@@ -266,7 +233,7 @@ mod tests {
         match deserialized {
             Output::Success(s) => {
                 let deserialized = serde_json::from_value::<FlashbotStatus>(s.result).unwrap();
-                assert_eq!(deserialized.status, "FAILED_BUNDLE");
+                assert_eq!(deserialized.status, Status::Failed);
             }
             Output::Failure(_) => panic!(),
         }
