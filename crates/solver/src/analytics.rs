@@ -15,6 +15,12 @@ struct SurplusInfo {
     ratio: BigRational,
 }
 
+impl SurplusInfo {
+    fn is_better_than(&self, other: &Self) -> bool {
+        self.ratio > other.ratio
+    }
+}
+
 impl Display for SurplusInfo {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -72,7 +78,7 @@ pub fn report_alternative_settlement_surplus(
                     .to_f64()
                     .unwrap_or_default(),
             );
-            if alternative.ratio > submitted.ratio {
+            if alternative.is_better_than(submitted) {
                 tracing::warn!(
                     ?order_id, %submitted, %alternative,
                     "submission surplus worse than lower ranked settlement",

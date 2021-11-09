@@ -493,7 +493,7 @@ impl Driver {
         for (solver, _) in &rated_settlements {
             self.metrics.settlement_simulation_succeeded(solver.name());
         }
-        // Reverse sort rated settlements by objective value
+
         rated_settlements.sort_by(|a, b| a.1.objective_value().cmp(&b.1.objective_value()));
         if let Some((wining_solver, mut winning_settlement)) = rated_settlements.pop() {
             // If we have enough buffer in the settlement contract to not use on-chain interactions, remove those
