@@ -8,9 +8,7 @@ use model::DomainSeparator;
 use shared::Web3;
 
 pub struct Contracts {
-    pub balancer_authorizer: BalancerV2Authorizer,
     pub balancer_vault: BalancerV2Vault,
-    pub gp_authentication: GPv2AllowListAuthentication,
     pub gp_settlement: GPv2Settlement,
     pub uniswap_factory: UniswapV2Factory,
     pub uniswap_router: UniswapV2Router02,
@@ -98,9 +96,7 @@ pub async fn deploy(web3: &Web3) -> Result<Contracts> {
     );
 
     Ok(Contracts {
-        balancer_authorizer,
         balancer_vault,
-        gp_authentication,
         gp_settlement,
         uniswap_factory,
         uniswap_router,
