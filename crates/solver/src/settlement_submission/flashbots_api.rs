@@ -54,8 +54,12 @@ where
             anyhow!("invalid flashbots response")
         })
         .and_then(|output| match output {
-            Output::Success(body) => serde_json::from_value::<T>(body.result)
-                .context("flashbots failed conversion to expected type"),
+            Output::Success(body) => serde_json::from_value::<T>(body.result).with_context(|| {
+                format!(
+                    "flashbots failed conversion to expected {}",
+                    std::any::type_name::<T>()
+                )
+            }),
             Output::Failure(body) => bail!("flashbots rpc error: {}", body.error),
         })
 }
@@ -106,7 +110,11 @@ impl FlashbotsApi {
         ensure!(status.is_success(), "status {}: {:?}", status, body);
 
         let success = parse_json_rpc_response::<bool>(&body)?;
-        tracing::debug!("flashbots cancellation request sent: {}", success);
+        tracing::debug!(
+            "flashbots cancellation for bundle {} result: {}",
+            bundle_id,
+            success
+        );
 
         match success {
             true => Ok(()),
