@@ -118,7 +118,7 @@ impl FlashbotsApi {
     pub async fn cancel_and_wait(&self, bundle_id: &str) -> Result<bool> {
         self.cancel(bundle_id).await?;
 
-        const WAIT_FOR_CANCELLATION_RETRIES: usize = 5usize; // will be a strategy parameter after the refactor!
+        const WAIT_FOR_CANCELLATION_RETRIES: usize = 10usize; // will be a strategy parameter after the refactor!
         const CANCEL_PROPAGATION_TIME: Duration = Duration::from_secs(2); // will be a strategy parameter after the refactor!
 
         for _ in 0..std::cmp::max(WAIT_FOR_CANCELLATION_RETRIES, 1usize) {
