@@ -197,7 +197,6 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
 
         // The amount of extra gas it costs to include the payment to block.coinbase interaction in
         // an existing settlement.
-        let gas_estimate = gas_estimate + U256::from(18346);
         let target_confirm_time = Instant::now() + target_confirm_time;
 
         // gas price and raw signed transaction
@@ -269,7 +268,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
                 if gas_price.cap() > previous_gas_price.cap() {
                     if let Err(err) = self.flashbots_api.cancel_and_wait(previous_tx).await {
                         // If we are unable to cancel, lets just wait for some time and try again
-                        // Maybe the current tx will get mined in the meantime, of the cancellation will succeed a bit later
+                        // Maybe the current tx will get mined in the meantime, or the cancellation will succeed a bit later
 
                         tracing::warn!("flashbots cancellation failed: {:?}", err);
                         tokio::time::sleep(UPDATE_INTERVAL).await;

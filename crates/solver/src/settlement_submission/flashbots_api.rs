@@ -250,13 +250,11 @@ mod tests {
             }
         });
 
-        let deserialized = serde_json::from_str::<Output>(&body.to_string()).unwrap();
-        match deserialized {
-            Output::Success(s) => {
-                let deserialized = serde_json::from_value::<FlashbotStatus>(s.result).unwrap();
-                assert_eq!(deserialized.status, Status::Failed);
-            }
-            Output::Failure(_) => panic!(),
-        }
+        assert_eq!(
+            parse_json_rpc_response::<FlashbotStatus>(&body.to_string())
+                .unwrap()
+                .status,
+            Status::Failed
+        );
     }
 }
