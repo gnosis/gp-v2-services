@@ -41,7 +41,7 @@ impl PriceEstimating for CompetitionPriceEstimator {
                         }
                     })
                     .filter_map(|(name, estimate)| {
-                        match estimate.price_in_sell_token_rational(&query) {
+                        match estimate.price_in_sell_token_rational(query) {
                             Some(price) => Some((name, estimate, price)),
                             None => {
                                 tracing::warn!(
@@ -61,7 +61,7 @@ impl PriceEstimating for CompetitionPriceEstimator {
                             winning_estimator = %name, ?query, ?estimate,
                             "winning price estimate",
                         );
-                        estimate.clone()
+                        *estimate
                     })
             })
             .collect()
@@ -110,29 +110,26 @@ mod tests {
         ];
 
         let mut first = MockPriceEstimating::new();
-        first.expect_estimates().times(1).returning({
-            let estimates = estimates.clone();
-            move |queries| {
-                assert_eq!(queries.len(), 3);
-                vec![
-                    Ok(estimates[0].clone()),
-                    Ok(estimates[0].clone()),
-                    Err(PriceEstimationError::Other(anyhow!(""))),
-                ]
-            }
+        first.expect_estimates().times(1).returning(move |queries| {
+            assert_eq!(queries.len(), 3);
+            vec![
+                Ok(estimates[0]),
+                Ok(estimates[0]),
+                Err(PriceEstimationError::Other(anyhow!(""))),
+            ]
         });
         let mut second = MockPriceEstimating::new();
-        second.expect_estimates().times(1).returning({
-            let estimates = estimates.clone();
-            move |queries| {
+        second
+            .expect_estimates()
+            .times(1)
+            .returning(move |queries| {
                 assert_eq!(queries.len(), 3);
                 vec![
                     Err(PriceEstimationError::Other(anyhow!(""))),
-                    Ok(estimates[1].clone()),
+                    Ok(estimates[1]),
                     Err(PriceEstimationError::Other(anyhow!(""))),
                 ]
-            }
-        });
+            });
 
         let priority = CompetitionPriceEstimator::new(vec![
             ("first".to_owned(), Box::new(first)),
