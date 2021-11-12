@@ -15,7 +15,7 @@
 
 use super::{flashbots_api::FlashbotsApi, ESTIMATE_GAS_LIMIT_FACTOR};
 use crate::settlement::Settlement;
-use anyhow::{anyhow, ensure, Context, Result};
+use anyhow::{anyhow, ensure, Error, Context, Result};
 use contracts::GPv2Settlement;
 use ethcontract::{transaction::Transaction, Account};
 use futures::FutureExt;
@@ -267,7 +267,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
                         tracing::warn!("flashbots cancellation request not sent: {:?}", err);
                     }
                 }
-                return anyhow::Error::new(err).context("flashbots failed simulation");
+                return Error::from(err).context("flashbots failed simulation");
             }
 
             // If gas price has increased cancel old and submit new transaction.
