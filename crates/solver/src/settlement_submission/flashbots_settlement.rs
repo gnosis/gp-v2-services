@@ -15,7 +15,7 @@
 
 use super::{flashbots_api::FlashbotsApi, ESTIMATE_GAS_LIMIT_FACTOR};
 use crate::settlement::Settlement;
-use anyhow::{anyhow, ensure, Error, Context, Result};
+use anyhow::{anyhow, ensure, Context, Error, Result};
 use contracts::GPv2Settlement;
 use ethcontract::{transaction::Transaction, Account};
 use futures::FutureExt;
