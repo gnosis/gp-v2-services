@@ -19,6 +19,9 @@ use orderbook::{
     verify_deployed_contract_constants,
 };
 use primitive_types::H160;
+use shared::http_solver_api::{HttpSolverApi, SolverConfig};
+use shared::network::network_name;
+use shared::price_estimation::quasimodo::QuasimodoPriceEstimator;
 use shared::price_estimation::zeroex::ZeroExPriceEstimator;
 use shared::zeroex_api::DefaultZeroExApi;
 use shared::{
@@ -157,6 +160,10 @@ struct Arguments {
         parse(try_from_str = parse_partner_fee_factor),
     )]
     partner_additional_fee_factors: HashMap<AppId, f64>,
+
+    /// The API endpoint to call the mip v2 solver for price estimation
+    #[structopt(long, env, default_value = "http://localhost:8000")]
+    quasimodo_solver_url: Url,
 }
 
 pub async fn database_metrics(metrics: Arc<Metrics>, database: Postgres) -> ! {
@@ -209,12 +216,12 @@ async fn main() {
         .await
         .expect("Could not get chainId")
         .as_u64();
-
     let network = web3
         .net()
         .version()
         .await
         .expect("Failed to retrieve network version ID");
+    let network_name = network_name(&network, chain_id);
 
     let native_token_price_estimation_amount = args
         .shared

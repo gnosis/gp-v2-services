@@ -3,6 +3,7 @@ use reqwest::header::HeaderValue;
 use reqwest::{Client, Url};
 use std::time::{Duration, Instant};
 
+pub mod constants;
 pub mod model;
 
 /// Configuration for solver requests.
