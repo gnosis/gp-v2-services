@@ -1,6 +1,8 @@
 use super::{Estimate, PriceEstimating, PriceEstimationError, Query};
 use anyhow::{anyhow, Result};
 use futures::future;
+use num::BigRational;
+use std::cmp;
 
 /// Price estimator that pulls estimates from various sources
 /// and competes on the best price.
@@ -30,41 +32,84 @@ impl PriceEstimating for CompetitionPriceEstimator {
             .map(|(i, query)| {
                 all_estimates
                     .iter()
-                    .filter_map(|(name, estimates)| match &estimates[i] {
-                        Ok(estimate) => Some((name, estimate)),
-                        Err(err) => {
-                            tracing::warn!(
-                                estimator_name = %name, ?query, ?err,
-                                "price estimation error",
-                            );
-                            None
-                        }
-                    })
-                    .filter_map(|(name, estimate)| {
-                        match estimate.price_in_sell_token_rational(query) {
-                            Some(price) => Some((name, estimate, price)),
-                            None => {
-                                tracing::warn!(
-                                    estimator_name = %name, ?query, ?estimate,
-                                    "price estimate with zero amounts",
-                                );
-                                None
-                            }
-                        }
-                    })
-                    .max_by_key(|(_, _, price)| price.clone())
-                    .ok_or_else(|| {
-                        PriceEstimationError::Other(anyhow!("no successful price estimates"))
-                    })
-                    .map(|(name, estimate, _)| {
-                        tracing::debug!(
-                            winning_estimator = %name, ?query, ?estimate,
-                            "winning price estimate",
-                        );
-                        *estimate
+                    .fold(
+                        Err(PriceEstimationError::Other(anyhow!(
+                            "no successful price estimates"
+                        ))),
+                        |previous_result, (name, estimates)| {
+                            fold_price_estimation_result(
+                                query,
+                                name,
+                                previous_result,
+                                estimates[i].clone(),
+                            )
+                        },
+                    )
+                    .map(|winning_estimate| {
+                        tracing::debug!(?query, ?winning_estimate, "winning price estimate",);
+                        winning_estimate.estimate
                     })
             })
             .collect()
+    }
+}
+
+#[derive(Debug)]
+struct EstimateData<'a> {
+    estimator_name: &'a str,
+    estimate: Estimate,
+    price: BigRational,
+}
+
+fn fold_price_estimation_result<'a>(
+    query: &'a Query,
+    estimator_name: &'a str,
+    previous_result: Result<EstimateData<'a>, PriceEstimationError>,
+    estimate: Result<Estimate, PriceEstimationError>,
+) -> Result<EstimateData<'a>, PriceEstimationError> {
+    // If we get an error from a price estimator, unconditionally log it.
+    if let Err(err) = &estimate {
+        tracing::warn!(
+            %estimator_name, ?query, ?err,
+            "price estimation error",
+        );
+    }
+
+    let estimate_with_price = estimate.and_then(|estimate| {
+        let price = estimate
+            .price_in_sell_token_rational(query)
+            .ok_or(PriceEstimationError::ZeroAmount)?;
+        Ok(EstimateData {
+            estimator_name,
+            estimate,
+            price,
+        })
+    });
+
+    match (previous_result, estimate_with_price) {
+        (Ok(previous), Ok(estimate)) => Ok(cmp::max_by_key(previous, estimate, |data| {
+            data.price.clone()
+        })),
+        (Ok(estimate), Err(_)) | (Err(_), Ok(estimate)) => Ok(estimate),
+        (Err(previous_err), Err(err)) => Err(join_error(previous_err, err)),
+    }
+}
+
+fn join_error(a: PriceEstimationError, b: PriceEstimationError) -> PriceEstimationError {
+    // NOTE(nlordell): How errors are joined is kind of arbitrary. I decided to
+    // just order them in the following priority:
+    // - ZeroAmount
+    // - UnsupportedToken
+    // - NoLiquidity
+    // - Other
+    match (a, b) {
+        (err @ PriceEstimationError::ZeroAmount, _)
+        | (_, err @ PriceEstimationError::ZeroAmount) => err,
+        (err @ PriceEstimationError::UnsupportedToken(_), _)
+        | (_, err @ PriceEstimationError::UnsupportedToken(_)) => err,
+        (err @ PriceEstimationError::NoLiquidity, _)
+        | (_, err @ PriceEstimationError::NoLiquidity) => err,
+        (err @ PriceEstimationError::Other(_), _) => err,
     }
 }
 
@@ -97,6 +142,12 @@ mod tests {
                 in_amount: 1.into(),
                 kind: OrderKind::Buy,
             },
+            Query {
+                sell_token: H160::from_low_u64_le(5),
+                buy_token: H160::from_low_u64_le(6),
+                in_amount: 1.into(),
+                kind: OrderKind::Buy,
+            },
         ];
         let estimates = [
             Estimate {
@@ -111,11 +162,12 @@ mod tests {
 
         let mut first = MockPriceEstimating::new();
         first.expect_estimates().times(1).returning(move |queries| {
-            assert_eq!(queries.len(), 3);
+            assert_eq!(queries.len(), 4);
             vec![
                 Ok(estimates[0]),
                 Ok(estimates[0]),
                 Err(PriceEstimationError::Other(anyhow!(""))),
+                Err(PriceEstimationError::NoLiquidity),
             ]
         });
         let mut second = MockPriceEstimating::new();
@@ -123,11 +175,12 @@ mod tests {
             .expect_estimates()
             .times(1)
             .returning(move |queries| {
-                assert_eq!(queries.len(), 3);
+                assert_eq!(queries.len(), 4);
                 vec![
                     Err(PriceEstimationError::Other(anyhow!(""))),
                     Ok(estimates[1]),
                     Err(PriceEstimationError::Other(anyhow!(""))),
+                    Err(PriceEstimationError::UnsupportedToken(H160([0; 20]))),
                 ]
             });
 
@@ -137,12 +190,17 @@ mod tests {
         ]);
 
         let result = priority.estimates(&queries).await;
-        assert_eq!(result.len(), 3);
+        assert_eq!(result.len(), 4);
         assert_eq!(result[0].as_ref().unwrap(), &estimates[0]);
         assert_eq!(result[1].as_ref().unwrap(), &estimates[1]);
         assert!(matches!(
             result[2].as_ref().unwrap_err(),
-            PriceEstimationError::Other(_),
+            PriceEstimationError::Other(err)
+                if err.to_string() == "no successful price estimates",
+        ));
+        assert!(matches!(
+            result[3].as_ref().unwrap_err(),
+            PriceEstimationError::UnsupportedToken(_),
         ));
     }
 }
