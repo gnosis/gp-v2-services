@@ -75,6 +75,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
         deadline: SystemTime,
         settlement: Settlement,
         gas_estimate: U256,
+        flashbots_tip: f64,
     ) -> Result<Option<TransactionReceipt>> {
         let nonce = self.nonce().await?;
 
@@ -86,6 +87,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
             nonce,
             settlement,
             gas_estimate,
+            flashbots_tip,
             &mut transactions,
         );
 
@@ -199,10 +201,10 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
         nonce: U256,
         settlement: Settlement,
         gas_estimate: U256,
+        flashbots_tip: f64,
         transactions: &mut Vec<H256>,
     ) -> anyhow::Error {
         const UPDATE_INTERVAL: Duration = Duration::from_secs(5);
-        const MINIMAL_MAX_PRIORITY_FEE: f64 = 3_010_000_000.0;
 
         // The amount of extra gas it costs to include the payment to block.coinbase interaction in
         // an existing settlement.
@@ -219,10 +221,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
             let gas_price = match self.gas_price(gas_limit, time_limit).await {
                 Ok(mut gas_price) => {
                     if let Some(ref mut eip1559) = gas_price.eip1559 {
-                        if eip1559.max_priority_fee_per_gas < MINIMAL_MAX_PRIORITY_FEE {
-                            tracing::debug!("max_priority_fee_per_gas old value {} replaced with minimal value {}", eip1559.max_priority_fee_per_gas, MINIMAL_MAX_PRIORITY_FEE);
-                            eip1559.max_priority_fee_per_gas = MINIMAL_MAX_PRIORITY_FEE;
-                        }
+                        eip1559.max_priority_fee_per_gas += flashbots_tip;
                     }
                     gas_price
                 }
@@ -403,6 +402,7 @@ mod tests {
                 SystemTime::now() + Duration::from_secs(90),
                 settlement,
                 gas_estimate,
+                3.0
             )
             .await;
         tracing::info!("finished with result {:?}", result);
