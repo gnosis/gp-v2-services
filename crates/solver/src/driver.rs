@@ -628,14 +628,14 @@ fn has_at_least_one_user_order(orders: &[LimitOrder]) -> bool {
 }
 
 fn print_settlements(rated_settlements: &[(Arc<dyn Solver>, RatedSettlement)]) {
-    tracing::info!("Rated Settlements:\n{}", rated_settlements.iter().rev().map(|(solver, settlement)| 
-        format!("Objective value for solver {} is {:.2e}: surplus={:.2e}, gas_estimate={:.2e}, gas_price={:.2e}",
+    tracing::info!("Rated Settlements: {:?}", rated_settlements.iter().rev().map(|(solver, settlement)| 
+        format!("{}: objective={:.2e}: surplus={:.2e}, gas_estimate={:.2e}, gas_price={:.2e}",
         solver.name(),
         settlement.objective_value().to_f64().unwrap_or(f64::NAN),
         settlement.surplus.to_f64().unwrap_or(f64::NAN),
         settlement.gas_estimate.to_f64_lossy(),
         settlement.gas_price.to_f64().unwrap_or(f64::NAN),
-        )).collect::<Vec<_>>().join("\n"));
+        )).collect::<Vec<_>>());
 }
 
 #[cfg(test)]
