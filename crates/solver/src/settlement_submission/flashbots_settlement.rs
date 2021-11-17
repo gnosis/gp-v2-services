@@ -402,7 +402,7 @@ mod tests {
                 SystemTime::now() + Duration::from_secs(90),
                 settlement,
                 gas_estimate,
-                3.0
+                3.0,
             )
             .await;
         tracing::info!("finished with result {:?}", result);
