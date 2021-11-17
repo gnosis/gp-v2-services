@@ -30,6 +30,8 @@ pub struct OrderModel {
     pub fee: FeeModel,
     pub cost: CostModel,
     pub is_liquidity_order: bool,
+    #[serde(default)]
+    pub mandatory: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -293,6 +295,7 @@ mod tests {
                 token: native_token,
             },
             is_liquidity_order: false,
+            mandatory: false,
         };
         let constant_product_pool_model = AmmModel {
             parameters: AmmParameters::ConstantProduct(ConstantProductPoolParameters {
@@ -411,6 +414,7 @@ mod tests {
                 "amount": "1",
                 "token": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
               },
+              "mandatory": false,
             },
           },
           "amms": {

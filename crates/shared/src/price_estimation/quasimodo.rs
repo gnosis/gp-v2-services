@@ -1,12 +1,11 @@
 use crate::bad_token::BadTokenDetecting;
 use crate::baseline_solver::BaseTokens;
-use crate::http_solver_api::constants::GAS_PER_ORDER;
-use crate::http_solver_api::constants::GAS_PER_UNISWAP;
 use crate::http_solver_api::model::{
     AmmModel, AmmParameters, BatchAuctionModel, ConstantProductPoolParameters, CostModel, FeeModel,
     OrderModel, TokenInfoModel,
 };
 use crate::http_solver_api::HttpSolverApi;
+use crate::price_estimation::gas::{ERC20_TRANSFER, GAS_PER_ORDER, GAS_PER_UNISWAP, INITIALIZATION_COST, SETTLEMENT};
 use crate::price_estimation::{
     ensure_token_supported, Estimate, PriceEstimating, PriceEstimationError, Query,
 };
@@ -64,6 +63,7 @@ impl QuasimodoPriceEstimator {
                     *token,
                     TokenInfoModel {
                         decimals: token_infos[token].decimals,
+                        alias: token_infos[token].symbol.clone(),
                         normalize_priority: Some(if self.native_token == query.buy_token {
                             1
                         } else {
@@ -90,14 +90,15 @@ impl QuasimodoPriceEstimator {
                 allow_partial_fill: false,
                 is_sell_order: query.kind == OrderKind::Sell,
                 fee: FeeModel {
-                    amount: *GAS_PER_ORDER * gas_cost,
+                    amount: U256::from(GAS_PER_ORDER) * gas_cost,
                     token: self.native_token,
                 },
                 cost: CostModel {
-                    amount: *GAS_PER_ORDER * gas_cost,
+                    amount: U256::from(GAS_PER_ORDER) * gas_cost,
                     token: self.native_token,
                 },
                 is_liquidity_order: false,
+                mandatory: true,
             },
         )]);
 
@@ -122,7 +123,7 @@ impl QuasimodoPriceEstimator {
                     BigInt::from(*pool.fee.denom()),
                 )),
                 cost: CostModel {
-                    amount: *GAS_PER_UNISWAP * gas_cost,
+                    amount: U256::from(GAS_PER_UNISWAP) * gas_cost,
                     token: self.native_token,
                 },
                 mandatory: false,
@@ -139,7 +140,7 @@ impl QuasimodoPriceEstimator {
                     amms,
                     metadata: None,
                 },
-                Instant::now() + Duration::from_secs(5),
+                Instant::now() + Duration::from_secs(1),
             )
             .await?;
 
@@ -148,6 +149,11 @@ impl QuasimodoPriceEstimator {
         }
 
         let mut cost = self.extract_cost(&settlement.orders[&0].cost)?;
+        cost += U256::from(
+            INITIALIZATION_COST // Call into contract
+            + SETTLEMENT // overhead for entering the `settle()` function
+            + 2 * ERC20_TRANSFER, // transfer in and transfer out
+        );
         for amm in settlement.amms.values() {
             cost += self.extract_cost(&amm.cost)? * amm.execution.len();
         }
@@ -187,5 +193,162 @@ impl PriceEstimating for QuasimodoPriceEstimator {
         }
 
         results
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bad_token::list_based::ListBasedDetector;
+    use crate::current_block::current_block_stream;
+    use crate::http_solver_api::SolverConfig;
+    use crate::price_estimation::Query;
+    use crate::recent_block_cache::CacheConfig;
+    use crate::sources::uniswap::pair_provider::UniswapPairProvider;
+    use crate::sources::uniswap::pool_cache::NoopPoolCacheMetrics;
+    use crate::sources::uniswap::pool_fetching::PoolFetcher;
+    use crate::token_info::TokenInfoFetcher;
+    use crate::transport::http::HttpTransport;
+    use crate::Web3;
+    use contracts::UniswapV2Factory;
+    use ethcontract::dyns::DynTransport;
+    use model::order::OrderKind;
+    use reqwest::Client;
+    use url::Url;
+
+    // TODO: to imolement these tests, we'll need to make HTTP solver API mockable.
+
+    #[tokio::test]
+    async fn estimate_sell() {
+    }
+
+    #[tokio::test]
+    async fn estimate_buy() {
+    }
+
+    #[tokio::test]
+    async fn quasimodo_error() {
+    }
+
+    #[tokio::test]
+    async fn quasimodo_no_liquidity() {
+    }
+
+    #[tokio::test]
+    async fn same_token() {
+    }
+
+    #[tokio::test]
+    async fn unsupported_token() {
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn real_estimate() {
+        let quasimodo_url =
+            std::env::var("QUASIMODO_URL").expect("env variable QUASIMODO_URL is required");
+
+        let weth = addr!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2");
+
+        let _weth = ("weth", weth);
+        let _owl = ("owl", addr!("1A5F9352Af8aF974bFC03399e3767DF6370d82e4"));
+        let _bal = ("bal", addr!("ba100000625a3754423978a60c9317c58a424e3D"));
+        let _gno = ("gno", addr!("6810e776880c02933d47db1b9fc05908e5386b96"));
+        let _dai = ("dai", addr!("6B175474E89094C44Da98b954EedeAC495271d0F"));
+
+        let t1 = _weth;
+        let t2 = _owl;
+        let amount: U256 = U256::from(1) * U256::exp10(8);
+
+        let client = Client::new();
+
+        let transport = HttpTransport::new(
+            client.clone(),
+            Url::parse("https://mainnet.infura.io/v3/5a2827cf14c44719baa03f3e6ed22118").unwrap(),
+            "main".into(),
+        );
+        let web3 = Web3::new(DynTransport::new(transport));
+
+        let pools = Arc::new(
+            PoolCache::new(
+                CacheConfig::default(),
+                Box::new(PoolFetcher {
+                    pair_provider: Arc::new(UniswapPairProvider {
+                        factory: UniswapV2Factory::deployed(&web3).await.unwrap(),
+                        chain_id: 1,
+                    }),
+                    web3: web3.clone(),
+                }),
+                current_block_stream(web3.clone(), Duration::from_secs(1))
+                    .await
+                    .unwrap(),
+                Arc::new(NoopPoolCacheMetrics),
+            )
+            .unwrap(),
+        );
+        let bad_token_detector = Arc::new(ListBasedDetector::deny_list(Vec::new()));
+        let token_info = Arc::new(TokenInfoFetcher { web3: web3.clone() });
+        let gas_info = Arc::new(web3);
+
+        let estimator = QuasimodoPriceEstimator {
+            api: Arc::new(HttpSolverApi {
+                name: "test",
+                network_name: "1".to_string(),
+                chain_id: 1,
+                base: Url::parse(&quasimodo_url).expect("failed to parse quasimodo url"),
+                client,
+                config: SolverConfig {
+                    api_key: None,
+                    max_nr_exec_orders: 100,
+                    has_ucp_policy_parameter: false,
+                },
+            }),
+            pools,
+            bad_token_detector,
+            token_info,
+            gas_info,
+            native_token: weth,
+            base_tokens: Arc::new(BaseTokens::new(weth, &[weth, t1.1, t2.1])),
+        };
+
+        let result = estimator
+            .estimate(&Query {
+                sell_token: t1.1,
+                buy_token: t2.1,
+                in_amount: amount,
+                kind: OrderKind::Sell,
+            })
+            .await;
+
+        dbg!(&result);
+        let estimate = result.unwrap();
+        println!(
+            "{} {} buys {} {}, costing {} gas",
+            amount.to_f64_lossy() / 1e18,
+            t1.0,
+            estimate.out_amount.to_f64_lossy() / 1e18,
+            t2.0,
+            estimate.gas,
+        );
+
+        let result = estimator
+            .estimate(&Query {
+                sell_token: t1.1,
+                buy_token: t2.1,
+                in_amount: amount,
+                kind: OrderKind::Buy,
+            })
+            .await;
+
+        dbg!(&result);
+        let estimate = result.unwrap();
+        println!(
+            "{} {} costs {} {}, costing {} gas",
+            amount.to_f64_lossy() / 1e18,
+            t2.0,
+            estimate.out_amount.to_f64_lossy() / 1e18,
+            t1.0,
+            estimate.gas,
+        );
     }
 }

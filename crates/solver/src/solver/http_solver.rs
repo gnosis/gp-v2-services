@@ -17,8 +17,8 @@ use model::order::OrderKind;
 use num::ToPrimitive;
 use num::{BigInt, BigRational};
 use primitive_types::H160;
+use shared::http_solver_api::model::*;
 use shared::http_solver_api::HttpSolverApi;
-use shared::http_solver_api::{constants::*, model::*};
 use shared::{
     measure_time,
     token_info::{TokenInfo, TokenInfoFetching},
@@ -28,6 +28,7 @@ use std::{
     iter::FromIterator as _,
     sync::Arc,
 };
+use shared::price_estimation::gas::{GAS_PER_BALANCER_SWAP, GAS_PER_ORDER, GAS_PER_UNISWAP};
 
 // TODO: exclude partially fillable orders
 // TODO: set settlement.fee_factor
@@ -179,15 +180,15 @@ impl GasModel {
     }
 
     fn order_cost(&self) -> CostModel {
-        self.cost_for_gas(*GAS_PER_ORDER)
+        self.cost_for_gas(GAS_PER_ORDER.into())
     }
 
     fn uniswap_cost(&self) -> CostModel {
-        self.cost_for_gas(*GAS_PER_UNISWAP)
+        self.cost_for_gas(GAS_PER_UNISWAP.into())
     }
 
     fn balancer_cost(&self) -> CostModel {
-        self.cost_for_gas(*GAS_PER_BALANCER_SWAP)
+        self.cost_for_gas(GAS_PER_BALANCER_SWAP.into())
     }
 
     fn order_fee(&self, order: &LimitOrder) -> FeeModel {
@@ -257,6 +258,7 @@ fn order_models(
                     fee: gas_model.order_fee(order),
                     cost: gas_model.order_cost(),
                     is_liquidity_order: order.is_liquidity_order,
+                    mandatory: false,
                 },
             ))
         })
