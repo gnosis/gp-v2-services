@@ -163,7 +163,7 @@ struct Arguments {
 
     /// The API endpoint to call the mip v2 solver for price estimation
     #[structopt(long, env, default_value = "http://localhost:8000")]
-    quasimodo_solver_url: Url,
+    quasimodo_solver_url: Option<Url>,
 }
 
 pub async fn database_metrics(metrics: Arc<Metrics>, database: Postgres) -> ! {
@@ -418,6 +418,33 @@ async fn main() {
                         ZeroExPriceEstimator {
                             api: zeroex_api.clone(),
                             bad_token_detector: bad_token_detector.clone(),
+                        },
+                        estimator.name(),
+                        metrics.clone(),
+                    )),
+                    PriceEstimatorType::Quasimodo => Box::new(InstrumentedPriceEstimator::new(
+                        QuasimodoPriceEstimator {
+                            api: Arc::new(HttpSolverApi {
+                                name: "quasimodo-price-estimator",
+                                network_name: network_name.to_string(),
+                                chain_id,
+                                base: args
+                                    .quasimodo_solver_url
+                                    .expect("quasimodo solver url is required when using quasimodo price estimation")
+                                    .clone(),
+                                client: client.clone(),
+                                config: SolverConfig {
+                                    api_key: None,
+                                    max_nr_exec_orders: 100,
+                                    has_ucp_policy_parameter: false,
+                                },
+                            }),
+                            pools: pool_fetcher.clone(),
+                            bad_token_detector: bad_token_detector.clone(),
+                            token_info: token_info_fetcher.clone(),
+                            gas_info: gas_price_estimator.clone(),
+                            native_token: native_token.address(),
+                            base_tokens: base_tokens.clone(),
                         },
                         estimator.name(),
                         metrics.clone(),
