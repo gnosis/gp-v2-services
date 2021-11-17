@@ -5,7 +5,9 @@ use crate::http_solver_api::model::{
     OrderModel, TokenInfoModel,
 };
 use crate::http_solver_api::HttpSolverApi;
-use crate::price_estimation::gas::{ERC20_TRANSFER, GAS_PER_ORDER, GAS_PER_UNISWAP, INITIALIZATION_COST, SETTLEMENT};
+use crate::price_estimation::gas::{
+    ERC20_TRANSFER, GAS_PER_ORDER, GAS_PER_UNISWAP, INITIALIZATION_COST, SETTLEMENT,
+};
 use crate::price_estimation::{
     ensure_token_supported, Estimate, PriceEstimating, PriceEstimationError, Query,
 };
@@ -219,28 +221,22 @@ mod tests {
     // TODO: to imolement these tests, we'll need to make HTTP solver API mockable.
 
     #[tokio::test]
-    async fn estimate_sell() {
-    }
+    async fn estimate_sell() {}
 
     #[tokio::test]
-    async fn estimate_buy() {
-    }
+    async fn estimate_buy() {}
 
     #[tokio::test]
-    async fn quasimodo_error() {
-    }
+    async fn quasimodo_error() {}
 
     #[tokio::test]
-    async fn quasimodo_no_liquidity() {
-    }
+    async fn quasimodo_no_liquidity() {}
 
     #[tokio::test]
-    async fn same_token() {
-    }
+    async fn same_token() {}
 
     #[tokio::test]
-    async fn unsupported_token() {
-    }
+    async fn unsupported_token() {}
 
     #[tokio::test]
     #[ignore]

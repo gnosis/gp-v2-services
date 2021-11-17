@@ -19,6 +19,7 @@ use num::{BigInt, BigRational};
 use primitive_types::H160;
 use shared::http_solver_api::model::*;
 use shared::http_solver_api::HttpSolverApi;
+use shared::price_estimation::gas::{GAS_PER_BALANCER_SWAP, GAS_PER_ORDER, GAS_PER_UNISWAP};
 use shared::{
     measure_time,
     token_info::{TokenInfo, TokenInfoFetching},
@@ -28,7 +29,6 @@ use std::{
     iter::FromIterator as _,
     sync::Arc,
 };
-use shared::price_estimation::gas::{GAS_PER_BALANCER_SWAP, GAS_PER_ORDER, GAS_PER_UNISWAP};
 
 // TODO: exclude partially fillable orders
 // TODO: set settlement.fee_factor
