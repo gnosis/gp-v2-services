@@ -87,7 +87,6 @@ impl HttpSolverApi {
         }
         let body = serde_json::to_string(&model).context("failed to encode body")?;
         tracing::trace!("request {}", body);
-        println!("{}", body);
         let request = request.body(body.clone());
         let response = request.send().await.context("failed to send request")?;
         let status = response.status();

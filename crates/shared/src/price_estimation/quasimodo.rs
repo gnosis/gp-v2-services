@@ -12,8 +12,8 @@ use crate::price_estimation::{
     ensure_token_supported, Estimate, PriceEstimating, PriceEstimationError, Query,
 };
 use crate::recent_block_cache::Block;
-use crate::sources::uniswap::pool_cache::PoolCache;
-use crate::sources::uniswap::pool_fetching::PoolFetching;
+use crate::sources::uniswap_v2::pool_cache::PoolCache;
+use crate::sources::uniswap_v2::pool_fetching::PoolFetching;
 use crate::token_info::TokenInfoFetching;
 use ethcontract::{H160, U256};
 use gas_estimation::GasPriceEstimating;
@@ -46,7 +46,7 @@ impl QuasimodoPriceEstimator {
         ensure_token_supported(query.buy_token, self.bad_token_detector.as_ref()).await?;
         ensure_token_supported(query.sell_token, self.bad_token_detector.as_ref()).await?;
 
-        let gas_cost = U256::from_f64_lossy(self.gas_info.estimate().await?.legacy);
+        let gas_cost = U256::from_f64_lossy(self.gas_info.estimate().await?.effective_gas_price());
 
         let mut tokens = self.base_tokens.tokens().clone();
         tokens.insert(query.sell_token);
@@ -56,9 +56,7 @@ impl QuasimodoPriceEstimator {
 
         let token_infos = self.token_info.get_token_infos(&tokens).await;
 
-        let tokens = self
-            .base_tokens
-            .tokens()
+        let tokens = tokens
             .iter()
             .map(|token| {
                 (
@@ -105,8 +103,7 @@ impl QuasimodoPriceEstimator {
         )]);
 
         let token_pair = TokenPair::new(query.sell_token, query.buy_token).unwrap();
-        let mut pairs = self.base_tokens.relevant_pairs([token_pair].into_iter());
-        pairs.insert(token_pair);
+        let pairs = self.base_tokens.relevant_pairs([token_pair].into_iter());
 
         let amms = self
             .pools
@@ -151,21 +148,20 @@ impl QuasimodoPriceEstimator {
         }
 
         let mut cost = self.extract_cost(&settlement.orders[&0].cost)?;
-        cost += U256::from(
-            INITIALIZATION_COST // Call into contract
-            + SETTLEMENT // overhead for entering the `settle()` function
-            + 2 * ERC20_TRANSFER, // transfer in and transfer out
-        );
         for amm in settlement.amms.values() {
             cost += self.extract_cost(&amm.cost)? * amm.execution.len();
         }
+        let gas = (cost / gas_cost)
+            + INITIALIZATION_COST // Call into contract
+            + SETTLEMENT // overhead for entering the `settle()` function
+            + ERC20_TRANSFER * 2; // transfer in and transfer out
 
         Ok(Estimate {
             out_amount: match query.kind {
                 OrderKind::Buy => settlement.orders[&0].exec_sell_amount,
                 OrderKind::Sell => settlement.orders[&0].exec_buy_amount,
             },
-            gas: cost / gas_cost,
+            gas,
         })
     }
 
@@ -206,9 +202,9 @@ mod tests {
     use crate::http_solver_api::SolverConfig;
     use crate::price_estimation::Query;
     use crate::recent_block_cache::CacheConfig;
-    use crate::sources::uniswap::pair_provider::UniswapPairProvider;
-    use crate::sources::uniswap::pool_cache::NoopPoolCacheMetrics;
-    use crate::sources::uniswap::pool_fetching::PoolFetcher;
+    use crate::sources::uniswap_v2::pair_provider::UniswapPairProvider;
+    use crate::sources::uniswap_v2::pool_cache::NoopPoolCacheMetrics;
+    use crate::sources::uniswap_v2::pool_fetching::PoolFetcher;
     use crate::token_info::TokenInfoFetcher;
     use crate::transport::http::HttpTransport;
     use crate::Web3;
