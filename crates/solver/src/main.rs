@@ -356,10 +356,9 @@ async fn main() {
         max_retries: args.shared.pool_cache_maximum_retries,
         delay_between_retries: args.shared.pool_cache_delay_between_retries_seconds,
     };
-    let baseline_sources = args
-        .shared
-        .baseline_sources
-        .unwrap_or_else(|| sources::defaults_for_chain(chain_id));
+    let baseline_sources = args.shared.baseline_sources.unwrap_or_else(|| {
+        sources::defaults_for_chain(chain_id).expect("failed to get default baseline sources")
+    });
     tracing::info!(?baseline_sources, "using baseline sources");
     let pool_caches: HashMap<BaselineSource, Arc<PoolCache>> =
         sources::pair_providers(&web3, &baseline_sources)

@@ -290,10 +290,9 @@ async fn main() {
         metrics.clone(),
     ));
 
-    let baseline_sources = args
-        .shared
-        .baseline_sources
-        .unwrap_or_else(|| sources::defaults_for_chain(chain_id));
+    let baseline_sources = args.shared.baseline_sources.unwrap_or_else(|| {
+        sources::defaults_for_chain(chain_id).expect("failed to get default baseline sources")
+    });
     tracing::info!(?baseline_sources, "using baseline sources");
     let pair_providers = sources::pair_providers(&web3, &baseline_sources)
         .await
