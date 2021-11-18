@@ -37,7 +37,11 @@ pub fn defaults_for_chain(chain_id: u64) -> Result<Vec<BaselineSource>> {
             BaselineSource::SushiSwap,
             BaselineSource::BalancerV2,
         ],
-        100 => vec![BaselineSource::Honeyswap, BaselineSource::SushiSwap],
+        100 => vec![
+            BaselineSource::Honeyswap,
+            BaselineSource::SushiSwap,
+            BaselineSource::Baoswap,
+        ],
         _ => bail!("unsupported chain {:#x}", chain_id),
     })
 }
