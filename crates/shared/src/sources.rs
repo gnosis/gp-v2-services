@@ -30,6 +30,18 @@ arg_enum! {
     }
 }
 
+pub fn defaults_for_chain(chain_id: u64) -> Vec<BaselineSource> {
+    match chain_id {
+        1 | 4 => vec![
+            BaselineSource::UniswapV2,
+            BaselineSource::SushiSwap,
+            BaselineSource::BalancerV2,
+        ],
+        100 => vec![BaselineSource::Honeyswap, BaselineSource::SushiSwap],
+        _ => panic!("unsupported chain {:#x}", chain_id),
+    }
+}
+
 /// Returns a mapping of baseline sources to their respective pair providers.
 pub async fn pair_providers(
     web3: &Web3,
