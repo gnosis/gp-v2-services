@@ -20,17 +20,11 @@ use ethcontract::errors::{ExecutionError, MethodError};
 use futures::future::join_all;
 use gas_estimation::{EstimatedGasPrice, GasPriceEstimating};
 use itertools::{Either, Itertools};
-use model::order::BUY_ETH_ADDRESS;
+use model::{order::BUY_ETH_ADDRESS};
 use num::{BigRational, ToPrimitive};
 use primitive_types::{H160, U256};
 use rand::prelude::SliceRandom;
-use shared::{
-    current_block::{self, CurrentBlockStream},
-    price_estimation::{self, PriceEstimating},
-    recent_block_cache::Block,
-    token_list::TokenList,
-    Web3,
-};
+use shared::{Web3, conversions::U256Ext, current_block::{self, CurrentBlockStream}, price_estimation::{self, PriceEstimating}, recent_block_cache::Block, token_list::TokenList};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -609,6 +603,9 @@ pub async fn collect_estimated_prices(
     // And the placeholder for its native counterpart.
     prices.insert(BUY_ETH_ADDRESS, num::one());
 
+    // Derive exchange rate from orders if only one token pair is traded
+    augment_prices(orders, &mut prices);
+    
     prices
 }
 
@@ -628,6 +625,40 @@ fn orders_with_price_estimates(
         );
     }
     orders
+}
+
+// In case we cannot estimate the price for a token but there is only one pair traded in the batch the accuracy of the price estimate for ranking a solution doesn't matter that much (surplus is not competing with other tokens).
+// Therefore we can deduct a price estimate by looking at the average limit price of the orders on the single token pair
+fn augment_prices(orders: &[LimitOrder], prices: &mut HashMap<H160, BigRational>) {
+    if orders.is_empty() {
+        return
+    }
+    let first_order = orders.first().unwrap();
+    let init = ((first_order.sell_token, U256::zero()),(first_order.buy_token, U256::zero()));
+    let only_pair_with_amounts = orders.iter().try_fold(init, |(first_token_and_amount, second_token_and_amount), order| {
+        if first_token_and_amount.0 == order.sell_token && second_token_and_amount.0 == order.buy_token {
+            // Same pair as previous (same direction)
+            Some(((order.sell_token, first_token_and_amount.1 + order.sell_amount), (order.buy_token, second_token_and_amount.1 + order.buy_amount)))                    
+        } else if first_token_and_amount.0 == order.buy_token && second_token_and_amount.0 == order.sell_token {
+            // Same pair as previous (opposite direction)
+            Some(((order.buy_token, first_token_and_amount.1 + order.buy_amount), (order.sell_token, second_token_and_amount.1 + order.sell_amount)))
+        } else {
+            // Don't augment prices unless all orders are on the same pair
+            None
+        }
+    });
+
+    if let Some(((first_token, first_amount), (second_token, second_amount))) = only_pair_with_amounts {
+        if prices.contains_key(&first_token) && !prices.contains_key(&second_token) {
+            tracing::debug!("Derived price for {} from limit price", second_token);
+            prices.insert(second_token, prices.get(&first_token).unwrap() * first_amount.to_big_int() / second_amount.to_big_int());
+        }
+        if prices.contains_key(&second_token) && !prices.contains_key(&first_token) {
+            tracing::debug!("Derived price for {} from limit price", first_token);
+            prices.insert(first_token, prices.get(&second_token).unwrap() * second_amount.to_big_int() / first_amount.to_big_int());
+        }
+
+    }
 }
 
 fn is_only_selling_trusted_tokens(settlement: &Settlement, token_list: &TokenList) -> bool {
@@ -653,7 +684,7 @@ mod tests {
     };
     use maplit::hashmap;
     use model::order::{Order, OrderCreation, OrderKind};
-    use num::traits::One as _;
+    use num::{traits::One as _};
     use shared::{
         price_estimation::mocks::{FailingPriceEstimator, FakePriceEstimator},
         token_list::Token,
@@ -816,5 +847,82 @@ mod tests {
             ],
         );
         assert!(!is_only_selling_trusted_tokens(&settlement, &token_list));
+    }
+
+    #[test]
+    fn test_augment_prices() {
+        let eth = H160::from_low_u64_be(0);
+        let gno = H160::from_low_u64_be(1);
+        let mut prices = hashmap! {
+            eth => BigRational::one()
+        };
+        let mut orders = vec![
+            LimitOrder {
+                sell_token: gno,
+                sell_amount: 10.into(),
+                buy_token: eth,
+                buy_amount: 1.into(),
+                ..Default::default()
+            },
+            LimitOrder {
+                sell_token: gno,
+                sell_amount: 8.into(),
+                buy_token: eth,
+                buy_amount: 1.into(),
+                ..Default::default()
+            },
+            LimitOrder {
+                sell_token: eth,
+                sell_amount: 2.into(),
+                buy_token: gno,
+                buy_amount: 18.into(),
+                ..Default::default()
+            }
+        ];
+
+        let mut cloned_prices = prices.clone();
+        augment_prices(&orders, &mut cloned_prices);
+        assert_eq!(cloned_prices.get(&gno).unwrap(), &BigRational::new(4.into(), 36.into()));
+
+        // Having ETH->GNO order first doesn't change anything
+        orders.reverse();
+        augment_prices(&orders, &mut prices);
+        assert_eq!(prices.get(&gno).unwrap(), &BigRational::new(4.into(), 36.into()));
+    }
+
+    #[test]
+    fn test_does_not_augment_prices_if_more_than_one_pair() {
+        let eth = H160::from_low_u64_be(0);
+        let gno = H160::from_low_u64_be(1);
+        let dai = H160::from_low_u64_be(2);
+        let mut prices = hashmap! {
+            eth => BigRational::one()
+        };
+        let orders = vec![
+            LimitOrder {
+                sell_token: gno,
+                sell_amount: 10.into(),
+                buy_token: eth,
+                buy_amount: 1.into(),
+                ..Default::default()
+            },
+            LimitOrder {
+                sell_token: gno,
+                sell_amount: 1.into(),
+                buy_token: dai,
+                buy_amount: 400.into(),
+                ..Default::default()
+            },
+            LimitOrder {
+                sell_token: gno,
+                sell_amount: 10.into(),
+                buy_token: eth,
+                buy_amount: 1.into(),
+                ..Default::default()
+            },
+        ];
+
+        augment_prices(&orders, &mut prices);
+        assert_eq!(prices.len(), 1);
     }
 }
