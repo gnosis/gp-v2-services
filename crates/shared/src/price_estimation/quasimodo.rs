@@ -14,7 +14,7 @@ use crate::price_estimation::{
 use crate::recent_block_cache::Block;
 use crate::sources::uniswap_v2::pool_cache::PoolCache;
 use crate::sources::uniswap_v2::pool_fetching::PoolFetching;
-use crate::token_info::TokenInfoFetching;
+use crate::token_info::{TokenInfo, TokenInfoFetching};
 use ethcontract::{H160, U256};
 use gas_estimation::GasPriceEstimating;
 use model::order::OrderKind;
@@ -59,11 +59,12 @@ impl QuasimodoPriceEstimator {
         let tokens = tokens
             .iter()
             .map(|token| {
+                let info = token_infos.get(token).cloned().unwrap_or_default();
                 (
                     *token,
                     TokenInfoModel {
-                        decimals: token_infos[token].decimals,
-                        alias: token_infos[token].symbol.clone(),
+                        decimals: info.decimals,
+                        alias: info.symbol,
                         normalize_priority: Some(if self.native_token == query.buy_token {
                             1
                         } else {
