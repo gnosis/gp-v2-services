@@ -13,8 +13,8 @@ use shared::{
     recent_block_cache::CacheConfig,
     sources::{
         self,
-        balancer::pool_fetching::BalancerPoolFetcher,
-        uniswap::{
+        balancer_v2::pool_fetching::BalancerPoolFetcher,
+        uniswap_v2::{
             pool_cache::PoolCache,
             pool_fetching::{PoolFetcher, PoolFetching},
         },
@@ -28,8 +28,8 @@ use shared::{
 use solver::{
     driver::Driver,
     liquidity::{
-        balancer::BalancerV2Liquidity, order_converter::OrderConverter,
-        uniswap::UniswapLikeLiquidity,
+        balancer_v2::BalancerV2Liquidity, order_converter::OrderConverter,
+        uniswap_v2::UniswapLikeLiquidity,
     },
     liquidity_collector::LiquidityCollector,
     metrics::Metrics,
@@ -205,6 +205,15 @@ struct Arguments {
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
     max_flashbots_submission_seconds: Duration,
+
+    /// Additional tip in gwei that we are willing to give to flashbots above regular gas price estimation
+    #[structopt(
+        long,
+        env,
+        default_value = "3",
+        parse(try_from_str = shared::arguments::wei_from_gwei)
+    )]
+    additional_flashbot_tip: f64,
 
     /// The RPC endpoints to use for submitting transaction to a custom set of nodes.
     #[structopt(long, env, use_delimiter = true)]
@@ -465,7 +474,6 @@ async fn main() {
         args.quasimodo_solver_url,
         &settlement_contract,
         token_info_fetcher,
-        price_estimator.clone(),
         network_name.to_string(),
         chain_id,
         args.min_order_size_one_inch,
@@ -474,7 +482,6 @@ async fn main() {
         args.shared.disabled_paraswap_dexs,
         args.shared.paraswap_partner,
         client.clone(),
-        native_token_price_estimation_amount,
         metrics.clone(),
         zeroex_api,
         args.zeroex_slippage_bps,
@@ -510,6 +517,7 @@ async fn main() {
             TransactionStrategyArg::Flashbots => TransactionStrategy::Flashbots {
                 flashbots_api: FlashbotsApi::new(client.clone()),
                 max_confirm_time: args.max_flashbots_submission_seconds,
+                flashbots_tip: args.additional_flashbot_tip,
             },
             TransactionStrategyArg::CustomNodes => {
                 assert!(
