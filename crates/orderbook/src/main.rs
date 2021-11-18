@@ -162,7 +162,7 @@ struct Arguments {
     partner_additional_fee_factors: HashMap<AppId, f64>,
 
     /// The API endpoint to call the mip v2 solver for price estimation
-    #[structopt(long, env, default_value = "http://localhost:8000")]
+    #[structopt(long, env)]
     quasimodo_solver_url: Option<Url>,
 }
 
@@ -430,8 +430,8 @@ async fn main() {
                                 chain_id,
                                 base: args
                                     .quasimodo_solver_url
-                                    .expect("quasimodo solver url is required when using quasimodo price estimation")
-                                    .clone(),
+                                    .clone()
+                                    .expect("quasimodo solver url is required when using quasimodo price estimation"),
                                 client: client.clone(),
                                 config: SolverConfig {
                                     api_key: None,
