@@ -46,7 +46,7 @@ impl QuasimodoPriceEstimator {
         ensure_token_supported(query.buy_token, self.bad_token_detector.as_ref()).await?;
         ensure_token_supported(query.sell_token, self.bad_token_detector.as_ref()).await?;
 
-        let gas_cost = U256::from_f64_lossy(self.gas_info.estimate().await?.effective_gas_price());
+        let gas_price = U256::from_f64_lossy(self.gas_info.estimate().await?.effective_gas_price());
 
         let mut tokens = self.base_tokens.tokens().clone();
         tokens.insert(query.sell_token);
@@ -65,11 +65,7 @@ impl QuasimodoPriceEstimator {
                     TokenInfoModel {
                         decimals: info.decimals,
                         alias: info.symbol,
-                        normalize_priority: Some(if self.native_token == query.buy_token {
-                            1
-                        } else {
-                            0
-                        }),
+                        normalize_priority: Some(if *token == self.native_token { 1 } else { 0 }),
                         ..Default::default()
                     },
                 )
@@ -81,9 +77,8 @@ impl QuasimodoPriceEstimator {
             OrderKind::Sell => (query.in_amount, U256::one()),
         };
 
-        let orders = BTreeMap::from([(
-            0,
-            OrderModel {
+        let orders = maplit::btreemap! {
+            0 => OrderModel {
                 sell_token: query.sell_token,
                 buy_token: query.buy_token,
                 sell_amount,
@@ -91,17 +86,17 @@ impl QuasimodoPriceEstimator {
                 allow_partial_fill: false,
                 is_sell_order: query.kind == OrderKind::Sell,
                 fee: FeeModel {
-                    amount: U256::from(GAS_PER_ORDER) * gas_cost,
+                    amount: U256::from(GAS_PER_ORDER) * gas_price,
                     token: self.native_token,
                 },
                 cost: CostModel {
-                    amount: U256::from(GAS_PER_ORDER) * gas_cost,
+                    amount: U256::from(GAS_PER_ORDER) * gas_price,
                     token: self.native_token,
                 },
                 is_liquidity_order: false,
                 mandatory: true,
             },
-        )]);
+        };
 
         let token_pair = TokenPair::new(query.sell_token, query.buy_token).unwrap();
         let pairs = self.base_tokens.relevant_pairs([token_pair].into_iter());
@@ -123,7 +118,7 @@ impl QuasimodoPriceEstimator {
                     BigInt::from(*pool.fee.denom()),
                 )),
                 cost: CostModel {
-                    amount: U256::from(GAS_PER_UNISWAP) * gas_cost,
+                    amount: U256::from(GAS_PER_UNISWAP) * gas_price,
                     token: self.native_token,
                 },
                 mandatory: false,
@@ -152,7 +147,7 @@ impl QuasimodoPriceEstimator {
         for amm in settlement.amms.values() {
             cost += self.extract_cost(&amm.cost)? * amm.execution.len();
         }
-        let gas = (cost / gas_cost)
+        let gas = (cost / gas_price)
             + INITIALIZATION_COST // Call into contract
             + SETTLEMENT // overhead for entering the `settle()` function
             + ERC20_TRANSFER * 2; // transfer in and transfer out
