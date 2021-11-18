@@ -14,7 +14,7 @@ use crate::price_estimation::{
 use crate::recent_block_cache::Block;
 use crate::sources::uniswap_v2::pool_cache::PoolCache;
 use crate::sources::uniswap_v2::pool_fetching::PoolFetching;
-use crate::token_info::{TokenInfo, TokenInfoFetching};
+use crate::token_info::TokenInfoFetching;
 use ethcontract::{H160, U256};
 use gas_estimation::GasPriceEstimating;
 use model::order::OrderKind;
