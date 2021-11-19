@@ -18,8 +18,8 @@ mod tests {
         // https://sushiswap.vision/pair/0x41328fdba556c8c969418ccccb077b7b8d932aa5
         let mainnet_pair_provider = get_pair_provider(&Mock::new(1).web3()).await.unwrap();
         let mainnet_pair = TokenPair::new(
-            addr!("6810e776880c02933d47db1b9fc05908e5386b96"),
-            addr!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+            testlib::tokens::GNO,
+            testlib::tokens::WETH,
         )
         .unwrap();
         assert_eq!(

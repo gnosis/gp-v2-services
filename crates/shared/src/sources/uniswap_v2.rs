@@ -23,8 +23,8 @@ mod tests {
         // https://info.uniswap.org/pair/0x3e8468f66d30fc99f745481d4b383f89861702c6
         let mainnet_pair_provider = get_pair_provider(&Mock::new(1).web3()).await.unwrap();
         let mainnet_pair = TokenPair::new(
-            addr!("6810e776880c02933d47db1b9fc05908e5386b96"),
-            addr!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+            testlib::tokens::GNO,
+            testlib::tokens::WETH,
         )
         .unwrap();
         assert_eq!(

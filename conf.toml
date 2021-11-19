@@ -1,7 +1,0 @@
-[[solvers]]
-type = "baseline"
-private_key = "0x00..."
-
-[[solvers]]
-type = "oneinch"
-private_key = "0x000..."

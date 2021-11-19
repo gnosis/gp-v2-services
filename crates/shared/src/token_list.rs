@@ -129,7 +129,7 @@ pub mod tests {
                     TokenModel {
                         chain_id: 1,
                         token: Token {
-                            address: addr!("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
+                            address: testlib::tokens::USDC,
                             name: "USD Coin".into(),
                             symbol: "USDC".into(),
                             decimals: 6,
@@ -154,7 +154,7 @@ pub mod tests {
         let list = serde_json::from_str::<TokenListModel>(EXAMPLE_LIST).unwrap();
         let instance = TokenList::from_tokens(list.tokens, 1);
         assert!(instance
-            .get(&addr!("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"))
+            .get(&testlib::tokens::USDC)
             .is_some());
         // Chain ID 4
         assert!(instance
