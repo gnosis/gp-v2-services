@@ -100,7 +100,6 @@ pub fn get_amount_estimate(
 mod tests {
     use super::*;
     use crate::api::response_body;
-    use hex_literal::hex;
     use shared::price_estimation::PriceEstimationError;
     use warp::hyper::StatusCode;
     use warp::{test::request, Reply};
