@@ -95,41 +95,28 @@ pub fn orders_with_price_estimates(
 // In case we cannot estimate the price for a token but there is only one pair traded in the batch the accuracy of the price estimate for ranking a solution doesn't matter that much (surplus is not competing with other tokens).
 // Therefore we can deduct a price estimate by looking at the average limit price of the orders on the single token pair
 fn augment_prices(orders: &[LimitOrder], prices: &mut HashMap<H160, BigRational>) {
-    if orders.is_empty() {
-        return;
-    }
-    let first_order = orders.first().unwrap();
+    let first_order = match orders.first() {
+        Some(order) => order,
+        None => return,
+    };
     let init = (
         (first_order.sell_token, U256::zero()),
         (first_order.buy_token, U256::zero()),
     );
     let only_pair_with_amounts = orders.iter().try_fold(
         init,
-        |(first_token_and_amount, second_token_and_amount), order| {
-            if first_token_and_amount.0 == order.sell_token
-                && second_token_and_amount.0 == order.buy_token
-            {
+        |((first_token, first_amount), (second_token, second_amount)), order| {
+            if first_token == order.sell_token && second_token == order.buy_token {
                 // Same pair as previous (same direction)
                 Some((
-                    (
-                        order.sell_token,
-                        first_token_and_amount.1 + order.sell_amount,
-                    ),
-                    (
-                        order.buy_token,
-                        second_token_and_amount.1 + order.buy_amount,
-                    ),
+                    (order.sell_token, first_amount + order.sell_amount),
+                    (order.buy_token, second_amount + order.buy_amount),
                 ))
-            } else if first_token_and_amount.0 == order.buy_token
-                && second_token_and_amount.0 == order.sell_token
-            {
+            } else if first_token == order.buy_token && second_token == order.sell_token {
                 // Same pair as previous (opposite direction)
                 Some((
-                    (order.buy_token, first_token_and_amount.1 + order.buy_amount),
-                    (
-                        order.sell_token,
-                        second_token_and_amount.1 + order.sell_amount,
-                    ),
+                    (order.buy_token, first_amount + order.buy_amount),
+                    (order.sell_token, second_amount + order.sell_amount),
                 ))
             } else {
                 // Don't augment prices unless all orders are on the same pair
