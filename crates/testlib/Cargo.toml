@@ -1,0 +1,14 @@
+[package]
+name = "testlib"
+version = "0.1.0"
+authors = ["Gnosis Developers <developers@gnosis.io>"]
+edition = "2018"
+license = "GPL-3.0-or-later"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+contracts = { path = "../contracts" }
+ethcontract = { git = "https://github.com/gnosis/ethcontract-rs.git", rev = "cafcac443f37cfe1e0e18b03a987a30b61b54695", default-features = false }
+ethcontract-mock = { git = "https://github.com/gnosis/ethcontract-rs.git", rev = "cafcac443f37cfe1e0e18b03a987a30b61b54695" }
+hex_literals = "0.1.6"
