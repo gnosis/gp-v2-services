@@ -153,9 +153,7 @@ pub mod tests {
     fn test_creation_with_chain_id() {
         let list = serde_json::from_str::<TokenListModel>(EXAMPLE_LIST).unwrap();
         let instance = TokenList::from_tokens(list.tokens, 1);
-        assert!(instance
-            .get(&testlib::tokens::USDC)
-            .is_some());
+        assert!(instance.get(&testlib::tokens::USDC).is_some());
         // Chain ID 4
         assert!(instance
             .get(&addr!("39AA39c021dfbaE8faC545936693aC917d5E7563"))

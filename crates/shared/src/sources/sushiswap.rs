@@ -17,11 +17,7 @@ mod tests {
     async fn test_create2_sushiswap() {
         // https://sushiswap.vision/pair/0x41328fdba556c8c969418ccccb077b7b8d932aa5
         let mainnet_pair_provider = get_pair_provider(&Mock::new(1).web3()).await.unwrap();
-        let mainnet_pair = TokenPair::new(
-            testlib::tokens::GNO,
-            testlib::tokens::WETH,
-        )
-        .unwrap();
+        let mainnet_pair = TokenPair::new(testlib::tokens::GNO, testlib::tokens::WETH).unwrap();
         assert_eq!(
             mainnet_pair_provider.pair_address(&mainnet_pair),
             addr!("41328fdba556c8c969418ccccb077b7b8d932aa5")
