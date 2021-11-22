@@ -13,8 +13,8 @@ use shared::{
     recent_block_cache::CacheConfig,
     sources::{
         self,
-        balancer::pool_fetching::BalancerPoolFetcher,
-        uniswap::{
+        balancer_v2::pool_fetching::BalancerPoolFetcher,
+        uniswap_v2::{
             pool_cache::PoolCache,
             pool_fetching::{PoolFetcher, PoolFetching},
         },
@@ -28,8 +28,8 @@ use shared::{
 use solver::{
     driver::Driver,
     liquidity::{
-        balancer::BalancerV2Liquidity, order_converter::OrderConverter,
-        uniswap::UniswapLikeLiquidity,
+        balancer_v2::BalancerV2Liquidity, order_converter::OrderConverter,
+        uniswap_v2::UniswapLikeLiquidity,
     },
     liquidity_collector::LiquidityCollector,
     metrics::Metrics,
@@ -206,6 +206,15 @@ struct Arguments {
     )]
     max_flashbots_submission_seconds: Duration,
 
+    /// Additional tip in gwei that we are willing to give to flashbots above regular gas price estimation
+    #[structopt(
+        long,
+        env,
+        default_value = "3",
+        parse(try_from_str = shared::arguments::wei_from_gwei)
+    )]
+    additional_flashbot_tip: f64,
+
     /// The RPC endpoints to use for submitting transaction to a custom set of nodes.
     #[structopt(long, env, use_delimiter = true)]
     transaction_submission_nodes: Vec<Url>,
@@ -347,9 +356,14 @@ async fn main() {
         max_retries: args.shared.pool_cache_maximum_retries,
         delay_between_retries: args.shared.pool_cache_delay_between_retries_seconds,
     };
+    let baseline_sources = args.shared.baseline_sources.unwrap_or_else(|| {
+        sources::defaults_for_chain(chain_id).expect("failed to get default baseline sources")
+    });
+    tracing::info!(?baseline_sources, "using baseline sources");
     let pool_caches: HashMap<BaselineSource, Arc<PoolCache>> =
-        sources::pair_providers(&args.shared.baseline_sources, chain_id, &web3)
+        sources::pair_providers(&web3, &baseline_sources)
             .await
+            .expect("failed to load baseline source pair providers")
             .into_iter()
             .map(|(source, pair_provider)| {
                 let fetcher = Box::new(PoolFetcher {
@@ -374,9 +388,7 @@ async fn main() {
             .collect(),
     });
 
-    let (balancer_pool_maintainer, balancer_v2_liquidity) = if args
-        .shared
-        .baseline_sources
+    let (balancer_pool_maintainer, balancer_v2_liquidity) = if baseline_sources
         .contains(&BaselineSource::BalancerV2)
     {
         let balancer_pool_fetcher = Arc::new(
@@ -508,6 +520,7 @@ async fn main() {
             TransactionStrategyArg::Flashbots => TransactionStrategy::Flashbots {
                 flashbots_api: FlashbotsApi::new(client.clone()),
                 max_confirm_time: args.max_flashbots_submission_seconds,
+                flashbots_tip: args.additional_flashbot_tip,
             },
             TransactionStrategyArg::CustomNodes => {
                 assert!(
@@ -587,34 +600,37 @@ async fn build_amm_artifacts(
     web3: shared::Web3,
 ) -> Vec<UniswapLikeLiquidity> {
     let mut res = vec![];
-    for (key, value) in sources {
-        match key {
-            BaselineSource::Uniswap => {
-                let router = contracts::UniswapV2Router02::deployed(&web3)
-                    .await
-                    .expect("couldn't load deployed uniswap router");
-                res.push(UniswapLikeLiquidity::new(
-                    IUniswapLikeRouter::at(&web3, router.address()),
-                    settlement_contract.clone(),
-                    base_tokens.clone(),
-                    web3.clone(),
-                    value.clone(),
-                ));
-            }
-            BaselineSource::Sushiswap => {
-                let router = contracts::SushiswapV2Router02::deployed(&web3)
-                    .await
-                    .expect("couldn't load deployed sushiswap router");
-                res.push(UniswapLikeLiquidity::new(
-                    IUniswapLikeRouter::at(&web3, router.address()),
-                    settlement_contract.clone(),
-                    base_tokens.clone(),
-                    web3.clone(),
-                    value.clone(),
-                ));
-            }
-            BaselineSource::BalancerV2 => (),
-        }
+    for (source, pool_cache) in sources {
+        let router_address = match source {
+            BaselineSource::UniswapV2 => contracts::UniswapV2Router02::deployed(&web3)
+                .await
+                .expect("couldn't load deployed UniswapV2 router")
+                .address(),
+            BaselineSource::SushiSwap => contracts::SushiSwapRouter::deployed(&web3)
+                .await
+                .expect("couldn't load deployed SushiSwap router")
+                .address(),
+            BaselineSource::Honeyswap => contracts::HoneyswapRouter::deployed(&web3)
+                .await
+                .expect("couldn't load deployed Honeyswap router")
+                .address(),
+            BaselineSource::Baoswap => contracts::BaoswapRouter::deployed(&web3)
+                .await
+                .expect("couldn't load deployed Baoswap router")
+                .address(),
+            BaselineSource::Swapr => contracts::SwaprRouter::deployed(&web3)
+                .await
+                .expect("couldn't load deployed Swapr router")
+                .address(),
+            BaselineSource::BalancerV2 => continue,
+        };
+        res.push(UniswapLikeLiquidity::new(
+            IUniswapLikeRouter::at(&web3, router_address),
+            settlement_contract.clone(),
+            base_tokens.clone(),
+            web3.clone(),
+            pool_cache.clone(),
+        ));
     }
     res
 }

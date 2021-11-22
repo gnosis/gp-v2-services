@@ -19,6 +19,9 @@ use orderbook::{
     verify_deployed_contract_constants,
 };
 use primitive_types::H160;
+use shared::http_solver_api::{DefaultHttpSolverApi, SolverConfig};
+use shared::network::network_name;
+use shared::price_estimation::quasimodo::QuasimodoPriceEstimator;
 use shared::price_estimation::zeroex::ZeroExPriceEstimator;
 use shared::zeroex_api::DefaultZeroExApi;
 use shared::{
@@ -26,7 +29,8 @@ use shared::{
         cache::CachingDetector,
         list_based::{ListBasedDetector, UnknownTokenStrategy},
         trace_call::{
-            AmmPairProviderFinder, BalancerVaultFinder, TokenOwnerFinding, TraceCallDetector,
+            BalancerVaultFinder, TokenOwnerFinding, TraceCallDetector,
+            UniswapLikePairProviderFinder,
         },
     },
     baseline_solver::BaseTokens,
@@ -42,7 +46,7 @@ use shared::{
     recent_block_cache::CacheConfig,
     sources::{
         self,
-        uniswap::{
+        uniswap_v2::{
             pool_cache::PoolCache,
             pool_fetching::{PoolFetcher, PoolFetching},
         },
@@ -157,6 +161,10 @@ struct Arguments {
         parse(try_from_str = parse_partner_fee_factor),
     )]
     partner_additional_fee_factors: HashMap<AppId, f64>,
+
+    /// The API endpoint to call the mip v2 solver for price estimation
+    #[structopt(long, env)]
+    quasimodo_solver_url: Option<Url>,
 }
 
 pub async fn database_metrics(metrics: Arc<Metrics>, database: Postgres) -> ! {
@@ -209,12 +217,12 @@ async fn main() {
         .await
         .expect("Could not get chainId")
         .as_u64();
-
     let network = web3
         .net()
         .version()
         .await
         .expect("Failed to retrieve network version ID");
+    let network_name = network_name(&network, chain_id);
 
     let native_token_price_estimation_amount = args
         .shared
@@ -282,8 +290,13 @@ async fn main() {
         metrics.clone(),
     ));
 
-    let pair_providers = sources::pair_providers(&args.shared.baseline_sources, chain_id, &web3)
+    let baseline_sources = args.shared.baseline_sources.unwrap_or_else(|| {
+        sources::defaults_for_chain(chain_id).expect("failed to get default baseline sources")
+    });
+    tracing::info!(?baseline_sources, "using baseline sources");
+    let pair_providers = sources::pair_providers(&web3, &baseline_sources)
         .await
+        .expect("failed to load baseline source pair providers")
         .values()
         .cloned()
         .collect::<Vec<_>>();
@@ -300,7 +313,7 @@ async fn main() {
     let mut finders: Vec<Arc<dyn TokenOwnerFinding>> = pair_providers
         .iter()
         .map(|provider| -> Arc<dyn TokenOwnerFinding> {
-            Arc::new(AmmPairProviderFinder {
+            Arc::new(UniswapLikePairProviderFinder {
                 inner: provider.clone(),
                 base_tokens: base_tokens.tokens().iter().copied().collect(),
             })
@@ -411,6 +424,33 @@ async fn main() {
                         ZeroExPriceEstimator {
                             api: zeroex_api.clone(),
                             bad_token_detector: bad_token_detector.clone(),
+                        },
+                        estimator.name(),
+                        metrics.clone(),
+                    )),
+                    PriceEstimatorType::Quasimodo => Box::new(InstrumentedPriceEstimator::new(
+                        QuasimodoPriceEstimator {
+                            api: Arc::new(DefaultHttpSolverApi {
+                                name: "quasimodo-price-estimator",
+                                network_name: network_name.to_string(),
+                                chain_id,
+                                base: args
+                                    .quasimodo_solver_url
+                                    .clone()
+                                    .expect("quasimodo solver url is required when using quasimodo price estimation"),
+                                client: client.clone(),
+                                config: SolverConfig {
+                                    api_key: None,
+                                    max_nr_exec_orders: 100,
+                                    has_ucp_policy_parameter: false,
+                                },
+                            }),
+                            pools: pool_fetcher.clone(),
+                            bad_token_detector: bad_token_detector.clone(),
+                            token_info: token_info_fetcher.clone(),
+                            gas_info: gas_price_estimator.clone(),
+                            native_token: native_token.address(),
+                            base_tokens: base_tokens.clone(),
                         },
                         estimator.name(),
                         metrics.clone(),

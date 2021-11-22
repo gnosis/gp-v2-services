@@ -66,12 +66,11 @@ pub struct Arguments {
     #[structopt(
         long,
         env,
-        default_value = "Uniswap,Sushiswap",
         possible_values = &BaselineSource::variants(),
         case_insensitive = true,
         use_delimiter = true
     )]
-    pub baseline_sources: Vec<BaselineSource>,
+    pub baseline_sources: Option<Vec<BaselineSource>>,
 
     /// The number of blocks kept in the pool cache.
     #[structopt(long, env, default_value = "10")]
@@ -150,7 +149,7 @@ pub fn wei_from_base_unit(s: &str) -> anyhow::Result<U256> {
 
 pub fn wei_from_gwei(s: &str) -> anyhow::Result<f64> {
     let in_gwei: f64 = s.parse()?;
-    Ok(in_gwei * 10e9)
+    Ok(in_gwei * 1e9)
 }
 
 pub fn default_amount_to_estimate_prices_with(network_id: &str) -> Option<U256> {

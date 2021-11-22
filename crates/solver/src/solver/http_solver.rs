@@ -12,14 +12,14 @@ use anyhow::{anyhow, Context, Result};
 use buffers::{BufferRetrievalError, BufferRetrieving};
 use ethcontract::{Account, U256};
 use futures::{join, lock::Mutex};
-use lazy_static::lazy_static;
 use maplit::{btreemap, hashset};
 use model::order::OrderKind;
 use num::ToPrimitive;
 use num::{BigInt, BigRational};
 use primitive_types::H160;
 use shared::http_solver_api::model::*;
-use shared::http_solver_api::HttpSolverApi;
+use shared::http_solver_api::{DefaultHttpSolverApi, HttpSolverApi};
+use shared::price_estimation::gas::{GAS_PER_BALANCER_SWAP, GAS_PER_ORDER, GAS_PER_UNISWAP};
 use shared::{
     measure_time,
     token_info::{TokenInfo, TokenInfoFetching},
@@ -29,18 +29,6 @@ use std::{
     iter::FromIterator as _,
     sync::Arc,
 };
-
-lazy_static! {
-    // Estimates from multivariate linear regression here:
-    // https://docs.google.com/spreadsheets/d/13UeUQ9DA4bHlcy9-i8d4nSLlCxSfjcXpTelvXYzyJzQ/edit?usp=sharing
-    static ref GAS_PER_ORDER: U256 = U256::from(66_315);
-    static ref GAS_PER_UNISWAP: U256 = U256::from(94_696);
-
-    // Taken from a sample of two swaps
-    // https://etherscan.io/tx/0x72d234d35fd169ef497ba0a1dc23258c96f278fb688d375d135eb012e5311009
-    // https://etherscan.io/tx/0x1c345a6da1edb2bba953685a4cf85f6a0d967ac751f8c5b518578c5fd20a7c96
-    static ref GAS_PER_BALANCER_SWAP: U256 = U256::from(120_000);
-}
 
 // TODO: exclude partially fillable orders
 // TODO: set settlement.fee_factor
@@ -58,7 +46,7 @@ pub struct InstanceData {
 pub type InstanceCache = Arc<Mutex<Option<InstanceData>>>;
 
 pub struct HttpSolver {
-    solver: HttpSolverApi,
+    solver: DefaultHttpSolverApi,
     account: Account,
     native_token: H160,
     token_info_fetcher: Arc<dyn TokenInfoFetching>,
@@ -69,7 +57,7 @@ pub struct HttpSolver {
 impl HttpSolver {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        solver: HttpSolverApi,
+        solver: DefaultHttpSolverApi,
         account: Account,
         native_token: H160,
         token_info_fetcher: Arc<dyn TokenInfoFetching>,
@@ -192,15 +180,15 @@ impl GasModel {
     }
 
     fn order_cost(&self) -> CostModel {
-        self.cost_for_gas(*GAS_PER_ORDER)
+        self.cost_for_gas(GAS_PER_ORDER.into())
     }
 
     fn uniswap_cost(&self) -> CostModel {
-        self.cost_for_gas(*GAS_PER_UNISWAP)
+        self.cost_for_gas(GAS_PER_UNISWAP.into())
     }
 
     fn balancer_cost(&self) -> CostModel {
-        self.cost_for_gas(*GAS_PER_BALANCER_SWAP)
+        self.cost_for_gas(GAS_PER_BALANCER_SWAP.into())
     }
 
     fn order_fee(&self, order: &LimitOrder) -> FeeModel {
@@ -270,6 +258,7 @@ fn order_models(
                     fee: gas_model.order_fee(order),
                     cost: gas_model.order_cost(),
                     is_liquidity_order: order.is_liquidity_order,
+                    mandatory: false,
                 },
             ))
         })
@@ -512,7 +501,7 @@ mod tests {
         let gas_price = 100.;
 
         let solver = HttpSolver::new(
-            HttpSolverApi {
+            DefaultHttpSolverApi {
                 name: "Test Solver",
                 network_name: "mock_network_id".to_string(),
                 chain_id: 0,

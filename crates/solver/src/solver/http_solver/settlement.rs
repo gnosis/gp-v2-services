@@ -177,8 +177,8 @@ mod tests {
     use model::TokenPair;
     use num::rational::Ratio;
     use num::BigRational;
-    use shared::sources::balancer::pool_fetching::AmplificationParameter;
-    use shared::sources::balancer::{
+    use shared::sources::balancer_v2::{
+        pool_fetching::AmplificationParameter,
         pool_fetching::{TokenState, WeightedTokenState},
         swap::fixed_point::Bfp,
     };
@@ -252,6 +252,8 @@ mod tests {
         let executed_order = ExecutedOrderModel {
             exec_buy_amount: 6.into(),
             exec_sell_amount: 7.into(),
+            cost: Default::default(),
+            fee: Default::default(),
         };
         let updated_uniswap = UpdatedAmmModel {
             execution: vec![ExecutedAmmModel {
@@ -264,6 +266,7 @@ mod tests {
                     position: 0,
                 }),
             }],
+            cost: Default::default(),
         };
         let updated_balancer_weighted = UpdatedAmmModel {
             execution: vec![ExecutedAmmModel {
@@ -276,6 +279,7 @@ mod tests {
                     position: 0,
                 }),
             }],
+            cost: Default::default(),
         };
         let updated_balancer_stable = UpdatedAmmModel {
             execution: vec![ExecutedAmmModel {
@@ -288,6 +292,7 @@ mod tests {
                     position: 0,
                 }),
             }],
+            cost: Default::default(),
         };
         let settled = SettledBatchAuctionModel {
             orders: hashmap! { 0 => executed_order },

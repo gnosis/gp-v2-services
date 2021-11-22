@@ -3,26 +3,32 @@ pub mod paths;
 pub mod vault;
 
 include!(concat!(env!("OUT_DIR"), "/BalancerV2Authorizer.rs"));
+include!(concat!(env!("OUT_DIR"), "/BalancerV2StablePool.rs"));
+include!(concat!(env!("OUT_DIR"), "/BalancerV2StablePoolFactory.rs"));
 include!(concat!(env!("OUT_DIR"), "/BalancerV2Vault.rs"));
 include!(concat!(env!("OUT_DIR"), "/BalancerV2WeightedPool.rs"));
-include!(concat!(env!("OUT_DIR"), "/BalancerV2StablePool.rs"));
-include!(concat!(
-    env!("OUT_DIR"),
-    "/BalancerV2WeightedPoolFactory.rs"
-));
 include!(concat!(
     env!("OUT_DIR"),
     "/BalancerV2WeightedPool2TokensFactory.rs"
 ));
-include!(concat!(env!("OUT_DIR"), "/BalancerV2StablePoolFactory.rs"));
+include!(concat!(
+    env!("OUT_DIR"),
+    "/BalancerV2WeightedPoolFactory.rs"
+));
+include!(concat!(env!("OUT_DIR"), "/BaoswapFactory.rs"));
+include!(concat!(env!("OUT_DIR"), "/BaoswapRouter.rs"));
 include!(concat!(env!("OUT_DIR"), "/ERC20.rs"));
 include!(concat!(env!("OUT_DIR"), "/ERC20Mintable.rs"));
 include!(concat!(env!("OUT_DIR"), "/GPv2AllowListAuthentication.rs"));
 include!(concat!(env!("OUT_DIR"), "/GPv2Settlement.rs"));
+include!(concat!(env!("OUT_DIR"), "/HoneyswapFactory.rs"));
+include!(concat!(env!("OUT_DIR"), "/HoneyswapRouter.rs"));
 include!(concat!(env!("OUT_DIR"), "/IUniswapLikePair.rs"));
 include!(concat!(env!("OUT_DIR"), "/IUniswapLikeRouter.rs"));
-include!(concat!(env!("OUT_DIR"), "/SushiswapV2Factory.rs"));
-include!(concat!(env!("OUT_DIR"), "/SushiswapV2Router02.rs"));
+include!(concat!(env!("OUT_DIR"), "/SushiSwapFactory.rs"));
+include!(concat!(env!("OUT_DIR"), "/SushiSwapRouter.rs"));
+include!(concat!(env!("OUT_DIR"), "/SwaprFactory.rs"));
+include!(concat!(env!("OUT_DIR"), "/SwaprRouter.rs"));
 include!(concat!(env!("OUT_DIR"), "/UniswapV2Factory.rs"));
 include!(concat!(env!("OUT_DIR"), "/UniswapV2Router02.rs"));
 include!(concat!(env!("OUT_DIR"), "/WETH9.rs"));
@@ -89,10 +95,8 @@ mod tests {
 
         for network in &[1, 4, 100] {
             assert_has_deployment_address!(GPv2Settlement for *network);
-            assert_has_deployment_address!(SushiswapV2Factory for *network);
-            assert_has_deployment_address!(SushiswapV2Router02 for *network);
-            assert_has_deployment_address!(UniswapV2Factory for *network);
-            assert_has_deployment_address!(UniswapV2Router02 for *network);
+            assert_has_deployment_address!(SushiSwapFactory for *network);
+            assert_has_deployment_address!(SushiSwapRouter for *network);
             assert_has_deployment_address!(WETH9 for *network);
         }
         for network in &[1, 4] {
@@ -100,6 +104,12 @@ mod tests {
             assert_has_deployment_address!(BalancerV2WeightedPoolFactory for *network);
             assert_has_deployment_address!(BalancerV2WeightedPool2TokensFactory for *network);
             assert_has_deployment_address!(BalancerV2StablePoolFactory for *network);
+            assert_has_deployment_address!(UniswapV2Factory for *network);
+            assert_has_deployment_address!(UniswapV2Router02 for *network);
+        }
+        for network in &[100] {
+            assert_has_deployment_address!(HoneyswapFactory for *network);
+            assert_has_deployment_address!(HoneyswapRouter for *network);
         }
     }
 
