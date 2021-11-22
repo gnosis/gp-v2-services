@@ -41,6 +41,8 @@ fn get_prices(settlement: &Settlement) -> HashMap<H160, BigRational> {
         .collect::<HashMap<_, _>>()
 }
 
+/// Record Grafana metrics for the number of orders which were matched in a batch,
+/// but were not part of the winning settlement (i.e. matched by unsettled).
 pub fn report_matched_but_unsettled_orders(
     metrics: Arc<dyn SolverMetrics>,
     submitted: &Settlement,
