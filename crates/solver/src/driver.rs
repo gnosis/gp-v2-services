@@ -31,7 +31,7 @@ use shared::{
     Web3,
 };
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -281,7 +281,6 @@ impl Driver {
         submitted: &(Arc<dyn Solver>, RatedSettlement),
         other_settlements: Vec<(Arc<dyn Solver>, RatedSettlement)>,
     ) {
-        // Report surplus
         analytics::report_alternative_settlement_surplus(
             self.metrics.clone(),
             (submitted.0.name(), &submitted.1.settlement),
@@ -290,26 +289,15 @@ impl Driver {
                 .map(|(solver, rated_settlement)| (solver.name(), &rated_settlement.settlement))
                 .collect(),
         );
-        // Report matched but not settled
-        // TODO - move all this data manipulation into analytics.rs
-        let submitted_orders: HashSet<_> = submitted
-            .1
-            .settlement
-            .trades()
-            .iter()
-            .map(|trade| trade.order.order_meta_data.uid)
-            .collect();
-        let other_matched_orders: HashSet<_> = other_settlements
-            .iter()
-            .flat_map(|(_, solution)| solution.settlement.trades().to_vec())
-            .map(|trade| trade.order.order_meta_data.uid)
-            .collect();
-        let matched_but_not_settled: HashSet<_> = other_matched_orders
-            .difference(&submitted_orders)
-            .copied()
-            .collect();
-        self.metrics
-            .orders_matched_but_not_settled(matched_but_not_settled.len());
+        analytics::report_matched_but_unsettled_orders(
+            self.metrics.clone(),
+            &submitted.1.settlement,
+            other_settlements
+                .iter()
+                // TODO - seems a bit weird to iterate over other_settlements twice.
+                .map(|(_, rated_settlement)| &rated_settlement.settlement)
+                .collect(),
+        )
     }
 
     // Rate settlements, ignoring those for which the rating procedure failed.

@@ -3,6 +3,7 @@ use ethcontract::H160;
 use model::order::OrderUid;
 use num::{BigRational, ToPrimitive, Zero};
 use shared::conversions::U256Ext;
+use std::collections::HashSet;
 use std::{
     collections::HashMap,
     fmt::{Display, Formatter},
@@ -38,6 +39,30 @@ fn get_prices(settlement: &Settlement) -> HashMap<H160, BigRational> {
         .iter()
         .map(|(token, price)| (*token, price.to_big_rational()))
         .collect::<HashMap<_, _>>()
+}
+
+pub fn report_matched_but_unsettled_orders(
+    metrics: Arc<dyn SolverMetrics>,
+    submitted: &Settlement,
+    other_settlements: Vec<&Settlement>,
+) {
+    let submitted_orders: HashSet<_> = submitted
+        .trades()
+        .iter()
+        .map(|trade| trade.order.order_meta_data.uid)
+        .collect();
+    let other_matched_orders: HashSet<_> = other_settlements
+        .iter()
+        .flat_map(|settlement| settlement.trades().to_vec())
+        .map(|trade| trade.order.order_meta_data.uid)
+        .collect();
+    // The recent refactoring and definition of other settlements deems this set difference invalid.
+    // However we still take the difference here since we don't enforce the sets to be disjoint.
+    let matched_but_not_settled: HashSet<_> = other_matched_orders
+        .difference(&submitted_orders)
+        .copied()
+        .collect();
+    metrics.orders_matched_but_not_settled(matched_but_not_settled.len());
 }
 
 /// Record metric with surplus achieved in winning settlement
