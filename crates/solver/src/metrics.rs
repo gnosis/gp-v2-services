@@ -62,7 +62,7 @@ pub struct Metrics {
     order_surplus_report: Histogram,
     complete_runloop_until_transaction: Histogram,
     transaction_submission: Histogram,
-    transaction_gas_price: Gauge,
+    transaction_gas_price_gwei: Gauge,
 }
 
 impl Metrics {
@@ -178,11 +178,11 @@ impl Metrics {
         registry.register(Box::new(transaction_submission.clone()))?;
 
         let opts = Opts::new(
-            "transaction_gas_price",
+            "transaction_gas_price_gwei",
             "Actual gas price used by settlement transaction.",
         );
-        let transaction_gas_price = Gauge::with_opts(opts).unwrap();
-        registry.register(Box::new(transaction_gas_price.clone()))?;
+        let transaction_gas_price_gwei = Gauge::with_opts(opts).unwrap();
+        registry.register(Box::new(transaction_gas_price_gwei.clone()))?;
 
         Ok(Self {
             trade_counter,
@@ -201,7 +201,7 @@ impl Metrics {
             order_surplus_report,
             complete_runloop_until_transaction,
             transaction_submission,
-            transaction_gas_price,
+            transaction_gas_price_gwei,
         })
     }
 }
@@ -322,7 +322,7 @@ impl SolverMetrics for Metrics {
     }
 
     fn transaction_gas_price(&self, gas_price: U256) {
-        self.transaction_gas_price
+        self.transaction_gas_price_gwei
             .set(gas_price.to_f64_lossy() / 1e9)
     }
 }
