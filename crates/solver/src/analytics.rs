@@ -56,8 +56,8 @@ pub fn report_matched_but_unsettled_orders(
         .flat_map(|settlement| settlement.trades().to_vec())
         .map(|trade| trade.order.order_meta_data.uid)
         .collect();
-    // The recent refactoring and definition of other settlements deems this set difference invalid.
-    // However we still take the difference here since we don't enforce the sets to be disjoint.
+    // Recent refactoring and definition of `other_settlements` renders this difference unnecessary.
+    // However, we still take the difference here since we don't enforce the sets to be disjoint.
     let matched_but_not_settled: HashSet<_> = other_matched_orders
         .difference(&submitted_orders)
         .copied()
