@@ -1,3 +1,4 @@
+use super::submitter::{SubmitterParams, TransactionSubmitting};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use jsonrpc_core::Output;
 use reqwest::Client;
@@ -34,9 +35,16 @@ impl FlashbotsApi {
     pub fn new(client: Client) -> Self {
         Self { client }
     }
+}
 
+#[async_trait::async_trait]
+impl TransactionSubmitting for FlashbotsApi {
     /// Submit a signed transaction to the flashbots protect network.
-    pub async fn submit_transaction(&self, raw_signed_transaction: &[u8]) -> Result<String> {
+    async fn submit_raw_transaction(
+        &self,
+        raw_signed_transaction: &[u8],
+        _params: &SubmitterParams,
+    ) -> Result<String> {
         let params = format!("0x{}", hex::encode(raw_signed_transaction));
         let body = serde_json::json!({
           "jsonrpc": "2.0",
@@ -59,8 +67,7 @@ impl FlashbotsApi {
         Ok(bundle_id)
     }
 
-    /// Send a cancel to a previously submitted transaction. This function does not wait for cancellation result.
-    pub async fn cancel(&self, _bundle_id: &str) -> Result<()> {
+    async fn cancel_transaction(&self, _id: String) -> Result<()> {
         Ok(())
     }
 }

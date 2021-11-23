@@ -6,6 +6,7 @@ pub mod flashbots_settlement;
 mod gas_price_stream;
 pub mod retry;
 pub mod rpc;
+pub mod submitter;
 
 use crate::settlement::Settlement;
 use anyhow::{bail, Result};
@@ -20,11 +21,10 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime},
 };
+use submitter::{Submitter, SubmitterParams};
 use web3::types::TransactionReceipt;
 
-use self::{
-    archer_settlement::ArcherSolutionSubmitter, flashbots_settlement::FlashbotsSolutionSubmitter,
-};
+use self::archer_settlement::ArcherSolutionSubmitter;
 
 const ESTIMATE_GAS_LIMIT_FACTOR: f64 = 1.2;
 const GAS_PRICE_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
@@ -110,23 +110,22 @@ impl SolutionSubmitter {
                 max_confirm_time,
                 flashbots_tip,
             } => {
-                let submitter = FlashbotsSolutionSubmitter::new(
+                let submitter = Submitter::new(
                     &self.web3,
                     &self.contract,
                     &account,
                     flashbots_api,
                     self.gas_price_estimator.as_ref(),
-                    self.gas_price_cap,
                 )?;
-                let result = submitter
-                    .submit(
-                        self.target_confirm_time,
-                        SystemTime::now() + *max_confirm_time,
-                        settlement,
-                        gas_estimate,
-                        *flashbots_tip,
-                    )
-                    .await;
+                let params = SubmitterParams {
+                    target_confirm_time: self.target_confirm_time,
+                    gas_estimate,
+                    gas_price_cap: self.gas_price_cap,
+                    deadline: Some(SystemTime::now() + *max_confirm_time),
+                    pay_gas_to_coinbase: None,
+                    additional_miner_tip: Some(*flashbots_tip),
+                };
+                let result = submitter.submit(settlement, params).await;
                 match result {
                     Ok(Some(hash)) => Ok(hash),
                     Ok(None) => bail!("transaction did not get mined in time"),
