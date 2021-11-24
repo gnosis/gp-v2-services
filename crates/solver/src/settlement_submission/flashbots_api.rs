@@ -39,7 +39,6 @@ impl FlashbotsApi {
 
 #[async_trait::async_trait]
 impl TransactionSubmitting for FlashbotsApi {
-    /// Submit a signed transaction to the flashbots protect network.
     async fn submit_raw_transaction(
         &self,
         raw_signed_transaction: &[u8],
@@ -67,7 +66,7 @@ impl TransactionSubmitting for FlashbotsApi {
         Ok(bundle_id)
     }
 
-    async fn cancel_transaction(&self, _id: String) -> Result<()> {
+    async fn cancel_transaction(&self, _id: &str) -> Result<()> {
         Ok(())
     }
 }

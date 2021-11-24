@@ -24,8 +24,6 @@ use std::{
 use submitter::{Submitter, SubmitterParams};
 use web3::types::TransactionReceipt;
 
-use self::archer_settlement::ArcherSolutionSubmitter;
-
 const ESTIMATE_GAS_LIMIT_FACTOR: f64 = 1.2;
 const GAS_PRICE_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
 
@@ -83,22 +81,23 @@ impl SolutionSubmitter {
                 archer_api,
                 max_confirm_time,
             } => {
-                let submitter = ArcherSolutionSubmitter::new(
+                let submitter = Submitter::new(
                     &self.web3,
                     &self.contract,
                     &account,
                     archer_api,
                     self.gas_price_estimator.as_ref(),
-                    self.gas_price_cap,
                 )?;
-                let result = submitter
-                    .submit(
-                        self.target_confirm_time,
-                        SystemTime::now() + *max_confirm_time,
-                        settlement,
-                        gas_estimate,
-                    )
-                    .await;
+                let params = SubmitterParams {
+                    target_confirm_time: self.target_confirm_time,
+                    gas_estimate,
+                    gas_price_cap: self.gas_price_cap,
+                    deadline: Some(SystemTime::now() + *max_confirm_time),
+                    pay_gas_to_coinbase: Some(U256::from(18346)),
+                    additional_miner_tip: None,
+                    update_interval: Duration::from_secs(5), //todo make cli argument
+                };
+                let result = submitter.submit(settlement, params).await;
                 match result {
                     Ok(Some(hash)) => Ok(hash),
                     Ok(None) => bail!("transaction did not get mined in time"),
@@ -124,6 +123,7 @@ impl SolutionSubmitter {
                     deadline: Some(SystemTime::now() + *max_confirm_time),
                     pay_gas_to_coinbase: None,
                     additional_miner_tip: Some(*flashbots_tip),
+                    update_interval: Duration::from_secs(5), //todo make cli argument
                 };
                 let result = submitter.submit(settlement, params).await;
                 match result {
