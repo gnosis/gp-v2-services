@@ -324,12 +324,16 @@ impl MinFeeCalculating for MinFeeCalculator {
         fee_data: FeeData,
         app_data: AppId,
     ) -> Result<Measurement, PriceEstimationError> {
-        ensure_token_supported(fee_data.sell_token, self.bad_token_detector.as_ref()).await?;
-        ensure_token_supported(fee_data.buy_token, self.bad_token_detector.as_ref()).await?;
-
         let now = (self.now)();
         let official_valid_until = now + Duration::seconds(STANDARD_VALIDITY_FOR_FEE_IN_SEC);
         let internal_valid_until = now + Duration::seconds(PERSISTED_VALIDITY_FOR_FEE_IN_SEC);
+
+        if fee_data.buy_token == fee_data.sell_token {
+            return Ok((U256::zero(), official_valid_until));
+        }
+
+        ensure_token_supported(fee_data.sell_token, self.bad_token_detector.as_ref()).await?;
+        ensure_token_supported(fee_data.buy_token, self.bad_token_detector.as_ref()).await?;
 
         tracing::debug!(?fee_data, ?app_data, "computing subsidized fee",);
 
