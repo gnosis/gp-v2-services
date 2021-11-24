@@ -15,10 +15,10 @@
 
 use super::ESTIMATE_GAS_LIMIT_FACTOR;
 use crate::{interactions::block_coinbase, settlement::Settlement};
-use anyhow::{anyhow, ensure, Context, Result};
+use anyhow::{anyhow, ensure, Context, Error, Result};
 use contracts::GPv2Settlement;
 use ethcontract::{
-    contract::MethodBuilder, dyns::DynTransport, errors::MethodError, transaction::Transaction,
+    contract::MethodBuilder, dyns::DynTransport, transaction::Transaction,
     Account,
 };
 use futures::FutureExt;
@@ -46,12 +46,14 @@ pub struct SubmitterParams {
     pub pay_gas_to_coinbase: Option<U256>,
     /// Boost estimated gas price miner tip in order to increase the chances of a transaction being mined
     pub additional_miner_tip: Option<f64>,
+    /// Resimulate and resend transaction on every update_interval seconds
+    pub update_interval: Duration,
 }
 
 #[async_trait::async_trait]
 pub trait TransactionSubmitting {
     async fn submit_raw_transaction(&self, tx: &[u8], params: &SubmitterParams) -> Result<String>;
-    async fn cancel_transaction(&self, id: String) -> Result<()>;
+    async fn cancel_transaction(&self, id: &str) -> Result<()>;
 }
 
 pub struct Submitter<'a> {
@@ -118,14 +120,31 @@ impl<'a> Submitter<'a> {
             None => Duration::from_secs(u64::MAX),
         });
 
-        futures::select! {
-            method_error = submit_future.fuse() => tracing::info!("stopping submission because simulation failed: {:?}", method_error),
-            new_nonce = nonce_future.fuse() => tracing::info!("stopping submission because account nonce changed to {}", new_nonce),
-            _ = deadline_future.fuse() => tracing::info!("stopping submission because deadline has been reached")
+        let fallback_result = tokio::select! {
+            method_error = submit_future.fuse() => {
+                tracing::info!("stopping submission because simulation failed: {:?}", method_error);
+                Err(method_error)
+            },
+            new_nonce = nonce_future.fuse() => {
+                tracing::info!("stopping submission because account nonce changed to {}", new_nonce);
+                Ok(None)
+            },
+            _ = deadline_future.fuse() => {
+                tracing::info!("stopping submission because deadline has been reached");
+                Ok(None)
+            },
         };
 
         // After stopping submission of new transactions we wait for some time to give a potentially
         // mined previously submitted transaction time to propagate to our node.
+
+        // Example:
+        // 1. We submit tx to ethereum node, and we start counting 10s pause before new loop iteration.
+        // 2. In the meantime, block A gets mined somewhere in the network (not containing our tx)
+        // 3. After some time block B is mined somewhere in the network (containing our tx)
+        // 4. Our node receives block A.
+        // 5. Our 10s is up but our node received only block A because of the delay in block propagation. We simulate tx and it fails, we return back
+        // 6. If we don't wait another 20s to receive block B, we wont see mined tx.
 
         if !transactions.is_empty() {
             const MINED_TX_PROPAGATE_TIME: Duration = Duration::from_secs(20);
@@ -150,7 +169,7 @@ impl<'a> Submitter<'a> {
         }
 
         tracing::info!("did not find any mined transaction");
-        Ok(None)
+        fallback_result
     }
 
     async fn nonce(&self) -> Result<U256> {
@@ -215,26 +234,21 @@ impl<'a> Submitter<'a> {
         nonce: U256,
         params: &SubmitterParams,
         transactions: &mut Vec<H256>,
-    ) -> MethodError {
-        const UPDATE_INTERVAL: Duration = Duration::from_secs(5);
-
-        let gas_estimate = gas_estimate(params);
+    ) -> anyhow::Error {
         let target_confirm_time = Instant::now() + params.target_confirm_time;
 
         // gas price and raw signed transaction
         let mut previous_tx: Option<(EstimatedGasPrice, String)> = None;
 
         loop {
-            // get gas price
             // Account for some buffer in the gas limit in case racing state changes result in slightly more heavy computation at execution time.
-
-            let gas_limit = gas_estimate.to_f64_lossy() * ESTIMATE_GAS_LIMIT_FACTOR;
+            let gas_limit = gas_estimate(params).to_f64_lossy() * ESTIMATE_GAS_LIMIT_FACTOR;
             let time_limit = target_confirm_time.saturating_duration_since(Instant::now());
             let gas_price = match self.gas_price(gas_limit, time_limit, params).await {
                 Ok(gas_price) => gas_price,
                 Err(err) => {
                     tracing::error!("gas estimation failed: {:?}", err);
-                    tokio::time::sleep(UPDATE_INTERVAL).await;
+                    tokio::time::sleep(params.update_interval).await;
                     continue;
                 }
             };
@@ -248,30 +262,25 @@ impl<'a> Submitter<'a> {
 
             if let Err(err) = method.clone().view().call().await {
                 if let Some((_, previous_tx)) = previous_tx.as_ref() {
-                    if let Err(err) = self
-                        .submit_api
-                        .cancel_transaction(previous_tx.to_string())
-                        .await
-                    {
-                        tracing::error!("cancellation failed: {:?}", err);
+                    if let Err(err) = self.submit_api.cancel_transaction(previous_tx).await {
+                        tracing::warn!("cancellation failed: {:?}", err);
                     }
                 }
-                return err;
+                return Error::from(err).context("failed simulation");
             }
 
             // If gas price has increased cancel old and submit new new transaction.
 
             if let Some((previous_gas_price, previous_tx)) = previous_tx.as_ref() {
-                if gas_price.cap() > previous_gas_price.cap() {
-                    if let Err(err) = self
-                        .submit_api
-                        .cancel_transaction(previous_tx.to_string())
-                        .await
-                    {
-                        tracing::error!("cancellation failed: {:?}", err);
+                let previous_gas_price = previous_gas_price.bump(1.125).ceil();
+                if gas_price.cap() > previous_gas_price.cap()
+                    && gas_price.tip() > previous_gas_price.tip()
+                {
+                    if let Err(err) = self.submit_api.cancel_transaction(previous_tx).await {
+                        tracing::warn!("cancellation failed: {:?}", err);
                     }
                 } else {
-                    tokio::time::sleep(UPDATE_INTERVAL).await;
+                    tokio::time::sleep(params.update_interval).await;
                     continue;
                 }
             }
@@ -288,7 +297,7 @@ impl<'a> Submitter<'a> {
                 hash,
                 tx_gas_cost(&gas_price, params).to_f64_lossy(),
                 gas_price,
-                gas_estimate,
+                gas_estimate(params),
             );
 
             match self
@@ -296,13 +305,13 @@ impl<'a> Submitter<'a> {
                 .submit_raw_transaction(&raw_signed_transaction, params)
                 .await
             {
-                Ok(bundle_id) => {
+                Ok(id) => {
                     transactions.push(hash);
-                    previous_tx = Some((gas_price, bundle_id));
+                    previous_tx = Some((gas_price, id));
                 }
                 Err(err) => tracing::error!("submission failed: {:?}", err),
             }
-            tokio::time::sleep(UPDATE_INTERVAL).await;
+            tokio::time::sleep(params.update_interval).await;
         }
     }
 
@@ -324,7 +333,7 @@ impl<'a> Submitter<'a> {
                     .append_to_execution_plan(block_coinbase::PayBlockCoinbase {
                         amount: tx_gas_cost(gas_price, params),
                     });
-                (0.0.into(), settlement)
+                ((0.0, 0.0).into(), settlement) //todo check if archer supports 1559?
             }
             None => {
                 // define gas price and use settlement as is

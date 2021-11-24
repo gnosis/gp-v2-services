@@ -1,6 +1,7 @@
 //! https://docs.archerdao.io/for-traders/for-traders/traders
 
-use anyhow::{ensure, Result};
+use super::submitter::{SubmitterParams, TransactionSubmitting};
+use anyhow::{anyhow, ensure, Result};
 use reqwest::Client;
 use std::time::SystemTime;
 
@@ -19,15 +20,19 @@ impl ArcherApi {
             authorization,
         }
     }
+}
 
-    /// Submit a signed transaction to the archer network.
-    pub async fn submit_transaction(
+#[async_trait::async_trait]
+impl TransactionSubmitting for ArcherApi {
+    async fn submit_raw_transaction(
         &self,
         raw_signed_transaction: &[u8],
-        deadline: SystemTime,
-    ) -> Result<()> {
-        let tx = format!("0x{}", hex::encode(raw_signed_transaction));
-        let deadline = deadline
+        params: &SubmitterParams,
+    ) -> Result<String> {
+        let id = format!("0x{}", hex::encode(raw_signed_transaction));
+        let deadline = params
+            .deadline
+            .ok_or_else(|| anyhow!("deadline not defined"))?
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_secs()
@@ -36,7 +41,7 @@ impl ArcherApi {
           "jsonrpc": "2.0",
           "id": 1,
           "method": "archer_submitTx",
-          "tx": tx,
+          "tx": id,
           "deadline": deadline,
         });
         tracing::debug!(
@@ -53,17 +58,15 @@ impl ArcherApi {
         let status = response.status();
         let body = response.text().await?;
         ensure!(status.is_success(), "status {}: {:?}", status, body);
-        Ok(())
+        Ok(id)
     }
 
-    /// Cancel a previously submitted transaction.
-    pub async fn cancel(&self, raw_signed_transaction: &[u8]) -> Result<()> {
-        let tx = format!("0x{}", hex::encode(raw_signed_transaction));
+    async fn cancel_transaction(&self, id: &str) -> Result<()> {
         let body = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
             "method": "archer_cancelTx",
-            "tx": tx,
+            "tx": id,
         });
         tracing::debug!(
             "archer_cancelTx body: {}",
