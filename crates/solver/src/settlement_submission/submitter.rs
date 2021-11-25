@@ -22,7 +22,7 @@ use futures::FutureExt;
 use gas_estimation::{EstimatedGasPrice, GasPriceEstimating};
 use primitive_types::{H256, U256};
 use shared::Web3;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 use web3::types::TransactionReceipt;
 
 /// Parameters for transaction submitting
@@ -35,7 +35,7 @@ pub struct SubmitterParams {
     /// Maximum max_fee_per_gas to pay for a transaction
     pub gas_price_cap: f64,
     /// Maximum duration of a single run loop
-    pub deadline: Option<SystemTime>,
+    pub deadline: Option<Instant>,
     /// There are two ways to pay for a transaction:
     /// 1. Set valid gas price (default)
     /// 2. Set 0 gas price, but add additional step to settlement to pay directly to the coinbase
@@ -49,7 +49,10 @@ pub struct SubmitterParams {
 
 #[async_trait::async_trait]
 pub trait TransactionSubmitting {
+    /// Submits raw signed transation to the specific network (public mempool, archer, flashbots...).
+    /// Returns transaction handle
     async fn submit_raw_transaction(&self, tx: &[u8], params: &SubmitterParams) -> Result<String>;
+    /// Cancels already submitted transaction using the transaction handle
     async fn cancel_transaction(&self, id: &str) -> Result<()>;
 }
 
@@ -111,9 +114,7 @@ impl<'a> Submitter<'a> {
 
         // If specified, deadline future stops submitting when deadline is reached
         let deadline_future = tokio::time::sleep(match params.deadline {
-            Some(deadline) => deadline
-                .duration_since(SystemTime::now())
-                .unwrap_or_else(|_| Duration::from_secs(0)),
+            Some(deadline) => deadline.saturating_duration_since(Instant::now()),
             None => Duration::from_secs(u64::MAX),
         });
 
@@ -451,7 +452,7 @@ mod tests {
             target_confirm_time: Duration::from_secs(0),
             gas_estimate,
             gas_price_cap,
-            deadline: Some(SystemTime::now() + Duration::from_secs(90)),
+            deadline: Some(Instant::now() + Duration::from_secs(90)),
             pay_gas_to_coinbase: None,
             additional_miner_tip: Some(3.0),
             retry_interval: Duration::from_secs(5),

@@ -3,7 +3,7 @@
 use super::submitter::{SubmitterParams, TransactionSubmitting};
 use anyhow::{anyhow, ensure, Result};
 use reqwest::Client;
-use std::time::SystemTime;
+use std::time::Instant;
 
 const URL: &str = "https://api.archerdao.io/v1/transaction";
 
@@ -33,8 +33,7 @@ impl TransactionSubmitting for ArcherApi {
         let deadline = params
             .deadline
             .ok_or_else(|| anyhow!("deadline not defined"))?
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
+            .saturating_duration_since(Instant::now())
             .as_secs()
             .to_string();
         let body = serde_json::json!({
