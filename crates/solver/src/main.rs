@@ -215,6 +215,22 @@ struct Arguments {
     )]
     additional_flashbot_tip: f64,
 
+    /// Amount of time to wait before retrying to submit the tx to the archer network
+    #[structopt(
+        long,
+        default_value = "10",
+        parse(try_from_str = shared::arguments::duration_from_seconds),
+    )]
+    archer_submission_retry_interval_seconds: Duration,
+
+    /// Amount of time to wait before retrying to submit the tx to the flashbots network
+    #[structopt(
+        long,
+        default_value = "5",
+        parse(try_from_str = shared::arguments::duration_from_seconds),
+    )]
+    flashbots_submission_retry_interval_seconds: Duration,
+
     /// The RPC endpoints to use for submitting transaction to a custom set of nodes.
     #[structopt(long, env, use_delimiter = true)]
     transaction_submission_nodes: Vec<Url>,
@@ -516,10 +532,12 @@ async fn main() {
                     client.clone(),
                 ),
                 max_confirm_time: args.max_archer_submission_seconds,
+                retry_interval: args.archer_submission_retry_interval_seconds,
             },
             TransactionStrategyArg::Flashbots => TransactionStrategy::Flashbots {
                 flashbots_api: FlashbotsApi::new(client.clone()),
                 max_confirm_time: args.max_flashbots_submission_seconds,
+                retry_interval: args.flashbots_submission_retry_interval_seconds,
                 flashbots_tip: args.additional_flashbot_tip,
             },
             TransactionStrategyArg::CustomNodes => {

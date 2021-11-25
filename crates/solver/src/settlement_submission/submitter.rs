@@ -43,8 +43,8 @@ pub struct SubmitterParams {
     pub pay_gas_to_coinbase: Option<U256>,
     /// Boost estimated gas price miner tip in order to increase the chances of a transaction being mined
     pub additional_miner_tip: Option<f64>,
-    /// Resimulate and resend transaction on every update_interval seconds
-    pub update_interval: Duration,
+    /// Resimulate and resend transaction on every retry_interval seconds
+    pub retry_interval: Duration,
 }
 
 #[async_trait::async_trait]
@@ -245,7 +245,7 @@ impl<'a> Submitter<'a> {
                 Ok(gas_price) => gas_price,
                 Err(err) => {
                     tracing::error!("gas estimation failed: {:?}", err);
-                    tokio::time::sleep(params.update_interval).await;
+                    tokio::time::sleep(params.retry_interval).await;
                     continue;
                 }
             };
@@ -277,7 +277,7 @@ impl<'a> Submitter<'a> {
                         tracing::warn!("cancellation failed: {:?}", err);
                     }
                 } else {
-                    tokio::time::sleep(params.update_interval).await;
+                    tokio::time::sleep(params.retry_interval).await;
                     continue;
                 }
             }
@@ -308,7 +308,7 @@ impl<'a> Submitter<'a> {
                 }
                 Err(err) => tracing::error!("submission failed: {:?}", err),
             }
-            tokio::time::sleep(params.update_interval).await;
+            tokio::time::sleep(params.retry_interval).await;
         }
     }
 
@@ -454,7 +454,7 @@ mod tests {
             deadline: Some(SystemTime::now() + Duration::from_secs(90)),
             pay_gas_to_coinbase: None,
             additional_miner_tip: Some(3.0),
-            update_interval: Duration::from_secs(5),
+            retry_interval: Duration::from_secs(5),
         };
         let result = submitter.submit(settlement, params).await;
         tracing::info!("finished with result {:?}", result);
