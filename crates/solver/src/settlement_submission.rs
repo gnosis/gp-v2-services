@@ -39,10 +39,12 @@ pub enum TransactionStrategy {
     ArcherNetwork {
         archer_api: ArcherApi,
         max_confirm_time: Duration,
+        retry_interval: Duration,
     },
     Flashbots {
         flashbots_api: FlashbotsApi,
         max_confirm_time: Duration,
+        retry_interval: Duration,
         flashbots_tip: f64,
     },
     CustomNodes(Vec<Web3>),
@@ -78,6 +80,7 @@ impl SolutionSubmitter {
             TransactionStrategy::ArcherNetwork {
                 archer_api,
                 max_confirm_time,
+                retry_interval,
             } => {
                 let submitter = Submitter::new(
                     &self.web3,
@@ -93,7 +96,7 @@ impl SolutionSubmitter {
                     deadline: Some(SystemTime::now() + *max_confirm_time),
                     pay_gas_to_coinbase: Some(U256::from(18346)),
                     additional_miner_tip: None,
-                    update_interval: Duration::from_secs(5), //todo make cli argument
+                    retry_interval: *retry_interval,
                 };
                 let result = submitter.submit(settlement, params).await;
                 match result {
@@ -105,6 +108,7 @@ impl SolutionSubmitter {
             TransactionStrategy::Flashbots {
                 flashbots_api,
                 max_confirm_time,
+                retry_interval,
                 flashbots_tip,
             } => {
                 let submitter = Submitter::new(
@@ -121,7 +125,7 @@ impl SolutionSubmitter {
                     deadline: Some(SystemTime::now() + *max_confirm_time),
                     pay_gas_to_coinbase: None,
                     additional_miner_tip: Some(*flashbots_tip),
-                    update_interval: Duration::from_secs(5), //todo make cli argument
+                    retry_interval: *retry_interval,
                 };
                 let result = submitter.submit(settlement, params).await;
                 match result {
