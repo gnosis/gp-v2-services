@@ -25,11 +25,11 @@ use shared::Web3;
 use std::time::{Duration, Instant, SystemTime};
 use web3::types::TransactionReceipt;
 
-/// Parameters for transaction submitting. todo
+/// Parameters for transaction submitting
 #[derive(Clone, Default)]
 pub struct SubmitterParams {
     /// Desired duration to include the transaction in a block
-    pub target_confirm_time: Duration, //todo change to blocks
+    pub target_confirm_time: Duration, //todo change to blocks in the following PR
     /// Estimated gas consumption of a transaction
     pub gas_estimate: U256,
     /// Maximum max_fee_per_gas to pay for a transaction
@@ -266,7 +266,7 @@ impl<'a> Submitter<'a> {
                 return Error::from(err).context("failed simulation");
             }
 
-            // If gas price has increased cancel old and submit new new transaction.
+            // If gas price has increased cancel old and submit new transaction.
 
             if let Some((previous_gas_price, previous_tx)) = previous_tx.as_ref() {
                 let previous_gas_price = previous_gas_price.bump(1.125).ceil();
