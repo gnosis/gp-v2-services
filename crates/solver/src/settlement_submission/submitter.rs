@@ -17,10 +17,7 @@ use super::ESTIMATE_GAS_LIMIT_FACTOR;
 use crate::{interactions::block_coinbase, settlement::Settlement};
 use anyhow::{anyhow, ensure, Context, Error, Result};
 use contracts::GPv2Settlement;
-use ethcontract::{
-    contract::MethodBuilder, dyns::DynTransport, transaction::Transaction,
-    Account,
-};
+use ethcontract::{contract::MethodBuilder, dyns::DynTransport, transaction::Transaction, Account};
 use futures::FutureExt;
 use gas_estimation::{EstimatedGasPrice, GasPriceEstimating};
 use primitive_types::{H256, U256};
@@ -389,6 +386,7 @@ async fn find_mined_transaction(web3: &Web3, hashes: &[H256]) -> Option<Transact
 #[cfg(test)]
 mod tests {
 
+    use super::super::flashbots_api::FlashbotsApi;
     use super::*;
     use ethcontract::PrivateKey;
     use gas_estimation::blocknative::BlockNative;
@@ -398,7 +396,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
-    async fn mainnet_settlement() {
+    async fn flashbots_mainnet_settlement() {
         shared::tracing::initialize(
             "solver=debug,shared=debug,shared::transport::http=info",
             LevelFilter::OFF,
@@ -440,19 +438,25 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        let submitter = FlashbotsSolutionSubmitter::new(
+        let submitter = Submitter::new(
             &web3,
             &contract,
             &account,
             &flashbots_api,
             &gas_price_estimator,
-            gas_price_cap,
         )
         .unwrap();
 
-        let result = submitter
-            .submit(Duration::from_secs(0), settlement, gas_estimate)
-            .await;
+        let params = SubmitterParams {
+            target_confirm_time: Duration::from_secs(0),
+            gas_estimate,
+            gas_price_cap,
+            deadline: Some(SystemTime::now() + Duration::from_secs(90)),
+            pay_gas_to_coinbase: None,
+            additional_miner_tip: Some(3.0),
+            update_interval: Duration::from_secs(5),
+        };
+        let result = submitter.submit(settlement, params).await;
         tracing::info!("finished with result {:?}", result);
     }
 }
