@@ -17,7 +17,7 @@ use primitive_types::U256;
 use shared::Web3;
 use std::{
     sync::Arc,
-    time::{Duration, SystemTime},
+    time::{Duration, Instant},
 };
 use submitter::{Submitter, SubmitterParams};
 use web3::types::TransactionReceipt;
@@ -93,7 +93,7 @@ impl SolutionSubmitter {
                     target_confirm_time: self.target_confirm_time,
                     gas_estimate,
                     gas_price_cap: self.gas_price_cap,
-                    deadline: Some(SystemTime::now() + *max_confirm_time),
+                    deadline: Some(Instant::now() + *max_confirm_time),
                     pay_gas_to_coinbase: Some(U256::from(18346)),
                     additional_miner_tip: None,
                     retry_interval: *retry_interval,
@@ -122,7 +122,7 @@ impl SolutionSubmitter {
                     target_confirm_time: self.target_confirm_time,
                     gas_estimate,
                     gas_price_cap: self.gas_price_cap,
-                    deadline: Some(SystemTime::now() + *max_confirm_time),
+                    deadline: Some(Instant::now() + *max_confirm_time),
                     pay_gas_to_coinbase: None,
                     additional_miner_tip: Some(*flashbots_tip),
                     retry_interval: *retry_interval,
