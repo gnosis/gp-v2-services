@@ -146,18 +146,6 @@ pub enum SubmissionError {
 }
 
 impl SubmissionError {
-    /// Try and convert a `MethodError` into a `SubmissionError`.
-    fn from_method_error(err: &MethodError) -> Option<Self> {
-        match &err.inner {
-            ExecutionError::ConfirmTimeout(_) => Some(SubmissionError::Timeout),
-            ExecutionError::Failure(_) | ExecutionError::InvalidOpcode => {
-                Some(SubmissionError::Revert(None))
-            }
-            ExecutionError::Revert(message) => Some(SubmissionError::Revert(message.clone())),
-            _ => None,
-        }
-    }
-
     /// Returns the outcome for use with metrics.
     pub fn as_outcome(&self) -> SettlementSubmissionOutcome {
         match self {
@@ -186,23 +174,22 @@ impl SubmissionError {
 
 impl From<anyhow::Error> for SubmissionError {
     fn from(err: anyhow::Error) -> Self {
-        match err
-            .downcast_ref::<MethodError>()
-            .and_then(Self::from_method_error)
-        {
-            Some(err) => err,
-            None => Self::Other(err),
-        }
+        Self::Other(err)
     }
 }
 
 impl From<MethodError> for SubmissionError {
     fn from(err: MethodError) -> Self {
-        Self::from_method_error(&err).unwrap_or_else(|| {
-            SubmissionError::Other(
+        match err.inner {
+            ExecutionError::ConfirmTimeout(_) => SubmissionError::Timeout,
+            ExecutionError::Failure(_) | ExecutionError::InvalidOpcode => {
+                SubmissionError::Revert(None)
+            }
+            ExecutionError::Revert(message) => SubmissionError::Revert(message),
+            _ => SubmissionError::Other(
                 anyhow::Error::from(err).context("settlement transaction failed"),
-            )
-        })
+            ),
+        }
     }
 }
 
@@ -246,30 +233,7 @@ mod tests {
             assert_eq!(
                 SubmissionError::from(MethodError::from_parts("foo()".to_owned(), from)),
                 to,
-            );
-        }
-    }
-
-    #[test]
-    fn converts_anyhow_errors() {
-        for (from, to) in [
-            (anyhow!("error"), SubmissionError::Other(anyhow!("error"))),
-            (
-                anyhow::Error::new(MethodError::from_parts(
-                    "foo()".to_owned(),
-                    ExecutionError::InvalidOpcode,
-                )),
-                SubmissionError::Revert(None),
-            ),
-            (
-                anyhow::Error::new(MethodError::from_parts(
-                    "foo()".to_owned(),
-                    ExecutionError::NoLocalAccounts,
-                )),
-                SubmissionError::Other(anyhow!("_")),
-            ),
-        ] {
-            assert_eq!(SubmissionError::from(from), to);
+            )
         }
     }
 }
