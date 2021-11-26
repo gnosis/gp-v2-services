@@ -411,20 +411,20 @@ impl Driver {
                     // Do not continue with settlements that are empty or only liquidity orders.
                     settlement.retain(solver_settlements::has_user_order);
                     if settlement.is_empty() {
-                        self.metrics.solver_run(name, SolverRunOutcome::Empty);
+                        self.metrics.solver_run(SolverRunOutcome::Empty, name);
                         continue;
                     }
 
-                    self.metrics.solver_run(name, SolverRunOutcome::Success);
+                    self.metrics.solver_run(SolverRunOutcome::Success, name);
                     settlement
                 }
                 Err(err) => {
                     match err {
                         SolverRunError::Timeout => {
-                            self.metrics.solver_run(name, SolverRunOutcome::Timeout)
+                            self.metrics.solver_run(SolverRunOutcome::Timeout, name)
                         }
                         SolverRunError::Solving(_) => {
-                            self.metrics.solver_run(name, SolverRunOutcome::Failure)
+                            self.metrics.solver_run(SolverRunOutcome::Failure, name)
                         }
                     }
                     tracing::warn!("solver {} error: {:?}", name, err);
