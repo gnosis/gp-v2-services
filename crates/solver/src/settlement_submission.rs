@@ -192,3 +192,50 @@ impl From<MethodError> for SubmissionError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ethcontract::H256;
+
+    impl PartialEq for SubmissionError {
+        fn eq(&self, other: &Self) -> bool {
+            match (self, other) {
+                (Self::Revert(l0), Self::Revert(r0)) => l0 == r0,
+                _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+            }
+        }
+    }
+
+    #[test]
+    fn converts_method_errors() {
+        for (from, to) in [
+            (
+                ExecutionError::Failure(Default::default()),
+                SubmissionError::Revert(None),
+            ),
+            (ExecutionError::InvalidOpcode, SubmissionError::Revert(None)),
+            (
+                ExecutionError::Revert(Some("foo".to_owned())),
+                SubmissionError::Revert(Some("foo".to_owned())),
+            ),
+            (
+                ExecutionError::ConfirmTimeout(Box::new(
+                    ethcontract::transaction::TransactionResult::Hash(H256::default()),
+                )),
+                SubmissionError::Timeout,
+            ),
+            (
+                ExecutionError::ConfirmTimeout(Box::new(
+                    ethcontract::transaction::TransactionResult::Hash(H256::default()),
+                )),
+                SubmissionError::Timeout,
+            ),
+        ] {
+            assert_eq!(
+                SubmissionError::from(MethodError::from_parts("foo()".to_owned(), from)),
+                to,
+            )
+        }
+    }
+}
