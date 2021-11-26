@@ -47,13 +47,19 @@ pub struct SubmitterParams {
     pub retry_interval: Duration,
 }
 
+pub struct TransactionHandle(pub String);
+
 #[async_trait::async_trait]
 pub trait TransactionSubmitting {
     /// Submits raw signed transation to the specific network (public mempool, archer, flashbots...).
     /// Returns transaction handle
-    async fn submit_raw_transaction(&self, tx: &[u8], params: &SubmitterParams) -> Result<String>;
+    async fn submit_raw_transaction(
+        &self,
+        tx: &[u8],
+        params: &SubmitterParams,
+    ) -> Result<TransactionHandle>;
     /// Cancels already submitted transaction using the transaction handle
-    async fn cancel_transaction(&self, id: &str) -> Result<()>;
+    async fn cancel_transaction(&self, id: &TransactionHandle) -> Result<()>;
 }
 
 pub struct Submitter<'a> {
@@ -236,7 +242,7 @@ impl<'a> Submitter<'a> {
         let target_confirm_time = Instant::now() + params.target_confirm_time;
 
         // gas price and raw signed transaction
-        let mut previous_tx: Option<(EstimatedGasPrice, String)> = None;
+        let mut previous_tx: Option<(EstimatedGasPrice, TransactionHandle)> = None;
 
         loop {
             // Account for some buffer in the gas limit in case racing state changes result in slightly more heavy computation at execution time.

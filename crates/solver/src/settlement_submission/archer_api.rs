@@ -1,6 +1,6 @@
 //! https://docs.archerdao.io/for-traders/for-traders/traders
 
-use super::submitter::{SubmitterParams, TransactionSubmitting};
+use super::submitter::{SubmitterParams, TransactionHandle, TransactionSubmitting};
 use anyhow::{anyhow, ensure, Result};
 use reqwest::Client;
 use std::time::Instant;
@@ -28,7 +28,7 @@ impl TransactionSubmitting for ArcherApi {
         &self,
         raw_signed_transaction: &[u8],
         params: &SubmitterParams,
-    ) -> Result<String> {
+    ) -> Result<TransactionHandle> {
         let id = format!("0x{}", hex::encode(raw_signed_transaction));
         let deadline = params
             .deadline
@@ -57,15 +57,15 @@ impl TransactionSubmitting for ArcherApi {
         let status = response.status();
         let body = response.text().await?;
         ensure!(status.is_success(), "status {}: {:?}", status, body);
-        Ok(id)
+        Ok(TransactionHandle(id))
     }
 
-    async fn cancel_transaction(&self, id: &str) -> Result<()> {
+    async fn cancel_transaction(&self, id: &TransactionHandle) -> Result<()> {
         let body = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
             "method": "archer_cancelTx",
-            "tx": id,
+            "tx": id.0,
         });
         tracing::debug!(
             "archer_cancelTx body: {}",

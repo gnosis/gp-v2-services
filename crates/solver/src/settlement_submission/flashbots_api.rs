@@ -1,4 +1,4 @@
-use super::submitter::{SubmitterParams, TransactionSubmitting};
+use super::submitter::{SubmitterParams, TransactionHandle, TransactionSubmitting};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use jsonrpc_core::Output;
 use reqwest::Client;
@@ -43,7 +43,7 @@ impl TransactionSubmitting for FlashbotsApi {
         &self,
         raw_signed_transaction: &[u8],
         _params: &SubmitterParams,
-    ) -> Result<String> {
+    ) -> Result<TransactionHandle> {
         let params = format!("0x{}", hex::encode(raw_signed_transaction));
         let body = serde_json::json!({
           "jsonrpc": "2.0",
@@ -63,10 +63,10 @@ impl TransactionSubmitting for FlashbotsApi {
 
         let bundle_id = parse_json_rpc_response::<String>(&body)?;
         tracing::debug!("flashbots bundle id: {}", bundle_id);
-        Ok(bundle_id)
+        Ok(TransactionHandle(bundle_id))
     }
 
-    async fn cancel_transaction(&self, _id: &str) -> Result<()> {
+    async fn cancel_transaction(&self, _id: &TransactionHandle) -> Result<()> {
         Ok(())
     }
 }
