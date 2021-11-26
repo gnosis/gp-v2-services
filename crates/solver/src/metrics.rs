@@ -40,11 +40,13 @@ pub enum SolverRunOutcome {
 pub enum SettlementSubmissionOutcome {
     /// A settlement transaction was mined and included on the blockchain.
     Success,
+    /// A transaction reverted.
+    Revert,
     /// Submission timed-out while waiting for the transaction to get mined.
     Timeout,
-    /// A transaction was either mined and reverted or, in the case of private
-    /// network submission, the blockchain state changed and the transaction is
-    /// no longer valid.
+    /// A transaction failed to be submitted or, in the case of private network
+    /// submission, the blockchain state changed and the transaction is no
+    /// longer valid.
     Failure,
 }
 
@@ -315,6 +317,7 @@ impl SolverMetrics for Metrics {
     fn settlement_submitted(&self, outcome: SettlementSubmissionOutcome, solver: &'static str) {
         let result = match outcome {
             SettlementSubmissionOutcome::Success => "success",
+            SettlementSubmissionOutcome::Revert => "revert",
             SettlementSubmissionOutcome::Timeout => "timeout",
             SettlementSubmissionOutcome::Failure => "failure",
         };

@@ -137,6 +137,8 @@ impl SolutionSubmitter {
 /// An error during settlement submission.
 #[derive(Debug)]
 pub enum SubmissionError {
+    /// The transaction reverted.
+    Revert(Option<String>),
     /// The settlement submission timed out.
     Timeout,
     /// An error occured.
@@ -148,6 +150,7 @@ impl SubmissionError {
     pub fn as_outcome(&self) -> SettlementSubmissionOutcome {
         match self {
             Self::Timeout => SettlementSubmissionOutcome::Timeout,
+            Self::Revert(_) => SettlementSubmissionOutcome::Revert,
             Self::Other(_) => SettlementSubmissionOutcome::Failure,
         }
     }
@@ -160,6 +163,10 @@ impl SubmissionError {
     pub fn into_anyhow(self) -> anyhow::Error {
         match self {
             SubmissionError::Timeout => anyhow!("transaction did not get mined in time"),
+            SubmissionError::Revert(Some(message)) => {
+                anyhow!("transaction reverted with message {}", message)
+            }
+            SubmissionError::Revert(None) => anyhow!("transaction reverted"),
             SubmissionError::Other(err) => err,
         }
     }
@@ -173,8 +180,12 @@ impl From<anyhow::Error> for SubmissionError {
 
 impl From<MethodError> for SubmissionError {
     fn from(err: MethodError) -> Self {
-        match &err.inner {
+        match err.inner {
             ExecutionError::ConfirmTimeout(_) => SubmissionError::Timeout,
+            ExecutionError::Failure(_) | ExecutionError::InvalidOpcode => {
+                SubmissionError::Revert(None)
+            }
+            ExecutionError::Revert(message) => SubmissionError::Revert(message),
             _ => SubmissionError::Other(
                 anyhow::Error::from(err).context("settlement transaction failed"),
             ),
