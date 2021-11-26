@@ -116,7 +116,7 @@ impl SolutionSubmitter {
                     self.gas_price_estimator.as_ref(),
                     self.gas_price_cap,
                 )?;
-                let result = submitter
+                submitter
                     .submit(
                         self.target_confirm_time,
                         SystemTime::now() + *max_confirm_time,
@@ -124,8 +124,7 @@ impl SolutionSubmitter {
                         gas_estimate,
                         *flashbots_tip,
                     )
-                    .await;
-                result?.ok_or(SubmissionError::Timeout)
+                    .await
             }
             TransactionStrategy::DryRun => {
                 Ok(dry_run::log_settlement(account, &self.contract, settlement).await?)

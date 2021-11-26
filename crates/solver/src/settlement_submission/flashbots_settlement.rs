@@ -76,7 +76,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
         settlement: Settlement,
         gas_estimate: U256,
         flashbots_tip: f64,
-    ) -> Result<Option<TransactionReceipt>, SubmissionError> {
+    ) -> Result<TransactionReceipt, SubmissionError> {
         let nonce = self.nonce().await?;
 
         tracing::info!("starting flashbots solution submission at nonce {}", nonce,);
@@ -138,7 +138,7 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
             loop {
                 if let Some(receipt) = find_mined_transaction(self.web3, &transactions).await {
                     tracing::info!("found mined transaction {}", receipt.transaction_hash);
-                    return Ok(Some(receipt));
+                    return Ok(receipt);
                 }
                 if Instant::now() + MINED_TX_CHECK_INTERVAL > tx_to_propagate_deadline {
                     break;
@@ -149,6 +149,8 @@ impl<'a> FlashbotsSolutionSubmitter<'a> {
 
         tracing::info!("did not find any mined transaction");
         fallback_result
+            .transpose()
+            .unwrap_or(Err(SubmissionError::Timeout))
     }
 
     async fn nonce(&self) -> Result<U256> {
