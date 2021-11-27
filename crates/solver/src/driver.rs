@@ -1,6 +1,7 @@
 pub mod solver_settlements;
 
 use self::solver_settlements::RatedSettlement;
+use crate::settlement_submission::TransactionTimeoutError;
 use crate::{
     analytics, auction_preprocessing,
     in_flight_orders::InFlightOrders,
@@ -179,10 +180,11 @@ impl Driver {
                 // Since we simulate and only submit solutions when they used to pass before, there is no
                 // point in logging transaction failures in the form of race conditions as hard errors.
                 let name = solver.name();
-                if err
-                    .downcast_ref::<MethodError>()
-                    .map(|e| is_transaction_failure(&e.inner))
-                    .unwrap_or(false)
+                if err.is::<TransactionTimeoutError>()
+                    || err
+                        .downcast_ref::<MethodError>()
+                        .map(|e| is_transaction_failure(&e.inner))
+                        .unwrap_or(false)
                 {
                     tracing::warn!("Failed to submit {} settlement: {:?}", name, err)
                 } else {
