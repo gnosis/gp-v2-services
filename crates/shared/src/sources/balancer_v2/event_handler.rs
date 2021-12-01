@@ -340,7 +340,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
-    async fn balancer_index_pool_events() {
+    async fn balancer_indexed_pool_events_match_subgraph() {
         let transport = transport::create_env_test_transport();
         let web3 = Web3::new(transport);
         let chain_id = web3.eth().chain_id().await.unwrap().as_u64();
