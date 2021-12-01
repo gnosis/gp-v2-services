@@ -80,8 +80,7 @@ fn main() {
                 Network {
                     address: addr("0xa5bf2ddf098bb0ef6d120c98217dd6b141c74ee0"),
                     // <https://rinkeby.etherscan.io/tx/0xbe28062b575c2743b3b4525c3a175b9acad36695c15dba1c69af5f3fc3ceca37>
-                    //deployment_information: Some(DeploymentInformation::BlockNumber(8510540)),
-                    deployment_information: Some(DeploymentInformation::BlockNumber(8723587)),
+                    deployment_information: Some(DeploymentInformation::BlockNumber(8510540)),
                 },
             )
     });
