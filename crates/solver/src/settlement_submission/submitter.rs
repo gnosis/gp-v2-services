@@ -14,7 +14,7 @@
 // find the one that got mined (if any).
 
 use super::ESTIMATE_GAS_LIMIT_FACTOR;
-use crate::{interactions::block_coinbase, settlement::Settlement};
+use crate::settlement::Settlement;
 use anyhow::{anyhow, ensure, Context, Error, Result};
 use contracts::GPv2Settlement;
 use ethcontract::{contract::MethodBuilder, dyns::DynTransport, transaction::Transaction, Account};
@@ -36,11 +36,6 @@ pub struct SubmitterParams {
     pub gas_price_cap: f64,
     /// Maximum duration of a single run loop
     pub deadline: Option<Instant>,
-    /// There are two ways to pay for a transaction:
-    /// 1. Set valid gas price (default)
-    /// 2. Set 0 gas price, but add additional step to settlement to pay directly to the coinbase
-    /// Contains quantity of gas needed to pay for the additional step
-    pub pay_gas_to_coinbase: Option<U256>,
     /// Boost estimated gas price miner tip in order to increase the chances of a transaction being mined
     pub additional_miner_tip: Option<f64>,
     /// Resimulate and resend transaction on every retry_interval seconds
@@ -51,13 +46,9 @@ pub struct TransactionHandle(pub String);
 
 #[async_trait::async_trait]
 pub trait TransactionSubmitting {
-    /// Submits raw signed transation to the specific network (public mempool, archer, flashbots...).
+    /// Submits raw signed transation to the specific network (public mempool, eden, flashbots...).
     /// Returns transaction handle
-    async fn submit_raw_transaction(
-        &self,
-        tx: &[u8],
-        params: &SubmitterParams,
-    ) -> Result<TransactionHandle>;
+    async fn submit_raw_transaction(&self, tx: &[u8]) -> Result<TransactionHandle>;
     /// Cancels already submitted transaction using the transaction handle
     async fn cancel_transaction(&self, id: &TransactionHandle) -> Result<()>;
 }
@@ -246,7 +237,7 @@ impl<'a> Submitter<'a> {
 
         loop {
             // Account for some buffer in the gas limit in case racing state changes result in slightly more heavy computation at execution time.
-            let gas_limit = gas_estimate(params).to_f64_lossy() * ESTIMATE_GAS_LIMIT_FACTOR;
+            let gas_limit = params.gas_estimate.to_f64_lossy() * ESTIMATE_GAS_LIMIT_FACTOR;
             let time_limit = target_confirm_time.saturating_duration_since(Instant::now());
             let gas_price = match self.gas_price(gas_limit, time_limit, params).await {
                 Ok(gas_price) => gas_price,
@@ -259,8 +250,7 @@ impl<'a> Submitter<'a> {
 
             // create transaction
 
-            let method =
-                self.build_method(settlement.clone(), params, &gas_price, nonce, gas_limit);
+            let method = self.build_method(settlement.clone(), &gas_price, nonce, gas_limit);
 
             // simulate transaction
 
@@ -301,12 +291,12 @@ impl<'a> Submitter<'a> {
                 hash,
                 tx_gas_cost(&gas_price, params).to_f64_lossy(),
                 gas_price,
-                gas_estimate(params),
+                params.gas_estimate,
             );
 
             match self
                 .submit_api
-                .submit_raw_transaction(&raw_signed_transaction, params)
+                .submit_raw_transaction(&raw_signed_transaction)
                 .await
             {
                 Ok(id) => {
@@ -322,32 +312,15 @@ impl<'a> Submitter<'a> {
     /// Prepare transaction for simulation
     fn build_method(
         &self,
-        mut settlement: Settlement,
-        params: &SubmitterParams,
+        settlement: Settlement,
         gas_price: &EstimatedGasPrice,
         nonce: U256,
         gas_limit: f64,
     ) -> MethodBuilder<DynTransport, ()> {
-        // for some private networks we need to pay directly to coinbase for the transaction
-        let (gas_price, settlement) = match params.pay_gas_to_coinbase {
-            Some(_) => {
-                // gas price iz zero, but we add additional step to settlement to pay to coinbase
-                settlement
-                    .encoder
-                    .append_to_execution_plan(block_coinbase::PayBlockCoinbase {
-                        amount: tx_gas_cost(gas_price, params),
-                    });
-                ((0.0, 0.0).into(), settlement) //todo check if archer supports 1559?
-            }
-            None => {
-                // define gas price and use settlement as is
-                let gas_price = if let Some(eip1559) = gas_price.eip1559 {
-                    (eip1559.max_fee_per_gas, eip1559.max_priority_fee_per_gas).into()
-                } else {
-                    gas_price.legacy.into()
-                };
-                (gas_price, settlement)
-            }
+        let gas_price = if let Some(eip1559) = gas_price.eip1559 {
+            (eip1559.max_fee_per_gas, eip1559.max_priority_fee_per_gas).into()
+        } else {
+            gas_price.legacy.into()
         };
 
         super::retry::settle_method_builder(self.contract, settlement.into(), self.account.clone())
@@ -357,12 +330,8 @@ impl<'a> Submitter<'a> {
     }
 }
 
-fn gas_estimate(params: &SubmitterParams) -> U256 {
-    params.gas_estimate + params.pay_gas_to_coinbase.unwrap_or_default()
-}
-
 fn tx_gas_cost(gas_price: &EstimatedGasPrice, params: &SubmitterParams) -> U256 {
-    U256::from_f64_lossy(gas_price.effective_gas_price()) * gas_estimate(params)
+    U256::from_f64_lossy(gas_price.effective_gas_price()) * params.gas_estimate
 }
 
 /// From a list of potential hashes find one that was mined.
@@ -459,7 +428,6 @@ mod tests {
             gas_estimate,
             gas_price_cap,
             deadline: Some(Instant::now() + Duration::from_secs(90)),
-            pay_gas_to_coinbase: None,
             additional_miner_tip: Some(3.0),
             retry_interval: Duration::from_secs(5),
         };
