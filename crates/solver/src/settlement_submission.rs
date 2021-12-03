@@ -1,5 +1,5 @@
-pub mod archer_api;
 mod dry_run;
+pub mod eden_api;
 pub mod flashbots_api;
 mod gas_price_stream;
 pub mod retry;
@@ -8,10 +8,8 @@ pub mod submitter;
 
 use crate::settlement::Settlement;
 use anyhow::{bail, Result};
-use archer_api::ArcherApi;
 use contracts::GPv2Settlement;
 use ethcontract::Account;
-use flashbots_api::FlashbotsApi;
 use gas_estimation::GasPriceEstimating;
 use primitive_types::U256;
 use shared::Web3;
@@ -19,7 +17,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use submitter::{Submitter, SubmitterParams};
+use submitter::{Submitter, SubmitterParams, TransactionSubmitting};
 use web3::types::TransactionReceipt;
 
 const ESTIMATE_GAS_LIMIT_FACTOR: f64 = 1.2;
@@ -35,18 +33,15 @@ pub struct SolutionSubmitter {
     pub transaction_strategy: TransactionStrategy,
 }
 
+pub struct StrategyArgs {
+    pub submit_api: Box<dyn TransactionSubmitting>,
+    pub max_confirm_time: Duration,
+    pub retry_interval: Duration,
+    pub additional_tip: f64,
+}
 pub enum TransactionStrategy {
-    ArcherNetwork {
-        archer_api: ArcherApi,
-        max_confirm_time: Duration,
-        retry_interval: Duration,
-    },
-    Flashbots {
-        flashbots_api: FlashbotsApi,
-        max_confirm_time: Duration,
-        retry_interval: Duration,
-        flashbots_tip: f64,
-    },
+    Eden(StrategyArgs),
+    Flashbots(StrategyArgs),
     CustomNodes(Vec<Web3>),
     DryRun,
 }
@@ -77,26 +72,21 @@ impl SolutionSubmitter {
                 )
                 .await
             }
-            TransactionStrategy::ArcherNetwork {
-                archer_api,
-                max_confirm_time,
-                retry_interval,
-            } => {
+            TransactionStrategy::Eden(args) => {
                 let submitter = Submitter::new(
                     &self.web3,
                     &self.contract,
                     &account,
-                    archer_api,
+                    args.submit_api.as_ref(),
                     self.gas_price_estimator.as_ref(),
                 )?;
                 let params = SubmitterParams {
                     target_confirm_time: self.target_confirm_time,
                     gas_estimate,
                     gas_price_cap: self.gas_price_cap,
-                    deadline: Some(Instant::now() + *max_confirm_time),
-                    pay_gas_to_coinbase: Some(U256::from(18346)),
-                    additional_miner_tip: None,
-                    retry_interval: *retry_interval,
+                    deadline: Some(Instant::now() + args.max_confirm_time),
+                    additional_miner_tip: Some(args.additional_tip),
+                    retry_interval: args.retry_interval,
                 };
                 let result = submitter.submit(settlement, params).await;
                 match result {
@@ -105,27 +95,21 @@ impl SolutionSubmitter {
                     Err(err) => Err(err),
                 }
             }
-            TransactionStrategy::Flashbots {
-                flashbots_api,
-                max_confirm_time,
-                retry_interval,
-                flashbots_tip,
-            } => {
+            TransactionStrategy::Flashbots(args) => {
                 let submitter = Submitter::new(
                     &self.web3,
                     &self.contract,
                     &account,
-                    flashbots_api,
+                    args.submit_api.as_ref(),
                     self.gas_price_estimator.as_ref(),
                 )?;
                 let params = SubmitterParams {
                     target_confirm_time: self.target_confirm_time,
                     gas_estimate,
                     gas_price_cap: self.gas_price_cap,
-                    deadline: Some(Instant::now() + *max_confirm_time),
-                    pay_gas_to_coinbase: None,
-                    additional_miner_tip: Some(*flashbots_tip),
-                    retry_interval: *retry_interval,
+                    deadline: Some(Instant::now() + args.max_confirm_time),
+                    additional_miner_tip: Some(args.additional_tip),
+                    retry_interval: args.retry_interval,
                 };
                 let result = submitter.submit(settlement, params).await;
                 match result {
