@@ -28,7 +28,7 @@ impl Query {
 #[cfg_attr(test, mockall::automock)]
 #[async_trait::async_trait]
 pub trait BalanceFetching: Send + Sync {
-    // Returns the balance available to the allowance manager for the given owner and token.
+    // Returns the balance available to the allowance manager for the given owner and token taking both balance as well as "allowance" into account.
     async fn get_balances(&self, queries: &[Query]) -> Vec<Result<U256>>;
 
     // Check that the settlement contract can make use of this user's token balance. This check
@@ -37,6 +37,18 @@ pub trait BalanceFetching: Send + Sync {
     // for example if it is paused or takes a fee on transfer.
     // If the node supports the trace_callMany we can perform more extensive tests.
     async fn can_transfer(
+        &self,
+        token: H160,
+        from: H160,
+        amount: U256,
+        source: SellTokenSource,
+    ) -> Result<bool>;
+
+    // Checks if the `from` address balance greater or equal to `amount`. Returns an error if the check fails.
+    async fn has_sufficient_balance(&self, token: H160, from: H160, amount: U256) -> Result<bool>;
+
+    // Checks if the `from` address approval is greater or equal to `amount`. Returns an error if the check fails.
+    async fn has_sufficient_allowance(
         &self,
         token: H160,
         from: H160,
@@ -208,6 +220,32 @@ impl BalanceFetching for Web3BalanceFetcher {
     ) -> Result<bool> {
         let success = match source {
             SellTokenSource::Erc20 => self.can_transfer_call(token, from, amount).await,
+            SellTokenSource::External => {
+                self.can_manage_user_balance_call(token, from, amount).await
+            }
+            SellTokenSource::Internal => bail!("internal Vault balances not supported"),
+        };
+        Ok(success)
+    }
+
+    async fn has_sufficient_balance(&self, token: H160, from: H160, amount: U256) -> Result<bool> {
+        let instance = ERC20::at(&self.web3, token);
+        let balance = instance.balance_of(from).call().await?;
+        Ok(balance >= amount)
+    }
+
+    async fn has_sufficient_allowance(
+        &self,
+        token: H160,
+        from: H160,
+        amount: U256,
+        source: SellTokenSource,
+    ) -> Result<bool> {
+        let success = match source {
+            SellTokenSource::Erc20 => {
+                let instance = ERC20::at(&self.web3, token);
+                instance.allowance(from, self.vault_relayer).call().await? >= amount
+            }
             SellTokenSource::External => {
                 self.can_manage_user_balance_call(token, from, amount).await
             }
@@ -538,5 +576,99 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(get_balance().await, 50.into());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_sufficient_balance() {
+        let http = create_env_test_transport();
+        let web3 = Web3::new(http);
+
+        let accounts: Vec<H160> = web3.eth().accounts().await.expect("get accounts failed");
+        let trader = Account::Local(accounts[0], None);
+
+        let token = ERC20Mintable::builder(&web3)
+            .deploy()
+            .await
+            .expect("MintableERC20 deployment failed");
+
+        token
+            .mint(trader.address(), 100.into())
+            .send()
+            .await
+            .unwrap();
+
+        let fetcher = Web3BalanceFetcher::new(web3, None, H160::zero(), H160::from_low_u64_be(1));
+
+        assert!(fetcher
+            .has_sufficient_balance(token.address(), trader.address(), 1.into())
+            .await
+            .unwrap());
+        assert!(fetcher
+            .has_sufficient_balance(token.address(), trader.address(), 100.into())
+            .await
+            .unwrap());
+        assert!(!fetcher
+            .has_sufficient_balance(token.address(), trader.address(), 100_000.into())
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_sufficient_allowance() {
+        let http = create_env_test_transport();
+        let web3 = Web3::new(http);
+
+        let accounts: Vec<H160> = web3.eth().accounts().await.expect("get accounts failed");
+        let trader = Account::Local(accounts[0], None);
+        let allowance_target = Account::Local(accounts[0], None);
+
+        let token = ERC20Mintable::builder(&web3)
+            .deploy()
+            .await
+            .expect("MintableERC20 deployment failed");
+
+        token
+            .approve(allowance_target.address(), 100.into())
+            .from(trader.clone())
+            .send()
+            .await
+            .unwrap();
+
+        let fetcher = Web3BalanceFetcher::new(
+            web3,
+            None,
+            allowance_target.address(),
+            H160::from_low_u64_be(1),
+        );
+
+        assert!(fetcher
+            .has_sufficient_allowance(
+                token.address(),
+                trader.address(),
+                1.into(),
+                SellTokenSource::Erc20
+            )
+            .await
+            .unwrap());
+        assert!(fetcher
+            .has_sufficient_allowance(
+                token.address(),
+                trader.address(),
+                100.into(),
+                SellTokenSource::Erc20
+            )
+            .await
+            .unwrap());
+        assert!(!fetcher
+            .has_sufficient_allowance(
+                token.address(),
+                trader.address(),
+                100_000.into(),
+                SellTokenSource::Erc20
+            )
+            .await
+            .unwrap());
     }
 }

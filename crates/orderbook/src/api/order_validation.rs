@@ -111,7 +111,11 @@ pub enum ValidationError {
     Partial(PartialValidationError),
     InsufficientFee,
     InsufficientFunds,
+    InsufficientAllowance,
     InvalidSignature,
+    // If fee and sell amount overflow u256
+    SellAmountOverflow,
+    TransferSimulationFailed,
     UnsupportedToken(H160),
     WrongOwner(H160),
     ZeroAmount,
@@ -143,12 +147,33 @@ impl IntoWarpReply for ValidationError {
                 ),
                 StatusCode::BAD_REQUEST,
             ),
+            Self::InsufficientAllowance => with_status(
+                super::error(
+                    "InsufficientAllowance",
+                    "order owner must give allowance to VaultRelayer",
+                ),
+                StatusCode::BAD_REQUEST,
+            ),
             Self::InvalidSignature => with_status(
                 super::error("InvalidSignature", "invalid signature"),
                 StatusCode::BAD_REQUEST,
             ),
             Self::InsufficientFee => with_status(
                 super::error("InsufficientFee", "Order does not include sufficient fee"),
+                StatusCode::BAD_REQUEST,
+            ),
+            Self::SellAmountOverflow => with_status(
+                super::error(
+                    "SellAmountOverflow",
+                    "Sell amount + fee amount must fit in U256",
+                ),
+                StatusCode::BAD_REQUEST,
+            ),
+            Self::TransferSimulationFailed => with_status(
+                super::error(
+                    "TransferSimulationFailed",
+                    "sell token cannot be transferred",
+                ),
                 StatusCode::BAD_REQUEST,
             ),
             Self::ZeroAmount => with_status(
@@ -322,11 +347,12 @@ impl OrderValidating for OrderValidator {
         }
         let min_balance = match minimum_balance(&order) {
             Some(amount) => amount,
-            // TODO - None happens when checked_add overflows - not insufficient funds...
-            //  This error should be changed to SellAmountOverflow.
-            None => return Err(ValidationError::InsufficientFunds),
+            None => return Err(ValidationError::SellAmountOverflow),
         };
-        if !self
+
+        // Fast path to check if transfer is possible with a single node query.
+        // If not, run extra queries for additional information.
+        if self
             .balance_fetcher
             .can_transfer(
                 order_creation.sell_token,
@@ -337,10 +363,34 @@ impl OrderValidating for OrderValidator {
             .await
             .unwrap_or(false)
         {
+            return Ok((order, unsubsidized_fee));
+        }
+
+        if !self
+            .balance_fetcher
+            .has_sufficient_balance(order_creation.sell_token, owner, min_balance)
+            .await
+            .unwrap_or(false)
+        {
             return Err(ValidationError::InsufficientFunds);
         }
 
-        Ok((order, unsubsidized_fee))
+        if !self
+            .balance_fetcher
+            .has_sufficient_allowance(
+                order_creation.sell_token,
+                owner,
+                min_balance,
+                order_creation.sell_token_balance,
+            )
+            .await
+            .unwrap_or(false)
+        {
+            return Err(ValidationError::InsufficientAllowance);
+        }
+
+        // Transfer failed, but there is both enough balance as well as allowance.
+        Err(ValidationError::TransferSimulationFailed)
     }
 }
 
@@ -641,6 +691,12 @@ mod tests {
         balance_fetcher
             .expect_can_transfer()
             .returning(|_, _, _, _| Ok(false));
+        balance_fetcher
+            .expect_has_sufficient_balance()
+            .returning(|_, _, _| Ok(false));
+        balance_fetcher
+            .expect_has_sufficient_allowance()
+            .returning(|_, _, _, _| Ok(false));
         let validator = OrderValidator::new(
             Box::new(MockCodeFetching::new()),
             dummy_contract!(WETH9, [0xef; 20]),
@@ -748,7 +804,7 @@ mod tests {
                     .await
                     .unwrap_err()
             ),
-            "InsufficientFunds"
+            "SellAmountOverflow"
         );
         order.sell_amount = U256::from(1);
         assert_eq!(
