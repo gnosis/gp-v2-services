@@ -742,7 +742,7 @@ components:
               DuplicateOrder,
               InsufficientFee,
               InsufficientAllowance,
-              InsufficientFunds,
+              InsufficientBalance,
               InsufficientValidTo,
               InvalidSignature,
               SellAmountOverflow,

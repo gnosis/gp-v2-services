@@ -110,7 +110,7 @@ impl IntoWarpReply for PartialValidationError {
 pub enum ValidationError {
     Partial(PartialValidationError),
     InsufficientFee,
-    InsufficientFunds,
+    InsufficientBalance,
     InsufficientAllowance,
     InvalidSignature,
     // If fee and sell amount overflow u256
@@ -140,9 +140,9 @@ impl IntoWarpReply for ValidationError {
                 ),
                 StatusCode::BAD_REQUEST,
             ),
-            Self::InsufficientFunds => with_status(
+            Self::InsufficientBalance => with_status(
                 super::error(
-                    "InsufficientFunds",
+                    "InsufficientBalance",
                     "order owner must have funds worth at least x in his account",
                 ),
                 StatusCode::BAD_REQUEST,
@@ -367,7 +367,7 @@ impl OrderValidating for OrderValidator {
                 Err(ValidationError::InsufficientAllowance)
             }
             Ok(TransferSimulationResult::InsufficientBalance) => {
-                Err(ValidationError::InsufficientFunds)
+                Err(ValidationError::InsufficientBalance)
             }
             Ok(TransferSimulationResult::TransferFailed) => {
                 Err(ValidationError::TransferSimulationFailed)
@@ -800,7 +800,7 @@ mod tests {
                     .await
                     .unwrap_err()
             ),
-            "InsufficientFunds"
+            "InsufficientBalance"
         );
     }
 
