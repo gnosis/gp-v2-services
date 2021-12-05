@@ -1,5 +1,5 @@
 use crate::{
-    account_balances::BalanceFetching,
+    account_balances::{BalanceFetching, TransferSimulationResult},
     api::IntoWarpReply,
     fee::{FeeData, FeeParameters, MinFeeCalculating},
 };
@@ -352,7 +352,7 @@ impl OrderValidating for OrderValidator {
 
         // Fast path to check if transfer is possible with a single node query.
         // If not, run extra queries for additional information.
-        if self
+        match self
             .balance_fetcher
             .can_transfer(
                 order_creation.sell_token,
@@ -361,36 +361,22 @@ impl OrderValidating for OrderValidator {
                 order_creation.sell_token_balance,
             )
             .await
-            .unwrap_or(false)
         {
-            return Ok((order, unsubsidized_fee));
+            Ok(TransferSimulationResult::Ok) => Ok((order, unsubsidized_fee)),
+            Ok(TransferSimulationResult::InsufficientAllowance) => {
+                Err(ValidationError::InsufficientAllowance)
+            }
+            Ok(TransferSimulationResult::InsufficientBalance) => {
+                Err(ValidationError::InsufficientFunds)
+            }
+            Ok(TransferSimulationResult::TransferFailed) => {
+                Err(ValidationError::TransferSimulationFailed)
+            }
+            Err(err) => {
+                tracing::warn!("TransferSimulation failed: {}", err);
+                Err(ValidationError::TransferSimulationFailed)
+            }
         }
-
-        if !self
-            .balance_fetcher
-            .has_sufficient_balance(order_creation.sell_token, owner, min_balance)
-            .await
-            .unwrap_or(false)
-        {
-            return Err(ValidationError::InsufficientFunds);
-        }
-
-        if !self
-            .balance_fetcher
-            .has_sufficient_allowance(
-                order_creation.sell_token,
-                owner,
-                min_balance,
-                order_creation.sell_token_balance,
-            )
-            .await
-            .unwrap_or(false)
-        {
-            return Err(ValidationError::InsufficientAllowance);
-        }
-
-        // Transfer failed, but there is both enough balance as well as allowance.
-        Err(ValidationError::TransferSimulationFailed)
     }
 }
 
@@ -690,13 +676,7 @@ mod tests {
             .returning(|_| Ok(TokenQuality::Good));
         balance_fetcher
             .expect_can_transfer()
-            .returning(|_, _, _, _| Ok(false));
-        balance_fetcher
-            .expect_has_sufficient_balance()
-            .returning(|_, _, _| Ok(false));
-        balance_fetcher
-            .expect_has_sufficient_allowance()
-            .returning(|_, _, _, _| Ok(false));
+            .returning(|_, _, _, _| Ok(TransferSimulationResult::InsufficientBalance));
         let validator = OrderValidator::new(
             Box::new(MockCodeFetching::new()),
             dummy_contract!(WETH9, [0xef; 20]),
@@ -837,7 +817,7 @@ mod tests {
             .returning(|_| Ok(TokenQuality::Good));
         balance_fetcher
             .expect_can_transfer()
-            .returning(|_, _, _, _| Ok(true));
+            .returning(|_, _, _, _| Ok(TransferSimulationResult::Ok));
         let validator = OrderValidator::new(
             Box::new(MockCodeFetching::new()),
             dummy_contract!(WETH9, [0xef; 20]),
