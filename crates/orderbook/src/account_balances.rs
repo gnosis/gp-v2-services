@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use contracts::{BalancerV2Vault, ERC20};
 use ethcontract::{batch::CallBatch, Account};
 use futures::{FutureExt, StreamExt};
@@ -25,12 +25,18 @@ impl Query {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum TransferSimulationResult {
-    Ok,
+#[derive(Debug)]
+pub enum TransferSimulationError {
     InsufficientAllowance,
     InsufficientBalance,
     TransferFailed,
+    Other(anyhow::Error),
+}
+
+impl From<anyhow::Error> for TransferSimulationError {
+    fn from(err: anyhow::Error) -> Self {
+        Self::Other(err)
+    }
 }
 
 #[cfg_attr(test, mockall::automock)]
@@ -50,7 +56,7 @@ pub trait BalanceFetching: Send + Sync {
         from: H160,
         amount: U256,
         source: SellTokenSource,
-    ) -> Result<TransferSimulationResult>;
+    ) -> Result<(), TransferSimulationError>;
 }
 
 pub struct Web3BalanceFetcher {
@@ -213,52 +219,57 @@ impl BalanceFetching for Web3BalanceFetcher {
         from: H160,
         amount: U256,
         source: SellTokenSource,
-    ) -> Result<TransferSimulationResult> {
+    ) -> Result<(), TransferSimulationError> {
         match (source, &self.vault) {
             (SellTokenSource::Erc20, _) => {
                 // In the very likely case that we can transfer we only do one RPC call.
                 // Only do more calls in case we need to closer assess why the transfer is failing
                 if self.can_transfer_call(token, from, amount).await {
-                    return Ok(TransferSimulationResult::Ok);
+                    return Ok(());
                 }
                 let mut batch = CallBatch::new(self.web3.transport().clone());
                 let token = ERC20::at(&self.web3, token);
-                let Balance { balance, allowance } =
-                    erc20_balance_query(&mut batch, token, from, self.vault_relayer).await?;
+                let balance_future =
+                    erc20_balance_query(&mut batch, token, from, self.vault_relayer);
+                // Batch needs to execute before we can await the query result
+                batch.execute_all(usize::MAX).await;
+                let Balance { balance, allowance } = balance_future.await?;
                 if balance < amount {
-                    return Ok(TransferSimulationResult::InsufficientBalance);
+                    return Err(TransferSimulationError::InsufficientBalance);
                 }
                 if allowance < amount {
-                    return Ok(TransferSimulationResult::InsufficientAllowance);
+                    return Err(TransferSimulationError::InsufficientAllowance);
                 }
-                return Ok(TransferSimulationResult::TransferFailed);
+                return Err(TransferSimulationError::TransferFailed);
             }
             (SellTokenSource::External, Some(vault)) => {
                 if self.can_manage_user_balance_call(token, from, amount).await {
-                    return Ok(TransferSimulationResult::Ok);
+                    return Ok(());
                 }
                 let mut batch = CallBatch::new(self.web3.transport().clone());
                 let token = ERC20::at(&self.web3, token);
-                let Balance { balance, allowance } = vault_external_balance_query(
-                    &mut batch,
-                    vault.clone(),
-                    token,
-                    from,
-                    self.vault_relayer,
-                )
-                .await?;
+                let balance_future = erc20_balance_query(&mut batch, token, from, vault.address());
+                // Batch needs to execute before we can await the query result
+                batch.execute_all(usize::MAX).await;
+                let Balance { balance, allowance } = balance_future.await?;
                 if balance < amount {
-                    return Ok(TransferSimulationResult::InsufficientBalance);
+                    return Err(TransferSimulationError::InsufficientBalance);
                 }
                 if allowance < amount {
-                    return Ok(TransferSimulationResult::InsufficientAllowance);
+                    return Err(TransferSimulationError::InsufficientAllowance);
                 }
-                return Ok(TransferSimulationResult::TransferFailed);
+                return Err(TransferSimulationError::TransferFailed);
             }
             (SellTokenSource::External, None) => {
-                bail!("External Vault balances require a deployed vault")
+                return Err(TransferSimulationError::Other(anyhow!(
+                    "External Vault balances require a deployed vault"
+                )))
             }
-            (SellTokenSource::Internal, _) => bail!("internal Vault balances not supported"),
+            (SellTokenSource::Internal, _) => {
+                return Err(TransferSimulationError::Other(anyhow!(
+                    "internal Vault balances not supported"
+                )))
+            }
         };
     }
 }
@@ -317,7 +328,7 @@ mod tests {
         let settlement = contracts::GPv2Settlement::deployed(&web3).await.unwrap();
         let vault_relayer = settlement.vault_relayer().call().await.unwrap();
         let fetcher = Web3BalanceFetcher::new(web3, None, vault_relayer, settlement.address());
-        let owner = H160(hex!("78045485dc4ad96f60937dad4b01b118958761ae"));
+        let owner = H160(hex!("401c51ebe418d2809921565e606b60851bace4ec"));
         // Token takes a fee.
         let token = H160(hex!("bae5f2d8a1299e5c4963eaff3312399253f27ccb"));
 
@@ -332,6 +343,7 @@ mod tests {
             .next()
             .unwrap()
             .unwrap();
+        println!("{}", result);
         assert!(result >= U256::from(811));
 
         let call_result = fetcher.can_transfer_call(token, owner, 811.into()).await;
@@ -441,7 +453,7 @@ mod tests {
             H160::from_low_u64_be(1),
         );
 
-        assert_eq!(
+        assert!(matches!(
             fetcher
                 .can_transfer(
                     token.address(),
@@ -449,10 +461,9 @@ mod tests {
                     100.into(),
                     SellTokenSource::External
                 )
-                .await
-                .unwrap(),
-            TransferSimulationResult::InsufficientBalance
-        );
+                .await,
+            Err(TransferSimulationError::InsufficientBalance)
+        ));
 
         // Set authorization for allowance target to act as a Vault relayer
         vault::grant_required_roles(&authorizer, vault.address(), allowance_target.address())
@@ -479,7 +490,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
+        assert!(matches!(
             fetcher
                 .can_transfer(
                     token.address(),
@@ -487,11 +498,10 @@ mod tests {
                     100.into(),
                     SellTokenSource::External
                 )
-                .await
-                .unwrap(),
-            TransferSimulationResult::Ok
-        );
-        assert_eq!(
+                .await,
+            Ok(_),
+        ));
+        assert!(matches!(
             fetcher
                 .can_transfer(
                     token.address(),
@@ -499,10 +509,9 @@ mod tests {
                     1_000_000.into(),
                     SellTokenSource::External
                 )
-                .await
-                .unwrap(),
-            TransferSimulationResult::InsufficientAllowance
-        );
+                .await,
+            Err(TransferSimulationError::InsufficientAllowance)
+        ));
     }
 
     #[tokio::test]

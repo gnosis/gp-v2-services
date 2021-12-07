@@ -1,5 +1,5 @@
 use crate::{
-    account_balances::{BalanceFetching, TransferSimulationResult},
+    account_balances::{BalanceFetching, TransferSimulationError},
     api::IntoWarpReply,
     fee::{FeeData, FeeParameters, MinFeeCalculating},
 };
@@ -362,20 +362,22 @@ impl OrderValidating for OrderValidator {
             )
             .await
         {
-            Ok(TransferSimulationResult::Ok) => Ok((order, unsubsidized_fee)),
-            Ok(TransferSimulationResult::InsufficientAllowance) => {
-                Err(ValidationError::InsufficientAllowance)
-            }
-            Ok(TransferSimulationResult::InsufficientBalance) => {
-                Err(ValidationError::InsufficientBalance)
-            }
-            Ok(TransferSimulationResult::TransferFailed) => {
-                Err(ValidationError::TransferSimulationFailed)
-            }
-            Err(err) => {
-                tracing::warn!("TransferSimulation failed: {}", err);
-                Err(ValidationError::TransferSimulationFailed)
-            }
+            Ok(_) => Ok((order, unsubsidized_fee)),
+            Err(err) => match err {
+                TransferSimulationError::InsufficientAllowance => {
+                    Err(ValidationError::InsufficientAllowance)
+                }
+                TransferSimulationError::InsufficientBalance => {
+                    Err(ValidationError::InsufficientBalance)
+                }
+                TransferSimulationError::TransferFailed => {
+                    Err(ValidationError::TransferSimulationFailed)
+                }
+                TransferSimulationError::Other(err) => {
+                    tracing::warn!("TransferSimulation failed: {:?}", err);
+                    Err(ValidationError::TransferSimulationFailed)
+                }
+            },
         }
     }
 }
@@ -654,7 +656,7 @@ mod tests {
             .returning(|_| Ok(TokenQuality::Good));
         balance_fetcher
             .expect_can_transfer()
-            .returning(|_, _, _, _| Ok(TransferSimulationResult::InsufficientBalance));
+            .returning(|_, _, _, _| Err(TransferSimulationError::InsufficientBalance));
         let validator = OrderValidator::new(
             Box::new(MockCodeFetching::new()),
             dummy_contract!(WETH9, [0xef; 20]),
@@ -764,7 +766,7 @@ mod tests {
             .returning(|_| Ok(TokenQuality::Good));
         balance_fetcher
             .expect_can_transfer()
-            .returning(|_, _, _, _| Ok(TransferSimulationResult::Ok));
+            .returning(|_, _, _, _| Ok(()));
         let validator = OrderValidator::new(
             Box::new(MockCodeFetching::new()),
             dummy_contract!(WETH9, [0xef; 20]),
