@@ -167,7 +167,7 @@ impl IntoWarpReply for ValidationError {
                     "SellAmountOverflow",
                     "Sell amount + fee amount must fit in U256",
                 ),
-                StatusCode::BAD_REQUEST,
+                StatusCode::INTERNAL_SERVER_ERROR,
             ),
             Self::TransferSimulationFailed => with_status(
                 super::error(

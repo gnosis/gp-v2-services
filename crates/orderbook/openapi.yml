@@ -745,7 +745,6 @@ components:
               InsufficientBalance,
               InsufficientValidTo,
               InvalidSignature,
-              SellAmountOverflow,
               TransferEthToContract,
               TransferSimulationFailed,
               UnsupportedToken,
