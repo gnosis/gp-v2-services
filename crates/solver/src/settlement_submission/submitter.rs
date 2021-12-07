@@ -13,9 +13,9 @@
 // from outside) so it is only at that point that we need to check the hashes individually to the
 // find the one that got mined (if any).
 
-use super::ESTIMATE_GAS_LIMIT_FACTOR;
+use super::{SubmissionError, ESTIMATE_GAS_LIMIT_FACTOR};
 use crate::settlement::Settlement;
-use anyhow::{anyhow, ensure, Context, Error, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 use contracts::GPv2Settlement;
 use ethcontract::{contract::MethodBuilder, dyns::DynTransport, transaction::Transaction, Account};
 use futures::FutureExt;
@@ -92,7 +92,7 @@ impl<'a> Submitter<'a> {
         &self,
         settlement: Settlement,
         params: SubmitterParams,
-    ) -> Result<Option<TransactionReceipt>> {
+    ) -> Result<TransactionReceipt, SubmissionError> {
         let nonce = self.nonce().await?;
 
         tracing::info!("starting solution submission at nonce {}", nonce);
@@ -154,7 +154,7 @@ impl<'a> Submitter<'a> {
             loop {
                 if let Some(receipt) = find_mined_transaction(self.web3, &transactions).await {
                     tracing::info!("found mined transaction {}", receipt.transaction_hash);
-                    return Ok(Some(receipt));
+                    return Ok(receipt);
                 }
                 if Instant::now() + MINED_TX_CHECK_INTERVAL > tx_to_propagate_deadline {
                     break;
@@ -165,6 +165,8 @@ impl<'a> Submitter<'a> {
 
         tracing::info!("did not find any mined transaction");
         fallback_result
+            .transpose()
+            .unwrap_or(Err(SubmissionError::Timeout))
     }
 
     async fn nonce(&self) -> Result<U256> {
@@ -229,7 +231,7 @@ impl<'a> Submitter<'a> {
         nonce: U256,
         params: &SubmitterParams,
         transactions: &mut Vec<H256>,
-    ) -> anyhow::Error {
+    ) -> SubmissionError {
         let target_confirm_time = Instant::now() + params.target_confirm_time;
 
         // gas price and raw signed transaction
@@ -260,7 +262,7 @@ impl<'a> Submitter<'a> {
                         tracing::warn!("cancellation failed: {:?}", err);
                     }
                 }
-                return Error::from(err).context("failed simulation");
+                return SubmissionError::from(err);
             }
 
             // If gas price has increased cancel old and submit new transaction.
