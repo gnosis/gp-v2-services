@@ -67,7 +67,7 @@ impl PoolInfoFetching for PoolInfoFetcher {
             .inner
             .fetch_common_pool_info(pool_address, block_created)
             .await?;
-        self.weighted_factory.augment_pool_info(common_info).await
+        self.weighted_factory.specialize_pool_info(common_info).await
     }
 
     async fn get_stable_pool_data(
@@ -79,6 +79,6 @@ impl PoolInfoFetching for PoolInfoFetcher {
             .inner
             .fetch_common_pool_info(pool_address, block_created)
             .await?;
-        self.stable_factory.augment_pool_info(common_info).await
+        self.stable_factory.specialize_pool_info(common_info).await
     }
 }

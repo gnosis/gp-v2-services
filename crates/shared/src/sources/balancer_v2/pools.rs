@@ -32,8 +32,11 @@ pub trait FactoryIndexing {
     /// `immuatble` in the smart contract and thus can never change and don't
     /// need to be re-fetched.
     ///
+    /// The implementation is not expected to verify on-chain that the type of
+    /// pool matches what it is expecting.
+    ///
     /// Returns an error if fetching the augmented pool data fails.
-    async fn augment_pool_info(&self, pool: common::PoolInfo) -> Result<Self::PoolInfo>;
+    async fn specialize_pool_info(&self, pool: common::PoolInfo) -> Result<Self::PoolInfo>;
 }
 
 /// Required information needed for indexing pools.
