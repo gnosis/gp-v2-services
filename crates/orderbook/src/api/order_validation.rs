@@ -506,93 +506,74 @@ mod tests {
             Arc::new(MockBadTokenDetecting::new()),
             Arc::new(MockBalanceFetching::new()),
         );
-        assert_eq!(
-            format!(
-                "{:?}",
-                validator
-                    .partial_validate(PreOrderData {
-                        owner: H160::from_low_u64_be(1),
-                        ..Default::default()
-                    })
-                    .await
-                    .unwrap_err()
-            ),
-            "Forbidden"
-        );
-        assert_eq!(
-            format!(
-                "{:?}",
-                validator
-                    .partial_validate(PreOrderData {
-                        buy_token_balance: BuyTokenDestination::Internal,
-                        ..Default::default()
-                    })
-                    .await
-                    .unwrap_err()
-            ),
-            "UnsupportedBuyTokenDestination(Internal)"
-        );
-        assert_eq!(
-            format!(
-                "{:?}",
-                validator
-                    .partial_validate(PreOrderData {
-                        sell_token_balance: SellTokenSource::Internal,
-                        ..Default::default()
-                    })
-                    .await
-                    .unwrap_err()
-            ),
-            "UnsupportedSellTokenSource(Internal)"
-        );
-        assert_eq!(
-            format!(
-                "{:?}",
-                validator
-                    .partial_validate(PreOrderData {
-                        valid_to: 0,
-                        ..Default::default()
-                    })
-                    .await
-                    .unwrap_err()
-            ),
-            "InsufficientValidTo"
-        );
-        assert_eq!(
-            format!(
-                "{:?}",
-                validator
-                    .partial_validate(PreOrderData {
-                        valid_to: legit_valid_to,
-                        buy_token: H160::from_low_u64_be(2),
-                        sell_token: H160::from_low_u64_be(2),
-                        ..Default::default()
-                    })
-                    .await
-                    .unwrap_err()
-            ),
-            "SameBuyAndSellToken"
-        );
-        assert_eq!(
-            format!(
-                "{:?}",
-                validator
-                    .partial_validate(PreOrderData {
-                        valid_to: legit_valid_to,
-                        buy_token: BUY_ETH_ADDRESS,
-                        ..Default::default()
-                    })
-                    .await
-                    .unwrap_err()
-            ),
-            "TransferEthToContract"
-        );
+        assert!(matches!(
+            validator
+                .partial_validate(PreOrderData {
+                    owner: H160::from_low_u64_be(1),
+                    ..Default::default()
+                })
+                .await,
+            Err(PartialValidationError::Forbidden)
+        ));
+        assert!(matches!(
+            validator
+                .partial_validate(PreOrderData {
+                    buy_token_balance: BuyTokenDestination::Internal,
+                    ..Default::default()
+                })
+                .await,
+            Err(PartialValidationError::UnsupportedBuyTokenDestination(
+                BuyTokenDestination::Internal
+            ))
+        ));
+        assert!(matches!(
+            validator
+                .partial_validate(PreOrderData {
+                    sell_token_balance: SellTokenSource::Internal,
+                    ..Default::default()
+                })
+                .await,
+            Err(PartialValidationError::UnsupportedSellTokenSource(
+                SellTokenSource::Internal
+            ))
+        ));
+        assert!(matches!(
+            validator
+                .partial_validate(PreOrderData {
+                    valid_to: 0,
+                    ..Default::default()
+                })
+                .await,
+            Err(PartialValidationError::InsufficientValidTo)
+        ));
+        assert!(matches!(
+            validator
+                .partial_validate(PreOrderData {
+                    valid_to: legit_valid_to,
+                    buy_token: H160::from_low_u64_be(2),
+                    sell_token: H160::from_low_u64_be(2),
+                    ..Default::default()
+                })
+                .await,
+            Err(PartialValidationError::SameBuyAndSellToken)
+        ));
+        assert!(matches!(
+            validator
+                .partial_validate(PreOrderData {
+                    valid_to: legit_valid_to,
+                    buy_token: BUY_ETH_ADDRESS,
+                    ..Default::default()
+                })
+                .await,
+            Err(PartialValidationError::TransferEthToContract)
+        ));
 
         let mut code_fetcher = Box::new(MockCodeFetching::new());
+        let _err = anyhow!("Failed to fetch Code Size!");
         code_fetcher
             .expect_code_size()
             .times(1)
-            .return_once(|_| Err(anyhow!("Failed to fetch Code Size!")));
+            .return_once(|_| Err(_err));
         let validator = OrderValidator::new(
             code_fetcher,
             dummy_contract!(WETH9, [0xef; 20]),
@@ -602,20 +583,17 @@ mod tests {
             Arc::new(MockBadTokenDetecting::new()),
             Arc::new(MockBalanceFetching::new()),
         );
-        assert_eq!(
-            format!(
-                "{:?}",
-                validator
-                    .partial_validate(PreOrderData {
-                        valid_to: legit_valid_to,
-                        buy_token: BUY_ETH_ADDRESS,
-                        ..Default::default()
-                    })
-                    .await
-                    .unwrap_err()
-            ),
-            "Other(Failed to fetch Code Size!)"
-        );
+
+        assert!(matches!(
+            validator
+                .partial_validate(PreOrderData {
+                    valid_to: legit_valid_to,
+                    buy_token: BUY_ETH_ADDRESS,
+                    ..Default::default()
+                })
+                .await,
+            Err(PartialValidationError::Other(_err))
+        ));
     }
 
     #[tokio::test]
