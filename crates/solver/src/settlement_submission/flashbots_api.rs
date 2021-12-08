@@ -1,6 +1,7 @@
 use super::submitter::{TransactionHandle, TransactionSubmitting};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use jsonrpc_core::Output;
+use primitive_types::H256;
 use reqwest::Client;
 use serde::de::DeserializeOwned;
 
@@ -11,7 +12,8 @@ pub struct FlashbotsApi {
     client: Client,
 }
 
-fn parse_json_rpc_response<T>(body: &str) -> Result<T>
+pub fn parse_json_rpc_response<T>(body: &str) -> Result<T>
+//will be moved to CustomNodes impl in the following PR
 where
     T: DeserializeOwned,
 {
@@ -60,7 +62,7 @@ impl TransactionSubmitting for FlashbotsApi {
         ensure!(status.is_success(), "status {}: {:?}", status, body);
         tracing::debug!("flashbots submit response: {}", body);
 
-        let bundle_id = parse_json_rpc_response::<String>(&body)?;
+        let bundle_id = parse_json_rpc_response::<H256>(&body)?;
         tracing::debug!("flashbots bundle id: {}", bundle_id);
         Ok(TransactionHandle(bundle_id))
     }

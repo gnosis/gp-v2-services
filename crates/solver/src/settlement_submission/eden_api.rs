@@ -2,6 +2,7 @@
 
 use super::submitter::{TransactionHandle, TransactionSubmitting};
 use anyhow::{ensure, Result};
+use primitive_types::H256;
 use reqwest::Client;
 
 const URL: &str = "https://api.edennetwork.io/v1/rpc";
@@ -40,7 +41,9 @@ impl TransactionSubmitting for EdenApi {
         ensure!(status.is_success(), "status {}: {:?}", status, body);
         tracing::debug!("eden submit response: {}", body);
 
-        Ok(TransactionHandle(tx))
+        let tx_hash = super::flashbots_api::parse_json_rpc_response::<H256>(&body)?;
+
+        Ok(TransactionHandle(tx_hash))
     }
 
     async fn cancel_transaction(&self, _id: &TransactionHandle) -> Result<()> {

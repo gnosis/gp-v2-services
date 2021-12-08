@@ -38,7 +38,7 @@ pub struct SubmitterParams {
     pub retry_interval: Duration,
 }
 
-pub struct TransactionHandle(pub String);
+pub struct TransactionHandle(pub H256);
 
 #[async_trait::async_trait]
 pub trait TransactionSubmitting {
