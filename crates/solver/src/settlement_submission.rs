@@ -20,7 +20,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use submitter::{Submitter, SubmitterParams, TransactionSubmitting};
+use submitter::{Submitter, SubmitterGasEstimator, SubmitterParams, TransactionSubmitting};
 use web3::types::TransactionReceipt;
 
 const ESTIMATE_GAS_LIMIT_FACTOR: f64 = 1.2;
@@ -76,37 +76,43 @@ impl SolutionSubmitter {
                 .await
             }
             TransactionStrategy::Eden(args) => {
+                let eden_gas_price_estimator = SubmitterGasEstimator {
+                    inner: self.gas_price_estimator.as_ref(),
+                    additional_tip: Some(args.additional_tip),
+                    gas_price_cap: self.gas_price_cap,
+                };
                 let submitter = Submitter::new(
                     &self.web3,
                     &self.contract,
                     &account,
                     args.submit_api.as_ref(),
-                    self.gas_price_estimator.as_ref(),
+                    &eden_gas_price_estimator,
                 )?;
                 let params = SubmitterParams {
                     target_confirm_time: self.target_confirm_time,
                     gas_estimate,
-                    gas_price_cap: self.gas_price_cap,
                     deadline: Some(Instant::now() + args.max_confirm_time),
-                    additional_miner_tip: Some(args.additional_tip),
                     retry_interval: args.retry_interval,
                 };
                 submitter.submit(settlement, params).await
             }
             TransactionStrategy::Flashbots(args) => {
+                let flashbots_gas_price_estimator = SubmitterGasEstimator {
+                    inner: self.gas_price_estimator.as_ref(),
+                    additional_tip: Some(args.additional_tip),
+                    gas_price_cap: self.gas_price_cap,
+                };
                 let submitter = Submitter::new(
                     &self.web3,
                     &self.contract,
                     &account,
                     args.submit_api.as_ref(),
-                    self.gas_price_estimator.as_ref(),
+                    &flashbots_gas_price_estimator,
                 )?;
                 let params = SubmitterParams {
                     target_confirm_time: self.target_confirm_time,
                     gas_estimate,
-                    gas_price_cap: self.gas_price_cap,
                     deadline: Some(Instant::now() + args.max_confirm_time),
-                    additional_miner_tip: Some(args.additional_tip),
                     retry_interval: args.retry_interval,
                 };
                 submitter.submit(settlement, params).await

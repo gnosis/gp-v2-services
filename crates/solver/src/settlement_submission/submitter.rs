@@ -32,12 +32,8 @@ pub struct SubmitterParams {
     pub target_confirm_time: Duration, //todo change to blocks in the following PR
     /// Estimated gas consumption of a transaction
     pub gas_estimate: U256,
-    /// Maximum max_fee_per_gas to pay for a transaction
-    pub gas_price_cap: f64,
     /// Maximum duration of a single run loop
     pub deadline: Option<Instant>,
-    /// Boost estimated gas price miner tip in order to increase the chances of a transaction being mined
-    pub additional_miner_tip: Option<f64>,
     /// Resimulate and resend transaction on every retry_interval seconds
     pub retry_interval: Duration,
 }
@@ -53,12 +49,46 @@ pub trait TransactionSubmitting {
     async fn cancel_transaction(&self, id: &TransactionHandle) -> Result<()>;
 }
 
+/// Gas price estimator specialized for sending transactions to the network
+pub struct SubmitterGasEstimator<'a> {
+    pub inner: &'a dyn GasPriceEstimating,
+    /// Boost estimated gas price miner tip in order to increase the chances of a transaction being mined
+    pub additional_tip: Option<f64>,
+    /// Maximum max_fee_per_gas to pay for a transaction
+    pub gas_price_cap: f64,
+}
+
+#[async_trait::async_trait]
+impl GasPriceEstimating for SubmitterGasEstimator<'_> {
+    async fn estimate_with_limits(
+        &self,
+        gas_limit: f64,
+        time_limit: Duration,
+    ) -> Result<EstimatedGasPrice> {
+        match self.inner.estimate_with_limits(gas_limit, time_limit).await {
+            Ok(mut gas_price) if gas_price.cap() <= self.gas_price_cap => {
+                // boost miner tip to increase our chances of being included in a block
+                if let Some(ref mut eip1559) = gas_price.eip1559 {
+                    eip1559.max_priority_fee_per_gas += self.additional_tip.unwrap_or_default();
+                }
+                Ok(gas_price)
+            }
+            Ok(gas_price) => Err(anyhow!(
+                "gas station gas price {} is larger than cap {}",
+                gas_price.cap(),
+                self.gas_price_cap
+            )),
+            Err(err) => Err(err),
+        }
+    }
+}
+
 pub struct Submitter<'a> {
     web3: &'a Web3,
     contract: &'a GPv2Settlement,
     account: &'a Account,
     submit_api: &'a dyn TransactionSubmitting,
-    gas_price_estimator: &'a dyn GasPriceEstimating,
+    gas_price_estimator: &'a SubmitterGasEstimator<'a>,
 }
 
 impl<'a> Submitter<'a> {
@@ -67,7 +97,7 @@ impl<'a> Submitter<'a> {
         contract: &'a GPv2Settlement,
         account: &'a Account,
         submit_api: &'a dyn TransactionSubmitting,
-        gas_price_estimator: &'a dyn GasPriceEstimating,
+        gas_price_estimator: &'a SubmitterGasEstimator<'a>,
     ) -> Result<Self> {
         ensure!(
             matches!(account, Account::Offline(..)),
@@ -191,34 +221,6 @@ impl<'a> Submitter<'a> {
         }
     }
 
-    async fn gas_price(
-        &self,
-        gas_limit: f64,
-        time_limit: Duration,
-        params: &SubmitterParams,
-    ) -> Result<EstimatedGasPrice> {
-        match self
-            .gas_price_estimator
-            .estimate_with_limits(gas_limit, time_limit)
-            .await
-        {
-            Ok(mut gas_price) if gas_price.cap() <= params.gas_price_cap => {
-                // boost miner tip to increase our chances of being included in a block
-                if let Some(ref mut eip1559) = gas_price.eip1559 {
-                    eip1559.max_priority_fee_per_gas +=
-                        params.additional_miner_tip.unwrap_or_default();
-                }
-                Ok(gas_price)
-            }
-            Ok(gas_price) => Err(anyhow!(
-                "gas station gas price {} is larger than cap {}",
-                gas_price.cap(),
-                params.gas_price_cap
-            )),
-            Err(err) => Err(err),
-        }
-    }
-
     /// Keep submitting the settlement transaction to the network as gas price changes.
     ///
     /// Returns when simulation of the transaction fails. This likely happens if the settlement
@@ -241,7 +243,11 @@ impl<'a> Submitter<'a> {
             // Account for some buffer in the gas limit in case racing state changes result in slightly more heavy computation at execution time.
             let gas_limit = params.gas_estimate.to_f64_lossy() * ESTIMATE_GAS_LIMIT_FACTOR;
             let time_limit = target_confirm_time.saturating_duration_since(Instant::now());
-            let gas_price = match self.gas_price(gas_limit, time_limit, params).await {
+            let gas_price = match self
+                .gas_price_estimator
+                .estimate_with_limits(gas_limit, time_limit)
+                .await
+            {
                 Ok(gas_price) => gas_price,
                 Err(err) => {
                     tracing::error!("gas estimation failed: {:?}", err);
@@ -399,7 +405,11 @@ mod tests {
         )
         .await
         .unwrap();
-        let gas_price_cap = 100e9;
+        let gas_price_estimator = SubmitterGasEstimator {
+            inner: &gas_price_estimator,
+            additional_tip: Some(3.0),
+            gas_price_cap: 100e9,
+        };
 
         let settlement = Settlement::new(Default::default());
         let gas_estimate =
@@ -428,9 +438,7 @@ mod tests {
         let params = SubmitterParams {
             target_confirm_time: Duration::from_secs(0),
             gas_estimate,
-            gas_price_cap,
             deadline: Some(Instant::now() + Duration::from_secs(90)),
-            additional_miner_tip: Some(3.0),
             retry_interval: Duration::from_secs(5),
         };
         let result = submitter.submit(settlement, params).await;
