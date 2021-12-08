@@ -1,9 +1,12 @@
 //! Module implementing stable pool specific indexing logic.
 
-use super::{common, FactoryIndexing, PoolIndexing, PoolKind};
+use super::{common, FactoryIndexing, PoolIndexing};
 use crate::{
     conversions::U256Ext as _,
-    sources::balancer_v2::graph_api::{PoolData, PoolType},
+    sources::balancer_v2::{
+        graph_api::{PoolData, PoolType},
+        swap::fixed_point::Bfp,
+    },
     Web3CallBatch,
 };
 use anyhow::{ensure, Result};
@@ -33,6 +36,7 @@ impl PoolIndexing for PoolInfo {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PoolState {
     pub tokens: BTreeMap<H160, common::TokenState>,
+    pub swap_fee: Bfp,
     pub amplification_parameter: AmplificationParameter,
 }
 
@@ -66,6 +70,7 @@ impl AmplificationParameter {
 #[async_trait::async_trait]
 impl FactoryIndexing for BalancerV2StablePoolFactory {
     type PoolInfo = PoolInfo;
+    type PoolState = PoolState;
 
     async fn specialize_pool_info(&self, pool: common::PoolInfo) -> Result<Self::PoolInfo> {
         Ok(PoolInfo { common: pool })
@@ -77,7 +82,7 @@ impl FactoryIndexing for BalancerV2StablePoolFactory {
         common_pool_state: BoxFuture<'static, common::PoolState>,
         batch: &mut Web3CallBatch,
         block: BlockId,
-    ) -> BoxFuture<'static, Result<PoolKind>> {
+    ) -> BoxFuture<'static, Result<Self::PoolState>> {
         let pool_contract =
             BalancerV2StablePool::at(&self.raw_instance().web3(), pool_info.common.address);
 
@@ -87,16 +92,17 @@ impl FactoryIndexing for BalancerV2StablePoolFactory {
             .batch_call(batch);
 
         async move {
-            let tokens = common_pool_state.await.tokens;
+            let common = common_pool_state.await;
             let amplification_parameter = {
                 let (factor, _, precision) = amplification_parameter.await?;
                 AmplificationParameter::new(factor, precision)?
             };
 
-            Ok(PoolKind::Stable(PoolState {
-                tokens,
+            Ok(PoolState {
+                tokens: common.tokens,
+                swap_fee: common.swap_fee,
                 amplification_parameter,
-            }))
+            })
         }
         .boxed()
     }
@@ -127,6 +133,7 @@ mod tests {
                 scaling_exponent: 12,
             },
         };
+        let swap_fee = bfp!("0.00015");
         let amplification_parameter =
             AmplificationParameter::new(200.into(), 10000.into()).unwrap();
 
@@ -156,7 +163,7 @@ mod tests {
         };
         let common_pool_state = common::PoolState {
             paused: false,
-            swap_fee: bfp!("0.003"),
+            swap_fee,
             tokens,
         };
 
@@ -175,13 +182,14 @@ mod tests {
             pool_state.await.unwrap()
         };
 
-        assert!(matches!(
+        assert_eq!(
             pool_state,
-            PoolKind::Stable(pool) if pool == PoolState {
+            PoolState {
                 tokens: common_pool_state.tokens,
+                swap_fee,
                 amplification_parameter,
             }
-        ));
+        );
     }
 
     #[test]

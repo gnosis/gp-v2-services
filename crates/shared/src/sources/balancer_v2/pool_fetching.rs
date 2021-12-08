@@ -13,7 +13,7 @@ use super::{
     pool_storage::{RegisteredStablePool, RegisteredWeightedPool},
     pools::{
         common::{self, PoolInfoFetcher},
-        stable,
+        stable, weighted,
     },
     swap::fixed_point::Bfp,
 };
@@ -36,12 +36,7 @@ use std::{
 
 pub use common::TokenState;
 pub use stable::AmplificationParameter;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct WeightedTokenState {
-    pub common: TokenState,
-    pub weight: Bfp,
-}
+pub use weighted::TokenState as WeightedTokenState;
 
 pub trait BalancerPoolEvaluating {
     fn properties(&self) -> CommonPoolState;
@@ -62,14 +57,11 @@ pub struct WeightedPool {
 }
 
 impl WeightedPool {
-    pub fn new(pool_data: RegisteredWeightedPool, common_state: common::PoolState) -> Self {
-        let reserves = common_state
-            .tokens
-            .into_iter()
-            .zip(&pool_data.weights)
-            .map(|((address, common), &weight)| (address, WeightedTokenState { common, weight }))
-            .collect();
-
+    pub fn new(
+        pool_data: RegisteredWeightedPool,
+        common_state: common::PoolState,
+        weighted_state: weighted::PoolState,
+    ) -> Self {
         WeightedPool {
             common: CommonPoolState {
                 id: pool_data.common.id,
@@ -77,7 +69,7 @@ impl WeightedPool {
                 swap_fee: common_state.swap_fee,
                 paused: common_state.paused,
             },
-            reserves,
+            reserves: weighted_state.tokens.into_iter().collect(),
         }
     }
 }
@@ -99,7 +91,7 @@ impl StablePool {
     pub fn new(
         pool_data: RegisteredStablePool,
         common_state: common::PoolState,
-        amplification_parameter: AmplificationParameter,
+        stable_state: stable::PoolState,
     ) -> Self {
         StablePool {
             common: CommonPoolState {
@@ -108,8 +100,8 @@ impl StablePool {
                 swap_fee: common_state.swap_fee,
                 paused: common_state.paused,
             },
-            reserves: common_state.tokens.into_iter().collect(),
-            amplification_parameter,
+            reserves: stable_state.tokens.into_iter().collect(),
+            amplification_parameter: stable_state.amplification_parameter,
         }
     }
 }

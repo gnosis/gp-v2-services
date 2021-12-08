@@ -1,6 +1,6 @@
 //! Module implementing weighted pool specific indexing logic.
 
-use super::{common, FactoryIndexing, PoolIndexing, PoolKind};
+use super::{common, FactoryIndexing, PoolIndexing};
 use crate::{
     sources::balancer_v2::{
         graph_api::{PoolData, PoolType},
@@ -23,6 +23,7 @@ pub struct PoolInfo {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PoolState {
     pub tokens: BTreeMap<H160, TokenState>,
+    pub swap_fee: Bfp,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -55,6 +56,7 @@ impl PoolIndexing for PoolInfo {
 #[async_trait::async_trait]
 impl FactoryIndexing for BalancerV2WeightedPoolFactory {
     type PoolInfo = PoolInfo;
+    type PoolState = PoolState;
 
     async fn specialize_pool_info(&self, pool: common::PoolInfo) -> Result<Self::PoolInfo> {
         let pool_contract = BalancerV2WeightedPool::at(&self.raw_instance().web3(), pool.address);
@@ -79,18 +81,19 @@ impl FactoryIndexing for BalancerV2WeightedPoolFactory {
         common_pool_state: BoxFuture<'static, common::PoolState>,
         _: &mut Web3CallBatch,
         _: BlockId,
-    ) -> BoxFuture<'static, Result<PoolKind>> {
+    ) -> BoxFuture<'static, Result<Self::PoolState>> {
         let pool_info = pool_info.clone();
         async move {
-            let tokens = common_pool_state
-                .await
+            let common = common_pool_state.await;
+            let tokens = common
                 .tokens
                 .into_iter()
                 .zip(&pool_info.weights)
                 .map(|((address, common), &weight)| (address, TokenState { common, weight }))
                 .collect();
+            let swap_fee = common.swap_fee;
 
-            Ok(PoolKind::Weighted(PoolState { tokens }))
+            Ok(PoolState { tokens, swap_fee })
         }
         .boxed()
     }
@@ -207,6 +210,7 @@ mod tests {
             },
         };
         let weights = [bfp!("0.8"), bfp!("0.2")];
+        let swap_fee = bfp!("0.003");
 
         let mock = Mock::new(42);
         let web3 = mock.web3();
@@ -227,7 +231,7 @@ mod tests {
         };
         let common_pool_state = common::PoolState {
             paused: false,
-            swap_fee: bfp!("0.003"),
+            swap_fee,
             tokens,
         };
 
@@ -252,11 +256,12 @@ mod tests {
             .zip(weights)
             .map(|((address, common), weight)| (address, TokenState { common, weight }))
             .collect();
-        assert!(matches!(
+        assert_eq!(
             pool_state,
-            PoolKind::Weighted(pool) if pool == PoolState {
+            PoolState {
                 tokens: weighted_tokens,
+                swap_fee,
             }
-        ));
+        );
     }
 }

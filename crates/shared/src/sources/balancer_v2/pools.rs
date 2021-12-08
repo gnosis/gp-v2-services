@@ -12,7 +12,7 @@ pub mod stable;
 pub mod weighted;
 pub mod weighted_2token;
 
-use super::{graph_api::PoolData, swap::fixed_point::Bfp};
+use super::graph_api::PoolData;
 use crate::Web3CallBatch;
 use anyhow::Result;
 use ethcontract::{BlockId, H256};
@@ -23,11 +23,6 @@ use futures::future::BoxFuture;
 pub struct Pool {
     /// The ID of the pool.
     pub id: H256,
-    /// The Balancer pool swap fees.
-    ///
-    /// Note that this is part of a Balancer `BasePool` and is shared across all
-    /// pool types.
-    pub swap_fee: Bfp,
     /// The pool-specific kind and state.
     pub kind: PoolKind,
 }
@@ -40,15 +35,21 @@ pub enum PoolKind {
 }
 
 /// A Balancer factory indexing implementation.
-#[mockall::automock(type PoolInfo = weighted::PoolInfo;)]
+#[mockall::automock(
+    type PoolInfo = weighted::PoolInfo;
+    type PoolState = weighted::PoolState;
+)]
 #[async_trait::async_trait]
 pub trait FactoryIndexing: Send + Sync + 'static {
-    /// The permanent pool info for this.
+    /// The permanent pool info for this factory.
     ///
     /// This contains all pool information that never changes and only needs to
     /// be retrieved once. This data will be passed in when fetching the current
     /// pool state via `fetch_pool`.
     type PoolInfo: PoolIndexing;
+
+    /// The current pool state for this factory.
+    type PoolState;
 
     /// Augments the specified common pool info for this factory.
     ///
@@ -78,7 +79,7 @@ pub trait FactoryIndexing: Send + Sync + 'static {
         common_pool_state: BoxFuture<'static, common::PoolState>,
         batch: &mut Web3CallBatch,
         block: BlockId,
-    ) -> BoxFuture<'static, Result<PoolKind>>;
+    ) -> BoxFuture<'static, Result<Self::PoolState>>;
 }
 
 /// Required information needed for indexing pools.
