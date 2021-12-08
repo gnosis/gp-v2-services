@@ -191,14 +191,18 @@ fn is_contract_error(err: &anyhow::Error) -> bool {
     )
 }
 
-/// An internal utility method for sharing the success value when fetching the
-/// common pool state.
+/// An internal utility method for sharing the success value for an
+/// `anyhow::Result`.
+///
+/// Typically, this is pretty trivial using `FutureExt::shared`. However, since
+/// `anyhow::Error: !Clone` we need to use a different approach.
 ///
 /// # Panics
 ///
 /// Polling the future with the shared success value will panic if the result
 /// future has not already resolved to a `Ok` value. This method is only ever
-/// meant to be used internally, so we can guarantee that these
+/// meant to be used internally, so we don't have to worry that these
+/// assumptions leak out of this module.
 fn share_common_pool_state(
     fut: impl Future<Output = Result<common::PoolState>>,
 ) -> (
@@ -229,6 +233,7 @@ fn share_common_pool_state(
 mod tests {
     use super::*;
     use crate::ethcontract_error;
+    use anyhow::bail;
 
     #[test]
     fn pool_fetcher_forwards_node_error() {
@@ -250,5 +255,37 @@ mod tests {
             .len(),
             1
         )
+    }
+
+    #[tokio::test]
+    async fn share_pool_state_future() {
+        let (pool_state, pool_state_ok) = share_common_pool_state(async { Ok(Default::default()) });
+        assert_eq!({ pool_state.await.unwrap() }, pool_state_ok.await);
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn shared_pool_state_future_panics_if_pending() {
+        let (_pool_state, pool_state_ok) = share_common_pool_state(async {
+            futures::pending!();
+            Ok(Default::default())
+        });
+        pool_state_ok.await;
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn share_pool_state_future_if_dropped() {
+        let (pool_state, pool_state_ok) = share_common_pool_state(async { Ok(Default::default()) });
+        drop(pool_state);
+        pool_state_ok.await;
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn share_pool_state_future_if_errored() {
+        let (pool_state, pool_state_ok) = share_common_pool_state(async { bail!("error") });
+        let _ = pool_state.await;
+        pool_state_ok.await;
     }
 }
