@@ -3,6 +3,7 @@ use anyhow::Result;
 use primitive_types::H160;
 use serde::Deserialize;
 use std::{convert::Infallible, sync::Arc};
+use warp::filters::BoxedFilter;
 use warp::{hyper::StatusCode, reply::with_status, Filter, Rejection};
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -17,31 +18,31 @@ fn request() -> impl Filter<Extract = (H160, Query), Error = Rejection> + Clone 
         .and(warp::query::<Query>())
 }
 
-pub fn get_user_orders(
-    orderbook: Arc<Orderbook>,
-) -> impl Filter<Extract = (super::ApiReply,), Error = Rejection> + Clone {
-    request().and_then(move |owner: H160, query: Query| {
-        let orderbook = orderbook.clone();
-        async move {
-            const DEFAULT_OFFSET: u64 = 0;
-            const DEFAULT_LIMIT: u64 = 10;
-            const MIN_LIMIT: u64 = 1;
-            const MAX_LIMIT: u64 = 1000;
-            let offset = query.offset.unwrap_or(DEFAULT_OFFSET);
-            let limit = query.limit.unwrap_or(DEFAULT_LIMIT);
-            if !(MIN_LIMIT..=MAX_LIMIT).contains(&limit) {
-                return Ok(with_status(
-                    super::error(
-                        "LIMIT_OUT_OF_BOUNDS",
-                        &format!("The pagination limit is [{},{}].", MIN_LIMIT, MAX_LIMIT),
-                    ),
-                    StatusCode::BAD_REQUEST,
-                ));
+pub fn get_user_orders(orderbook: Arc<Orderbook>) -> BoxedFilter<(super::ApiReply,)> {
+    request()
+        .and_then(move |owner: H160, query: Query| {
+            let orderbook = orderbook.clone();
+            async move {
+                const DEFAULT_OFFSET: u64 = 0;
+                const DEFAULT_LIMIT: u64 = 10;
+                const MIN_LIMIT: u64 = 1;
+                const MAX_LIMIT: u64 = 1000;
+                let offset = query.offset.unwrap_or(DEFAULT_OFFSET);
+                let limit = query.limit.unwrap_or(DEFAULT_LIMIT);
+                if !(MIN_LIMIT..=MAX_LIMIT).contains(&limit) {
+                    return Ok(with_status(
+                        super::error(
+                            "LIMIT_OUT_OF_BOUNDS",
+                            &format!("The pagination limit is [{},{}].", MIN_LIMIT, MAX_LIMIT),
+                        ),
+                        StatusCode::BAD_REQUEST,
+                    ));
+                }
+                let result = orderbook.get_user_orders(&owner, offset, limit).await;
+                Result::<_, Infallible>::Ok(convert_json_response(result))
             }
-            let result = orderbook.get_user_orders(&owner, offset, limit).await;
-            Result::<_, Infallible>::Ok(convert_json_response(result))
-        }
-    })
+        })
+        .boxed()
 }
 
 #[cfg(test)]

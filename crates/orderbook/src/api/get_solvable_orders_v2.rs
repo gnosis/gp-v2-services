@@ -1,27 +1,28 @@
 use crate::{api::convert_json_response, orderbook::Orderbook};
 use anyhow::Result;
 use std::{convert::Infallible, sync::Arc};
+use warp::filters::BoxedFilter;
 use warp::{Filter, Rejection};
 
 fn get_solvable_orders_request() -> impl Filter<Extract = (), Error = Rejection> + Clone {
     warp::path!("solvable_orders").and(warp::get())
 }
 
-pub fn get_solvable_orders(
-    orderbook: Arc<Orderbook>,
-) -> impl Filter<Extract = (super::ApiReply,), Error = Rejection> + Clone {
-    get_solvable_orders_request().and_then(move || {
-        let orderbook = orderbook.clone();
-        async move {
-            let result = orderbook.get_solvable_orders().await;
-            Result::<_, Infallible>::Ok(convert_json_response(result.map(|orders| {
-                model::SolvableOrders {
-                    orders: orders.orders,
-                    latest_settlement_block: orders.latest_settlement_block,
-                }
-            })))
-        }
-    })
+pub fn get_solvable_orders(orderbook: Arc<Orderbook>) -> BoxedFilter<(super::ApiReply,)> {
+    get_solvable_orders_request()
+        .and_then(move || {
+            let orderbook = orderbook.clone();
+            async move {
+                let result = orderbook.get_solvable_orders().await;
+                Result::<_, Infallible>::Ok(convert_json_response(result.map(|orders| {
+                    model::SolvableOrders {
+                        orders: orders.orders,
+                        latest_settlement_block: orders.latest_settlement_block,
+                    }
+                })))
+            }
+        })
+        .boxed()
 }
 
 #[cfg(test)]

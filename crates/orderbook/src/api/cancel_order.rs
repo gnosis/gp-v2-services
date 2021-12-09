@@ -8,6 +8,7 @@ use model::{
 };
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, sync::Arc};
+use warp::filters::BoxedFilter;
 use warp::{hyper::StatusCode, Filter, Rejection};
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
@@ -71,16 +72,16 @@ pub fn cancel_order_response(result: Result<OrderCancellationResult>) -> super::
     warp::reply::with_status(body, status_code)
 }
 
-pub fn cancel_order(
-    orderbook: Arc<Orderbook>,
-) -> impl Filter<Extract = (super::ApiReply,), Error = Rejection> + Clone {
-    cancel_order_request().and_then(move |order| {
-        let orderbook = orderbook.clone();
-        async move {
-            let result = orderbook.cancel_order(order).await.context("cancel_order");
-            Result::<_, Infallible>::Ok(cancel_order_response(result))
-        }
-    })
+pub fn cancel_order(orderbook: Arc<Orderbook>) -> BoxedFilter<(super::ApiReply,)> {
+    cancel_order_request()
+        .and_then(move |order| {
+            let orderbook = orderbook.clone();
+            async move {
+                let result = orderbook.cancel_order(order).await.context("cancel_order");
+                Result::<_, Infallible>::Ok(cancel_order_response(result))
+            }
+        })
+        .boxed()
 }
 
 #[cfg(test)]

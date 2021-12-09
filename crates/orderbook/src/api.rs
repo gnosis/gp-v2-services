@@ -10,6 +10,7 @@ mod get_solvable_orders;
 mod get_solvable_orders_v2;
 mod get_trades;
 mod get_user_orders;
+mod metrics;
 pub mod order_validation;
 pub mod post_quote;
 
@@ -18,7 +19,7 @@ use crate::{
 };
 use anyhow::{Error as anyhowError, Result};
 use serde::{de::DeserializeOwned, Serialize};
-use shared::{metrics::get_metric_storage_registry, price_estimation::PriceEstimationError};
+use shared::price_estimation::PriceEstimationError;
 use std::fmt::Debug;
 use std::{convert::Infallible, sync::Arc};
 use warp::{
@@ -32,48 +33,110 @@ pub fn handle_all_routes(
     orderbook: Arc<Orderbook>,
     quoter: Arc<OrderQuoter>,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
-    let create_order = create_order::create_order(orderbook.clone()).boxed();
-    let get_orders = get_orders::get_orders(orderbook.clone()).boxed();
-    let fee_info = get_fee_info::get_fee_info(quoter.fee_calculator.clone()).boxed();
-    let get_order = get_order_by_uid::get_order_by_uid(orderbook.clone()).boxed();
-    let get_solvable_orders = get_solvable_orders::get_solvable_orders(orderbook.clone()).boxed();
-    let get_solvable_orders_v2 =
-        get_solvable_orders_v2::get_solvable_orders(orderbook.clone()).boxed();
-    let get_trades = get_trades::get_trades(database).boxed();
-    let cancel_order = cancel_order::cancel_order(orderbook.clone()).boxed();
-    let get_amount_estimate =
-        get_markets::get_amount_estimate(quoter.price_estimator.clone()).boxed();
-    let get_fee_and_quote_sell = get_fee_and_quote::get_fee_and_quote_sell(quoter.clone()).boxed();
-    let get_fee_and_quote_buy = get_fee_and_quote::get_fee_and_quote_buy(quoter.clone()).boxed();
-    let get_user_orders = get_user_orders::get_user_orders(orderbook.clone()).boxed();
-    let get_orders_by_tx = get_orders_by_tx::get_orders_by_tx(orderbook).boxed();
-    let post_quote = post_quote::post_quote(quoter).boxed();
+    // api/v1
+    let create_order = (
+        "/api/v1/orders",
+        create_order::create_order(orderbook.clone()),
+    );
+    let get_orders = ("/api/v1/orders", get_orders::get_orders(orderbook.clone()));
+    let get_fee_info = (
+        "/api/v1/fee",
+        get_fee_info::get_fee_info(quoter.fee_calculator.clone()),
+    );
+    let get_order_by_uid = (
+        "/api/v1/orders/*",
+        get_order_by_uid::get_order_by_uid(orderbook.clone()),
+    );
+    let get_solvable_orders = (
+        "/api/v1/solvable_orders",
+        get_solvable_orders::get_solvable_orders(orderbook.clone()),
+    );
+    let get_trades = ("/api/v1/trades", get_trades::get_trades(database));
+    let cancel_order = (
+        "/api/v1/orders/*",
+        cancel_order::cancel_order(orderbook.clone()),
+    );
+    let get_markets = (
+        "/api/v1/markets/*/*/*",
+        get_markets::get_amount_estimate(quoter.price_estimator.clone()),
+    );
+    let get_fee_and_quote_sell = (
+        "/api/v1/feeAndQuote/sell",
+        get_fee_and_quote::get_fee_and_quote_sell(quoter.clone()),
+    );
+    let get_fee_and_quote_buy = (
+        "/api/v1/feeAndQuote/buy",
+        get_fee_and_quote::get_fee_and_quote_buy(quoter.clone()),
+    );
+    let get_user_orders = (
+        "/api/v1/account/*/orders",
+        get_user_orders::get_user_orders(orderbook.clone()),
+    );
+    let get_orders_by_tx = (
+        "/api/v1/transactions/*/orders",
+        get_orders_by_tx::get_orders_by_tx(orderbook.clone()),
+    );
+    let post_quote = ("/api/v1/quote", post_quote::post_quote(quoter));
+
+    // api/v2
+    let get_solvable_orders_v2 = (
+        "/api/v2/solvable_orders",
+        get_solvable_orders_v2::get_solvable_orders(orderbook),
+    );
+
     let cors = warp::cors()
         .allow_any_origin()
         .allow_methods(vec!["GET", "POST", "DELETE", "OPTIONS", "PUT", "PATCH"])
         .allow_headers(vec!["Origin", "Content-Type", "X-Auth-Token", "X-AppId"]);
-    let routes_with_labels = (warp::path!("api" / "v1" / ..)
-        .and(create_order.with(handle_metrics("create_order"))))
-    .or(warp::path!("api" / "v1" / ..).and(get_orders.with(handle_metrics("get_orders"))))
-    .or(warp::path!("api" / "v1" / ..).and(fee_info.with(handle_metrics("fee_info"))))
-    .or(warp::path!("api" / "v1" / ..).and(get_order.with(handle_metrics("get_order"))))
-    .or(warp::path!("api" / "v1" / ..)
-        .and(get_solvable_orders.with(handle_metrics("get_solvable_orders"))))
-    .or(warp::path!("api" / "v2" / ..)
-        .and(get_solvable_orders_v2.with(handle_metrics("get_solvable_orders"))))
-    .or(warp::path!("api" / "v1" / ..).and(get_trades.with(handle_metrics("get_trades"))))
-    .or(warp::path!("api" / "v1" / ..).and(cancel_order.with(handle_metrics("cancel_order"))))
-    .or(warp::path!("api" / "v1" / ..)
-        .and(get_amount_estimate.with(handle_metrics("get_amount_estimate"))))
-    .or(warp::path!("api" / "v1" / ..)
-        .and(get_fee_and_quote_sell.with(handle_metrics("get_fee_and_quote_sell"))))
-    .or(warp::path!("api" / "v1" / ..)
-        .and(get_fee_and_quote_buy.with(handle_metrics("get_fee_and_quote_buy"))))
-    .or(warp::path!("api" / "v1" / ..).and(get_user_orders.with(handle_metrics("get_user_orders"))))
-    .or(warp::path!("api" / "v1" / ..).and(get_orders_by_tx.with(handle_metrics("get_user_by_tx"))))
-    .or(warp::path!("api" / "v1" / ..).and(post_quote.with(handle_metrics("post_quote"))));
 
-    routes_with_labels.recover(handle_rejection).with(cors)
+    let v1 = warp::path!("api" / "v1" / ..).and(
+        (create_order.1)
+            .or(get_orders.1)
+            .or(get_fee_info.1)
+            .or(get_order_by_uid.1)
+            .or(get_solvable_orders.1)
+            .or(get_trades.1)
+            .or(cancel_order.1)
+            .or(get_markets.1)
+            .or(get_fee_and_quote_sell.1)
+            .or(get_fee_and_quote_buy.1)
+            .or(get_user_orders.1)
+            .or(get_orders_by_tx.1)
+            .or(post_quote.1),
+    );
+
+    let v2 = warp::path!("api" / "v1" / ..).and(get_solvable_orders_v2.1);
+
+    let routes = v1.or(v2);
+
+    routes
+        .recover(handle_rejection)
+        .with(cors)
+        .with(metrics::handle_metrics([
+            create_order.0,
+            get_orders.0,
+            get_fee_info.0,
+            get_order_by_uid.0,
+            get_solvable_orders.0,
+            get_trades.0,
+            cancel_order.0,
+            get_markets.0,
+            get_fee_and_quote_sell.0,
+            get_fee_and_quote_buy.0,
+            get_user_orders.0,
+            get_orders_by_tx.0,
+            post_quote.0,
+            get_solvable_orders_v2.0,
+        ]))
+        .with(warp::log::custom(|info| {
+            tracing::info!(
+                "{} \"{}\" {} {:?}",
+                info.method(),
+                info.path(),
+                info.status().as_str(),
+                info.elapsed(),
+            );
+        }))
 }
 
 pub type ApiReply = warp::reply::WithStatus<warp::reply::Json>;
@@ -81,31 +144,6 @@ pub type ApiReply = warp::reply::WithStatus<warp::reply::Json>;
 // We turn Rejection into Reply to workaround warp not setting CORS headers on rejections.
 async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> {
     Ok(err.default_response())
-}
-
-fn handle_metrics(endpoint: impl Into<String>) -> warp::log::Log<impl Fn(warp::log::Info) + Clone> {
-    let metrics = ApiMetrics::instance(get_metric_storage_registry(), endpoint.into()).unwrap();
-
-    warp::log::custom(move |info: warp::log::Info| {
-        metrics
-            .requests_complete
-            .with_label_values(&[info.status().as_str()])
-            .inc();
-        metrics
-            .requests_duration_seconds
-            .observe(info.elapsed().as_secs_f64());
-    })
-}
-
-#[derive(prometheus_metric_storage::MetricStorage, Clone, Debug)]
-#[metric(subsystem = "api", labels("endpoint"))]
-struct ApiMetrics {
-    /// Number of completed API requests.
-    #[metric(labels("status_code"))]
-    requests_complete: prometheus::CounterVec,
-
-    /// Execution time for each API request.
-    requests_duration_seconds: prometheus::Histogram,
 }
 
 #[derive(Serialize)]

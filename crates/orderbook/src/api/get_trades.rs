@@ -7,6 +7,7 @@ use model::order::OrderUid;
 use primitive_types::H160;
 use serde::Deserialize;
 use std::{convert::Infallible, sync::Arc};
+use warp::filters::BoxedFilter;
 use warp::{hyper::StatusCode, Filter, Rejection};
 
 #[derive(Deserialize)]
@@ -47,24 +48,24 @@ fn get_trades_request(
         .map(|query: Query| query.validate())
 }
 
-pub fn get_trades(
-    db: Arc<dyn TradeRetrieving>,
-) -> impl Filter<Extract = (super::ApiReply,), Error = Rejection> + Clone {
-    get_trades_request().and_then(move |request_result| {
-        let database = db.clone();
-        async move {
-            match request_result {
-                Ok(trade_filter) => {
-                    let result = database.trades(&trade_filter).await.context("get_trades");
-                    Result::<_, Infallible>::Ok(convert_json_response(result))
-                }
-                Err(TradeFilterError::InvalidFilter(msg)) => {
-                    let err = super::error("InvalidTradeFilter", msg);
-                    Ok(warp::reply::with_status(err, StatusCode::BAD_REQUEST))
+pub fn get_trades(db: Arc<dyn TradeRetrieving>) -> BoxedFilter<(super::ApiReply,)> {
+    get_trades_request()
+        .and_then(move |request_result| {
+            let database = db.clone();
+            async move {
+                match request_result {
+                    Ok(trade_filter) => {
+                        let result = database.trades(&trade_filter).await.context("get_trades");
+                        Result::<_, Infallible>::Ok(convert_json_response(result))
+                    }
+                    Err(TradeFilterError::InvalidFilter(msg)) => {
+                        let err = super::error("InvalidTradeFilter", msg);
+                        Ok(warp::reply::with_status(err, StatusCode::BAD_REQUEST))
+                    }
                 }
             }
-        }
-    })
+        })
+        .boxed()
 }
 
 #[cfg(test)]

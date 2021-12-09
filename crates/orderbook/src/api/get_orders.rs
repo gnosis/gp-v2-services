@@ -7,6 +7,7 @@ use primitive_types::H160;
 use serde::Deserialize;
 use shared::time::now_in_epoch_seconds;
 use std::{convert::Infallible, sync::Arc};
+use warp::filters::BoxedFilter;
 use warp::{hyper::StatusCode, Filter, Rejection};
 
 // The default values create a filter that only includes valid orders.
@@ -58,26 +59,26 @@ pub fn get_orders_request(
         .map(|query: Query| query.order_filter())
 }
 
-pub fn get_orders(
-    orderbook: Arc<Orderbook>,
-) -> impl Filter<Extract = (super::ApiReply,), Error = Rejection> + Clone {
-    get_orders_request().and_then(move |order_filter| {
-        let orderbook = orderbook.clone();
-        async move {
-            let order_filter = match order_filter {
-                Ok(order_filter) => order_filter,
-                Err(err) => {
-                    let err = super::error("InvalidOrderFilter", err);
-                    return Ok(warp::reply::with_status(err, StatusCode::BAD_REQUEST));
-                }
-            };
-            let result = orderbook
-                .get_orders(&order_filter)
-                .await
-                .context("get_orders");
-            Result::<_, Infallible>::Ok(convert_json_response(result))
-        }
-    })
+pub fn get_orders(orderbook: Arc<Orderbook>) -> BoxedFilter<(super::ApiReply,)> {
+    get_orders_request()
+        .and_then(move |order_filter| {
+            let orderbook = orderbook.clone();
+            async move {
+                let order_filter = match order_filter {
+                    Ok(order_filter) => order_filter,
+                    Err(err) => {
+                        let err = super::error("InvalidOrderFilter", err);
+                        return Ok(warp::reply::with_status(err, StatusCode::BAD_REQUEST));
+                    }
+                };
+                let result = orderbook
+                    .get_orders(&order_filter)
+                    .await
+                    .context("get_orders");
+                Result::<_, Infallible>::Ok(convert_json_response(result))
+            }
+        })
+        .boxed()
 }
 
 #[cfg(test)]

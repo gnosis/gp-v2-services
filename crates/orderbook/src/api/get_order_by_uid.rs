@@ -2,6 +2,7 @@ use crate::{api::IntoWarpReply, orderbook::Orderbook};
 use anyhow::Result;
 use model::order::{Order, OrderUid};
 use std::{convert::Infallible, sync::Arc};
+use warp::filters::BoxedFilter;
 use warp::{hyper::StatusCode, reply, Filter, Rejection};
 
 pub fn get_order_by_uid_request() -> impl Filter<Extract = (OrderUid,), Error = Rejection> + Clone {
@@ -24,16 +25,16 @@ pub fn get_order_by_uid_response(result: Result<Option<Order>>) -> super::ApiRep
     }
 }
 
-pub fn get_order_by_uid(
-    orderbook: Arc<Orderbook>,
-) -> impl Filter<Extract = (super::ApiReply,), Error = Rejection> + Clone {
-    get_order_by_uid_request().and_then(move |uid| {
-        let orderbook = orderbook.clone();
-        async move {
-            let result = orderbook.get_order(&uid).await;
-            Result::<_, Infallible>::Ok(get_order_by_uid_response(result))
-        }
-    })
+pub fn get_order_by_uid(orderbook: Arc<Orderbook>) -> BoxedFilter<(super::ApiReply,)> {
+    get_order_by_uid_request()
+        .and_then(move |uid| {
+            let orderbook = orderbook.clone();
+            async move {
+                let result = orderbook.get_order(&uid).await;
+                Result::<_, Infallible>::Ok(get_order_by_uid_response(result))
+            }
+        })
+        .boxed()
 }
 
 #[cfg(test)]

@@ -18,6 +18,7 @@ use model::{
 use serde::{Deserialize, Serialize};
 use shared::price_estimation::{self, PriceEstimating, PriceEstimationError};
 use std::{convert::Infallible, sync::Arc};
+use warp::filters::BoxedFilter;
 use warp::{hyper::StatusCode, Filter, Rejection};
 
 /// The order parameters to quote a price and fee for.
@@ -366,19 +367,19 @@ fn post_quote_request() -> impl Filter<Extract = (OrderQuoteRequest,), Error = R
         .and(api::extract_payload())
 }
 
-pub fn post_quote(
-    quoter: Arc<OrderQuoter>,
-) -> impl Filter<Extract = (super::ApiReply,), Error = Rejection> + Clone {
-    post_quote_request().and_then(move |request: OrderQuoteRequest| {
-        let quoter = quoter.clone();
-        async move {
-            let result = quoter.calculate_quote(&request).await;
-            if let Err(err) = &result {
-                tracing::warn!(?err, ?request, "post_quote error");
+pub fn post_quote(quoter: Arc<OrderQuoter>) -> BoxedFilter<(super::ApiReply,)> {
+    post_quote_request()
+        .and_then(move |request: OrderQuoteRequest| {
+            let quoter = quoter.clone();
+            async move {
+                let result = quoter.calculate_quote(&request).await;
+                if let Err(err) = &result {
+                    tracing::warn!(?err, ?request, "post_quote error");
+                }
+                Result::<_, Infallible>::Ok(convert_json_response(result))
             }
-            Result::<_, Infallible>::Ok(convert_json_response(result))
-        }
-    })
+        })
+        .boxed()
 }
 
 #[cfg(test)]

@@ -7,6 +7,7 @@ use primitive_types::{H160, U256};
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::sync::Arc;
+use warp::filters::BoxedFilter;
 use warp::{Filter, Rejection};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -33,31 +34,31 @@ fn get_fee_info_request() -> impl Filter<Extract = (Query,), Error = Rejection> 
         .and(warp::query::<Query>())
 }
 
-pub fn get_fee_info(
-    fee_calculator: Arc<dyn MinFeeCalculating>,
-) -> impl Filter<Extract = (super::ApiReply,), Error = Rejection> + Clone {
-    get_fee_info_request().and_then(move |query: Query| {
-        let fee_calculator = fee_calculator.clone();
-        async move {
-            let result = fee_calculator
-                .compute_subsidized_min_fee(
-                    FeeData {
-                        sell_token: query.sell_token,
-                        buy_token: query.buy_token,
-                        amount: query.amount,
-                        kind: query.kind,
+pub fn get_fee_info(fee_calculator: Arc<dyn MinFeeCalculating>) -> BoxedFilter<(super::ApiReply,)> {
+    get_fee_info_request()
+        .and_then(move |query: Query| {
+            let fee_calculator = fee_calculator.clone();
+            async move {
+                let result = fee_calculator
+                    .compute_subsidized_min_fee(
+                        FeeData {
+                            sell_token: query.sell_token,
+                            buy_token: query.buy_token,
+                            amount: query.amount,
+                            kind: query.kind,
+                        },
+                        Default::default(),
+                    )
+                    .await;
+                Result::<_, Infallible>::Ok(convert_json_response(result.map(
+                    |(amount, expiration_date)| FeeInfo {
+                        expiration_date,
+                        amount,
                     },
-                    Default::default(),
-                )
-                .await;
-            Result::<_, Infallible>::Ok(convert_json_response(result.map(
-                |(amount, expiration_date)| FeeInfo {
-                    expiration_date,
-                    amount,
-                },
-            )))
-        }
-    })
+                )))
+            }
+        })
+        .boxed()
 }
 
 #[cfg(test)]

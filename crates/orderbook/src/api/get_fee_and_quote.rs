@@ -8,6 +8,7 @@ use ethcontract::{H160, U256};
 use model::u256_decimal;
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, sync::Arc};
+use warp::filters::BoxedFilter;
 use warp::{Filter, Rejection};
 
 #[derive(Debug, Serialize)]
@@ -115,36 +116,36 @@ fn buy_request() -> impl Filter<Extract = (BuyQuery,), Error = Rejection> + Clon
         .and(warp::query::<BuyQuery>())
 }
 
-pub fn get_fee_and_quote_sell(
-    quoter: Arc<OrderQuoter>,
-) -> impl Filter<Extract = (super::ApiReply,), Error = Rejection> + Clone {
-    sell_request().and_then(move |query: SellQuery| {
-        let quoter = quoter.clone();
-        async move {
-            Result::<_, Infallible>::Ok(convert_json_response(
-                quoter
-                    .calculate_quote(&query.into())
-                    .await
-                    .map(SellResponse::from),
-            ))
-        }
-    })
+pub fn get_fee_and_quote_sell(quoter: Arc<OrderQuoter>) -> BoxedFilter<(super::ApiReply,)> {
+    sell_request()
+        .and_then(move |query: SellQuery| {
+            let quoter = quoter.clone();
+            async move {
+                Result::<_, Infallible>::Ok(convert_json_response(
+                    quoter
+                        .calculate_quote(&query.into())
+                        .await
+                        .map(SellResponse::from),
+                ))
+            }
+        })
+        .boxed()
 }
 
-pub fn get_fee_and_quote_buy(
-    quoter: Arc<OrderQuoter>,
-) -> impl Filter<Extract = (super::ApiReply,), Error = Rejection> + Clone {
-    buy_request().and_then(move |query: BuyQuery| {
-        let quoter = quoter.clone();
-        async move {
-            Result::<_, Infallible>::Ok(convert_json_response(
-                quoter
-                    .calculate_quote(&query.into())
-                    .await
-                    .map(BuyResponse::from),
-            ))
-        }
-    })
+pub fn get_fee_and_quote_buy(quoter: Arc<OrderQuoter>) -> BoxedFilter<(super::ApiReply,)> {
+    buy_request()
+        .and_then(move |query: BuyQuery| {
+            let quoter = quoter.clone();
+            async move {
+                Result::<_, Infallible>::Ok(convert_json_response(
+                    quoter
+                        .calculate_quote(&query.into())
+                        .await
+                        .map(BuyResponse::from),
+                ))
+            }
+        })
+        .boxed()
 }
 
 #[cfg(test)]
