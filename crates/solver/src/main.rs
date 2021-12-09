@@ -35,8 +35,8 @@ use solver::{
     metrics::Metrics,
     orderbook::OrderBookApi,
     settlement_submission::{
-        eden_api::EdenApi, flashbots_api::FlashbotsApi, SolutionSubmitter, StrategyArgs,
-        TransactionStrategy,
+        custom_nodes_api::CustomNodesApi, eden_api::EdenApi, flashbots_api::FlashbotsApi,
+        SolutionSubmitter, StrategyArgs, TransactionStrategy,
     },
     solver::SolverType,
 };
@@ -529,7 +529,12 @@ async fn main() {
         gas_price_cap: args.gas_price_cap,
         transaction_strategy: match args.transaction_strategy {
             TransactionStrategyArg::PublicMempool => {
-                TransactionStrategy::CustomNodes(vec![web3.clone()])
+                TransactionStrategy::CustomNodes(StrategyArgs {
+                    submit_api: Box::new(CustomNodesApi::new(client.clone(), vec![web3.clone()])),
+                    max_confirm_time: args.max_flashbots_submission_seconds, //todo ds
+                    retry_interval: args.flashbots_submission_retry_interval_seconds, //todo ds
+                    additional_tip: 0.0,
+                })
             }
             TransactionStrategyArg::Eden => TransactionStrategy::Eden(StrategyArgs {
                 submit_api: Box::new(EdenApi::new(client.clone())),
@@ -567,7 +572,12 @@ async fn main() {
                         "network id of custom node doesn't match main node"
                     );
                 }
-                TransactionStrategy::CustomNodes(nodes)
+                TransactionStrategy::CustomNodes(StrategyArgs {
+                    submit_api: Box::new(CustomNodesApi::new(client.clone(), nodes)),
+                    max_confirm_time: args.max_flashbots_submission_seconds, //todo ds
+                    retry_interval: args.flashbots_submission_retry_interval_seconds, //todo ds
+                    additional_tip: 0.0,
+                })
             }
             TransactionStrategyArg::DryRun => TransactionStrategy::DryRun,
         },

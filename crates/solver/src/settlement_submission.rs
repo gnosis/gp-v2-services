@@ -1,3 +1,4 @@
+pub mod custom_nodes_api;
 mod dry_run;
 pub mod eden_api;
 pub mod flashbots_api;
@@ -20,7 +21,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use submitter::{Submitter, SubmitterGasEstimator, SubmitterParams, TransactionSubmitting};
+use submitter::{Submitter, SubmitterGasPriceEstimator, SubmitterParams, TransactionSubmitting};
 use web3::types::TransactionReceipt;
 
 const ESTIMATE_GAS_LIMIT_FACTOR: f64 = 1.2;
@@ -45,7 +46,7 @@ pub struct StrategyArgs {
 pub enum TransactionStrategy {
     Eden(StrategyArgs),
     Flashbots(StrategyArgs),
-    CustomNodes(Vec<Web3>),
+    CustomNodes(StrategyArgs),
     DryRun,
 }
 
@@ -61,28 +62,35 @@ impl SolutionSubmitter {
         gas_estimate: U256,
         account: Account,
     ) -> Result<TransactionReceipt, SubmissionError> {
+        //todo ds reduce duplicated code
         match &self.transaction_strategy {
-            TransactionStrategy::CustomNodes(nodes) => {
-                rpc::submit(
-                    nodes,
-                    account,
-                    &self.contract,
-                    self.gas_price_estimator.as_ref(),
-                    self.target_confirm_time,
-                    self.gas_price_cap,
-                    settlement,
-                    gas_estimate,
-                )
-                .await
-            }
-            TransactionStrategy::Eden(args) => {
-                let eden_gas_price_estimator = SubmitterGasEstimator {
+            TransactionStrategy::CustomNodes(args) => {
+                let gas_price_estimator = SubmitterGasPriceEstimator {
                     inner: self.gas_price_estimator.as_ref(),
                     additional_tip: Some(args.additional_tip),
                     gas_price_cap: self.gas_price_cap,
                 };
                 let submitter = Submitter::new(
-                    &self.web3,
+                    &self.contract,
+                    &account,
+                    args.submit_api.as_ref(),
+                    &gas_price_estimator,
+                )?;
+                let params = SubmitterParams {
+                    target_confirm_time: self.target_confirm_time,
+                    gas_estimate,
+                    deadline: Some(Instant::now() + args.max_confirm_time),
+                    retry_interval: args.retry_interval,
+                };
+                submitter.submit(settlement, params).await
+            }
+            TransactionStrategy::Eden(args) => {
+                let eden_gas_price_estimator = SubmitterGasPriceEstimator {
+                    inner: self.gas_price_estimator.as_ref(),
+                    additional_tip: Some(args.additional_tip),
+                    gas_price_cap: self.gas_price_cap,
+                };
+                let submitter = Submitter::new(
                     &self.contract,
                     &account,
                     args.submit_api.as_ref(),
@@ -97,13 +105,12 @@ impl SolutionSubmitter {
                 submitter.submit(settlement, params).await
             }
             TransactionStrategy::Flashbots(args) => {
-                let flashbots_gas_price_estimator = SubmitterGasEstimator {
+                let flashbots_gas_price_estimator = SubmitterGasPriceEstimator {
                     inner: self.gas_price_estimator.as_ref(),
                     additional_tip: Some(args.additional_tip),
                     gas_price_cap: self.gas_price_cap,
                 };
                 let submitter = Submitter::new(
-                    &self.web3,
                     &self.contract,
                     &account,
                     args.submit_api.as_ref(),

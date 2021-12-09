@@ -29,7 +29,7 @@ use web3::types::TransactionReceipt;
 #[derive(Clone, Default)]
 pub struct SubmitterParams {
     /// Desired duration to include the transaction in a block
-    pub target_confirm_time: Duration, //todo change to blocks in the following PR
+    pub target_confirm_time: Duration, //todo ds change to blocks in the following PR
     /// Estimated gas consumption of a transaction
     pub gas_estimate: U256,
     /// Maximum duration of a single run loop
@@ -50,7 +50,7 @@ pub trait TransactionSubmitting {
 }
 
 /// Gas price estimator specialized for sending transactions to the network
-pub struct SubmitterGasEstimator<'a> {
+pub struct SubmitterGasPriceEstimator<'a> {
     pub inner: &'a dyn GasPriceEstimating,
     /// Boost estimated gas price miner tip in order to increase the chances of a transaction being mined
     pub additional_tip: Option<f64>,
@@ -59,7 +59,7 @@ pub struct SubmitterGasEstimator<'a> {
 }
 
 #[async_trait::async_trait]
-impl GasPriceEstimating for SubmitterGasEstimator<'_> {
+impl GasPriceEstimating for SubmitterGasPriceEstimator<'_> {
     async fn estimate_with_limits(
         &self,
         gas_limit: f64,
@@ -84,20 +84,18 @@ impl GasPriceEstimating for SubmitterGasEstimator<'_> {
 }
 
 pub struct Submitter<'a> {
-    web3: &'a Web3,
     contract: &'a GPv2Settlement,
     account: &'a Account,
     submit_api: &'a dyn TransactionSubmitting,
-    gas_price_estimator: &'a SubmitterGasEstimator<'a>,
+    gas_price_estimator: &'a SubmitterGasPriceEstimator<'a>,
 }
 
 impl<'a> Submitter<'a> {
     pub fn new(
-        web3: &'a Web3,
         contract: &'a GPv2Settlement,
         account: &'a Account,
         submit_api: &'a dyn TransactionSubmitting,
-        gas_price_estimator: &'a SubmitterGasEstimator<'a>,
+        gas_price_estimator: &'a SubmitterGasPriceEstimator<'a>,
     ) -> Result<Self> {
         ensure!(
             matches!(account, Account::Offline(..)),
@@ -105,7 +103,6 @@ impl<'a> Submitter<'a> {
         );
 
         Ok(Self {
-            web3,
             contract,
             account,
             submit_api,
@@ -182,7 +179,10 @@ impl<'a> Submitter<'a> {
             );
 
             loop {
-                if let Some(receipt) = find_mined_transaction(self.web3, &transactions).await {
+                if let Some(receipt) =
+                    find_mined_transaction(&self.contract.raw_instance().web3(), &transactions)
+                        .await
+                {
                     tracing::info!("found mined transaction {}", receipt.transaction_hash);
                     return Ok(receipt);
                 }
@@ -200,7 +200,9 @@ impl<'a> Submitter<'a> {
     }
 
     async fn nonce(&self) -> Result<U256> {
-        self.web3
+        self.contract
+            .raw_instance()
+            .web3()
             .eth()
             .transaction_count(self.account.address(), None)
             .await
@@ -405,7 +407,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let gas_price_estimator = SubmitterGasEstimator {
+        let gas_price_estimator = SubmitterGasPriceEstimator {
             inner: &gas_price_estimator,
             additional_tip: Some(3.0),
             gas_price_cap: 100e9,
@@ -426,14 +428,8 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        let submitter = Submitter::new(
-            &web3,
-            &contract,
-            &account,
-            &flashbots_api,
-            &gas_price_estimator,
-        )
-        .unwrap();
+        let submitter =
+            Submitter::new(&contract, &account, &flashbots_api, &gas_price_estimator).unwrap();
 
         let params = SubmitterParams {
             target_confirm_time: Duration::from_secs(0),
