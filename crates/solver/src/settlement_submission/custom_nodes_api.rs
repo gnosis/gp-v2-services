@@ -12,17 +12,17 @@ where
 {
     serde_json::from_str::<Output>(body)
         .with_context(|| {
-            tracing::info!("flashbot response: {}", body);
-            anyhow!("invalid flashbots response")
+            tracing::info!("invalid rpc response: {}", body);
+            anyhow!("invalid rpc response")
         })
         .and_then(|output| match output {
             Output::Success(body) => serde_json::from_value::<T>(body.result).with_context(|| {
                 format!(
-                    "flashbots failed conversion to expected {}",
+                    "failed conversion to expected type {}",
                     std::any::type_name::<T>()
                 )
             }),
-            Output::Failure(body) => bail!("flashbots rpc error: {}", body.error),
+            Output::Failure(body) => bail!("rpc error: {}", body.error),
         })
 }
 
