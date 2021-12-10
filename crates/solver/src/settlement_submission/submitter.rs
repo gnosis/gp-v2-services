@@ -297,9 +297,8 @@ impl<'a> Submitter<'a> {
                 };
 
             tracing::info!(
-                "creating transaction with hash {:?}, tip to miner {:.3e}, gas price {:?}, gas estimate {}",
+                "creating transaction with hash {:?}, gas price {:?}, gas estimate {}",
                 hash,
-                tx_gas_cost(&gas_price, params).to_f64_lossy(),
                 gas_price,
                 params.gas_estimate,
             );
@@ -338,10 +337,6 @@ impl<'a> Submitter<'a> {
             .gas(U256::from_f64_lossy(gas_limit))
             .gas_price(gas_price)
     }
-}
-
-fn tx_gas_cost(gas_price: &EstimatedGasPrice, params: &SubmitterParams) -> U256 {
-    U256::from_f64_lossy(gas_price.effective_gas_price()) * params.gas_estimate
 }
 
 /// From a list of potential hashes find one that was mined.

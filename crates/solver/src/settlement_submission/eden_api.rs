@@ -39,7 +39,6 @@ impl TransactionSubmitting for EdenApi {
         let status = response.status();
         let body = response.text().await?;
         ensure!(status.is_success(), "status {}: {:?}", status, body);
-        tracing::debug!("eden submit response: {}", body);
 
         let tx_hash = super::custom_nodes_api::parse_json_rpc_response::<H256>(&body)?;
 

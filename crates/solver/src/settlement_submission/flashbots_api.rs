@@ -37,7 +37,6 @@ impl TransactionSubmitting for FlashbotsApi {
         let status = response.status();
         let body = response.text().await?;
         ensure!(status.is_success(), "status {}: {:?}", status, body);
-        tracing::debug!("flashbots submit response: {}", body);
 
         let bundle_id = super::custom_nodes_api::parse_json_rpc_response::<H256>(&body)?;
         tracing::debug!("flashbots bundle id: {}", bundle_id);
