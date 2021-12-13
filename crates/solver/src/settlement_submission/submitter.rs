@@ -303,13 +303,17 @@ impl<'a> Submitter<'a> {
                 params.gas_estimate,
             );
 
+            // Save tx hash regardless of submission success, it's not significant overhead
+            // Some apis (Eden) returns failed response for submission even if its successfull,
+            // we want to catch mined txs for this case
+            transactions.push(hash);
+
             match self
                 .submit_api
                 .submit_raw_transaction(&raw_signed_transaction)
                 .await
             {
                 Ok(id) => {
-                    transactions.push(hash);
                     previous_tx = Some((gas_price, id));
                 }
                 Err(err) => tracing::error!("submission failed: {:?}", err),
