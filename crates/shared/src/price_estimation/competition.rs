@@ -55,8 +55,7 @@ impl PriceEstimating for CompetitionPriceEstimator {
 }
 
 #[derive(Debug)]
-struct EstimateData<'a> {
-    estimator_name: &'a str,
+struct EstimateData {
     estimate: Estimate,
     sell_over_buy: BigRational,
 }
@@ -64,9 +63,9 @@ struct EstimateData<'a> {
 fn fold_price_estimation_result<'a>(
     query: &'a Query,
     estimator_name: &'a str,
-    previous_result: Result<EstimateData<'a>, PriceEstimationError>,
+    previous_result: Result<EstimateData, PriceEstimationError>,
     estimate: Result<Estimate, PriceEstimationError>,
-) -> Result<EstimateData<'a>, PriceEstimationError> {
+) -> Result<EstimateData, PriceEstimationError> {
     match &estimate {
         Ok(estimate) => tracing::debug!(
             %estimator_name, ?query, ?estimate,
@@ -83,7 +82,6 @@ fn fold_price_estimation_result<'a>(
             .price_in_sell_token_rational(query)
             .ok_or(PriceEstimationError::ZeroAmount)?;
         Ok(EstimateData {
-            estimator_name,
             estimate,
             sell_over_buy,
         })
