@@ -46,7 +46,12 @@ impl PriceEstimating for CompetitionPriceEstimator {
                         },
                     )
                     .map(|winning_estimate| {
-                        tracing::debug!(?query, ?winning_estimate, "winning price estimate",);
+                        tracing::debug!(
+                            "winning price estimate from estimator {:?} for the query: {:?} is the estimate: {:?}",
+                            winning_estimate.estimator_name,
+                            query,
+                            winning_estimate,
+                        );
                         winning_estimate.estimate
                     })
             })
@@ -55,7 +60,8 @@ impl PriceEstimating for CompetitionPriceEstimator {
 }
 
 #[derive(Debug)]
-struct EstimateData {
+struct EstimateData<'a> {
+    estimator_name: &'a str,
     estimate: Estimate,
     sell_over_buy: BigRational,
 }
@@ -63,9 +69,9 @@ struct EstimateData {
 fn fold_price_estimation_result<'a>(
     query: &'a Query,
     estimator_name: &'a str,
-    previous_result: Result<EstimateData, PriceEstimationError>,
+    previous_result: Result<EstimateData<'a>, PriceEstimationError>,
     estimate: Result<Estimate, PriceEstimationError>,
-) -> Result<EstimateData, PriceEstimationError> {
+) -> Result<EstimateData<'a>, PriceEstimationError> {
     match &estimate {
         Ok(estimate) => tracing::debug!(
             %estimator_name, ?query, ?estimate,
@@ -82,6 +88,7 @@ fn fold_price_estimation_result<'a>(
             .price_in_sell_token_rational(query)
             .ok_or(PriceEstimationError::ZeroAmount)?;
         Ok(EstimateData {
+            estimator_name,
             estimate,
             sell_over_buy,
         })
