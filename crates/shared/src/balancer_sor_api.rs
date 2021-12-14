@@ -167,6 +167,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::excessive_precision)]
     fn deserialize_quote() {
         assert_eq!(
             serde_json::from_value::<Quote>(json!({
