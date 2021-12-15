@@ -32,6 +32,7 @@ pub struct QuasimodoPriceEstimator {
     pub gas_info: Arc<dyn GasPriceEstimating>,
     pub native_token: H160,
     pub base_tokens: Arc<BaseTokens>,
+    pub use_internal_buffers: bool,
 }
 
 impl QuasimodoPriceEstimator {
@@ -139,7 +140,7 @@ impl QuasimodoPriceEstimator {
                 // reserves one second of timeout for shutdown, plus one
                 // more second is reserved for network interactions.
                 Duration::from_secs(3),
-                false,
+                self.use_internal_buffers,
             )
             .await?;
 
@@ -321,6 +322,7 @@ mod tests {
                 testlib::tokens::WETH,
                 &[testlib::tokens::WETH, t1.1, t2.1],
             )),
+            use_internal_buffers: false,
         };
 
         let result = estimator

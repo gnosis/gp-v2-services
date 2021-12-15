@@ -452,6 +452,7 @@ async fn main() {
                             gas_info: gas_price_estimator.clone(),
                             native_token: native_token.address(),
                             base_tokens: base_tokens.clone(),
+                            use_internal_buffers: args.shared.quasimodo_uses_internal_buffers,
                         },
                         estimator.name(),
                         metrics.clone(),
