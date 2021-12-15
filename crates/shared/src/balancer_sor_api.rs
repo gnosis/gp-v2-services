@@ -1,5 +1,5 @@
 //! Module for interacting with the Balancer SOR HTTP API.
-
+//! https://dev.balancer.fi/resources/smart-order-router
 use anyhow::Result;
 use ethcontract::{H160, H256, U256};
 use model::order::OrderKind;
