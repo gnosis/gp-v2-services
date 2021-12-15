@@ -14,6 +14,7 @@ pub trait HttpSolverApi: Send + Sync {
         &self,
         model: &model::BatchAuctionModel,
         timeout: Duration,
+        use_internal_buffers: bool,
     ) -> Result<model::SettledBatchAuctionModel>;
 }
 
@@ -55,6 +56,9 @@ pub struct SolverConfig {
 
     /// Controls if we should fill the `ucp_policy` parameter.
     pub has_ucp_policy_parameter: bool,
+
+    /// Controls if we should fill the `use_internal_buffers` parameter.
+    pub has_use_internal_buffers_parameter: bool,
 }
 
 #[async_trait::async_trait]
@@ -63,6 +67,7 @@ impl HttpSolverApi for DefaultHttpSolverApi {
         &self,
         model: &model::BatchAuctionModel,
         timeout: Duration,
+        use_internal_buffers: bool,
     ) -> Result<model::SettledBatchAuctionModel> {
         // The timeout we give to the solver is one second less than
         // the deadline to make up for overhead from the network.
@@ -91,7 +96,12 @@ impl HttpSolverApi for DefaultHttpSolverApi {
             url.query_pairs_mut()
                 .append_pair("ucp_policy", "EnforceForOrders");
         }
-
+        if self.config.has_use_internal_buffers_parameter {
+            url.query_pairs_mut().append_pair(
+                "use_internal_buffers_parameter",
+                use_internal_buffers.to_string().as_str(),
+            );
+        }
         let query = url.query().map(ToString::to_string).unwrap_or_default();
         let mut request = self.client.post(url).timeout(timeout);
         if let Some(api_key) = &self.config.api_key {

@@ -139,6 +139,7 @@ impl QuasimodoPriceEstimator {
                 // reserves one second of timeout for shutdown, plus one
                 // more second is reserved for network interactions.
                 Duration::from_secs(3),
+                false,
             )
             .await?;
 
@@ -308,6 +309,7 @@ mod tests {
                     api_key: None,
                     max_nr_exec_orders: 100,
                     has_ucp_policy_parameter: false,
+                    has_use_internal_buffers_parameter: true,
                 },
             }),
             pools,
