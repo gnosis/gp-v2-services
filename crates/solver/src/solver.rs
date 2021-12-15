@@ -157,6 +157,7 @@ pub fn create(
     solver_metrics: Arc<dyn SolverMetrics>,
     zeroex_api: Arc<dyn ZeroExApi>,
     zeroex_slippage_bps: u32,
+    quasimodo_uses_internal_buffers: bool,
 ) -> Result<Solvers> {
     // Tiny helper function to help out with type inference. Otherwise, all
     // `Box::new(...)` expressions would have to be cast `as Box<dyn Solver>`.
@@ -171,25 +172,29 @@ pub fn create(
     ));
     let http_solver_cache = http_solver::InstanceCache::default();
     // Helper function to create http solver instances.
-    let create_http_solver =
-        |account: Account, url: Url, name: &'static str, config: SolverConfig, use_internal_buffers: bool| -> HttpSolver {
-            HttpSolver::new(
-                DefaultHttpSolverApi {
-                    name,
-                    network_name: network_id.clone(),
-                    chain_id,
-                    base: url,
-                    client: client.clone(),
-                    config,
-                },
-                account,
-                native_token,
-                token_info_fetcher.clone(),
-                buffer_retriever.clone(),
-                http_solver_cache.clone(),
-                use_internal_buffers,
-            )
-        };
+    let create_http_solver = |account: Account,
+                              url: Url,
+                              name: &'static str,
+                              config: SolverConfig,
+                              use_internal_buffers: bool|
+     -> HttpSolver {
+        HttpSolver::new(
+            DefaultHttpSolverApi {
+                name,
+                network_name: network_id.clone(),
+                chain_id,
+                base: url,
+                client: client.clone(),
+                config,
+            },
+            account,
+            native_token,
+            token_info_fetcher.clone(),
+            buffer_retriever.clone(),
+            http_solver_cache.clone(),
+            use_internal_buffers,
+        )
+    };
 
     solvers
         .into_iter()
@@ -231,7 +236,7 @@ pub fn create(
                         has_ucp_policy_parameter: true,
                         has_use_internal_buffers_parameter: true,
                     },
-                    true,
+                    quasimodo_uses_internal_buffers,
                 )),
                 SolverType::OneInch => {
                     let one_inch_solver: SingleOrderSolver<_> = SingleOrderSolver::new(

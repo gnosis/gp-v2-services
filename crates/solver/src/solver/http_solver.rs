@@ -436,7 +436,10 @@ impl Solver for HttpSolver {
         let timeout = deadline
             .checked_duration_since(Instant::now())
             .ok_or_else(|| anyhow!("no time left to send request"))?;
-        let settled = self.solver.solve(&model, timeout, self.use_internal_buffers).await?;
+        let settled = self
+            .solver
+            .solve(&model, timeout, self.use_internal_buffers)
+            .await?;
         tracing::trace!(?settled);
         if !settled.has_execution_plan() {
             return Ok(Vec::new());

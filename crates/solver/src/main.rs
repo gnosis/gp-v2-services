@@ -260,6 +260,10 @@ struct Arguments {
     /// The maximum number of settlements the driver considers per solver.
     #[structopt(long, env, default_value = "20")]
     max_settlements_per_solver: usize,
+
+    /// If quasimodo should use internal buffers to improve solution quality.
+    #[structopt(long, env)]
+    pub quasimodo_uses_internal_buffers: bool,
 }
 
 arg_enum! {
@@ -515,6 +519,7 @@ async fn main() {
         metrics.clone(),
         zeroex_api,
         args.zeroex_slippage_bps,
+        args.quasimodo_uses_internal_buffers,
     )
     .expect("failure creating solvers");
     let liquidity_collector = LiquidityCollector {
