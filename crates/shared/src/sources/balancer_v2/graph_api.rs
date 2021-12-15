@@ -229,6 +229,7 @@ mod tests {
     use super::*;
     use crate::sources::balancer_v2::swap::fixed_point::Bfp;
     use ethcontract::{H160, H256};
+    use maplit::hashmap;
     use std::collections::HashMap;
 
     #[test]
@@ -337,6 +338,45 @@ mod tests {
                 }
             }
         );
+    }
+
+    #[test]
+    fn splits_pools_by_factory() {
+        let pool = |factory: H160, id: u8| PoolData {
+            id: H256([id; 32]),
+            factory,
+            pool_type: PoolType::Weighted,
+            address: Default::default(),
+            tokens: Default::default(),
+        };
+
+        let registered_pools = RegisteredPools {
+            pools: vec![
+                pool(H160([1; 20]), 1),
+                pool(H160([1; 20]), 2),
+                pool(H160([2; 20]), 3),
+            ],
+            fetched_block_number: 42,
+        };
+
+        assert_eq!(
+            registered_pools.group_by_factory(),
+            hashmap! {
+                H160([1; 20]) => RegisteredPools {
+                    pools: vec![
+                        pool(H160([1; 20]), 1),
+                        pool(H160([1; 20]), 2),
+                    ],
+                    fetched_block_number: 42,
+                },
+                H160([2; 20]) => RegisteredPools {
+                    pools: vec![
+                        pool(H160([2; 20]), 3),
+                    ],
+                    fetched_block_number: 42,
+                },
+            }
+        )
     }
 
     #[tokio::test]
