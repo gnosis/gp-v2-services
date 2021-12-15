@@ -16,6 +16,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use serde_json::json;
 use serde_with::{serde_as, DisplayFromStr};
+use std::collections::HashMap;
 
 /// The page size when querying pools.
 #[cfg(not(test))]
@@ -106,13 +107,33 @@ impl BalancerSubgraphClient {
 }
 
 /// Result of the registered stable pool query.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Default, PartialEq)]
 pub struct RegisteredPools {
     /// The block number that the data was fetched, and for which the registered
     /// weighted pools can be considered up to date.
     pub fetched_block_number: u64,
     /// The registered Pools
     pub pools: Vec<PoolData>,
+}
+
+impl RegisteredPools {
+    /// Groups registered pools by factory addresses.
+    pub fn group_by_factory(self) -> HashMap<H160, RegisteredPools> {
+        let fetched_block_number = self.fetched_block_number;
+        self.pools
+            .into_iter()
+            .fold(HashMap::new(), |mut grouped, pool| {
+                grouped
+                    .entry(pool.factory)
+                    .or_insert(RegisteredPools {
+                        fetched_block_number,
+                        ..Default::default()
+                    })
+                    .pools
+                    .push(pool);
+                grouped
+            })
+    }
 }
 
 /// Pool data from the Balancer V2 subgraph.
