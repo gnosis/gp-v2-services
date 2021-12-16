@@ -94,14 +94,13 @@ impl CacheFetching<H256, WeightedPool> for PoolReserveFetcher<BalancerV2Weighted
 
                 async move {
                     let pool_status = pool_status.await?;
-                    let weighted_pool = match pool_status.active() {
+                    match pool_status.active() {
                         Some(Pool {
                             kind: PoolKind::Weighted(state),
                             ..
-                        }) => WeightedPool::new_unpaused(registered_pool, state),
-                        _ => return Ok(None),
-                    };
-                    Ok(Some(weighted_pool))
+                        }) => Ok(Some(WeightedPool::new_unpaused(registered_pool, state))),
+                        _ => Ok(None),
+                    }
                 }
             })
             .collect::<Vec<_>>();
@@ -133,14 +132,13 @@ impl CacheFetching<H256, StablePool> for PoolReserveFetcher<BalancerV2StablePool
 
                 async move {
                     let pool_status = pool_status.await?;
-                    let stable_pool = match pool_status.active() {
+                    match pool_status.active() {
                         Some(Pool {
                             kind: PoolKind::Stable(state),
                             ..
-                        }) => StablePool::new_unpaused(registered_pool, state),
-                        _ => return Ok(None),
-                    };
-                    Ok(Some(stable_pool))
+                        }) => Ok(Some(StablePool::new_unpaused(registered_pool, state))),
+                        _ => Ok(None),
+                    }
                 }
             })
             .collect::<Vec<_>>();
