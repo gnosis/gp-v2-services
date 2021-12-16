@@ -1,28 +1,47 @@
 //! Module for interacting with the Balancer SOR HTTP API.
+//!
+//! For more information how the SOR solver works, check out
 //! https://dev.balancer.fi/resources/smart-order-router
-use anyhow::Result;
+
+use anyhow::{ensure, Result};
 use ethcontract::{H160, H256, U256};
 use model::order::OrderKind;
 use model::u256_decimal;
+use num::BigInt;
 use reqwest::{Client, IntoUrl, Url};
 use serde::{Deserialize, Serialize};
 use web3::types::Bytes;
 
+/// Trait for mockable Balancer SOR API.
+#[mockall::automock]
+#[async_trait::async_trait]
+pub trait BalancerSorApi: Send + Sync + 'static {
+    /// Quotes a price.
+    async fn quote(&self, query: Query) -> Result<Option<Quote>>;
+}
+
 /// Balancer SOR API.
-pub struct BalancerSorApi {
+pub struct DefaultBalancerSorApi {
     client: Client,
     url: Url,
 }
 
-impl BalancerSorApi {
+impl DefaultBalancerSorApi {
     /// Creates a new Balancer SOR API instance.
     pub fn new(client: Client, base_url: impl IntoUrl, chain_id: u64) -> Result<Self> {
+        ensure!(
+            chain_id == 1 || chain_id == 4,
+            "Balancer SOR API only supported on Mainnet and Rinkeby",
+        );
+
         let url = base_url.into_url()?.join(&chain_id.to_string())?;
         Ok(Self { client, url })
     }
+}
 
-    /// Quotes a price.
-    pub async fn quote(&self, query: Query) -> Result<Quote> {
+#[async_trait::async_trait]
+impl BalancerSorApi for DefaultBalancerSorApi {
+    async fn quote(&self, query: Query) -> Result<Option<Quote>> {
         tracing::debug!(url =% self.url, ?query, "querying Balancer SOR");
         let response = self
             .client
@@ -34,12 +53,17 @@ impl BalancerSorApi {
             .await?;
         tracing::debug!(%response, "received Balancer SOR quote");
 
-        Ok(serde_json::from_str(&response)?)
+        let quote = serde_json::from_str::<Quote>(&response)?;
+        if quote.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(quote))
     }
 }
 
 /// An SOR query.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Query {
     /// The sell token to quote.
@@ -61,39 +85,58 @@ pub struct Query {
 }
 
 /// The swap route found by the Balancer SOR service.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Quote {
-    /// The swapped sell token amount.
-    #[serde(with = "serde_u256_wrapped")]
-    pub swap_amount: U256,
-    /// The received buy token amount.
-    #[serde(with = "serde_u256_wrapped")]
-    pub return_amount: U256,
-    /// The received considering fees.
-    #[serde(with = "serde_u256_wrapped")]
-    pub return_amount_considering_fees: U256,
-    /// The swap route.
-    pub swaps: Vec<Swap>,
     /// The token addresses included in the swap route.
     pub token_addresses: Vec<H160>,
+    /// The swap route.
+    pub swaps: Vec<Swap>,
+    /// The swapped token amount.
+    ///
+    /// In sell token for sell orders or buy token for buy orders.
+    #[serde(with = "u256_decimal")]
+    pub swap_amount: U256,
+    /// The real swapped amount for certain kinds of wrapped tokens.
+    ///
+    /// Some wrapped tokens like stETH/wstETH support wrapping and unwrapping at
+    /// a conversion rate before trading using a Relayer. In those cases, this
+    /// amount represents the value of the real token before wrapping.
+    ///
+    /// This amount is useful for informational purposes and not intended to be
+    /// used when calling `singleSwap` an `batchSwap` on the Vault.
+    #[serde(with = "u256_decimal")]
+    pub swap_amount_for_swaps: U256,
+    /// The returned token amount.
+    ///
+    /// In buy token for sell orders or sell token for buy orders.
+    #[serde(with = "u256_decimal")]
+    pub return_amount: U256,
+    /// The real returned amount.
+    ///
+    /// See `swap_amount_for_swap` for more details.
+    #[serde(with = "u256_decimal")]
+    pub return_amount_from_swaps: U256,
+    /// The received considering fees.
+    ///
+    /// This can be negative when quoting small sell amounts at high gas costs
+    /// or greater than `U256::MAX` when quoting large buy amounts at high
+    /// gas costs.
+    #[serde(with = "serde_with::rust::display_fromstr")]
+    pub return_amount_considering_fees: BigInt,
     /// The input (sell) token.
+    #[serde(with = "address_default_when_empty")]
     pub token_in: H160,
     /// The output (buy) token.
+    #[serde(with = "address_default_when_empty")]
     pub token_out: H160,
     /// The price impact (i.e. market slippage).
     #[serde(with = "serde_with::rust::display_fromstr")]
     pub market_sp: f64,
-    /// The swapped sell amount to use for encoding the Balancer batch swap.
-    #[serde(with = "serde_u256_wrapped")]
-    pub swap_amount_for_swaps: U256,
-    /// The received buy amount to use for encoding the Balancer batch swap.
-    #[serde(with = "serde_u256_wrapped")]
-    pub return_amount_from_swaps: U256,
 }
 
 /// A swap included in a larger batched swap.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Swap {
     /// The ID of the pool swapping in this step.
@@ -109,32 +152,33 @@ pub struct Swap {
     pub user_data: Bytes,
 }
 
-/// Module for deserializing the "wrapped" big integer types in the Balancer SOR
-/// API response (of the form `{ "type": "BigNumber", hex: "0x..." }`).
-mod serde_u256_wrapped {
-    use ethcontract::U256;
-    use serde::{de, Deserialize, Deserializer};
-
-    #[derive(Deserialize)]
-    struct Wrapped {
-        #[serde(rename = "type")]
-        kind: String,
-        hex: U256,
+impl Quote {
+    /// Check for "empty" quotes - i.e. all 0's with no swaps. Balancer SOR API
+    /// returns this in case it fails to find a route for whatever reason (not
+    /// enough liquidity, no trading path, etc.). We don't consider this an
+    /// error case.
+    fn is_empty(&self) -> bool {
+        *self == Quote::default()
     }
+}
 
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<U256, D::Error>
+/// Balancer SOR responds with `address: ""` on error cases. Instead of using an
+/// `<Option<H160>>::None` just use `H160::default()` in those cases to simplify
+/// using resulting `Quote`s.
+mod address_default_when_empty {
+    use ethcontract::H160;
+    use serde::{de, Deserialize as _, Deserializer};
+    use std::borrow::Cow;
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<H160, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let wrapped = Wrapped::deserialize(deserializer)?;
-        if wrapped.kind != "BigNumber" {
-            return Err(de::Error::custom(format!(
-                "unexpected big number type {}",
-                wrapped.kind
-            )));
+        let value = Cow::<str>::deserialize(deserializer)?;
+        if value == "" {
+            return Ok(H160::default());
         }
-
-        Ok(wrapped.hex)
+        value.parse().map_err(de::Error::custom)
     }
 }
 
@@ -171,90 +215,116 @@ mod tests {
     fn deserialize_quote() {
         assert_eq!(
             serde_json::from_value::<Quote>(json!({
-                "swapAmount":{
-                    "type": "BigNumber",
-                    "hex": "0x0de0b6b3a7640000",
-                },
-                "returnAmount":{
-                    "type": "BigNumber",
-                    "hex": "0xc7dda274dffbd34e",
-                },
-                "returnAmountConsideringFees":{
-                    "type": "BigNumber",
-                    "hex": "0xc7d43370ffc29870",
-                },
-                "swaps":[
-                    {
-                        "poolId": "0x9c08c7a7a89cfd671c79eacdc6f07c1996277ed5000200000000000000000025",
-                        "assetInIndex":0,
-                        "assetOutIndex":1,
-                        "amount": "1000000000000000000",
-                        "userData": "0x",
-                    },
-                    {
-                        "poolId": "0x06df3b2bbb68adc8b0e302443692037ed9f91b42000000000000000000000063",
-                        "assetInIndex":1,
-                        "assetOutIndex":2,
-                        "amount": "0",
-                        "userData": "0x",
-                    },
-                ],
-                "tokenAddresses":[
+                "tokenAddresses": [
                     "0xba100000625a3754423978a60c9317c58a424e3d",
-                    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-                    "0x6b175474e89094c44da98b954eedeac495271d0f",
+                    "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+                    "0x6b175474e89094c44da98b954eedeac495271d0f"
                 ],
+                "swaps": [
+                    {
+                        "poolId": "0x5c6ee304399dbdb9c8ef030ab642b10820db8f56000200000000000000000014",
+                        "assetInIndex": 0,
+                        "assetOutIndex": 1,
+                        "amount": "1000000000000000000",
+                        "userData": "0x"
+                    },
+                    {
+                        "poolId": "0x0b09dea16768f0799065c475be02919503cb2a3500020000000000000000001a",
+                        "assetInIndex": 1,
+                        "assetOutIndex": 2,
+                        "amount": "0",
+                        "userData": "0x"
+                    }
+                ],
+                "swapAmount": "1000000000000000000",
+                "swapAmountForSwaps": "1000000000000000000",
+                "returnAmount": "15520274244171816967",
+                "returnAmountFromSwaps": "15520274244171816967",
+                "returnAmountConsideringFees": "15517420194930649326",
                 "tokenIn": "0xba100000625a3754423978a60c9317c58a424e3d",
                 "tokenOut": "0x6b175474e89094c44da98b954eedeac495271d0f",
-                "marketSp": "0.06920157586731092586977924035977274",
-                "swapAmountForSwaps":{
-                    "type": "BigNumber",
-                    "hex": "0x0de0b6b3a7640000",
-                },
-                "returnAmountFromSwaps":{
-                    "type": "BigNumber",
-                    "hex": "0xc7dda274dffbd34e",
-                },
+                "marketSp": "0.0644318002071386807508916699095248"
             })).unwrap(),
             Quote {
-                swap_amount: 1_000_000_000_000_000_000_u128.into(),
-                return_amount: 14_401_845_806_258_443_086_u128.into(),
-                return_amount_considering_fees: 14_399_190_469_030_615_152_u128.into(),
+                token_addresses: vec![
+                    addr!("ba100000625a3754423978a60c9317c58a424e3d"),
+                    addr!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+                    addr!("6b175474e89094c44da98b954eedeac495271d0f"),
+                ],
                 swaps: vec![
                     Swap {
-                        pool_id: H256(hex!("9c08c7a7a89cfd671c79eacdc6f07c1996277ed5000200000000000000000025")),
+                        pool_id: H256(hex!("5c6ee304399dbdb9c8ef030ab642b10820db8f56000200000000000000000014")),
                         asset_in_index: 0,
                         asset_out_index: 1,
                         amount: 1_000_000_000_000_000_000_u128.into(),
                         user_data: Default::default(),
                     },
                     Swap {
-                        pool_id: H256(hex!("06df3b2bbb68adc8b0e302443692037ed9f91b42000000000000000000000063")),
+                        pool_id: H256(hex!("0b09dea16768f0799065c475be02919503cb2a3500020000000000000000001a")),
                         asset_in_index: 1,
                         asset_out_index: 2,
                         amount: 0.into(),
                         user_data: Default::default(),
                     },
                 ],
-                token_addresses: vec![
-                    addr!("ba100000625a3754423978a60c9317c58a424e3d"),
-                    addr!("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
-                    addr!("6b175474e89094c44da98b954eedeac495271d0f"),
-                ],
+                swap_amount: 1_000_000_000_000_000_000_u128.into(),
+                swap_amount_for_swaps: 1_000_000_000_000_000_000_u128.into(),
+                return_amount: 15_520_274_244_171_816_967_u128.into(),
+                return_amount_from_swaps: 15_520_274_244_171_816_967_u128.into(),
+                return_amount_considering_fees: 15_517_420_194_930_649_326_u128.into(),
                 token_in: addr!("ba100000625a3754423978a60c9317c58a424e3d"),
                 token_out: addr!("6b175474e89094c44da98b954eedeac495271d0f"),
-                market_sp: 0.06920157586731092586977924035977274,
-                swap_amount_for_swaps: 1_000_000_000_000_000_000_u128.into(),
-                return_amount_from_swaps: 14_401_845_806_258_443_086_u128.into(),
+                market_sp: 0.0644318002071386807508916699095248,
             },
         );
+    }
+
+    #[test]
+    fn deserialize_empty_quote() {
+        assert!(serde_json::from_value::<Quote>(json!({
+            "tokenAddresses": [],
+            "swaps": [],
+            "swapAmount": "0",
+            "swapAmountForSwaps": "0",
+            "returnAmount": "0",
+            "returnAmountFromSwaps": "0",
+            "returnAmountConsideringFees": "0",
+            "tokenIn": "",
+            "tokenOut": "",
+            "marketSp": "0",
+        }))
+        .unwrap()
+        .is_empty());
+    }
+
+    #[test]
+    fn deserializes_negative_and_large_return_amount_after_fee_values() {
+        for amount in [
+            "-1337",
+            "10000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        ] {
+            assert!(U256::from_dec_str(amount).is_err());
+            assert!(serde_json::from_value::<Quote>(json!({
+                "tokenAddresses": [],
+                "swaps": [],
+                "swapAmount": "0",
+                "swapAmountForSwaps": "0",
+                "returnAmount": "0",
+                "returnAmountFromSwaps": "0",
+                "returnAmountConsideringFees": amount,
+                "tokenIn": "",
+                "tokenOut": "",
+                "marketSp": "0",
+            }))
+            .is_ok());
+        }
     }
 
     #[tokio::test]
     #[ignore]
     async fn balancer_sor_quote() {
         let url = env::var("BALANCER_SOR_URL").unwrap();
-        let api = BalancerSorApi::new(Client::new(), url, 1).unwrap();
+        let api = DefaultBalancerSorApi::new(Client::new(), url, 1).unwrap();
 
         fn base(atoms: U256) -> String {
             let base = atoms.to_f64_lossy() / 1e18;
@@ -270,6 +340,7 @@ mod tests {
                 gas_price: 10_000_000.into(),
             })
             .await
+            .unwrap()
             .unwrap();
         println!("Sell 1.0 BAL for {:.4} DAI", base(sell_quote.return_amount));
 
@@ -282,6 +353,7 @@ mod tests {
                 gas_price: 10_000_000.into(),
             })
             .await
+            .unwrap()
             .unwrap();
         println!("Buy {:.4} BAL for 100.0 DAI", base(buy_quote.return_amount));
     }
