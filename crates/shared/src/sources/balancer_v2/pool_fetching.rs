@@ -148,7 +148,7 @@ impl BalancerPoolFetcher {
     ) -> Result<Self> {
         let pool_initializer = SubgraphPoolInitializer::new(chain_id, client)?;
         let fetcher = Arc::new(Cache::new(
-            create_all_pools_fetcher(web3, pool_initializer, token_infos).await?,
+            create_all_pool_fetchers(web3, pool_initializer, token_infos).await?,
             config,
             block_stream,
             metrics,
@@ -209,7 +209,7 @@ impl Maintaining for BalancerPoolFetcher {
 }
 
 /// Creates an aggregate fetcher for all supported pool factories.
-async fn create_all_pools_fetcher(
+async fn create_all_pool_fetchers(
     web3: Web3,
     pool_initializer: impl PoolInitializing,
     token_infos: Arc<dyn TokenInfoFetching>,
@@ -295,7 +295,7 @@ mod tests {
         let token_infos = TokenInfoFetcher { web3: web3.clone() };
         let pool_fetcher = BalancerPoolFetcher {
             fetcher: Arc::new(
-                create_all_pools_fetcher(web3, pool_initializer, Arc::new(token_infos))
+                create_all_pool_fetchers(web3, pool_initializer, Arc::new(token_infos))
                     .await
                     .unwrap(),
             ),
