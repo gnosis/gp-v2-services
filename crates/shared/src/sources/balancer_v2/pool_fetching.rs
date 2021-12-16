@@ -31,8 +31,8 @@ use crate::{
 };
 use anyhow::Result;
 use contracts::{
-    BalancerV2StablePoolFactory, BalancerV2Vault, BalancerV2WeightedPool2TokensFactory,
-    BalancerV2WeightedPoolFactory,
+    BalancerV2LiquidityBootstrappingPoolFactory, BalancerV2StablePoolFactory, BalancerV2Vault,
+    BalancerV2WeightedPool2TokensFactory, BalancerV2WeightedPoolFactory,
 };
 use ethcontract::{Instance, H160, H256};
 use model::TokenPair;
@@ -144,6 +144,7 @@ arg_enum! {
         Weighted,
         Weighted2Token,
         Stable,
+        LiquidityBootstrapping,
     }
 }
 
@@ -271,6 +272,9 @@ async fn create_aggregate_pool_fetcher(
                 registry!(BalancerV2WeightedPool2TokensFactory)
             }
             BalancerFactoryKind::Stable => registry!(BalancerV2StablePoolFactory),
+            BalancerFactoryKind::LiquidityBootstrapping => {
+                registry!(BalancerV2LiquidityBootstrappingPoolFactory)
+            }
         };
         fetchers.push(registry);
     }
@@ -411,7 +415,7 @@ mod tests {
             .collect::<HashMap<_, _>>();
 
         let mut unknown_pools = Vec::new();
-        for subgraph_pool in &subgraph_pools.pools {
+        for subgraph_pool in subgraph_pools.pools.iter().filter(|pool| pool.swap_enabled) {
             tracing::info!(?subgraph_pool);
 
             let fetched_pool = match fetched_pools_by_id.get(&subgraph_pool.id) {
