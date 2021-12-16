@@ -156,8 +156,9 @@ fn accumulate_handled_results<T>(results: Vec<Result<T>>) -> Result<Vec<T>> {
     results
         .into_iter()
         .filter_map(|result| match result {
+            Ok(value) => Some(Ok(value)),
             Err(err) if is_contract_error(&err) => None,
-            _ => Some(result.map(Into::into)),
+            Err(err) => Some(Err(err)),
         })
         .collect()
 }
