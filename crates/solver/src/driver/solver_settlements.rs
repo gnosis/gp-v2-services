@@ -157,12 +157,84 @@ pub fn retain_mature_settlements(
 mod tests {
     use super::*;
     use crate::settlement::Trade;
+    use chrono::{offset::Utc, DateTime, Duration, Local};
     use maplit::hashmap;
     use model::order::{Order, OrderCreation, OrderKind, OrderMetaData, OrderUid};
     use num::rational::BigRational;
     use num::traits::FromPrimitive;
     use primitive_types::U256;
     use std::collections::HashSet;
+    use std::ops::Sub;
+
+    fn trade(created_at: DateTime<Utc>, uid: u8) -> Trade {
+        Trade {
+            order: Order {
+                order_meta_data: OrderMetaData {
+                    creation_date: created_at,
+                    uid: OrderUid([uid; 56]),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    fn assert_same_settlements(expected: &[Settlement], actual: &[Settlement]) {
+        assert!(expected
+            .iter()
+            .map(|s| s.trades())
+            .eq(actual.iter().map(|s| s.trades())));
+    }
+
+    #[test]
+    fn no_mature_orders() {
+        let recent = Local::now().with_timezone(&Utc);
+        let min_age = std::time::Duration::from_secs(50);
+
+        let settlement = |trades| Settlement::with_trades(hashmap!(), trades);
+        let s1 = settlement(vec![trade(recent, 1), trade(recent, 2)]);
+        let s2 = settlement(vec![trade(recent, 2), trade(recent, 3)]);
+        let s3 = settlement(vec![trade(recent, 4), trade(recent, 5)]);
+        let settlements = vec![s1, s2, s3];
+        let mature_settlements = retain_mature_settlements(min_age, settlements);
+
+        assert_same_settlements(&mature_settlements, &[]);
+    }
+
+    #[test]
+    fn mature_by_age() {
+        let recent = Local::now().with_timezone(&Utc);
+        let old = Local::now().with_timezone(&Utc).sub(Duration::seconds(600));
+        let min_age = std::time::Duration::from_secs(60);
+
+        let settlement = |trades| Settlement::with_trades(hashmap!(), trades);
+        let s1 = settlement(vec![trade(old, 1), trade(recent, 2)]);
+        let s2 = settlement(vec![trade(recent, 3), trade(recent, 4)]);
+        let settlements = vec![s1.clone(), s2];
+        let mature_settlements = retain_mature_settlements(min_age, settlements);
+
+        assert_same_settlements(&mature_settlements, &[s1]);
+    }
+
+    #[test]
+    fn mature_by_association() {
+        let recent = Local::now().with_timezone(&Utc);
+        let old = Local::now().with_timezone(&Utc).sub(Duration::seconds(600));
+        let min_age = std::time::Duration::from_secs(60);
+
+        let settlement = |trades| Settlement::with_trades(hashmap!(), trades);
+        let s1 = settlement(vec![trade(recent, 1), trade(recent, 2)]);
+        let s2 = settlement(vec![trade(recent, 2), trade(recent, 3)]);
+        let s3 = settlement(vec![trade(recent, 3), trade(old, 4)]);
+        // this will not be included because it only contains recent orders which are not
+        // referenced in any other valid settlements
+        let s4 = settlement(vec![trade(recent, 5), trade(recent, 6)]);
+        let settlements = vec![s1.clone(), s2.clone(), s3.clone(), s4];
+        let mature_settlements = retain_mature_settlements(min_age, settlements);
+
+        assert_same_settlements(&mature_settlements, &[s1, s2, s3]);
+    }
 
     #[test]
     fn merges_settlements_with_highest_objective_value() {
