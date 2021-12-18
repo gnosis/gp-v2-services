@@ -53,7 +53,6 @@ pub struct HttpSolver {
     token_info_fetcher: Arc<dyn TokenInfoFetching>,
     buffer_retriever: Arc<dyn BufferRetrieving>,
     instance_cache: InstanceCache,
-    use_internal_buffers: bool,
 }
 
 impl HttpSolver {
@@ -65,7 +64,6 @@ impl HttpSolver {
         token_info_fetcher: Arc<dyn TokenInfoFetching>,
         buffer_retriever: Arc<dyn BufferRetrieving>,
         instance_cache: InstanceCache,
-        use_internal_buffers: bool,
     ) -> Self {
         Self {
             solver,
@@ -74,7 +72,6 @@ impl HttpSolver {
             token_info_fetcher,
             buffer_retriever,
             instance_cache,
-            use_internal_buffers,
         }
     }
 
@@ -436,10 +433,7 @@ impl Solver for HttpSolver {
         let timeout = deadline
             .checked_duration_since(Instant::now())
             .ok_or_else(|| anyhow!("no time left to send request"))?;
-        let settled = self
-            .solver
-            .solve(&model, timeout, self.use_internal_buffers)
-            .await?;
+        let settled = self.solver.solve(&model, timeout).await?;
         tracing::trace!(?settled);
         if !settled.has_execution_plan() {
             return Ok(Vec::new());
@@ -521,7 +515,7 @@ mod tests {
                     api_key: None,
                     max_nr_exec_orders: 0,
                     has_ucp_policy_parameter: false,
-                    has_use_internal_buffers_parameter: false,
+                    use_internal_buffers: None,
                 },
             },
             Account::Local(Address::default(), None),
@@ -529,7 +523,6 @@ mod tests {
             mock_token_info_fetcher,
             mock_buffer_retriever,
             Default::default(),
-            false,
         );
         let base = |x: u128| x * 10u128.pow(18);
         let limit_orders = vec![LimitOrder {
@@ -556,7 +549,7 @@ mod tests {
             .unwrap();
         let settled = solver
             .solver
-            .solve(&model, Duration::from_secs(1000), false)
+            .solve(&model, Duration::from_secs(1000))
             .await
             .unwrap();
         dbg!(&settled);

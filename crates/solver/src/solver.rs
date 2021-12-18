@@ -172,29 +172,24 @@ pub fn create(
     ));
     let http_solver_cache = http_solver::InstanceCache::default();
     // Helper function to create http solver instances.
-    let create_http_solver = |account: Account,
-                              url: Url,
-                              name: &'static str,
-                              config: SolverConfig,
-                              use_internal_buffers: bool|
-     -> HttpSolver {
-        HttpSolver::new(
-            DefaultHttpSolverApi {
-                name,
-                network_name: network_id.clone(),
-                chain_id,
-                base: url,
-                client: client.clone(),
-                config,
-            },
-            account,
-            native_token,
-            token_info_fetcher.clone(),
-            buffer_retriever.clone(),
-            http_solver_cache.clone(),
-            use_internal_buffers,
-        )
-    };
+    let create_http_solver =
+        |account: Account, url: Url, name: &'static str, config: SolverConfig| -> HttpSolver {
+            HttpSolver::new(
+                DefaultHttpSolverApi {
+                    name,
+                    network_name: network_id.clone(),
+                    chain_id,
+                    base: url,
+                    client: client.clone(),
+                    config,
+                },
+                account,
+                native_token,
+                token_info_fetcher.clone(),
+                buffer_retriever.clone(),
+                http_solver_cache.clone(),
+            )
+        };
 
     solvers
         .into_iter()
@@ -210,9 +205,8 @@ pub fn create(
                         api_key: None,
                         max_nr_exec_orders: 100,
                         has_ucp_policy_parameter: false,
-                        has_use_internal_buffers_parameter: false,
+                        use_internal_buffers: None,
                     },
-                    false,
                 )),
                 SolverType::CowDexAg => shared(create_http_solver(
                     account,
@@ -222,9 +216,8 @@ pub fn create(
                         api_key: None,
                         max_nr_exec_orders: 100,
                         has_ucp_policy_parameter: false,
-                        has_use_internal_buffers_parameter: false,
+                        use_internal_buffers: None,
                     },
-                    false,
                 )),
                 SolverType::Quasimodo => shared(create_http_solver(
                     account,
@@ -234,9 +227,8 @@ pub fn create(
                         api_key: None,
                         max_nr_exec_orders: 100,
                         has_ucp_policy_parameter: true,
-                        has_use_internal_buffers_parameter: true,
+                        use_internal_buffers: quasimodo_uses_internal_buffers.into(),
                     },
-                    quasimodo_uses_internal_buffers,
                 )),
                 SolverType::OneInch => {
                     let one_inch_solver: SingleOrderSolver<_> = SingleOrderSolver::new(
