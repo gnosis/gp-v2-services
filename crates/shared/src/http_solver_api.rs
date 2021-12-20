@@ -94,14 +94,10 @@ impl HttpSolverApi for DefaultHttpSolverApi {
             url.query_pairs_mut()
                 .append_pair("ucp_policy", "EnforceForOrders");
         }
-        if self.config.use_internal_buffers.is_some() {
+        if let Some(use_internal_buffers) = self.config.use_internal_buffers {
             url.query_pairs_mut().append_pair(
                 "use_internal_buffers",
-                self.config
-                    .use_internal_buffers
-                    .unwrap()
-                    .to_string()
-                    .as_str(),
+                use_internal_buffers.to_string().as_str(),
             );
         }
         let query = url.query().map(ToString::to_string).unwrap_or_default();
