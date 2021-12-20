@@ -125,8 +125,8 @@ impl SwapQuery {
 #[derive(Clone, Debug, Deserialize, PartialEq, From)]
 #[serde(untagged)]
 pub enum SwapResponse {
-    Swap(Swap),
-    Error(SwapResponseError),
+    Swap(Box<Swap>),
+    Error(Box<SwapResponseError>),
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Default)]
@@ -426,7 +426,7 @@ mod tests {
 
         assert_eq!(
             swap,
-            SwapResponse::Swap(Swap {
+            SwapResponse::Swap(Box::new(Swap {
                 from_token: Token {
                     address: shared::addr!("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"),
                 },
@@ -442,7 +442,7 @@ mod tests {
                         from_token_address: shared::addr!(
                             "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
                         ),
-                        to_token_address: shared::addr!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+                        to_token_address: testlib::tokens::WETH,
                     }],
                     vec![Protocol {
                         name: "UNISWAP_V2".to_owned(),
@@ -470,7 +470,7 @@ mod tests {
                     gas_price: 154_110_000_000u128.into(),
                     gas: 143297,
                 },
-            })
+            }))
         );
 
         let swap_error = serde_json::from_str::<SwapResponse>(
@@ -483,10 +483,10 @@ mod tests {
 
         assert_eq!(
             swap_error,
-            SwapResponse::Error(SwapResponseError {
+            SwapResponse::Error(Box::new(SwapResponseError {
                 status_code: 500,
                 message: "Internal server error".into()
-            })
+            }))
         );
     }
 

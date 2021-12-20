@@ -18,7 +18,7 @@ pub struct Arguments {
     #[structopt(
         long,
         env,
-        default_value = "warn,orderbook=debug,solver=debug,shared=debug,shared::transport::http=info,archerapi=info"
+        default_value = "warn,orderbook=debug,solver=debug,shared=debug,shared::transport::http=info"
     )]
     pub log_filter: String,
 
@@ -131,6 +131,10 @@ pub struct Arguments {
 
     #[structopt(long, env)]
     pub zeroex_api_key: Option<String>,
+
+    /// If quasimodo should use internal buffers to improve solution quality.
+    #[structopt(long, env)]
+    pub quasimodo_uses_internal_buffers: bool,
 }
 
 pub fn parse_fee_factor(s: &str) -> Result<f64> {

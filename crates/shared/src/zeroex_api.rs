@@ -197,7 +197,10 @@ impl DefaultZeroExApi {
         endpoint: &str,
         query: SwapQuery,
     ) -> Result<T, ZeroExResponseError> {
-        let mut request = self.client.get(query.format_url(&self.base_url, endpoint));
+        let url = query.format_url(&self.base_url, endpoint);
+        tracing::debug!("Querying 0x API: {}", url);
+
+        let mut request = self.client.get(url);
         if let Some(key) = &self.api_key {
             request = request.header("0x-api-key", key);
         }
@@ -208,6 +211,7 @@ impl DefaultZeroExApi {
             .text()
             .await
             .map_err(ZeroExResponseError::TextFetch)?;
+        tracing::debug!("Response from 0x API: {}", response_text);
 
         match serde_json::from_str::<RawResponse<T>>(&response_text) {
             Ok(RawResponse::ResponseOk(response)) => Ok(response),
@@ -232,8 +236,8 @@ mod tests {
     async fn test_api_e2e() {
         let zeroex_client = DefaultZeroExApi::default();
         let swap_query = SwapQuery {
-            sell_token: crate::addr!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
-            buy_token: crate::addr!("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
+            sell_token: testlib::tokens::WETH,
+            buy_token: testlib::tokens::USDC,
             sell_amount: Some(U256::from_f64_lossy(1e18)),
             buy_amount: None,
             slippage_percentage: Slippage(0.1_f64),
@@ -251,8 +255,8 @@ mod tests {
         let api_key = std::env::var("ZEROEX_API_KEY").unwrap();
         let zeroex_client = DefaultZeroExApi::new(url, Some(api_key), Client::new()).unwrap();
         let swap_query = SwapQuery {
-            sell_token: crate::addr!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
-            buy_token: crate::addr!("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
+            sell_token: testlib::tokens::WETH,
+            buy_token: testlib::tokens::USDC,
             sell_amount: Some(U256::from_f64_lossy(1e18)),
             buy_amount: None,
             slippage_percentage: Slippage(0.1_f64),
