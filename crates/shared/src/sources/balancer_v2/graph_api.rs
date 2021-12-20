@@ -341,7 +341,7 @@ mod tests {
     }
 
     #[test]
-    fn splits_pools_by_factory() {
+    fn groups_pools_by_factory() {
         let pool = |factory: H160, id: u8| PoolData {
             id: H256([id; 32]),
             factory,
