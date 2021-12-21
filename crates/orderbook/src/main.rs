@@ -22,6 +22,7 @@ use primitive_types::H160;
 use shared::http_solver_api::{DefaultHttpSolverApi, SolverConfig};
 use shared::network::network_name;
 use shared::price_estimation::quasimodo::QuasimodoPriceEstimator;
+use shared::price_estimation::sanitized::SanitizedPriceEstimator;
 use shared::price_estimation::zeroex::ZeroExPriceEstimator;
 use shared::zeroex_api::DefaultZeroExApi;
 use shared::{
@@ -460,7 +461,11 @@ async fn main() {
             )
         })
         .collect::<Vec<_>>();
-    let price_estimator = Arc::new(CompetitionPriceEstimator::new(price_estimators));
+    let price_estimator = Arc::new(SanitizedPriceEstimator::new(
+        CompetitionPriceEstimator::new(price_estimators),
+        native_token.address(),
+        bad_token_detector.clone(),
+    ));
     let fee_calculator = Arc::new(EthAwareMinFeeCalculator::new(
         price_estimator.clone(),
         gas_price_estimator,
