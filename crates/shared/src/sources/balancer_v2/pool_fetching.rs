@@ -360,6 +360,11 @@ mod tests {
         );
     }
 
+    #[test]
+    fn enumerates_all_balancer_factory_kinds() {
+        assert!(!BalancerFactoryKind::all().is_empty());
+    }
+
     #[tokio::test]
     #[ignore]
     async fn balancer_fetched_pools_match_subgraph() {
