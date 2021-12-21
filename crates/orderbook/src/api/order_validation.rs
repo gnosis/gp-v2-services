@@ -75,7 +75,10 @@ impl IntoWarpReply for PartialValidationError {
                 StatusCode::BAD_REQUEST,
             ),
             Self::UnsupportedOrderType => with_status(
-                super::error("UnsupportedOrderType", "This order type is currently not supported"),
+                super::error(
+                    "UnsupportedOrderType",
+                    "This order type is currently not supported",
+                ),
                 StatusCode::BAD_REQUEST,
             ),
             Self::Forbidden => with_status(
@@ -258,7 +261,7 @@ impl OrderValidator {
 #[async_trait::async_trait]
 impl OrderValidating for OrderValidator {
     async fn partial_validate(&self, order: PreOrderData) -> Result<(), PartialValidationError> {
-        if order. partially_fillable {
+        if order.partially_fillable {
             return Err(PartialValidationError::UnsupportedOrderType);
         }
         if self.banned_users.contains(&order.owner) {
