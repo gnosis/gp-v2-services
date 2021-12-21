@@ -278,8 +278,12 @@ async fn create_aggregate_pool_fetcher(
     // Just to catch cases where new Balancer factories get added for a pool
     // kind, but we don't index it, log a warning for unused pools.
     if !registered_pools_by_factory.is_empty() {
+        let total_count = registered_pools_by_factory
+            .values()
+            .map(|registered| registered.pools.len())
+            .sum::<usize>();
         tracing::warn!(
-            unused_pools = ?registered_pools_by_factory,
+            %total_count, unused_pools = ?registered_pools_by_factory,
             "found pools that don't correspond to any known Balancer pool factory",
         );
     }
