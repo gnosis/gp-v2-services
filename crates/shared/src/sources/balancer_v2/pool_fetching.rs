@@ -152,7 +152,7 @@ impl BalancerFactoryKind {
     pub fn all() -> Vec<Self> {
         // take advantage of the auto-generated `::variants()` associated
         // function so we don't have to keep updating this method with new kinds
-        // as they get added. A little inneficient though.
+        // as they get added. Slightly inefficient.
         Self::variants()
             .iter()
             .map(|name| {
