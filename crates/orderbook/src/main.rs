@@ -401,7 +401,6 @@ async fn main() {
                             pool_fetcher.clone(),
                             gas_price_estimator.clone(),
                             base_tokens.clone(),
-                            bad_token_detector.clone(),
                             native_token.address(),
                             native_token_price_estimation_amount,
                         ),
@@ -415,7 +414,6 @@ async fn main() {
                                 partner: args.shared.paraswap_partner.clone().unwrap_or_default(),
                             }),
                             token_info: token_info_fetcher.clone(),
-                            bad_token_detector: bad_token_detector.clone(),
                             disabled_paraswap_dexs: args.shared.disabled_paraswap_dexs.clone(),
                         },
                         estimator.name(),
@@ -424,7 +422,6 @@ async fn main() {
                     PriceEstimatorType::ZeroEx => Box::new(InstrumentedPriceEstimator::new(
                         ZeroExPriceEstimator {
                             api: zeroex_api.clone(),
-                            bad_token_detector: bad_token_detector.clone(),
                         },
                         estimator.name(),
                         metrics.clone(),
@@ -448,7 +445,6 @@ async fn main() {
                                 },
                             }),
                             pools: pool_fetcher.clone(),
-                            bad_token_detector: bad_token_detector.clone(),
                             token_info: token_info_fetcher.clone(),
                             gas_info: gas_price_estimator.clone(),
                             native_token: native_token.address(),
