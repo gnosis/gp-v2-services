@@ -2,7 +2,6 @@ use super::{Estimate, PriceEstimating, PriceEstimationError, Query};
 use crate::bad_token::BadTokenDetecting;
 use crate::price_estimation::gas::GAS_PER_WETH_UNWRAP;
 use anyhow::Result;
-use futures::future;
 use model::order::BUY_ETH_ADDRESS;
 use primitive_types::H160;
 use std::collections::HashSet;
@@ -14,6 +13,14 @@ pub struct SanitizedPriceEstimator<T: PriceEstimating> {
     inner: T,
     bad_token_detector: Arc<dyn BadTokenDetecting>,
     native_token: H160,
+}
+
+type EstimationResult = Result<Estimate, PriceEstimationError>;
+
+enum EstimationProgress {
+    TrivialSolution(EstimationResult),
+    AwaitingEthEstimation,
+    AwaitingErc20Estimation,
 }
 
 impl<T: PriceEstimating> SanitizedPriceEstimator<T> {
@@ -52,57 +59,89 @@ impl<T: PriceEstimating> SanitizedPriceEstimator<T> {
         Ok(unsupported_tokens)
     }
 
-    async fn estimate_sanitized_query(
+    async fn bulk_estimate_prices(
         &self,
-        query: &Query,
-    ) -> Result<Estimate, PriceEstimationError> {
-        if query.buy_token == query.sell_token {
-            return Ok(Estimate {
-                out_amount: query.in_amount,
-                gas: 0.into(),
-            });
-        }
+        queries: &[Query],
+    ) -> (Vec<EstimationProgress>, Vec<EstimationResult>) {
+        let unsupported_tokens = self.get_unsupported_tokens(queries).await.unwrap();
 
-        let buy_eth = query.buy_token == BUY_ETH_ADDRESS;
-        let sanitized_query = if buy_eth {
-            Query {
-                buy_token: self.native_token,
-                ..*query
-            }
-        } else {
-            *query
-        };
+        let mut estimations_to_forward = Vec::new();
 
-        let mut estimated_price = self.inner.estimate(&sanitized_query).await?;
+        let estimation_progress = queries
+            .iter()
+            .map(|query| {
+                if unsupported_tokens.contains(&query.buy_token) {
+                    return EstimationProgress::TrivialSolution(Err(
+                        PriceEstimationError::UnsupportedToken(query.buy_token),
+                    ));
+                }
+                if unsupported_tokens.contains(&query.sell_token) {
+                    return EstimationProgress::TrivialSolution(Err(
+                        PriceEstimationError::UnsupportedToken(query.sell_token),
+                    ));
+                }
+                if query.buy_token == query.sell_token {
+                    return EstimationProgress::TrivialSolution(Ok(Estimate {
+                        out_amount: query.in_amount,
+                        gas: 0.into(),
+                    }));
+                }
 
-        if buy_eth {
-            estimated_price.gas = estimated_price
-                .gas
-                .checked_add(GAS_PER_WETH_UNWRAP.into())
-                .ok_or(anyhow::anyhow!(
-                    "cost of unwrapping ETH would overflow gas price"
-                ))?;
-        }
+                if query.buy_token == BUY_ETH_ADDRESS {
+                    estimations_to_forward.push(Query {
+                        buy_token: self.native_token,
+                        ..*query
+                    });
+                    return EstimationProgress::AwaitingEthEstimation;
+                }
 
-        Ok(estimated_price)
+                estimations_to_forward.push(*query);
+                EstimationProgress::AwaitingErc20Estimation
+            })
+            .collect::<Vec<_>>();
+
+        let remaining_estimations = self.inner.estimates(&estimations_to_forward[..]).await;
+        (estimation_progress, remaining_estimations)
+    }
+
+    fn merge_trivial_and_forwarded_estimations(
+        partially_estimated: Vec<EstimationProgress>,
+        forwarded_estimations: Vec<EstimationResult>,
+    ) -> Vec<EstimationResult> {
+        let mut forwarded_estimations = forwarded_estimations.into_iter();
+
+        partially_estimated
+            .into_iter()
+            .map(|progress| match progress {
+                EstimationProgress::TrivialSolution(res) => res,
+                EstimationProgress::AwaitingErc20Estimation => forwarded_estimations
+                    .next()
+                    .expect("there is a result for every forwarded estimation"),
+                EstimationProgress::AwaitingEthEstimation => {
+                    let mut res = forwarded_estimations
+                        .next()
+                        .expect("there is a result for every forwarded estimation")?;
+                    res.gas =
+                        res.gas
+                            .checked_add(GAS_PER_WETH_UNWRAP.into())
+                            .ok_or(anyhow::anyhow!(
+                                "cost of unwrapping ETH would overflow gas price"
+                            ))?;
+                    Ok(res)
+                }
+            })
+            .collect()
     }
 }
 
 #[async_trait::async_trait]
 impl<T: PriceEstimating> PriceEstimating for SanitizedPriceEstimator<T> {
-    async fn estimates(&self, queries: &[Query]) -> Vec<Result<Estimate, PriceEstimationError>> {
-        let unsupported_tokens = self.get_unsupported_tokens(queries).await.unwrap();
-
-        future::join_all(queries.iter().map(|query| async {
-            if unsupported_tokens.contains(&query.buy_token) {
-                return Err(PriceEstimationError::UnsupportedToken(query.buy_token));
-            }
-            if unsupported_tokens.contains(&query.sell_token) {
-                return Err(PriceEstimationError::UnsupportedToken(query.sell_token));
-            }
-            self.estimate_sanitized_query(query).await
-        }))
-        .await
+    async fn estimates(&self, queries: &[Query]) -> Vec<EstimationResult> {
+        let (trivial_estimations, forwarded_estimations) = self.bulk_estimate_prices(queries).await;
+        SanitizedPriceEstimator::<T>::merge_trivial_and_forwarded_estimations(
+            trivial_estimations,
+            forwarded_estimations,
+        )
     }
 }
 
@@ -111,7 +150,6 @@ mod tests {
     use super::*;
     use crate::bad_token::{MockBadTokenDetecting, TokenQuality};
     use crate::price_estimation::MockPriceEstimating;
-    use mockall::predicate::eq;
     use model::order::OrderKind;
     use primitive_types::{H160, U256};
 
@@ -180,47 +218,41 @@ mod tests {
             },
         ];
 
-        let mut wrapped_estimator = MockPriceEstimating::new();
-        // Tests for estimates[0]
-        wrapped_estimator
-            .expect_estimate()
-            .times(1)
-            .with(eq(queries[0]))
-            .returning(|_| {
-                Ok(Estimate {
-                    out_amount: 1.into(),
-                    gas: 100.into(),
-                })
-            });
-        // Tests for estimates[1]
-        wrapped_estimator
-            .expect_estimate()
-            .times(1)
-            .with(eq(Query {
+        let expected_forwarded_queries = [
+            // SanitizedPriceEstimator will simply forward the Query in the common case
+            queries[0],
+            Query {
                 // SanitizedPriceEstimator replaces ETH buy token with native token
                 buy_token: native_token,
                 ..queries[1]
-            }))
-            .returning(|_| {
-                Ok(Estimate {
-                    out_amount: 1.into(),
-                    gas: 100.into(),
-                })
-            });
-        // Tests for estimates[2]
-        wrapped_estimator
-            .expect_estimate()
-            .times(1)
-            .with(eq(Query {
+            },
+            Query {
                 // SanitizedPriceEstimator replaces ETH buy token with native token
                 buy_token: native_token,
                 ..queries[2]
-            }))
+            },
+        ];
+
+        let mut wrapped_estimator = MockPriceEstimating::new();
+        wrapped_estimator
+            .expect_estimates()
+            .times(1)
+            .withf(move |arg: &[Query]| arg.iter().eq(expected_forwarded_queries.iter()))
             .returning(|_| {
-                Ok(Estimate {
-                    out_amount: 1.into(),
-                    gas: U256::MAX,
-                })
+                vec![
+                    Ok(Estimate {
+                        out_amount: 1.into(),
+                        gas: 100.into(),
+                    }),
+                    Ok(Estimate {
+                        out_amount: 1.into(),
+                        gas: 100.into(),
+                    }),
+                    Ok(Estimate {
+                        out_amount: 1.into(),
+                        gas: U256::MAX,
+                    }),
+                ]
             });
 
         let sanitized_estimator = SanitizedPriceEstimator {
