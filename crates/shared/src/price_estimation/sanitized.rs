@@ -1,10 +1,10 @@
 use super::{Estimate, PriceEstimating, PriceEstimationError, Query};
-use crate::bad_token::BadTokenDetecting;
+use crate::bad_token::{BadTokenDetecting, TokenQuality};
 use crate::price_estimation::gas::GAS_PER_WETH_UNWRAP;
 use anyhow::Result;
 use model::order::BUY_ETH_ADDRESS;
 use primitive_types::H160;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 /// Verifies that buy and sell tokens are supported and handles
@@ -36,9 +36,12 @@ impl<T: PriceEstimating> SanitizedPriceEstimator<T> {
         }
     }
 
-    async fn get_unsupported_tokens(&self, queries: &[Query]) -> Result<HashSet<H160>> {
-        let mut unsupported_tokens: HashSet<H160> = Default::default();
-        let mut supported_tokens: HashSet<H160> = Default::default();
+    async fn get_token_quality_errors(
+        &self,
+        queries: &[Query],
+    ) -> HashMap<H160, PriceEstimationError> {
+        let mut token_quality_errors: HashMap<H160, PriceEstimationError> = Default::default();
+        let mut checked_tokens = HashSet::<H160>::default();
 
         // TODO should this be parallelised?
         for token in queries
@@ -46,40 +49,43 @@ impl<T: PriceEstimating> SanitizedPriceEstimator<T> {
             .copied()
             .flat_map(|query| [query.buy_token, query.sell_token])
         {
-            if unsupported_tokens.contains(&token) || supported_tokens.contains(&token) {
+            if checked_tokens.contains(&token) {
                 continue;
             }
-            let quality = self.bad_token_detector.detect(token).await?;
-            if quality.is_good() {
-                supported_tokens.insert(token);
-            } else {
-                unsupported_tokens.insert(token);
-            }
+
+            match self.bad_token_detector.detect(token).await {
+                Err(err) => {
+                    token_quality_errors.insert(token, PriceEstimationError::Other(err));
+                }
+                Ok(TokenQuality::Bad { .. }) => {
+                    token_quality_errors
+                        .insert(token, PriceEstimationError::UnsupportedToken(token));
+                }
+                _ => (),
+            };
+            checked_tokens.insert(token);
         }
-        Ok(unsupported_tokens)
+        token_quality_errors
     }
 
     async fn bulk_estimate_prices(
         &self,
         queries: &[Query],
     ) -> (Vec<EstimationProgress>, Vec<EstimationResult>) {
-        let unsupported_tokens = self.get_unsupported_tokens(queries).await.unwrap();
+        let token_quality_errors = self.get_token_quality_errors(queries).await;
 
         let mut estimations_to_forward = Vec::new();
 
         let estimation_progress = queries
             .iter()
             .map(|query| {
-                if unsupported_tokens.contains(&query.buy_token) {
-                    return EstimationProgress::TrivialSolution(Err(
-                        PriceEstimationError::UnsupportedToken(query.buy_token),
-                    ));
+                if let Some(err) = token_quality_errors.get(&query.buy_token) {
+                    return EstimationProgress::TrivialSolution(Err(err.clone()));
                 }
-                if unsupported_tokens.contains(&query.sell_token) {
-                    return EstimationProgress::TrivialSolution(Err(
-                        PriceEstimationError::UnsupportedToken(query.sell_token),
-                    ));
+                if let Some(err) = token_quality_errors.get(&query.sell_token) {
+                    return EstimationProgress::TrivialSolution(Err(err.clone()));
                 }
+
                 if query.buy_token == query.sell_token {
                     return EstimationProgress::TrivialSolution(Ok(Estimate {
                         out_amount: query.in_amount,
@@ -105,19 +111,22 @@ impl<T: PriceEstimating> SanitizedPriceEstimator<T> {
     }
 
     fn merge_trivial_and_forwarded_estimations(
+        &self,
         partially_estimated: Vec<EstimationProgress>,
         forwarded_estimations: Vec<EstimationResult>,
     ) -> Vec<EstimationResult> {
+        use EstimationProgress::*;
+
         let mut forwarded_estimations = forwarded_estimations.into_iter();
 
         partially_estimated
             .into_iter()
             .map(|progress| match progress {
-                EstimationProgress::TrivialSolution(res) => res,
-                EstimationProgress::AwaitingErc20Estimation => forwarded_estimations
+                TrivialSolution(res) => res,
+                AwaitingErc20Estimation => forwarded_estimations
                     .next()
                     .expect("there is a result for every forwarded estimation"),
-                EstimationProgress::AwaitingEthEstimation => {
+                AwaitingEthEstimation => {
                     let mut res = forwarded_estimations
                         .next()
                         .expect("there is a result for every forwarded estimation")?;
@@ -138,10 +147,7 @@ impl<T: PriceEstimating> SanitizedPriceEstimator<T> {
 impl<T: PriceEstimating> PriceEstimating for SanitizedPriceEstimator<T> {
     async fn estimates(&self, queries: &[Query]) -> Vec<EstimationResult> {
         let (trivial_estimations, forwarded_estimations) = self.bulk_estimate_prices(queries).await;
-        SanitizedPriceEstimator::<T>::merge_trivial_and_forwarded_estimations(
-            trivial_estimations,
-            forwarded_estimations,
-        )
+        self.merge_trivial_and_forwarded_estimations(trivial_estimations, forwarded_estimations)
     }
 }
 
@@ -156,7 +162,7 @@ mod tests {
     const BAD_TOKEN: H160 = H160([0x12; 20]);
 
     #[tokio::test]
-    async fn works() {
+    async fn handles_trivial_estimates_on_its_own() {
         let mut bad_token_detector = MockBadTokenDetecting::new();
         bad_token_detector.expect_detect().returning(|token| {
             if token == BAD_TOKEN {
