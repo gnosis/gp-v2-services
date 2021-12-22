@@ -142,6 +142,14 @@ fn main() {
                         deployment_information: Some(DeploymentInformation::BlockNumber(13730248)),
                     },
                 )
+                .add_network(
+                    "4",
+                    Network {
+                        address: addr("0x41B953164995c11C81DA73D212ED8Af25741b7Ac"),
+                        // <https://rinkeby.etherscan.io/tx/0x69211f2b510d5d18b49e226822f4b920979b75ba87f5041034dc53d38a79a7c3>
+                        deployment_information: Some(DeploymentInformation::BlockNumber(13730248)),
+                    },
+                )
         },
     );
     generate_contract("BalancerV2WeightedPool");

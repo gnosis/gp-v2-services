@@ -433,7 +433,7 @@ async fn main() {
                 web3.clone(),
                 token_info_fetcher.clone(),
                 args.balancer_factories
-                    .unwrap_or_else(|| BalancerFactoryKind::all(chain_id)),
+                    .unwrap_or_else(BalancerFactoryKind::all),
                 cache_config,
                 current_block_stream.clone(),
                 metrics.clone(),

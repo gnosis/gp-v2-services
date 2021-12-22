@@ -152,7 +152,7 @@ arg_enum! {
 
 impl BalancerFactoryKind {
     /// Returns all supported Balancer factory kinds.
-    pub fn all(chain_id: u64) -> Vec<Self> {
+    pub fn all() -> Vec<Self> {
         // take advantage of the auto-generated `::variants()` associated
         // function so we don't have to keep updating this method with new kinds
         // as they get added. Slightly inefficient.
@@ -161,11 +161,6 @@ impl BalancerFactoryKind {
             .map(|name| {
                 name.parse()
                     .expect("generated variant name did not parse successfully")
-            })
-            .filter(|kind| match (kind, chain_id) {
-                (BalancerFactoryKind::NoProtocolFeeLiquidityBootstrapping, 4) => false,
-                (_, 1 | 4) => true,
-                _ => false,
             })
             .collect()
     }
@@ -376,13 +371,7 @@ mod tests {
 
     #[test]
     fn enumerates_all_balancer_factory_kinds() {
-        assert!(!BalancerFactoryKind::all(1).is_empty());
-    }
-
-    #[test]
-    fn filters_out_no_protocol_fee_liquidity_bootstrapping_pool_for_rinkeby() {
-        assert!(!BalancerFactoryKind::all(4)
-            .contains(&BalancerFactoryKind::NoProtocolFeeLiquidityBootstrapping));
+        assert!(!BalancerFactoryKind::all().is_empty());
     }
 
     #[tokio::test]
@@ -403,7 +392,7 @@ mod tests {
                     web3,
                     pool_initializer,
                     Arc::new(token_infos),
-                    BalancerFactoryKind::all(chain_id),
+                    BalancerFactoryKind::all(),
                 )
                 .await
                 .unwrap(),

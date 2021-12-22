@@ -18,7 +18,9 @@ impl FactoryIndexing for BalancerV2NoProtocolFeeLiquidityBootstrappingPoolFactor
     type PoolState = PoolState;
 
     async fn specialize_pool_info(&self, pool: common::PoolInfo) -> Result<Self::PoolInfo> {
-        as_liquidity_bootstrapping_factory(self).specialize_pool_info(pool).await
+        as_liquidity_bootstrapping_factory(self)
+            .specialize_pool_info(pool)
+            .await
     }
 
     fn fetch_pool_state(
@@ -28,7 +30,12 @@ impl FactoryIndexing for BalancerV2NoProtocolFeeLiquidityBootstrappingPoolFactor
         batch: &mut Web3CallBatch,
         block: BlockId,
     ) -> BoxFuture<'static, Result<Option<Self::PoolState>>> {
-        as_liquidity_bootstrapping_factory(self).fetch_pool_state(pool_info, common_pool_state, batch, block)
+        as_liquidity_bootstrapping_factory(self).fetch_pool_state(
+            pool_info,
+            common_pool_state,
+            batch,
+            block,
+        )
     }
 }
 
