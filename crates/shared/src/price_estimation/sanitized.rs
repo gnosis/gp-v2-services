@@ -1,10 +1,11 @@
-use super::{ensure_token_supported, Estimate, PriceEstimating, PriceEstimationError, Query};
+use super::{Estimate, PriceEstimating, PriceEstimationError, Query};
 use crate::bad_token::BadTokenDetecting;
 use crate::price_estimation::gas::GAS_PER_WETH_UNWRAP;
 use anyhow::Result;
 use futures::future;
 use model::order::BUY_ETH_ADDRESS;
 use primitive_types::H160;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 /// Verifies that buy and sell tokens are supported and handles
@@ -27,6 +28,30 @@ impl<T: PriceEstimating> SanitizedPriceEstimator<T> {
             bad_token_detector,
         }
     }
+
+    async fn get_unsupported_tokens(&self, queries: &[Query]) -> Result<HashSet<H160>> {
+        let mut unsupported_tokens: HashSet<H160> = Default::default();
+        let mut supported_tokens: HashSet<H160> = Default::default();
+
+        // TODO should this be parallelised?
+        for token in queries
+            .iter()
+            .copied()
+            .flat_map(|query| [query.buy_token, query.sell_token])
+        {
+            if unsupported_tokens.contains(&token) || supported_tokens.contains(&token) {
+                continue;
+            }
+            let quality = self.bad_token_detector.detect(token).await?;
+            if quality.is_good() {
+                supported_tokens.insert(token);
+            } else {
+                unsupported_tokens.insert(token);
+            }
+        }
+        Ok(unsupported_tokens)
+    }
+
     async fn estimate_sanitized_query(
         &self,
         query: &Query,
@@ -37,9 +62,6 @@ impl<T: PriceEstimating> SanitizedPriceEstimator<T> {
                 gas: 0.into(),
             });
         }
-
-        ensure_token_supported(query.buy_token, self.bad_token_detector.as_ref()).await?;
-        ensure_token_supported(query.sell_token, self.bad_token_detector.as_ref()).await?;
 
         let buy_eth = query.buy_token == BUY_ETH_ADDRESS;
         let sanitized_query = if buy_eth {
@@ -69,11 +91,17 @@ impl<T: PriceEstimating> SanitizedPriceEstimator<T> {
 #[async_trait::async_trait]
 impl<T: PriceEstimating> PriceEstimating for SanitizedPriceEstimator<T> {
     async fn estimates(&self, queries: &[Query]) -> Vec<Result<Estimate, PriceEstimationError>> {
-        future::join_all(
-            queries
-                .iter()
-                .map(|query| self.estimate_sanitized_query(query)),
-        )
+        let unsupported_tokens = self.get_unsupported_tokens(queries).await.unwrap();
+
+        future::join_all(queries.iter().map(|query| async {
+            if unsupported_tokens.contains(&query.buy_token) {
+                return Err(PriceEstimationError::UnsupportedToken(query.buy_token));
+            }
+            if unsupported_tokens.contains(&query.sell_token) {
+                return Err(PriceEstimationError::UnsupportedToken(query.sell_token));
+            }
+            self.estimate_sanitized_query(query).await
+        }))
         .await
     }
 }
