@@ -13,6 +13,10 @@ include!(concat!(
     env!("OUT_DIR"),
     "/BalancerV2LiquidityBootstrappingPoolFactory.rs"
 ));
+include!(concat!(
+    env!("OUT_DIR"),
+    "/BalancerV2NoProtocolFeeLiquidityBootstrappingPoolFactory.rs"
+));
 include!(concat!(env!("OUT_DIR"), "/BalancerV2StablePool.rs"));
 include!(concat!(env!("OUT_DIR"), "/BalancerV2StablePoolFactory.rs"));
 include!(concat!(env!("OUT_DIR"), "/BalancerV2Vault.rs"));
@@ -112,11 +116,15 @@ mod tests {
         }
         for network in &[1, 4] {
             assert_has_deployment_address!(BalancerV2Vault for *network);
+            assert_has_deployment_address!(BalancerV2LiquidityBootstrappingPoolFactory for *network);
             assert_has_deployment_address!(BalancerV2WeightedPoolFactory for *network);
             assert_has_deployment_address!(BalancerV2WeightedPool2TokensFactory for *network);
             assert_has_deployment_address!(BalancerV2StablePoolFactory for *network);
             assert_has_deployment_address!(UniswapV2Factory for *network);
             assert_has_deployment_address!(UniswapV2Router02 for *network);
+        }
+        for network in &[1] {
+            assert_has_deployment_address!(BalancerV2NoProtocolFeeLiquidityBootstrappingPoolFactory for *network);
         }
         for network in &[100] {
             assert_has_deployment_address!(HoneyswapFactory for *network);

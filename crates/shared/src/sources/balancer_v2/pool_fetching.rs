@@ -31,8 +31,9 @@ use crate::{
 };
 use anyhow::Result;
 use contracts::{
-    BalancerV2LiquidityBootstrappingPoolFactory, BalancerV2StablePoolFactory, BalancerV2Vault,
-    BalancerV2WeightedPool2TokensFactory, BalancerV2WeightedPoolFactory,
+    BalancerV2LiquidityBootstrappingPoolFactory,
+    BalancerV2NoProtocolFeeLiquidityBootstrappingPoolFactory, BalancerV2StablePoolFactory,
+    BalancerV2Vault, BalancerV2WeightedPool2TokensFactory, BalancerV2WeightedPoolFactory,
 };
 use ethcontract::{Instance, H160, H256};
 use model::TokenPair;
@@ -139,18 +140,19 @@ pub struct BalancerPoolFetcher {
 
 arg_enum! {
     /// An enum containing all supported Balancer factory types.
-    #[derive(Clone, Copy, Debug)]
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub enum BalancerFactoryKind {
         Weighted,
         Weighted2Token,
         Stable,
         LiquidityBootstrapping,
+        NoProtocolFeeLiquidityBootstrapping,
     }
 }
 
 impl BalancerFactoryKind {
     /// Returns all supported Balancer factory kinds.
-    pub fn all() -> Vec<Self> {
+    pub fn all(chain_id: u64) -> Vec<Self> {
         // take advantage of the auto-generated `::variants()` associated
         // function so we don't have to keep updating this method with new kinds
         // as they get added. Slightly inefficient.
@@ -159,6 +161,11 @@ impl BalancerFactoryKind {
             .map(|name| {
                 name.parse()
                     .expect("generated variant name did not parse successfully")
+            })
+            .filter(|kind| match (kind, chain_id) {
+                (BalancerFactoryKind::NoProtocolFeeLiquidityBootstrapping, 4) => false,
+                (_, 1 | 4) => true,
+                _ => false,
             })
             .collect()
     }
@@ -275,6 +282,9 @@ async fn create_aggregate_pool_fetcher(
             BalancerFactoryKind::LiquidityBootstrapping => {
                 registry!(BalancerV2LiquidityBootstrappingPoolFactory)
             }
+            BalancerFactoryKind::NoProtocolFeeLiquidityBootstrapping => {
+                registry!(BalancerV2NoProtocolFeeLiquidityBootstrappingPoolFactory)
+            }
         };
         fetchers.push(registry);
     }
@@ -366,7 +376,13 @@ mod tests {
 
     #[test]
     fn enumerates_all_balancer_factory_kinds() {
-        assert!(!BalancerFactoryKind::all().is_empty());
+        assert!(!BalancerFactoryKind::all(1).is_empty());
+    }
+
+    #[test]
+    fn filters_out_no_protocol_fee_liquidity_bootstrapping_pool_for_rinkeby() {
+        assert!(!BalancerFactoryKind::all(4)
+            .contains(&BalancerFactoryKind::NoProtocolFeeLiquidityBootstrapping));
     }
 
     #[tokio::test]
@@ -387,7 +403,7 @@ mod tests {
                     web3,
                     pool_initializer,
                     Arc::new(token_infos),
-                    BalancerFactoryKind::all(),
+                    BalancerFactoryKind::all(chain_id),
                 )
                 .await
                 .unwrap(),

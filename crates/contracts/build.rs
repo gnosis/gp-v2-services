@@ -127,6 +127,23 @@ fn main() {
                 },
             )
     });
+    generate_contract_with_config(
+        "BalancerV2NoProtocolFeeLiquidityBootstrappingPoolFactory",
+        |builder| {
+            builder
+                .contract_mod_override(
+                    "balancer_v2_no_protocol_fee_liquidity_bootstrapping_pool_factory",
+                )
+                .add_network(
+                    "1",
+                    Network {
+                        address: addr("0x0F3e0c4218b7b0108a3643cFe9D3ec0d4F57c54e"),
+                        // <https://etherscan.io/tx/0x298381e567ff6643d9b32e8e7e9ff0f04a80929dce3e004f6fa1a0104b2b69c3>
+                        deployment_information: Some(DeploymentInformation::BlockNumber(13730248)),
+                    },
+                )
+        },
+    );
     generate_contract("BalancerV2WeightedPool");
     generate_contract_with_config("BalancerV2StablePool", |builder| {
         builder.add_method_alias(
