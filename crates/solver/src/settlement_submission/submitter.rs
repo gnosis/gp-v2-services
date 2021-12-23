@@ -14,7 +14,7 @@
 // find the one that got mined (if any).
 
 use super::{SubmissionError, ESTIMATE_GAS_LIMIT_FACTOR};
-use crate::settlement::Settlement;
+use crate::{settlement::Settlement, settlement_simulation::settle_method_builder};
 use anyhow::{anyhow, ensure, Context, Result};
 use contracts::GPv2Settlement;
 use ethcontract::{contract::MethodBuilder, dyns::DynTransport, transaction::Transaction, Account};
@@ -336,7 +336,7 @@ impl<'a> Submitter<'a> {
             gas_price.legacy.into()
         };
 
-        super::retry::settle_method_builder(self.contract, settlement.into(), self.account.clone())
+        settle_method_builder(self.contract, settlement.into(), self.account.clone())
             .nonce(nonce)
             .gas(U256::from_f64_lossy(gas_limit))
             .gas_price(gas_price)

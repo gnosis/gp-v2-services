@@ -2,9 +2,6 @@ pub mod custom_nodes_api;
 mod dry_run;
 pub mod eden_api;
 pub mod flashbots_api;
-mod gas_price_stream;
-pub mod retry;
-pub mod rpc;
 pub mod submitter;
 
 use crate::{metrics::SettlementSubmissionOutcome, settlement::Settlement};
@@ -25,7 +22,6 @@ use submitter::{Submitter, SubmitterGasPriceEstimator, SubmitterParams, Transact
 use web3::types::TransactionReceipt;
 
 const ESTIMATE_GAS_LIMIT_FACTOR: f64 = 1.2;
-const GAS_PRICE_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
 
 pub struct SolutionSubmitter {
     pub web3: Web3,
