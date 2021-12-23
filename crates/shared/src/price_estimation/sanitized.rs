@@ -119,27 +119,27 @@ impl<T: PriceEstimating> SanitizedPriceEstimator<T> {
 
         let mut forwarded_estimations = forwarded_estimations.into_iter();
 
-        partially_estimated
-            .into_iter()
-            .map(|progress| match progress {
-                TrivialSolution(res) => res,
-                AwaitingErc20Estimation => forwarded_estimations
-                    .next()
-                    .expect("there is a result for every forwarded estimation"),
-                AwaitingEthEstimation => {
-                    let mut res = forwarded_estimations
+        let merged_results =
+            partially_estimated
+                .into_iter()
+                .map(|progress| match progress {
+                    TrivialSolution(res) => res,
+                    AwaitingErc20Estimation => forwarded_estimations
                         .next()
-                        .expect("there is a result for every forwarded estimation")?;
-                    res.gas =
-                        res.gas
-                            .checked_add(GAS_PER_WETH_UNWRAP.into())
-                            .ok_or(anyhow::anyhow!(
-                                "cost of unwrapping ETH would overflow gas price"
-                            ))?;
-                    Ok(res)
-                }
-            })
-            .collect()
+                        .expect("there is a result for every forwarded estimation"),
+                    AwaitingEthEstimation => {
+                        let mut res = forwarded_estimations
+                            .next()
+                            .expect("there is a result for every forwarded estimation")?;
+                        res.gas = res.gas.checked_add(GAS_PER_WETH_UNWRAP.into()).ok_or(
+                            anyhow::anyhow!("cost of unwrapping ETH would overflow gas price"),
+                        )?;
+                        Ok(res)
+                    }
+                })
+                .collect();
+        debug_assert!(forwarded_estimations.next().is_none());
+        merged_results
     }
 }
 
