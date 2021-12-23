@@ -138,7 +138,7 @@ pub struct Arguments {
 
     /// If mipsolver should use internal buffers to improve solution quality.
     #[structopt(long, env)]
-    pub mipsolver_uses_internal_buffers: bool,
+    pub mip_uses_internal_buffers: bool,
 }
 
 pub fn parse_fee_factor(s: &str) -> Result<f64> {
