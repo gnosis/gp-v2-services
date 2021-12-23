@@ -46,7 +46,11 @@ impl PriceEstimating for CompetitionPriceEstimator {
                         },
                     )
                     .map(|winning_estimate| {
-                        tracing::debug!(?query, ?winning_estimate, "winning price estimate",);
+                        // The `EstimateData::estimator_name` field is getting
+                        // flagged as dead code despited being used in the log
+                        // below. Just convince the linter that we use it.
+                        let _ = winning_estimate.estimator_name;
+                        tracing::debug!(?query, ?winning_estimate, "winning price estimate");
                         winning_estimate.estimate
                     })
             })
