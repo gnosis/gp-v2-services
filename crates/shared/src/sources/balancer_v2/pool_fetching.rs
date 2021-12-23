@@ -346,7 +346,7 @@ mod tests {
     use super::*;
     use crate::{
         sources::balancer_v2::{
-            graph_api::{BalancerSubgraphClient, PoolData},
+            graph_api::{BalancerSubgraphClient, PoolData, PoolType},
             pool_init::EmptyPoolInitializer,
         },
         token_info::TokenInfoFetcher,
@@ -432,7 +432,13 @@ mod tests {
                     for token in &subgraph_pool.tokens {
                         let token_state = &state.tokens[&token.address];
                         assert_eq!(token_state.common.scaling_exponent, 18 - token.decimals);
-                        assert_eq!(token_state.weight, token.weight.unwrap());
+
+                        // Don't check weights for LBPs because they may be out
+                        // of date in the subgraph. See:
+                        // <https://github.com/balancer-labs/balancer-subgraph-v2/issues/173>
+                        if subgraph_pool.pool_type != PoolType::LiquidityBootstrapping {
+                            assert_eq!(token_state.weight, token.weight.unwrap());
+                        }
                     }
                 }
                 PoolKind::Stable(state) => {
