@@ -17,9 +17,9 @@ pub struct SanitizedPriceEstimator<T: PriceEstimating> {
 
 type EstimationResult = Result<Estimate, PriceEstimationError>;
 
-enum EstimationProgress {
+enum EstimationProgress<'a> {
     TrivialSolution(EstimationResult),
-    AwaitingEthEstimation,
+    AwaitingEthEstimation(&'a Query),
     AwaitingErc20Estimation,
 }
 
@@ -68,10 +68,13 @@ impl<T: PriceEstimating> SanitizedPriceEstimator<T> {
         token_quality_errors
     }
 
-    async fn bulk_estimate_prices(
+    async fn bulk_estimate_prices<'a, 'b>(
         &self,
-        queries: &[Query],
-    ) -> (Vec<EstimationProgress>, Vec<EstimationResult>) {
+        queries: &'a [Query],
+    ) -> (Vec<EstimationProgress<'b>>, Vec<EstimationResult>)
+    where
+        'a: 'b,
+    {
         let token_quality_errors = self.get_token_quality_errors(queries).await;
 
         let mut estimations_to_forward = Vec::new();
@@ -87,18 +90,29 @@ impl<T: PriceEstimating> SanitizedPriceEstimator<T> {
                 }
 
                 if query.buy_token == query.sell_token {
-                    return EstimationProgress::TrivialSolution(Ok(Estimate {
+                    let estimation = Estimate {
                         out_amount: query.in_amount,
                         gas: 0.into(),
-                    }));
+                    };
+
+                    tracing::debug!(?query, ?estimation, "generate trivial price estimation");
+                    return EstimationProgress::TrivialSolution(Ok(estimation));
                 }
 
                 if query.buy_token == BUY_ETH_ADDRESS {
-                    estimations_to_forward.push(Query {
+                    let sanitized_query = Query {
                         buy_token: self.native_token,
                         ..*query
-                    });
-                    return EstimationProgress::AwaitingEthEstimation;
+                    };
+
+                    tracing::debug!(
+                        ?query,
+                        ?sanitized_query,
+                        "estimate price for wrapped native asset"
+                    );
+
+                    estimations_to_forward.push(sanitized_query);
+                    return EstimationProgress::AwaitingEthEstimation(query);
                 }
 
                 estimations_to_forward.push(*query);
@@ -119,25 +133,32 @@ impl<T: PriceEstimating> SanitizedPriceEstimator<T> {
 
         let mut forwarded_estimations = forwarded_estimations.into_iter();
 
-        let merged_results =
-            partially_estimated
-                .into_iter()
-                .map(|progress| match progress {
-                    TrivialSolution(res) => res,
-                    AwaitingErc20Estimation => forwarded_estimations
+        let merged_results = partially_estimated
+            .into_iter()
+            .map(|progress| match progress {
+                TrivialSolution(res) => res,
+                AwaitingErc20Estimation => forwarded_estimations
+                    .next()
+                    .expect("there is a result for every forwarded estimation"),
+                AwaitingEthEstimation(query) => {
+                    let mut final_estimation = forwarded_estimations
                         .next()
-                        .expect("there is a result for every forwarded estimation"),
-                    AwaitingEthEstimation => {
-                        let mut res = forwarded_estimations
-                            .next()
-                            .expect("there is a result for every forwarded estimation")?;
-                        res.gas = res.gas.checked_add(GAS_PER_WETH_UNWRAP.into()).ok_or(
-                            anyhow::anyhow!("cost of unwrapping ETH would overflow gas price"),
-                        )?;
-                        Ok(res)
-                    }
-                })
-                .collect();
+                        .expect("there is a result for every forwarded estimation")?;
+                    final_estimation.gas = final_estimation
+                        .gas
+                        .checked_add(GAS_PER_WETH_UNWRAP.into())
+                        .ok_or(anyhow::anyhow!(
+                            "cost of unwrapping ETH would overflow gas price"
+                        ))?;
+                    tracing::debug!(
+                        ?query,
+                        ?final_estimation,
+                        "added cost of unwrapping WETH to price estimation"
+                    );
+                    Ok(final_estimation)
+                }
+            })
+            .collect();
         debug_assert!(forwarded_estimations.next().is_none());
         merged_results
     }
