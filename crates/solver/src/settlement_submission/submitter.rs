@@ -38,13 +38,20 @@ pub struct SubmitterParams {
     pub retry_interval: Duration,
 }
 
+#[derive(Debug)]
+/// Enum used to handle all kind of messages received from implementers of trait TransactionSubmitting
+pub enum SubmitApiError {
+    InvalidNonce,
+    Other(anyhow::Error),
+}
+
 pub struct TransactionHandle(pub H256);
 
 #[async_trait::async_trait]
 pub trait TransactionSubmitting {
     /// Submits raw signed transation to the specific network (public mempool, eden, flashbots...).
     /// Returns transaction handle
-    async fn submit_raw_transaction(&self, tx: &[u8]) -> Result<TransactionHandle>;
+    async fn submit_raw_transaction(&self, tx: &[u8]) -> Result<TransactionHandle, SubmitApiError>;
     /// Cancels already submitted transaction using the transaction handle
     async fn cancel_transaction(&self, id: &TransactionHandle) -> Result<()>;
 }
@@ -316,7 +323,12 @@ impl<'a> Submitter<'a> {
                 Ok(id) => {
                     previous_tx = Some((gas_price, id));
                 }
-                Err(err) => tracing::error!("submission failed: {:?}", err),
+                Err(err) => match err {
+                    SubmitApiError::InvalidNonce => {
+                        tracing::warn!("submission failed: invalid nonce")
+                    }
+                    SubmitApiError::Other(err) => tracing::error!("submission failed: {}", err),
+                },
             }
             tokio::time::sleep(params.retry_interval).await;
         }

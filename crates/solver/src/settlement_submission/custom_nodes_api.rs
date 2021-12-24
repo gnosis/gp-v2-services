@@ -1,29 +1,36 @@
-use super::submitter::{TransactionHandle, TransactionSubmitting};
-use anyhow::{anyhow, bail, Context, Result};
+use super::submitter::{SubmitApiError, TransactionHandle, TransactionSubmitting};
+use anyhow::{anyhow, Result};
 use futures::FutureExt;
 use jsonrpc_core::Output;
 use reqwest::Client;
 use serde::de::DeserializeOwned;
 use shared::Web3;
 
-pub fn parse_json_rpc_response<T>(body: &str) -> Result<T>
+pub fn parse_json_rpc_response<T>(body: &str) -> Result<T, SubmitApiError>
 where
     T: DeserializeOwned,
 {
-    serde_json::from_str::<Output>(body)
-        .with_context(|| {
-            tracing::info!("invalid rpc response: {}", body);
-            anyhow!("invalid rpc response")
-        })
-        .and_then(|output| match output {
-            Output::Success(body) => serde_json::from_value::<T>(body.result).with_context(|| {
-                format!(
+    match serde_json::from_str::<Output>(body) {
+        Ok(output) => match output {
+            Output::Success(body) => serde_json::from_value::<T>(body.result).map_err(|_| {
+                SubmitApiError::Other(anyhow!(
                     "failed conversion to expected type {}",
                     std::any::type_name::<T>()
-                )
+                ))
             }),
-            Output::Failure(body) => bail!("rpc error: {}", body.error),
-        })
+            Output::Failure(body) => {
+                if body.error.message.contains("invalid nonce") {
+                    Err(SubmitApiError::InvalidNonce)
+                } else {
+                    Err(SubmitApiError::Other(anyhow!("rpc error: {}", body.error)))
+                }
+            }
+        },
+        Err(_) => {
+            tracing::info!("invalid rpc response: {}", body);
+            Err(SubmitApiError::Other(anyhow!("invalid rpc response")))
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -43,7 +50,7 @@ impl TransactionSubmitting for CustomNodesApi {
     async fn submit_raw_transaction(
         &self,
         raw_signed_transaction: &[u8],
-    ) -> Result<TransactionHandle> {
+    ) -> Result<TransactionHandle, SubmitApiError> {
         let mut futures = self
             .nodes
             .iter()
@@ -62,7 +69,9 @@ impl TransactionSubmitting for CustomNodesApi {
             match result {
                 Ok(hash) => return Ok(TransactionHandle(hash)),
                 Err(err) if rest.is_empty() => {
-                    return Err(anyhow::Error::from(err).context("all nodes tx failed"))
+                    return Err(SubmitApiError::Other(
+                        anyhow::Error::from(err).context("all nodes tx failed"),
+                    ))
                 }
                 Err(err) => {
                     tracing::warn!(?err, "single node tx failed");
