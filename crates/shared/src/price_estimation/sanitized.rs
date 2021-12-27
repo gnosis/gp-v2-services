@@ -67,31 +67,49 @@ impl<T: PriceEstimating> SanitizedPriceEstimator<T> {
         }
         token_quality_errors
     }
+}
 
-    async fn bulk_estimate_prices<'a, 'b>(
-        &self,
-        queries: &'a [Query],
-    ) -> (Vec<EstimationProgress<'b>>, Vec<EstimationResult>)
-    where
-        'a: 'b,
-    {
+#[async_trait::async_trait]
+impl<T: PriceEstimating> PriceEstimating for SanitizedPriceEstimator<T> {
+    // This function will estimate easy queries on its own and forward "difficult" queries to the
+    // inner estimator. When the inner estimator did its job, solutions get merged back together
+    // while preserving the correct order.
+    //
+    // TQ: Trivial Query, DQ: Difficult Query, P: Placeholder, TE: Trivial Estimate, DE: Difficult Estimate
+    // numbers are the index within the original slice of queries
+    // A => B: Code which turns A into B
+    //
+    // 1) Solve trivial queries and split off difficult ones.
+    // [TQ0, DQ1, DQ2, TQ3, DQ4] =>
+    // [TE0, P,   P,   TE3, P  ] and [DQ1, DQ2, DQ4]
+    //
+    // 2) Let inner estimator estimate difficult queries.
+    // [DQ1, DQ2, DQ4] => [DE1, DE2, DE4]
+    //
+    // 3) Fill placeholders by merging difficult estimations back into all estimates.
+    // [TE0, P,   P,   TE3, P  ] + [DE1, DE2, DE4] =>
+    // [TE0, DE1, DE2, TE3, DE4]
+    async fn estimates(&self, queries: &[Query]) -> Vec<EstimationResult> {
+        use EstimationProgress::*;
+
         let token_quality_errors = self.get_token_quality_errors(queries).await;
 
-        let mut estimations_to_forward = Vec::new();
+        let mut difficult_queries = Vec::new();
 
-        let estimation_progress = queries
+        // If we don't collect here the borrow checker starts yelling :(
+        #[allow(clippy::needless_collect)]
+        // 1) Solve trivial queries and split off difficult ones.
+        let all_estimates = queries
             .iter()
             .map(|query| {
                 if query.sell_token == BUY_ETH_ADDRESS {
-                    return EstimationProgress::TrivialSolution(Err(
-                        PriceEstimationError::NoLiquidity,
-                    ));
+                    return TrivialSolution(Err(PriceEstimationError::NoLiquidity));
                 }
                 if let Some(err) = token_quality_errors.get(&query.buy_token) {
-                    return EstimationProgress::TrivialSolution(Err(err.clone()));
+                    return TrivialSolution(Err(err.clone()));
                 }
                 if let Some(err) = token_quality_errors.get(&query.sell_token) {
-                    return EstimationProgress::TrivialSolution(Err(err.clone()));
+                    return TrivialSolution(Err(err.clone()));
                 }
 
                 if query.buy_token == query.sell_token {
@@ -101,7 +119,7 @@ impl<T: PriceEstimating> SanitizedPriceEstimator<T> {
                     };
 
                     tracing::debug!(?query, ?estimation, "generate trivial price estimation");
-                    return EstimationProgress::TrivialSolution(Ok(estimation));
+                    return TrivialSolution(Ok(estimation));
                 }
 
                 if query.buy_token == BUY_ETH_ADDRESS {
@@ -116,39 +134,34 @@ impl<T: PriceEstimating> SanitizedPriceEstimator<T> {
                         "estimate price for wrapped native asset"
                     );
 
-                    estimations_to_forward.push(sanitized_query);
-                    return EstimationProgress::AwaitingEthEstimation(query);
+                    difficult_queries.push(sanitized_query);
+                    return AwaitingEthEstimation(query);
                 }
 
-                estimations_to_forward.push(*query);
-                EstimationProgress::AwaitingErc20Estimation
+                difficult_queries.push(*query);
+                AwaitingErc20Estimation
             })
             .collect::<Vec<_>>();
 
-        let remaining_estimations = self.inner.estimates(&estimations_to_forward[..]).await;
-        (estimation_progress, remaining_estimations)
-    }
+        // 2) Let inner estimator estimate difficult queries.
+        let mut difficult_estimates = self
+            .inner
+            .estimates(&difficult_queries[..])
+            .await
+            .into_iter();
 
-    fn merge_trivial_and_forwarded_estimations(
-        &self,
-        partially_estimated: Vec<EstimationProgress>,
-        forwarded_estimations: Vec<EstimationResult>,
-    ) -> Vec<EstimationResult> {
-        use EstimationProgress::*;
-
-        let mut forwarded_estimations = forwarded_estimations.into_iter();
-
-        let merged_results = partially_estimated
+        // 3) Fill placeholders by merging difficult estimations back into the result.
+        let merged_results = all_estimates
             .into_iter()
             .map(|progress| match progress {
                 TrivialSolution(res) => res,
-                AwaitingErc20Estimation => forwarded_estimations
+                AwaitingErc20Estimation => difficult_estimates
                     .next()
-                    .expect("there is a result for every forwarded estimation"),
+                    .expect("there is a result for every forwarded query"),
                 AwaitingEthEstimation(query) => {
-                    let mut final_estimation = forwarded_estimations
+                    let mut final_estimation = difficult_estimates
                         .next()
-                        .expect("there is a result for every forwarded estimation")?;
+                        .expect("there is a result for every forwarded query")?;
                     final_estimation.gas = final_estimation
                         .gas
                         .checked_add(GAS_PER_WETH_UNWRAP.into())
@@ -164,16 +177,11 @@ impl<T: PriceEstimating> SanitizedPriceEstimator<T> {
                 }
             })
             .collect();
-        debug_assert!(forwarded_estimations.next().is_none());
-        merged_results
-    }
-}
 
-#[async_trait::async_trait]
-impl<T: PriceEstimating> PriceEstimating for SanitizedPriceEstimator<T> {
-    async fn estimates(&self, queries: &[Query]) -> Vec<EstimationResult> {
-        let (trivial_estimations, forwarded_estimations) = self.bulk_estimate_prices(queries).await;
-        self.merge_trivial_and_forwarded_estimations(trivial_estimations, forwarded_estimations)
+        // All results of difficult queries have been merged.
+        debug_assert!(difficult_estimates.next().is_none());
+
+        merged_results
     }
 }
 
