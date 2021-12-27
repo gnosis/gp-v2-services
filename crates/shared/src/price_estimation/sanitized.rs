@@ -82,6 +82,11 @@ impl<T: PriceEstimating> SanitizedPriceEstimator<T> {
         let estimation_progress = queries
             .iter()
             .map(|query| {
+                if query.sell_token == BUY_ETH_ADDRESS {
+                    return EstimationProgress::TrivialSolution(Err(
+                        PriceEstimationError::NoLiquidity,
+                    ));
+                }
                 if let Some(err) = token_quality_errors.get(&query.buy_token) {
                     return EstimationProgress::TrivialSolution(Err(err.clone()));
                 }
@@ -243,6 +248,13 @@ mod tests {
                 in_amount: 1.into(),
                 kind: OrderKind::Buy,
             },
+            // Will throw `NoLiquidity` error in `sanitized_estimator`.
+            Query {
+                sell_token: BUY_ETH_ADDRESS,
+                buy_token: H160::from_low_u64_le(1),
+                in_amount: 1.into(),
+                kind: OrderKind::Buy,
+            },
         ];
 
         let expected_forwarded_queries = [
@@ -289,7 +301,7 @@ mod tests {
         };
 
         let result = sanitized_estimator.estimates(&queries).await;
-        assert_eq!(result.len(), 6);
+        assert_eq!(result.len(), 7);
         assert_eq!(
             result[0].as_ref().unwrap(),
             &Estimate {
@@ -327,6 +339,10 @@ mod tests {
         assert!(matches!(
             result[5].as_ref().unwrap_err(),
             PriceEstimationError::UnsupportedToken(_)
+        ));
+        assert!(matches!(
+            result[6].as_ref().unwrap_err(),
+            PriceEstimationError::NoLiquidity
         ));
     }
 }
