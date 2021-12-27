@@ -1,11 +1,13 @@
+use crate::interactions::allowances::AllowanceManager;
 use crate::metrics::SolverMetrics;
+use crate::solver::balancer_sor_solver::BalancerSorSolver;
 use crate::{
     liquidity::{LimitOrder, Liquidity},
     settlement::Settlement,
 };
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use baseline_solver::BaselineSolver;
-use contracts::GPv2Settlement;
+use contracts::{BalancerV2Vault, GPv2Settlement};
 use ethcontract::{Account, H160, U256};
 use http_solver::{buffers::BufferRetriever, HttpSolver};
 use naive_solver::NaiveSolver;
@@ -13,6 +15,7 @@ use num::BigRational;
 use oneinch_solver::OneInchSolver;
 use paraswap_solver::ParaswapSolver;
 use reqwest::{Client, Url};
+use shared::balancer_sor_api::DefaultBalancerSorApi;
 use shared::http_solver_api::{DefaultHttpSolverApi, SolverConfig};
 use shared::zeroex_api::ZeroExApi;
 use shared::{
@@ -133,6 +136,7 @@ arg_enum! {
         Paraswap,
         ZeroEx,
         Quasimodo,
+        BalancerSor,
     }
 }
 
@@ -145,7 +149,9 @@ pub fn create(
     mip_solver_url: Url,
     cow_dex_ag_solver_url: Url,
     quasimodo_solver_url: Url,
+    balancer_sor_url: Url,
     settlement_contract: &GPv2Settlement,
+    vault_contract: Option<&BalancerV2Vault>,
     token_info_fetcher: Arc<dyn TokenInfoFetching>,
     network_id: String,
     chain_id: u64,
@@ -159,6 +165,7 @@ pub fn create(
     zeroex_api: Arc<dyn ZeroExApi>,
     zeroex_slippage_bps: u32,
     quasimodo_uses_internal_buffers: bool,
+    mip_uses_internal_buffers: bool,
 ) -> Result<Solvers> {
     // Tiny helper function to help out with type inference. Otherwise, all
     // `Box::new(...)` expressions would have to be cast `as Box<dyn Solver>`.
@@ -206,7 +213,7 @@ pub fn create(
                         api_key: None,
                         max_nr_exec_orders: 100,
                         has_ucp_policy_parameter: false,
-                        use_internal_buffers: None,
+                        use_internal_buffers: mip_uses_internal_buffers.into(),
                     },
                 )),
                 SolverType::CowDexAg => shared(create_http_solver(
@@ -274,6 +281,27 @@ pub fn create(
                         disabled_paraswap_dexs.clone(),
                         client.clone(),
                         paraswap_partner.clone(),
+                    ),
+                    solver_metrics.clone(),
+                )),
+                SolverType::BalancerSor => shared(SingleOrderSolver::new(
+                    BalancerSorSolver::new(
+                        account,
+                        vault_contract
+                            .ok_or_else(|| {
+                                anyhow!("missing Balancer Vault deployment for SOR solver")
+                            })?
+                            .clone(),
+                        settlement_contract.clone(),
+                        Arc::new(DefaultBalancerSorApi::new(
+                            client.clone(),
+                            balancer_sor_url.clone(),
+                            chain_id,
+                        )?),
+                        Arc::new(AllowanceManager::new(
+                            web3.clone(),
+                            settlement_contract.address(),
+                        )),
                     ),
                     solver_metrics.clone(),
                 )),
