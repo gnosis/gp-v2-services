@@ -13,11 +13,18 @@
 // from outside) so it is only at that point that we need to check the hashes individually to the
 // find the one that got mined (if any).
 
+mod common;
+pub mod custom_nodes_api;
+pub mod eden_api;
+pub mod flashbots_api;
+
 use super::{SubmissionError, ESTIMATE_GAS_LIMIT_FACTOR};
 use crate::{settlement::Settlement, settlement_simulation::settle_method_builder};
 use anyhow::{anyhow, Context, Result};
 use contracts::GPv2Settlement;
-use ethcontract::{contract::MethodBuilder, dyns::DynTransport, transaction::Transaction, Account};
+use ethcontract::{
+    contract::MethodBuilder, dyns::DynTransport, transaction::TransactionBuilder, Account,
+};
 use futures::FutureExt;
 use gas_estimation::{EstimatedGasPrice, GasPriceEstimating};
 use primitive_types::{H256, U256};
@@ -42,17 +49,24 @@ pub struct SubmitterParams {
 /// Enum used to handle all kind of messages received from implementers of trait TransactionSubmitting
 pub enum SubmitApiError {
     InvalidNonce,
-    OpenEthereumTooCheapToReplace,
+    OpenEthereumTooCheapToReplace, // todo ds safe to remove after dropping OE support
     Other(anyhow::Error),
 }
 
-pub struct TransactionHandle(pub H256);
+#[derive(Debug, Clone, Copy)]
+pub struct TransactionHandle {
+    pub hash: H256,
+    pub handle: H256,
+}
 
 #[async_trait::async_trait]
 pub trait TransactionSubmitting {
-    /// Submits raw signed transation to the specific network (public mempool, eden, flashbots...).
+    /// Submits transation to the specific network (public mempool, eden, flashbots...).
     /// Returns transaction handle
-    async fn submit_raw_transaction(&self, tx: &[u8]) -> Result<TransactionHandle, SubmitApiError>;
+    async fn submit_transaction(
+        &self,
+        tx: TransactionBuilder<DynTransport>,
+    ) -> Result<TransactionHandle, SubmitApiError>;
     /// Cancels already submitted transaction using the transaction handle
     async fn cancel_transaction(&self, id: &TransactionHandle) -> Result<()>;
 }
@@ -276,7 +290,7 @@ impl<'a> Submitter<'a> {
                 return SubmissionError::from(err);
             }
 
-            // If gas price has increased cancel old and submit new transaction.
+            // if gas price has increased cancel old transaction so new transaction could be submitted.
 
             if let Some((previous_gas_price, previous_tx)) = previous_tx.as_ref() {
                 let previous_gas_price = previous_gas_price.bump(1.125).ceil();
@@ -292,32 +306,18 @@ impl<'a> Submitter<'a> {
                 }
             }
 
-            // Unwrap because no communication with the node is needed because we specified nonce and gas.
-            let (raw_signed_transaction, hash) =
-                match method.tx.build().now_or_never().unwrap().unwrap() {
-                    Transaction::Request(_) => unreachable!("verified offline account was used"),
-                    Transaction::Raw { bytes, hash } => (bytes.0, hash),
-                };
-
             tracing::info!(
-                "creating transaction with hash {:?}, gas price {:?}, gas estimate {}",
-                hash,
+                "creating transaction with gas price {:?}, gas estimate {}",
                 gas_price,
                 params.gas_estimate,
             );
 
-            // Save tx hash regardless of submission success, it's not significant overhead
-            // Some apis (Eden) returns failed response for submission even if its successfull,
-            // we want to catch mined txs for this case
-            transactions.push(hash);
+            // execute transaction
 
-            match self
-                .submit_api
-                .submit_raw_transaction(&raw_signed_transaction)
-                .await
-            {
-                Ok(id) => {
-                    previous_tx = Some((gas_price, id));
+            match self.submit_api.submit_transaction(method.tx).await {
+                Ok(handle) => {
+                    previous_tx = Some((gas_price, handle));
+                    transactions.push(handle.hash)
                 }
                 Err(err) => match err {
                     SubmitApiError::InvalidNonce => {
@@ -382,7 +382,7 @@ async fn find_mined_transaction(web3: &Web3, hashes: &[H256]) -> Option<Transact
 #[cfg(test)]
 mod tests {
 
-    use super::super::flashbots_api::FlashbotsApi;
+    use super::super::submitter::flashbots_api::FlashbotsApi;
     use super::*;
     use ethcontract::PrivateKey;
     use gas_estimation::blocknative::BlockNative;

@@ -1,7 +1,4 @@
-pub mod custom_nodes_api;
 mod dry_run;
-pub mod eden_api;
-pub mod flashbots_api;
 pub mod submitter;
 
 use crate::{metrics::SettlementSubmissionOutcome, settlement::Settlement};
@@ -81,8 +78,8 @@ impl SolutionSubmitter {
                 submitter.submit(settlement, params).await
             }
             TransactionStrategy::Eden(args) => {
-                if matches!(account, Account::Offline(..)) {
-                    return Err(SubmissionError::Other(anyhow!(
+                if !matches!(account, Account::Offline(..)) {
+                    return Err(SubmissionError::from(anyhow!(
                         "Submission requires offline account for signing"
                     )));
                 }
@@ -106,8 +103,8 @@ impl SolutionSubmitter {
                 submitter.submit(settlement, params).await
             }
             TransactionStrategy::Flashbots(args) => {
-                if matches!(account, Account::Offline(..)) {
-                    return Err(SubmissionError::Other(anyhow!(
+                if !matches!(account, Account::Offline(..)) {
+                    return Err(SubmissionError::from(anyhow!(
                         "Submission requires offline account for signing"
                     )));
                 }

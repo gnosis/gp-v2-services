@@ -35,7 +35,9 @@ use solver::{
     metrics::Metrics,
     orderbook::OrderBookApi,
     settlement_submission::{
-        custom_nodes_api::CustomNodesApi, eden_api::EdenApi, flashbots_api::FlashbotsApi,
+        submitter::{
+            custom_nodes_api::CustomNodesApi, eden_api::EdenApi, flashbots_api::FlashbotsApi,
+        },
         SolutionSubmitter, StrategyArgs, TransactionStrategy,
     },
     solver::SolverType,
