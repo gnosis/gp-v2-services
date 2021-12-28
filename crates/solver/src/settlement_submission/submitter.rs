@@ -15,7 +15,7 @@
 
 use super::{SubmissionError, ESTIMATE_GAS_LIMIT_FACTOR};
 use crate::{settlement::Settlement, settlement_simulation::settle_method_builder};
-use anyhow::{anyhow, ensure, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use contracts::GPv2Settlement;
 use ethcontract::{contract::MethodBuilder, dyns::DynTransport, transaction::Transaction, Account};
 use futures::FutureExt;
@@ -105,11 +105,6 @@ impl<'a> Submitter<'a> {
         submit_api: &'a dyn TransactionSubmitting,
         gas_price_estimator: &'a SubmitterGasPriceEstimator<'a>,
     ) -> Result<Self> {
-        ensure!(
-            matches!(account, Account::Offline(..)),
-            "Submission requires offline account for signing"
-        );
-
         Ok(Self {
             contract,
             account,

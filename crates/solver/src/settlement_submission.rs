@@ -81,6 +81,11 @@ impl SolutionSubmitter {
                 submitter.submit(settlement, params).await
             }
             TransactionStrategy::Eden(args) => {
+                if matches!(account, Account::Offline(..)) {
+                    return Err(SubmissionError::Other(anyhow!(
+                        "Submission requires offline account for signing"
+                    )));
+                }
                 let eden_gas_price_estimator = SubmitterGasPriceEstimator {
                     inner: self.gas_price_estimator.as_ref(),
                     additional_tip: Some(args.additional_tip),
@@ -101,6 +106,11 @@ impl SolutionSubmitter {
                 submitter.submit(settlement, params).await
             }
             TransactionStrategy::Flashbots(args) => {
+                if matches!(account, Account::Offline(..)) {
+                    return Err(SubmissionError::Other(anyhow!(
+                        "Submission requires offline account for signing"
+                    )));
+                }
                 let flashbots_gas_price_estimator = SubmitterGasPriceEstimator {
                     inner: self.gas_price_estimator.as_ref(),
                     additional_tip: Some(args.additional_tip),
