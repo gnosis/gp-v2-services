@@ -26,14 +26,14 @@ pub struct SolutionSubmitter {
     pub gas_price_estimator: Arc<dyn GasPriceEstimating>,
     // for gas price estimation
     pub target_confirm_time: Duration,
+    pub max_confirm_time: Duration,
+    pub retry_interval: Duration,
     pub gas_price_cap: f64,
     pub transaction_strategy: TransactionStrategy,
 }
 
 pub struct StrategyArgs {
     pub submit_api: Box<dyn TransactionSubmitting>,
-    pub max_confirm_time: Duration,
-    pub retry_interval: Duration,
     pub additional_tip: f64,
 }
 pub enum TransactionStrategy {
@@ -55,7 +55,13 @@ impl SolutionSubmitter {
         gas_estimate: U256,
         account: Account,
     ) -> Result<TransactionReceipt, SubmissionError> {
-        //todo ds reduce duplicated code
+        let params = SubmitterParams {
+            target_confirm_time: self.target_confirm_time,
+            gas_estimate,
+            deadline: Some(Instant::now() + self.max_confirm_time),
+            retry_interval: self.retry_interval,
+        };
+
         match &self.transaction_strategy {
             TransactionStrategy::CustomNodes(args) => {
                 let gas_price_estimator = SubmitterGasPriceEstimator {
@@ -69,12 +75,6 @@ impl SolutionSubmitter {
                     args.submit_api.as_ref(),
                     &gas_price_estimator,
                 )?;
-                let params = SubmitterParams {
-                    target_confirm_time: self.target_confirm_time,
-                    gas_estimate,
-                    deadline: Some(Instant::now() + args.max_confirm_time),
-                    retry_interval: args.retry_interval,
-                };
                 submitter.submit(settlement, params).await
             }
             TransactionStrategy::Eden(args) => {
@@ -94,12 +94,6 @@ impl SolutionSubmitter {
                     args.submit_api.as_ref(),
                     &eden_gas_price_estimator,
                 )?;
-                let params = SubmitterParams {
-                    target_confirm_time: self.target_confirm_time,
-                    gas_estimate,
-                    deadline: Some(Instant::now() + args.max_confirm_time),
-                    retry_interval: args.retry_interval,
-                };
                 submitter.submit(settlement, params).await
             }
             TransactionStrategy::Flashbots(args) => {
@@ -119,12 +113,6 @@ impl SolutionSubmitter {
                     args.submit_api.as_ref(),
                     &flashbots_gas_price_estimator,
                 )?;
-                let params = SubmitterParams {
-                    target_confirm_time: self.target_confirm_time,
-                    gas_estimate,
-                    deadline: Some(Instant::now() + args.max_confirm_time),
-                    retry_interval: args.retry_interval,
-                };
                 submitter.submit(settlement, params).await
             }
             TransactionStrategy::DryRun => {

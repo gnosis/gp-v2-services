@@ -218,11 +218,11 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
             gas_price_estimator: Arc::new(web3.clone()),
             target_confirm_time: Duration::from_secs(1),
             gas_price_cap: f64::MAX,
+            max_confirm_time: Duration::from_secs(120),
+            retry_interval: Duration::from_secs(5),
             transaction_strategy: solver::settlement_submission::TransactionStrategy::CustomNodes(
                 StrategyArgs {
                     submit_api: Box::new(CustomNodesApi::new(vec![web3.clone()])),
-                    max_confirm_time: Duration::from_secs(120),
-                    retry_interval: Duration::from_secs(5),
                     additional_tip: 0.0,
                 },
             ),
