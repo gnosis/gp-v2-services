@@ -133,13 +133,13 @@ pub enum SwapResponse {
 #[serde(rename_all = "camelCase")]
 pub struct SwapResponseError {
     pub status_code: u32,
-    pub message: String,
+    pub description: String,
 }
 
 impl From<SwapResponseError> for SettlementError {
     fn from(error: SwapResponseError) -> Self {
         SettlementError {
-            inner: anyhow!(error.message),
+            inner: anyhow!(error.description),
             retryable: matches!(error.status_code, 500),
         }
     }
