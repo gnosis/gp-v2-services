@@ -44,7 +44,12 @@ impl TransactionSubmitting for CustomNodesApi {
         loop {
             let (result, _index, rest) = futures::future::select_all(futures).await;
             match result {
-                Ok(hash) => return Ok(TransactionHandle { hash, handle: hash }),
+                Ok(tx_hash) => {
+                    return Ok(TransactionHandle {
+                        tx_hash,
+                        handle: tx_hash,
+                    })
+                }
                 Err(err) if rest.is_empty() => {
                     tracing::debug!("error {}", err);
                     return Err(SubmitApiError::Other(

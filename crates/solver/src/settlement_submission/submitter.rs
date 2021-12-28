@@ -55,8 +55,8 @@ pub enum SubmitApiError {
 
 #[derive(Debug, Clone, Copy)]
 pub struct TransactionHandle {
-    pub hash: H256,
     pub handle: H256,
+    pub tx_hash: H256,
 }
 
 #[async_trait::async_trait]
@@ -316,15 +316,16 @@ impl<'a> Submitter<'a> {
 
             match self.submit_api.submit_transaction(method.tx).await {
                 Ok(handle) => {
+                    tracing::info!("created transaction with hash {}", handle.tx_hash);
                     previous_tx = Some((gas_price, handle));
-                    transactions.push(handle.hash)
+                    transactions.push(handle.tx_hash)
                 }
                 Err(err) => match err {
                     SubmitApiError::InvalidNonce => {
                         tracing::warn!("submission failed: invalid nonce")
                     }
                     SubmitApiError::OpenEthereumTooCheapToReplace => {
-                        tracing::debug!("submission failed because OE has different replacement rules than our algorithm")
+                        tracing::debug!("submission failed: OE has different replacement rules than our algorithm")
                     }
                     SubmitApiError::Other(err) => tracing::error!("submission failed: {}", err),
                 },

@@ -16,12 +16,8 @@ pub async fn submit_raw_transaction(
     url: impl IntoUrl,
     tx: TransactionBuilder<DynTransport>,
 ) -> Result<TransactionHandle, SubmitApiError> {
-    let (raw_signed_transaction, hash) = match tx.build().now_or_never().unwrap().unwrap() {
-        Transaction::Request(_) => {
-            return Err(SubmitApiError::Other(anyhow!(
-                "transaction request type not supported"
-            )))
-        }
+    let (raw_signed_transaction, tx_hash) = match tx.build().now_or_never().unwrap().unwrap() {
+        Transaction::Request(_) => unreachable!("verified offline account was used"),
         Transaction::Raw { bytes, hash } => (bytes.0, hash),
     };
     let tx = format!("0x{}", hex::encode(raw_signed_transaction));
@@ -32,8 +28,7 @@ pub async fn submit_raw_transaction(
       "params": [tx],
     });
     tracing::debug!(
-        "submit_transaction hash: {}, submit_transaction body: {}",
-        hash,
+        "submit_transaction body: {}",
         serde_json::to_string(&body).unwrap_or_else(|err| format!("error: {:?}", err)),
     );
     let response = client
@@ -49,7 +44,7 @@ pub async fn submit_raw_transaction(
 
     let handle = parse_json_rpc_response::<H256>(&body)?;
     tracing::debug!("transaction handle: {}", handle);
-    Ok(TransactionHandle { hash, handle })
+    Ok(TransactionHandle { tx_hash, handle })
 }
 
 fn parse_json_rpc_response<T>(body: &str) -> Result<T, SubmitApiError>
