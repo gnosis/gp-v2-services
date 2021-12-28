@@ -59,6 +59,7 @@ pub struct Driver {
     api: OrderBookApi,
     order_converter: OrderConverter,
     in_flight_orders: InFlightOrders,
+    weth_unwrap_factor: f64,
 }
 impl Driver {
     #[allow(clippy::too_many_arguments)]
@@ -83,6 +84,7 @@ impl Driver {
         max_settlements_per_solver: usize,
         api: OrderBookApi,
         order_converter: OrderConverter,
+        weth_unwrap_factor: f64,
     ) -> Self {
         Self {
             settlement_contract,
@@ -107,6 +109,7 @@ impl Driver {
             api,
             order_converter,
             in_flight_orders: InFlightOrders::default(),
+            weth_unwrap_factor,
         }
     }
 
