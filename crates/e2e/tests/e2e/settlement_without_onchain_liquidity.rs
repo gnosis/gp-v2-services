@@ -18,8 +18,10 @@ use shared::{
     Web3,
 };
 use solver::{
-    liquidity::uniswap_v2::UniswapLikeLiquidity, liquidity_collector::LiquidityCollector,
-    metrics::NoopMetrics, settlement_submission::{SolutionSubmitter, custom_nodes_api::CustomNodesApi, StrategyArgs},
+    liquidity::uniswap_v2::UniswapLikeLiquidity,
+    liquidity_collector::LiquidityCollector,
+    metrics::NoopMetrics,
+    settlement_submission::{custom_nodes_api::CustomNodesApi, SolutionSubmitter, StrategyArgs},
 };
 use std::{sync::Arc, time::Duration};
 use web3::signing::SecretKeyRef;
@@ -220,7 +222,7 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
                     max_confirm_time: Duration::from_secs(120),
                     retry_interval: Duration::from_secs(5),
                     additional_tip: 0.0,
-                }
+                },
             ),
         },
         1_000_000_000_000_000_000_u128.into(),

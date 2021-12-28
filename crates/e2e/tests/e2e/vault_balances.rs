@@ -12,8 +12,10 @@ use secp256k1::SecretKey;
 use serde_json::json;
 use shared::{sources::uniswap_v2::pool_fetching::PoolFetcher, Web3};
 use solver::{
-    liquidity::uniswap_v2::UniswapLikeLiquidity, liquidity_collector::LiquidityCollector,
-    metrics::NoopMetrics, settlement_submission::{SolutionSubmitter, custom_nodes_api::CustomNodesApi, StrategyArgs},
+    liquidity::uniswap_v2::UniswapLikeLiquidity,
+    liquidity_collector::LiquidityCollector,
+    metrics::NoopMetrics,
+    settlement_submission::{custom_nodes_api::CustomNodesApi, SolutionSubmitter, StrategyArgs},
 };
 use std::{sync::Arc, time::Duration};
 use web3::signing::SecretKeyRef;
@@ -171,7 +173,7 @@ async fn vault_balances(web3: Web3) {
                     max_confirm_time: Duration::from_secs(120),
                     retry_interval: Duration::from_secs(5),
                     additional_tip: 0.0,
-                }
+                },
             ),
         },
         1_000_000_000_000_000_000_u128.into(),
