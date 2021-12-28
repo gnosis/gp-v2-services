@@ -21,6 +21,12 @@ where
             Output::Failure(body) => {
                 if body.error.message.contains("invalid nonce") {
                     Err(SubmitApiError::InvalidNonce)
+                } else if body
+                    .error
+                    .message
+                    .contains("Transaction gas price supplied is too low")
+                {
+                    Err(SubmitApiError::OpenEthereumTooCheapToReplace)
                 } else {
                     Err(SubmitApiError::Other(anyhow!("rpc error: {}", body.error)))
                 }
@@ -69,9 +75,10 @@ impl TransactionSubmitting for CustomNodesApi {
             match result {
                 Ok(hash) => return Ok(TransactionHandle(hash)),
                 Err(err) if rest.is_empty() => {
+                    tracing::debug!("error {}", err);
                     return Err(SubmitApiError::Other(
                         anyhow::Error::from(err).context("all nodes tx failed"),
-                    ))
+                    ));
                 }
                 Err(err) => {
                     tracing::warn!(?err, "single node tx failed");

@@ -42,6 +42,7 @@ pub struct SubmitterParams {
 /// Enum used to handle all kind of messages received from implementers of trait TransactionSubmitting
 pub enum SubmitApiError {
     InvalidNonce,
+    OpenEthereumTooCheapToReplace,
     Other(anyhow::Error),
 }
 
@@ -326,6 +327,9 @@ impl<'a> Submitter<'a> {
                 Err(err) => match err {
                     SubmitApiError::InvalidNonce => {
                         tracing::warn!("submission failed: invalid nonce")
+                    }
+                    SubmitApiError::OpenEthereumTooCheapToReplace => {
+                        tracing::debug!("submission failed because OE has different replacement rules than our algorithm")
                     }
                     SubmitApiError::Other(err) => tracing::error!("submission failed: {}", err),
                 },
