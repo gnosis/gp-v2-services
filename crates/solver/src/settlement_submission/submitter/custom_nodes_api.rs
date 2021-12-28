@@ -52,9 +52,9 @@ impl TransactionSubmitting for CustomNodesApi {
                 }
                 Err(err) if rest.is_empty() => {
                     tracing::debug!("error {}", err);
-                    return Err(SubmitApiError::Other(
-                        anyhow::Error::from(err).context("all nodes tx failed"),
-                    ));
+                    return Err(anyhow::Error::from(err)
+                        .context("all nodes tx failed")
+                        .into());
                 }
                 Err(err) => {
                     tracing::warn!(?err, "single node tx failed");

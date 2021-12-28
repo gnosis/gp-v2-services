@@ -54,10 +54,11 @@ where
     match serde_json::from_str::<Output>(body) {
         Ok(output) => match output {
             Output::Success(body) => serde_json::from_value::<T>(body.result).map_err(|_| {
-                SubmitApiError::Other(anyhow!(
+                anyhow!(
                     "failed conversion to expected type {}",
                     std::any::type_name::<T>()
-                ))
+                )
+                .into()
             }),
             Output::Failure(body) => {
                 if body.error.message.contains("invalid nonce") {
@@ -69,13 +70,13 @@ where
                 {
                     Err(SubmitApiError::OpenEthereumTooCheapToReplace)
                 } else {
-                    Err(SubmitApiError::Other(anyhow!("rpc error: {}", body.error)))
+                    Err(anyhow!("rpc error: {}", body.error).into())
                 }
             }
         },
         Err(_) => {
             tracing::info!("invalid rpc response: {}", body);
-            Err(SubmitApiError::Other(anyhow!("invalid rpc response")))
+            Err(anyhow!("invalid rpc response").into())
         }
     }
 }

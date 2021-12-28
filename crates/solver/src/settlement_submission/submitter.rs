@@ -53,6 +53,12 @@ pub enum SubmitApiError {
     Other(anyhow::Error),
 }
 
+impl From<anyhow::Error> for SubmitApiError {
+    fn from(err: anyhow::Error) -> Self {
+        Self::Other(err)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct TransactionHandle {
     pub handle: H256,
