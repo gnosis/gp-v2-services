@@ -10,7 +10,9 @@ use solver::{
     liquidity::uniswap_v2::UniswapLikeLiquidity,
     liquidity_collector::LiquidityCollector,
     metrics::NoopMetrics,
-    settlement_submission::{submitter::custom_nodes_api::CustomNodesApi, SolutionSubmitter, StrategyArgs},
+    settlement_submission::{
+        submitter::custom_nodes_api::CustomNodesApi, SolutionSubmitter, StrategyArgs,
+    },
 };
 use std::{sync::Arc, time::Duration};
 
