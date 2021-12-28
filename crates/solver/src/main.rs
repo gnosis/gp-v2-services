@@ -536,7 +536,7 @@ async fn main() {
         transaction_strategy: match args.transaction_strategy {
             TransactionStrategyArg::PublicMempool => {
                 TransactionStrategy::CustomNodes(StrategyArgs {
-                    submit_api: Box::new(CustomNodesApi::new(client.clone(), vec![web3.clone()])),
+                    submit_api: Box::new(CustomNodesApi::new(vec![web3.clone()])),
                     max_confirm_time: args.max_flashbots_submission_seconds, //todo ds
                     retry_interval: args.flashbots_submission_retry_interval_seconds, //todo ds
                     additional_tip: 0.0,
@@ -579,7 +579,7 @@ async fn main() {
                     );
                 }
                 TransactionStrategy::CustomNodes(StrategyArgs {
-                    submit_api: Box::new(CustomNodesApi::new(client.clone(), nodes)),
+                    submit_api: Box::new(CustomNodesApi::new(nodes)),
                     max_confirm_time: args.max_flashbots_submission_seconds, //todo ds
                     retry_interval: args.flashbots_submission_retry_interval_seconds, //todo ds
                     additional_tip: 0.0,

@@ -2,7 +2,6 @@ use super::submitter::{SubmitApiError, TransactionHandle, TransactionSubmitting}
 use anyhow::{anyhow, Result};
 use futures::FutureExt;
 use jsonrpc_core::Output;
-use reqwest::Client;
 use serde::de::DeserializeOwned;
 use shared::Web3;
 
@@ -41,13 +40,12 @@ where
 
 #[derive(Clone)]
 pub struct CustomNodesApi {
-    client: Client,
     nodes: Vec<Web3>,
 }
 
 impl CustomNodesApi {
-    pub fn new(client: Client, nodes: Vec<Web3>) -> Self {
-        Self { client, nodes }
+    pub fn new(nodes: Vec<Web3>) -> Self {
+        Self { nodes }
     }
 }
 
