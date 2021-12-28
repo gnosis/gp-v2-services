@@ -476,7 +476,7 @@ mod tests {
         let swap_error = serde_json::from_str::<SwapResponse>(
             r#"{
             "statusCode":500,
-            "message":"Internal server error"
+            "description":"Internal server error"
         }"#,
         )
         .unwrap();
@@ -485,7 +485,7 @@ mod tests {
             swap_error,
             SwapResponse::Error(Box::new(SwapResponseError {
                 status_code: 500,
-                message: "Internal server error".into()
+                description: "Internal server error".into()
             }))
         );
     }
