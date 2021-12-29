@@ -1,9 +1,8 @@
 use anyhow::anyhow;
-use contracts::{IUniswapLikeRouter, WETH9};
+use contracts::{BalancerV2Vault, IUniswapLikeRouter, WETH9};
 use ethcontract::{Account, PrivateKey, H160, U256};
 use reqwest::Url;
 use shared::{
-    bad_token::list_based::ListBasedDetector,
     baseline_solver::BaseTokens,
     current_block::current_block_stream,
     maintenance::{Maintaining, ServiceMaintenance},
@@ -65,6 +64,10 @@ struct Arguments {
     /// The API endpoint to call the cow-dex-ag-solver solver
     #[structopt(long, env, default_value = "http://localhost:8000")]
     cow_dex_ag_solver_url: Url,
+
+    /// The API endpoint for the Balancer SOR API for solving.
+    #[structopt(long, env, default_value = "http://localhost:8000")]
+    balancer_sor_url: Url,
 
     /// The account used by the driver to sign transactions. This can be either
     /// a 32-byte private key for offline signing, or a 20-byte Ethereum address
@@ -325,6 +328,7 @@ async fn main() {
     let settlement_contract = solver::get_settlement_contract(&web3)
         .await
         .expect("couldn't load deployed settlement");
+    let vault_contract = BalancerV2Vault::deployed(&web3).await.ok();
     let native_token_contract = WETH9::deployed(&web3)
         .await
         .expect("couldn't load deployed native token");
@@ -431,8 +435,6 @@ async fn main() {
         pool_aggregator,
         gas_price_estimator.clone(),
         base_tokens.clone(),
-        // Order book already filters bad tokens
-        Arc::new(ListBasedDetector::deny_list(Vec::new())),
         native_token_contract.address(),
         native_token_price_estimation_amount,
     ));
@@ -487,7 +489,9 @@ async fn main() {
         args.mip_solver_url,
         args.cow_dex_ag_solver_url,
         args.quasimodo_solver_url,
+        args.balancer_sor_url,
         &settlement_contract,
+        vault_contract.as_ref(),
         token_info_fetcher,
         network_name.to_string(),
         chain_id,
@@ -501,6 +505,7 @@ async fn main() {
         zeroex_api,
         args.zeroex_slippage_bps,
         args.shared.quasimodo_uses_internal_buffers,
+        args.shared.mip_uses_internal_buffers,
     )
     .expect("failure creating solvers");
     let liquidity_collector = LiquidityCollector {
