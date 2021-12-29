@@ -9,6 +9,7 @@ use crate::{
     metrics::{SolverMetrics, SolverRunOutcome},
     orderbook::OrderBookApi,
     settlement::Settlement,
+    settlement_post_processing::PostProcessingPipeline,
     settlement_simulation,
     settlement_submission::SolutionSubmitter,
     solver::{Auction, SettlementWithSolver, Solver, Solvers},
@@ -59,7 +60,7 @@ pub struct Driver {
     api: OrderBookApi,
     order_converter: OrderConverter,
     in_flight_orders: InFlightOrders,
-    weth_unwrap_factor: f64,
+    post_processing_pipeline: PostProcessingPipeline,
 }
 impl Driver {
     #[allow(clippy::too_many_arguments)]
@@ -86,6 +87,13 @@ impl Driver {
         order_converter: OrderConverter,
         weth_unwrap_factor: f64,
     ) -> Self {
+        let post_processing_pipeline = PostProcessingPipeline::new(
+            native_token,
+            web3.clone(),
+            weth_unwrap_factor,
+            settlement_contract.clone(),
+        );
+
         Self {
             settlement_contract,
             liquidity_collector,
@@ -109,7 +117,7 @@ impl Driver {
             api,
             order_converter,
             in_flight_orders: InFlightOrders::default(),
-            weth_unwrap_factor,
+            post_processing_pipeline,
         }
     }
 
@@ -491,6 +499,15 @@ impl Driver {
                 winning_solver.name(),
                 winning_settlement
             );
+
+            self.post_processing_pipeline
+                .optimize_settlement(
+                    &mut winning_settlement.settlement,
+                    winning_solver.account().clone(),
+                    gas_price,
+                )
+                .await;
+
             self.metrics
                 .complete_runloop_until_transaction(start.elapsed());
             let start = Instant::now();
