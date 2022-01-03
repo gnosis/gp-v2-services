@@ -131,6 +131,14 @@ pub struct Arguments {
 
     #[structopt(long, env)]
     pub zeroex_api_key: Option<String>,
+
+    /// If quasimodo should use internal buffers to improve solution quality.
+    #[structopt(long, env)]
+    pub quasimodo_uses_internal_buffers: bool,
+
+    /// If mipsolver should use internal buffers to improve solution quality.
+    #[structopt(long, env)]
+    pub mip_uses_internal_buffers: bool,
 }
 
 pub fn parse_fee_factor(s: &str) -> Result<f64> {

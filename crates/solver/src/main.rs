@@ -1,9 +1,8 @@
 use anyhow::anyhow;
-use contracts::{IUniswapLikeRouter, WETH9};
+use contracts::{BalancerV2Vault, IUniswapLikeRouter, WETH9};
 use ethcontract::{Account, PrivateKey, H160, U256};
 use reqwest::Url;
 use shared::{
-    bad_token::list_based::ListBasedDetector,
     baseline_solver::BaseTokens,
     current_block::current_block_stream,
     maintenance::{Maintaining, ServiceMaintenance},
@@ -35,8 +34,10 @@ use solver::{
     metrics::Metrics,
     orderbook::OrderBookApi,
     settlement_submission::{
-        eden_api::EdenApi, flashbots_api::FlashbotsApi, SolutionSubmitter, StrategyArgs,
-        TransactionStrategy,
+        submitter::{
+            custom_nodes_api::CustomNodesApi, eden_api::EdenApi, flashbots_api::FlashbotsApi,
+        },
+        SolutionSubmitter, StrategyArgs, TransactionStrategy,
     },
     solver::SolverType,
 };
@@ -63,6 +64,10 @@ struct Arguments {
     /// The API endpoint to call the cow-dex-ag-solver solver
     #[structopt(long, env, default_value = "http://localhost:8000")]
     cow_dex_ag_solver_url: Url,
+
+    /// The API endpoint for the Balancer SOR API for solving.
+    #[structopt(long, env, default_value = "http://localhost:8000")]
+    balancer_sor_url: Url,
 
     /// The account used by the driver to sign transactions. This can be either
     /// a 32-byte private key for offline signing, or a 20-byte Ethereum address
@@ -186,17 +191,17 @@ struct Arguments {
     zeroex_slippage_bps: u32,
 
     /// How to to submit settlement transactions.
-    #[structopt(long, env, default_value = "PublicMempool")]
-    transaction_strategy: TransactionStrategyArg,
-
-    /// The maximum time in seconds we spend trying to settle a transaction through the eden
-    /// network before going to back to solving.
+    /// Expected to contain either:
+    /// 1. One value equal to TransactionStrategyArg::DryRun or
+    /// 2. One or more values equal to any combination of enum variants except TransactionStrategyArg::DryRun
     #[structopt(
         long,
-        default_value = "120",
-        parse(try_from_str = shared::arguments::duration_from_seconds),
-    )]
-    max_eden_submission_seconds: Duration,
+        env,
+        default_value = "Flashbots,Eden",
+        possible_values = &TransactionStrategyArg::variants(),
+        case_insensitive = true,
+        use_delimiter = true)]
+    transaction_strategy: Vec<TransactionStrategyArg>,
 
     /// Additional tip in gwei that we are willing to give to eden above regular gas price estimation
     #[structopt(
@@ -207,22 +212,14 @@ struct Arguments {
     )]
     additional_eden_tip: f64,
 
-    /// Amount of time to wait before retrying to submit the tx to the eden network
-    #[structopt(
-            long,
-            default_value = "10",
-            parse(try_from_str = shared::arguments::duration_from_seconds),
-        )]
-    eden_submission_retry_interval_seconds: Duration,
-
-    /// The maximum time in seconds we spend trying to settle a transaction through the flashbots
+    /// The maximum time in seconds we spend trying to settle a transaction through the ethereum
     /// network before going to back to solving.
     #[structopt(
         long,
         default_value = "120",
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
-    max_flashbots_submission_seconds: Duration,
+    max_submission_seconds: Duration,
 
     /// Additional tip in gwei that we are willing to give to flashbots above regular gas price estimation
     #[structopt(
@@ -233,13 +230,13 @@ struct Arguments {
     )]
     additional_flashbot_tip: f64,
 
-    /// Amount of time to wait before retrying to submit the tx to the flashbots network
+    /// Amount of time to wait before retrying to submit the tx to the ethereum network
     #[structopt(
         long,
         default_value = "5",
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
-    flashbots_submission_retry_interval_seconds: Duration,
+    submission_retry_interval_seconds: Duration,
 
     /// The RPC endpoints to use for submitting transaction to a custom set of nodes.
     #[structopt(long, env, use_delimiter = true)]
@@ -340,6 +337,7 @@ async fn main() {
     let settlement_contract = solver::get_settlement_contract(&web3)
         .await
         .expect("couldn't load deployed settlement");
+    let vault_contract = BalancerV2Vault::deployed(&web3).await.ok();
     let native_token_contract = WETH9::deployed(&web3)
         .await
         .expect("couldn't load deployed native token");
@@ -446,8 +444,6 @@ async fn main() {
         pool_aggregator,
         gas_price_estimator.clone(),
         base_tokens.clone(),
-        // Order book already filters bad tokens
-        Arc::new(ListBasedDetector::deny_list(Vec::new())),
         native_token_contract.address(),
         native_token_price_estimation_amount,
     ));
@@ -502,7 +498,9 @@ async fn main() {
         args.mip_solver_url,
         args.cow_dex_ag_solver_url,
         args.quasimodo_solver_url,
+        args.balancer_sor_url,
         &settlement_contract,
+        vault_contract.as_ref(),
         token_info_fetcher,
         network_name.to_string(),
         chain_id,
@@ -515,6 +513,8 @@ async fn main() {
         metrics.clone(),
         zeroex_api,
         args.zeroex_slippage_bps,
+        args.shared.quasimodo_uses_internal_buffers,
+        args.shared.mip_uses_internal_buffers,
     )
     .expect("failure creating solvers");
     let liquidity_collector = LiquidityCollector {
@@ -526,56 +526,65 @@ async fn main() {
             .await
             .map_err(|err| tracing::error!("Couldn't fetch market makable token list: {}", err))
             .ok();
+    let submission_nodes = args
+        .transaction_submission_nodes
+        .into_iter()
+        .enumerate()
+        .map(|(index, url)| {
+            let transport = create_instrumented_transport(
+                HttpTransport::new(client.clone(), url, index.to_string()),
+                metrics.clone(),
+            );
+            web3::Web3::new(transport)
+        })
+        .collect::<Vec<_>>();
+    for node in &submission_nodes {
+        let node_network_id = node.net().version().await.unwrap();
+        assert_eq!(
+            node_network_id, network_id,
+            "network id of custom node doesn't match main node"
+        );
+    }
+    let transaction_strategies = args
+        .transaction_strategy
+        .iter()
+        .map(|strategy| match strategy {
+            TransactionStrategyArg::PublicMempool => {
+                TransactionStrategy::CustomNodes(StrategyArgs {
+                    submit_api: Box::new(CustomNodesApi::new(vec![web3.clone()])),
+                    additional_tip: 0.0,
+                })
+            }
+            TransactionStrategyArg::Eden => TransactionStrategy::Eden(StrategyArgs {
+                submit_api: Box::new(EdenApi::new(client.clone())),
+                additional_tip: args.additional_eden_tip,
+            }),
+            TransactionStrategyArg::Flashbots => TransactionStrategy::Flashbots(StrategyArgs {
+                submit_api: Box::new(FlashbotsApi::new(client.clone())),
+                additional_tip: args.additional_flashbot_tip,
+            }),
+            TransactionStrategyArg::CustomNodes => {
+                assert!(
+                    !submission_nodes.is_empty(),
+                    "missing transaction submission nodes"
+                );
+                TransactionStrategy::CustomNodes(StrategyArgs {
+                    submit_api: Box::new(CustomNodesApi::new(submission_nodes.clone())),
+                    additional_tip: 0.0,
+                })
+            }
+            TransactionStrategyArg::DryRun => TransactionStrategy::DryRun,
+        })
+        .collect::<Vec<_>>();
     let solution_submitter = SolutionSubmitter {
         web3: web3.clone(),
         contract: settlement_contract.clone(),
         gas_price_estimator: gas_price_estimator.clone(),
         target_confirm_time: args.target_confirm_time,
+        max_confirm_time: args.max_submission_seconds,
+        retry_interval: args.submission_retry_interval_seconds,
         gas_price_cap: args.gas_price_cap,
-        transaction_strategy: match args.transaction_strategy {
-            TransactionStrategyArg::PublicMempool => {
-                TransactionStrategy::CustomNodes(vec![web3.clone()])
-            }
-            TransactionStrategyArg::Eden => TransactionStrategy::Eden(StrategyArgs {
-                submit_api: Box::new(EdenApi::new(client.clone())),
-                max_confirm_time: args.max_eden_submission_seconds,
-                retry_interval: args.eden_submission_retry_interval_seconds,
-                additional_tip: args.additional_eden_tip,
-            }),
-            TransactionStrategyArg::Flashbots => TransactionStrategy::Flashbots(StrategyArgs {
-                submit_api: Box::new(FlashbotsApi::new(client.clone())),
-                max_confirm_time: args.max_flashbots_submission_seconds,
-                retry_interval: args.flashbots_submission_retry_interval_seconds,
-                additional_tip: args.additional_flashbot_tip,
-            }),
-            TransactionStrategyArg::CustomNodes => {
-                assert!(
-                    !args.transaction_submission_nodes.is_empty(),
-                    "missing transaction submission nodes"
-                );
-                let nodes = args
-                    .transaction_submission_nodes
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, url)| {
-                        let transport = create_instrumented_transport(
-                            HttpTransport::new(client.clone(), url, index.to_string()),
-                            metrics.clone(),
-                        );
-                        web3::Web3::new(transport)
-                    })
-                    .collect::<Vec<_>>();
-                for node in &nodes {
-                    let node_network_id = node.net().version().await.unwrap();
-                    assert_eq!(
-                        node_network_id, network_id,
-                        "network id of custom node doesn't match main node"
-                    );
-                }
-                TransactionStrategy::CustomNodes(nodes)
-            }
-            TransactionStrategyArg::DryRun => TransactionStrategy::DryRun,
-        },
+        transaction_strategies,
     };
     let api = OrderBookApi::new(args.orderbook_url, client.clone());
     let order_converter = OrderConverter {
