@@ -105,7 +105,8 @@ pub trait FactoryIndexing: Send + Sync + 'static {
     ///
     /// This method should return `None` if the pool is disabled. This allows
     /// pool/factory specific details about whether or not the pool can be
-    /// used to be provided to the caller.
+    /// used to be provided to the caller. Note that implementations are **not**
+    /// expected to check if the pool is paused.
     fn fetch_pool_state(
         &self,
         pool_info: &Self::PoolInfo,
