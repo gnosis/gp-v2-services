@@ -3,6 +3,11 @@ use anyhow::Result;
 use contracts::WETH9;
 use primitive_types::U256;
 
+/// Tries to do one of 2 optimizations.
+/// 1) Drop WETH unwraps and instead pay ETH with the settlment contract's buffer.
+/// 2) Top up settlement contract's ETH buffer by unwrapping way more WETH than this settlement
+///    needs. This will cause the next few settlements to use optimization 1.
+/// If this function returns Err(), the original settlement will not be modified in any way.
 pub async fn optimize_unwrapping<V, VFut, B, BFut>(
     settlement: &mut Settlement,
     settlement_would_succeed: V,

@@ -60,6 +60,7 @@ impl PostProcessingPipeline {
                 .map_err(|e| anyhow::anyhow!(e))
         };
 
+        // an error will leave the settlement unmodified
         let _ = optimize_unwrapping(
             settlement,
             &settlement_would_succeed,
