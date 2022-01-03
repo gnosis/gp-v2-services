@@ -141,10 +141,10 @@ pub struct Arguments {
     pub mip_uses_internal_buffers: bool,
 }
 
-pub fn parse_unbounded_percentage_factor(s: &str) -> Result<f64> {
-    let percentage_factor = f64::from_str(s)?;
-    ensure!(percentage_factor.is_finite() && percentage_factor >= 0.);
-    Ok(percentage_factor)
+pub fn parse_unbounded_factor(s: &str) -> Result<f64> {
+    let factor = f64::from_str(s)?;
+    ensure!(factor.is_finite() && factor >= 0.);
+    Ok(factor)
 }
 
 pub fn parse_percentage_factor(s: &str) -> Result<f64> {

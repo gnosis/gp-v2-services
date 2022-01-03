@@ -251,7 +251,7 @@ struct Arguments {
     /// factor by which order fees are multiplied with. Setting this to a value
     /// greater than 1.0 makes settlements with negative objective values less
     /// likely, promoting more aggressive merging of single order settlements.
-    #[structopt(long, env, default_value = "1", parse(try_from_str = shared::arguments::parse_unbounded_percentage_factor))]
+    #[structopt(long, env, default_value = "1", parse(try_from_str = shared::arguments::parse_unbounded_factor))]
     fee_objective_scaling_factor: f64,
 
     /// The maximum number of settlements the driver considers per solver.
