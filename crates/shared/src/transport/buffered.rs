@@ -160,13 +160,10 @@ where
 
 /// Batches a stream into chunks.
 ///
-/// This is very similar to `futures::future::FutureExt::ready_chunks` with the
-/// difference that it allows configuring:
-/// - Maximum concurrency for work done on the chunks (allowing things like only
-///   processing one chunk at a time, and have the subsequent chunk already
-///   start accumulating incoming items)
-/// - Minimum delay for a batch, so waiting for a small amount of time to allow
-///   the stream to produce additional items, thus increasing batch sizes.
+/// This is very similar to `futures::stream::StreamExt::ready_chunks` with the
+/// difference that it allows configuring a minimum delay for a batch, so
+/// waiting for a small amount of time to allow the stream to produce additional
+/// items, thus decreasing the chance of batches of size 1.
 fn batched_for_each<T, St, F, Fut>(
     config: Configuration,
     items: St,
