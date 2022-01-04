@@ -8,16 +8,12 @@ use ethcontract::{
 };
 use futures::{
     channel::{mpsc, oneshot},
-    future::{BoxFuture, FutureExt as _, Shared},
+    future::{self, BoxFuture, FutureExt as _},
     stream::{self, FusedStream, Stream, StreamExt as _},
 };
 use serde_json::Value;
-use std::{
-    fmt::{self, Debug, Formatter},
-    future::Future,
-    sync::Arc,
-    time::Duration,
-};
+use std::{future::Future, sync::Arc, time::Duration};
+use tokio::task::JoinHandle;
 
 /// Buffered transport configuration.
 pub struct Configuration {
@@ -44,18 +40,15 @@ impl Default for Configuration {
 
 /// Buffered `Transport` implementation that implements automatic batching of
 /// JSONRPC requests.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Buffered<Inner> {
     inner: Arc<Inner>,
     calls: mpsc::UnboundedSender<CallContext>,
-    worker: Worker,
 }
 
 type RpcResult = Result<Value, Web3Error>;
 
 type CallContext = (RequestId, Call, oneshot::Sender<RpcResult>);
-
-type Worker = Shared<BoxFuture<'static, ()>>;
 
 impl<Inner> Buffered<Inner>
 where
@@ -72,22 +65,18 @@ where
     pub fn with_config(inner: Inner, config: Configuration) -> Self {
         let inner = Arc::new(inner);
         let (calls, receiver) = mpsc::unbounded();
-        let worker = Self::worker(inner.clone(), config, receiver);
+        Self::background_worker(inner.clone(), config, receiver);
 
-        Self {
-            inner,
-            calls,
-            worker,
-        }
+        Self { inner, calls }
     }
 
     /// Start a background worker for handling batched requests.
-    fn worker(
+    fn background_worker(
         inner: Arc<Inner>,
         config: Configuration,
         calls: mpsc::UnboundedReceiver<CallContext>,
-    ) -> Worker {
-        batched_for_each(config, calls, move |mut batch| {
+    ) -> JoinHandle<()> {
+        tokio::task::spawn(batched_for_each(config, calls, move |mut batch| {
             let inner = inner.clone();
             async move {
                 match batch.len() {
@@ -112,9 +101,7 @@ where
                     }
                 }
             }
-        })
-        .boxed()
-        .shared()
+        }))
     }
 
     /// Queue a call by sending it over calls channel to the background worker.
@@ -125,42 +112,6 @@ where
             .unbounded_send(context)
             .expect("worker task unexpectedly dropped");
         receiver
-    }
-
-    /// Executes a task that is dependent on the background worker.
-    ///
-    /// This methods takes extra care to always drive the background worker
-    /// future per call. This is done so `call` futures resolve even if we
-    /// drop the transport.
-    fn task<T, Fut>(&self, fut: Fut) -> BoxFuture<'static, T>
-    where
-        Fut: Future<Output = T> + Send + 'static,
-    {
-        let fut = fut.fuse();
-
-        let mut worker = self.worker.clone();
-        async move {
-            futures::pin_mut!(fut);
-            futures::select_biased! {
-                result = fut => result,
-                _ = worker => fut
-                    .now_or_never()
-                    .expect("worker task did not resolve pending calls"),
-            }
-        }
-        .boxed()
-    }
-}
-
-impl<Inner> Debug for Buffered<Inner>
-where
-    Inner: Debug,
-{
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Buffered")
-            .field("inner", &self.inner)
-            .field("calls", &self.calls)
-            .finish()
     }
 }
 
@@ -178,8 +129,7 @@ where
 
     fn send(&self, id: RequestId, request: Call) -> Self::Out {
         let response = self.queue_call(id, request);
-        self.task(async move { response.await.expect("worker task unexpectedly dropped") })
-            .boxed()
+        async move { response.await.expect("worker task unexpectedly dropped") }.boxed()
     }
 }
 
@@ -191,11 +141,20 @@ where
 {
     type Batch = BoxFuture<'static, Result<Vec<RpcResult>, Web3Error>>;
 
-    fn send_batch<T>(&self, _requests: T) -> Self::Batch
+    fn send_batch<T>(&self, requests: T) -> Self::Batch
     where
         T: IntoIterator<Item = (RequestId, Call)>,
     {
-        todo!()
+        let responses = requests
+            .into_iter()
+            .map(|(id, request)| self.queue_call(id, request))
+            .collect::<Vec<_>>();
+        async move {
+            Ok(future::try_join_all(responses)
+                .await
+                .expect("worker task unexpectedly dropped"))
+        }
+        .boxed()
     }
 }
 
@@ -205,9 +164,9 @@ where
 /// difference that it allows configuring:
 /// - Maximum concurrency for work done on the chunks (allowing things like only
 ///   processing one chunk at a time, and have the subsequent chunk already
-///   start accumulating in a batch)
+///   start accumulating incoming items)
 /// - Minimum delay for a batch, so waiting for a small amount of time to allow
-///   other items to resolve to increase batch sizes.
+///   the stream to produce additional items, thus increasing batch sizes.
 fn batched_for_each<T, St, F, Fut>(
     config: Configuration,
     items: St,
@@ -223,7 +182,7 @@ where
     let batches = stream::unfold(items, move |mut items| async move {
         let mut chunk = vec![items.next().await?];
 
-        let delay = delay(config.batch_delay).fuse();
+        let delay = tokio::time::sleep(config.batch_delay).fuse();
         futures::pin_mut!(delay);
 
         while chunk.len() < config.max_batch_len {
@@ -240,11 +199,6 @@ where
     });
 
     batches.for_each_concurrent(concurrency_limit, work)
-}
-
-async fn delay(_: Duration) {
-    // TODO
-    futures::future::ready(()).await;
 }
 
 #[cfg(test)]
@@ -319,7 +273,7 @@ mod tests {
 
         let web3 = Web3::new(Buffered::new(transport));
 
-        let chain_ids = futures::future::try_join_all(vec![
+        let chain_ids = future::try_join_all(vec![
             web3.clone().eth().chain_id(),
             web3.clone().eth().chain_id(),
             web3.clone().eth().chain_id(),
