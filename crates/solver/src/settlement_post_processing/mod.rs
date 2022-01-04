@@ -35,10 +35,10 @@ impl PostProcessingPipeline {
 
     pub async fn optimize_settlement(
         &self,
-        settlement: &mut Settlement,
+        settlement: Settlement,
         solver_account: Account,
         gas_price: EstimatedGasPrice,
-    ) {
+    ) -> Settlement {
         let settlement_would_succeed = |settlement: Settlement| async {
             let result = simulate_and_estimate_gas_at_current_block(
                 std::iter::once((solver_account.clone(), settlement)),
@@ -61,13 +61,13 @@ impl PostProcessingPipeline {
         };
 
         // an error will leave the settlement unmodified
-        let _ = optimize_unwrapping(
+        optimize_unwrapping(
             settlement,
             &settlement_would_succeed,
             &get_weth_balance,
             &self.weth,
             self.unwrap_factor,
         )
-        .await;
+        .await
     }
 }

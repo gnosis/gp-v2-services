@@ -500,9 +500,10 @@ impl Driver {
                 winning_settlement
             );
 
-            self.post_processing_pipeline
+            winning_settlement.settlement = self
+                .post_processing_pipeline
                 .optimize_settlement(
-                    &mut winning_settlement.settlement,
+                    winning_settlement.settlement,
                     winning_solver.account().clone(),
                     gas_price,
                 )

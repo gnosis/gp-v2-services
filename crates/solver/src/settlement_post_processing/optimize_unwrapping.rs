@@ -7,14 +7,13 @@ use primitive_types::U256;
 /// 1) Drop WETH unwraps and instead pay ETH with the settlment contract's buffer.
 /// 2) Top up settlement contract's ETH buffer by unwrapping way more WETH than this settlement
 ///    needs. This will cause the next few settlements to use optimization 1.
-/// If this function returns Err(), the original settlement will not be modified in any way.
 pub async fn optimize_unwrapping<V, VFut, B, BFut>(
-    settlement: &mut Settlement,
+    settlement: Settlement,
     settlement_would_succeed: V,
     get_weth_balance: B,
     weth: &WETH9,
     unwrap_factor: f64,
-) -> Result<()>
+) -> Settlement
 where
     V: Fn(Settlement) -> VFut,
     VFut: futures::Future<Output = bool>,
@@ -23,7 +22,7 @@ where
 {
     let required_eth_payout = settlement.encoder.amount_to_unwrap(weth.address());
     if required_eth_payout.is_zero() {
-        return Ok(());
+        return settlement;
     }
 
     // simulate settlement without unwrap
@@ -32,16 +31,15 @@ where
 
     if settlement_would_succeed(optimized_settlement.clone()).await {
         tracing::debug!("use internal buffer to unwraps");
-        *settlement = optimized_settlement;
-        return Ok(());
+        return optimized_settlement;
     }
 
-    let weth_balance = get_weth_balance().await?;
+    let weth_balance = get_weth_balance().await.unwrap_or_else(|_| U256::zero());
     let amount_to_unwrap = U256::from_f64_lossy(weth_balance.to_f64_lossy() * unwrap_factor);
 
     if amount_to_unwrap <= required_eth_payout {
         // if we wouldn't unwrap more than required we can leave the settlement as it is
-        return Ok(());
+        return settlement;
     }
 
     // simulate settlement with way bigger unwrap
@@ -57,10 +55,10 @@ where
             ?amount_to_unwrap,
             "unwrap parts of the settlement contract's WETH buffer"
         );
-        *settlement = optimized_settlement;
+        return optimized_settlement;
     }
 
-    Ok(())
+    settlement
 }
 
 #[cfg(test)]
@@ -93,17 +91,14 @@ mod tests {
         let get_weth_balance_succeeds = || async { Ok(U256::zero()) };
         let weth = dummy_contract!(WETH9, [0x42; 20]);
 
-        let mut settlement = settlement_with_unwrap(&weth, to_wei(1));
-
-        optimize_unwrapping(
-            &mut settlement,
+        let settlement = optimize_unwrapping(
+            settlement_with_unwrap(&weth, to_wei(1)),
             &first_optimization_succeeds,
             &get_weth_balance_succeeds,
             &weth,
             0.6,
         )
-        .await
-        .unwrap();
+        .await;
 
         // no unwraps left because we pay 1 ETH from our buffer
         assert_eq!(
@@ -120,18 +115,14 @@ mod tests {
         let get_weth_balance_succeeds = || async { Ok(to_wei(100)) };
         let weth = dummy_contract!(WETH9, [0x42; 20]);
 
-        let mut settlement = settlement_with_unwrap(&weth, to_wei(10));
-        let unwrap_factor = 0.6;
-
-        optimize_unwrapping(
-            &mut settlement,
+        let settlement = optimize_unwrapping(
+            settlement_with_unwrap(&weth, to_wei(10)),
             &second_optimization_succeeds,
             &get_weth_balance_succeeds,
             &weth,
-            unwrap_factor,
+            0.6,
         )
-        .await
-        .unwrap();
+        .await;
 
         // we unwrap way more than needed to hopefully drop unwraps on the next few settlements
         assert_eq!(
@@ -150,54 +141,17 @@ mod tests {
         let weth = dummy_contract!(WETH9, [0x42; 20]);
 
         let eth_to_unwrap = to_wei(50);
-        let mut settlement = settlement_with_unwrap(&weth, eth_to_unwrap);
 
-        optimize_unwrapping(
-            &mut settlement,
+        let settlement = optimize_unwrapping(
+            settlement_with_unwrap(&weth, eth_to_unwrap),
             &no_optimization_succeeds,
             &get_weth_balance_succeeds,
             &weth,
             0.6,
         )
-        .await
-        .unwrap();
-
-        // the settlement has been left unchanged
-        assert_eq!(
-            eth_to_unwrap,
-            settlement.encoder.amount_to_unwrap(weth.address())
-        );
-    }
-
-    #[tokio::test]
-    async fn errors_get_propagated_and_leave_settlement_unchanged() {
-        //second optimization would work if the algorithm would get so far
-        let successes = Arc::new(Mutex::new(vec![true, false]));
-        let second_optimization_succeeds =
-            |_: Settlement| async { successes.lock().unwrap().pop().unwrap() };
-
-        let error_message = "can't determine WETH balance";
-        let get_weth_balance_fails = || async { Err(anyhow::anyhow!(error_message)) };
-        let weth = dummy_contract!(WETH9, [0x42; 20]);
-
-        let eth_to_unwrap = to_wei(60);
-        let mut settlement = settlement_with_unwrap(&weth, eth_to_unwrap);
-
-        let optimization_result = optimize_unwrapping(
-            &mut settlement,
-            &second_optimization_succeeds,
-            &get_weth_balance_fails,
-            &weth,
-            0.6,
-        )
         .await;
 
-        assert_eq!(
-            error_message,
-            optimization_result.as_ref().unwrap_err().to_string(),
-        );
-
-        // settlement had been left unchanged because we encountered an error while optimizing it
+        // the settlement has been left unchanged
         assert_eq!(
             eth_to_unwrap,
             settlement.encoder.amount_to_unwrap(weth.address())

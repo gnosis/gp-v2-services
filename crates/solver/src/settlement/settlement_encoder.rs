@@ -348,7 +348,7 @@ impl SettlementEncoder {
     }
 
     /// Calculates how much of a given token this settlement will unwrap during the execution.
-    pub fn amount_to_unwrap(&mut self, token: H160) -> U256 {
+    pub fn amount_to_unwrap(&self, token: H160) -> U256 {
         self.unwraps.iter().fold(U256::zero(), |sum, unwrap| {
             if unwrap.weth.address() == token {
                 sum.checked_add(unwrap.amount)
