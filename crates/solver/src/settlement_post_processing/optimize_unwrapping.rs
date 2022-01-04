@@ -20,7 +20,9 @@ pub async fn optimize_unwrapping(
         return settlement;
     }
 
-    // simulate settlement without unwrap
+    // We can't determine how much of the WETH and ETH buffers solvers are using for their
+    // solution. Dropping the unwrap could alter the buffers such that the proposed solution is no
+    // longer possible. That's why a simulation is necessary.
     let mut optimized_settlement = settlement.clone();
     optimized_settlement.encoder.drop_unwrap(weth.address());
 
@@ -52,6 +54,9 @@ pub async fn optimize_unwrapping(
             amount: amount_to_unwrap,
         });
 
+    // We can't determine how much of the WETH and ETH buffers solvers are using for their
+    // solution. Increasing the unwrap could alter the buffers such that the proposed solution is no
+    // longer possible. That's why a simulation is necessary.
     if settlement_simulator
         .settlement_would_succeed(optimized_settlement.clone())
         .await
