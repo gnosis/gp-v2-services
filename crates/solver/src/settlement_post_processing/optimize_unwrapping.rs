@@ -37,7 +37,7 @@ pub async fn optimize_unwrapping(
     let buffers = buffer_retriever.get_buffers(&[weth.address()]).await;
     let weth_balance = match buffers.get(&weth.address()) {
         Some(Ok(balance)) => *balance,
-        _ => U256::zero(),
+        _ => return settlement,
     };
     let amount_to_unwrap = U256::from_f64_lossy(weth_balance.to_f64_lossy() * unwrap_factor);
 
