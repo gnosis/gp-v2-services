@@ -69,7 +69,5 @@ impl PostProcessingPipeline {
             self.unwrap_factor,
         )
         .await;
-
-        debug_assert!(settlement_would_succeed(settlement.clone()).await);
     }
 }
