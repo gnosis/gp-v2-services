@@ -1,3 +1,4 @@
+use super::SettlementSimulating;
 use crate::settlement::Settlement;
 use crate::solver::http_solver::buffers::BufferRetrieving;
 use contracts::WETH9;
@@ -7,18 +8,13 @@ use primitive_types::U256;
 /// 1) Drop WETH unwraps and instead pay ETH with the settlment contract's buffer.
 /// 2) Top up settlement contract's ETH buffer by unwrapping way more WETH than this settlement
 ///    needs. This will cause the next few settlements to use optimization 1.
-pub async fn optimize_unwrapping<V, VFut, B>(
+pub async fn optimize_unwrapping(
     settlement: Settlement,
-    settlement_would_succeed: V,
-    buffer_retriever: &B,
+    settlement_simulator: &impl SettlementSimulating,
+    buffer_retriever: &impl BufferRetrieving,
     weth: &WETH9,
     unwrap_factor: f64,
-) -> Settlement
-where
-    V: Fn(Settlement) -> VFut,
-    VFut: futures::Future<Output = bool>,
-    B: BufferRetrieving,
-{
+) -> Settlement {
     let required_eth_payout = settlement.encoder.amount_to_unwrap(weth.address());
     if required_eth_payout.is_zero() {
         return settlement;
@@ -28,7 +24,10 @@ where
     let mut optimized_settlement = settlement.clone();
     optimized_settlement.encoder.drop_unwrap(weth.address());
 
-    if settlement_would_succeed(optimized_settlement.clone()).await {
+    if settlement_simulator
+        .settlement_would_succeed(optimized_settlement.clone())
+        .await
+    {
         tracing::debug!("use internal buffer to unwraps");
         return optimized_settlement;
     }
@@ -53,7 +52,10 @@ where
             amount: amount_to_unwrap,
         });
 
-    if settlement_would_succeed(optimized_settlement.clone()).await {
+    if settlement_simulator
+        .settlement_would_succeed(optimized_settlement.clone())
+        .await
+    {
         tracing::debug!(
             ?amount_to_unwrap,
             "unwrap parts of the settlement contract's WETH buffer"
@@ -68,11 +70,11 @@ where
 mod tests {
     use super::*;
     use crate::interactions::UnwrapWethInteraction;
+    use crate::settlement_post_processing::MockSettlementSimulating;
     use crate::solver::http_solver::buffers::MockBufferRetrieving;
     use maplit::hashmap;
     use shared::dummy_contract;
     use std::collections::HashMap;
-    use std::sync::{Arc, Mutex};
 
     fn to_wei(base: u128) -> U256 {
         U256::from(base) * U256::from(10).pow(18.into())
@@ -92,7 +94,6 @@ mod tests {
 
     #[tokio::test]
     async fn drop_unwrap_if_eth_buffer_is_big_enough() {
-        let first_optimization_succeeds = |_: Settlement| async { true };
         let weth = dummy_contract!(WETH9, [0x42; 20]);
         let mut buffer_retriever = MockBufferRetrieving::new();
         let weth_address = weth.address();
@@ -100,9 +101,15 @@ mod tests {
             .expect_get_buffers()
             .returning(move |_| hashmap! {weth_address => Ok(U256::zero())});
 
+        let mut settlement_simulator = MockSettlementSimulating::new();
+        settlement_simulator
+            .expect_settlement_would_succeed()
+            .times(1)
+            .returning(|_| true);
+
         let settlement = optimize_unwrapping(
             settlement_with_unwrap(&weth, to_wei(1)),
-            &first_optimization_succeeds,
+            &settlement_simulator,
             &buffer_retriever,
             &weth,
             0.6,
@@ -118,9 +125,6 @@ mod tests {
 
     #[tokio::test]
     async fn bulk_convert_if_weth_buffer_is_big_enough() {
-        let successes = Arc::new(Mutex::new(vec![true, false]));
-        let second_optimization_succeeds =
-            |_: Settlement| async { successes.lock().unwrap().pop().unwrap() };
         let weth = dummy_contract!(WETH9, [0x42; 20]);
         let weth_address = weth.address();
         let mut buffer_retriever = MockBufferRetrieving::new();
@@ -128,9 +132,19 @@ mod tests {
             .expect_get_buffers()
             .returning(move |_| hashmap! {weth_address => Ok(to_wei(100))});
 
+        let mut settlement_simulator = MockSettlementSimulating::new();
+        settlement_simulator
+            .expect_settlement_would_succeed()
+            .times(1)
+            .returning(|_| false);
+        settlement_simulator
+            .expect_settlement_would_succeed()
+            .times(1)
+            .returning(|_| true);
+
         let settlement = optimize_unwrapping(
             settlement_with_unwrap(&weth, to_wei(10)),
-            &second_optimization_succeeds,
+            &settlement_simulator,
             &buffer_retriever,
             &weth,
             0.6,
@@ -149,7 +163,12 @@ mod tests {
         // Although we would have enough WETH to cover the ETH payout, we pretend the bulk unwrap
         // would fail anyway. This can happen if the execution_plan of the settlement also tries to
         // use the WETH buffer (In this case more than 10 WETH).
-        let no_optimization_succeeds = |_: Settlement| async { false };
+        let mut settlement_simulator = MockSettlementSimulating::new();
+        settlement_simulator
+            .expect_settlement_would_succeed()
+            .times(2)
+            .returning(|_| false);
+
         let weth = dummy_contract!(WETH9, [0x42; 20]);
         let weth_address = weth.address();
         let mut buffer_retriever = MockBufferRetrieving::new();
@@ -161,7 +180,7 @@ mod tests {
 
         let settlement = optimize_unwrapping(
             settlement_with_unwrap(&weth, eth_to_unwrap),
-            &no_optimization_succeeds,
+            &settlement_simulator,
             &buffer_retriever,
             &weth,
             0.6,
