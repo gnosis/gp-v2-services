@@ -1,5 +1,5 @@
 use crate::settlement::Settlement;
-use anyhow::Result;
+use crate::solver::http_solver::buffers::BufferRetrieving;
 use contracts::WETH9;
 use primitive_types::U256;
 
@@ -7,18 +7,17 @@ use primitive_types::U256;
 /// 1) Drop WETH unwraps and instead pay ETH with the settlment contract's buffer.
 /// 2) Top up settlement contract's ETH buffer by unwrapping way more WETH than this settlement
 ///    needs. This will cause the next few settlements to use optimization 1.
-pub async fn optimize_unwrapping<V, VFut, B, BFut>(
+pub async fn optimize_unwrapping<V, VFut, B>(
     settlement: Settlement,
     settlement_would_succeed: V,
-    get_weth_balance: B,
+    buffer_retriever: &B,
     weth: &WETH9,
     unwrap_factor: f64,
 ) -> Settlement
 where
     V: Fn(Settlement) -> VFut,
     VFut: futures::Future<Output = bool>,
-    B: Fn() -> BFut,
-    BFut: futures::Future<Output = Result<U256>>,
+    B: BufferRetrieving,
 {
     let required_eth_payout = settlement.encoder.amount_to_unwrap(weth.address());
     if required_eth_payout.is_zero() {
@@ -34,7 +33,11 @@ where
         return optimized_settlement;
     }
 
-    let weth_balance = get_weth_balance().await.unwrap_or_else(|_| U256::zero());
+    let buffers = buffer_retriever.get_buffers(&[weth.address()]).await;
+    let weth_balance = match buffers.get(&weth.address()) {
+        Some(Ok(balance)) => *balance,
+        _ => U256::zero(),
+    };
     let amount_to_unwrap = U256::from_f64_lossy(weth_balance.to_f64_lossy() * unwrap_factor);
 
     if amount_to_unwrap <= required_eth_payout {
@@ -65,6 +68,8 @@ where
 mod tests {
     use super::*;
     use crate::interactions::UnwrapWethInteraction;
+    use crate::solver::http_solver::buffers::MockBufferRetrieving;
+    use maplit::hashmap;
     use shared::dummy_contract;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
@@ -88,13 +93,17 @@ mod tests {
     #[tokio::test]
     async fn drop_unwrap_if_eth_buffer_is_big_enough() {
         let first_optimization_succeeds = |_: Settlement| async { true };
-        let get_weth_balance_succeeds = || async { Ok(U256::zero()) };
         let weth = dummy_contract!(WETH9, [0x42; 20]);
+        let mut buffer_retriever = MockBufferRetrieving::new();
+        let weth_address = weth.address();
+        buffer_retriever
+            .expect_get_buffers()
+            .returning(move |_| hashmap! {weth_address => Ok(U256::zero())});
 
         let settlement = optimize_unwrapping(
             settlement_with_unwrap(&weth, to_wei(1)),
             &first_optimization_succeeds,
-            &get_weth_balance_succeeds,
+            &buffer_retriever,
             &weth,
             0.6,
         )
@@ -112,13 +121,17 @@ mod tests {
         let successes = Arc::new(Mutex::new(vec![true, false]));
         let second_optimization_succeeds =
             |_: Settlement| async { successes.lock().unwrap().pop().unwrap() };
-        let get_weth_balance_succeeds = || async { Ok(to_wei(100)) };
         let weth = dummy_contract!(WETH9, [0x42; 20]);
+        let weth_address = weth.address();
+        let mut buffer_retriever = MockBufferRetrieving::new();
+        buffer_retriever
+            .expect_get_buffers()
+            .returning(move |_| hashmap! {weth_address => Ok(to_wei(100))});
 
         let settlement = optimize_unwrapping(
             settlement_with_unwrap(&weth, to_wei(10)),
             &second_optimization_succeeds,
-            &get_weth_balance_succeeds,
+            &buffer_retriever,
             &weth,
             0.6,
         )
@@ -137,15 +150,19 @@ mod tests {
         // would fail anyway. This can happen if the execution_plan of the settlement also tries to
         // use the WETH buffer (In this case more than 10 WETH).
         let no_optimization_succeeds = |_: Settlement| async { false };
-        let get_weth_balance_succeeds = || async { Ok(to_wei(100)) };
         let weth = dummy_contract!(WETH9, [0x42; 20]);
+        let weth_address = weth.address();
+        let mut buffer_retriever = MockBufferRetrieving::new();
+        buffer_retriever
+            .expect_get_buffers()
+            .returning(move |_| hashmap! {weth_address => Ok(to_wei(100))});
 
         let eth_to_unwrap = to_wei(50);
 
         let settlement = optimize_unwrapping(
             settlement_with_unwrap(&weth, eth_to_unwrap),
             &no_optimization_succeeds,
-            &get_weth_balance_succeeds,
+            &buffer_retriever,
             &weth,
             0.6,
         )

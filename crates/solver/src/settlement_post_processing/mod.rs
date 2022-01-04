@@ -2,6 +2,7 @@ pub mod optimize_unwrapping;
 
 use crate::settlement::Settlement;
 use crate::settlement_simulation::simulate_and_estimate_gas_at_current_block;
+use crate::solver::http_solver::buffers::BufferRetriever;
 use contracts::{GPv2Settlement, WETH9};
 use ethcontract::Account;
 use gas_estimation::EstimatedGasPrice;
@@ -14,6 +15,7 @@ pub struct PostProcessingPipeline {
     unwrap_factor: f64,
     settlement_contract: GPv2Settlement,
     weth: WETH9,
+    buffer_retriever: BufferRetriever,
 }
 
 impl PostProcessingPipeline {
@@ -24,12 +26,14 @@ impl PostProcessingPipeline {
         settlement_contract: GPv2Settlement,
     ) -> Self {
         let weth = WETH9::at(&web3, native_token);
+        let buffer_retriever = BufferRetriever::new(web3.clone(), settlement_contract.address());
 
         Self {
             web3,
             unwrap_factor,
             settlement_contract,
             weth,
+            buffer_retriever,
         }
     }
 
@@ -50,21 +54,11 @@ impl PostProcessingPipeline {
             matches!(result, Ok(results) if results[0].is_ok())
         };
 
-        let get_weth_balance = || async {
-            // TODO cache the WETH balance if we add more optimizations in the future which need it
-            self.weth
-                .methods()
-                .balance_of(self.settlement_contract.address())
-                .call()
-                .await
-                .map_err(|e| anyhow::anyhow!(e))
-        };
-
         // an error will leave the settlement unmodified
         optimize_unwrapping(
             settlement,
             &settlement_would_succeed,
-            &get_weth_balance,
+            &self.buffer_retriever,
             &self.weth,
             self.unwrap_factor,
         )
