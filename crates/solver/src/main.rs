@@ -12,7 +12,7 @@ use shared::{
     recent_block_cache::CacheConfig,
     sources::{
         self,
-        balancer_v2::{BalancerFactoryKind, BalancerPoolFetcher},
+        balancer_v2::{pool_fetching::BalancerContracts, BalancerFactoryKind, BalancerPoolFetcher},
         uniswap_v2::{
             pool_cache::PoolCache,
             pool_fetching::{PoolFetcher, PoolFetching},
@@ -432,35 +432,37 @@ async fn main() {
             .collect(),
     });
 
-    let (balancer_pool_maintainer, balancer_v2_liquidity) = if baseline_sources
-        .contains(&BaselineSource::BalancerV2)
-    {
-        let balancer_pool_fetcher = Arc::new(
-            BalancerPoolFetcher::new(
-                chain_id,
-                web3.clone(),
-                token_info_fetcher.clone(),
-                args.balancer_factories
-                    .unwrap_or_else(BalancerFactoryKind::all),
-                cache_config,
-                current_block_stream.clone(),
-                metrics.clone(),
-                client.clone(),
+    let (balancer_pool_maintainer, balancer_v2_liquidity) =
+        if baseline_sources.contains(&BaselineSource::BalancerV2) {
+            let contracts = BalancerContracts::new(&web3).await.unwrap();
+            let balancer_pool_fetcher = Arc::new(
+                BalancerPoolFetcher::new(
+                    chain_id,
+                    token_info_fetcher.clone(),
+                    args.balancer_factories
+                        .unwrap_or_else(BalancerFactoryKind::all),
+                    cache_config,
+                    current_block_stream.clone(),
+                    metrics.clone(),
+                    client.clone(),
+                    &contracts,
+                )
+                .await
+                .expect("failed to create Balancer pool fetcher"),
+            );
+            (
+                Some(balancer_pool_fetcher.clone() as Arc<dyn Maintaining>),
+                Some(BalancerV2Liquidity::new(
+                    web3.clone(),
+                    balancer_pool_fetcher,
+                    base_tokens.clone(),
+                    settlement_contract.clone(),
+                    contracts.vault,
+                )),
             )
-            .await
-            .expect("failed to create Balancer pool fetcher"),
-        );
-        (
-            Some(balancer_pool_fetcher.clone() as Arc<dyn Maintaining>),
-            Some(
-                BalancerV2Liquidity::new(web3.clone(), balancer_pool_fetcher, base_tokens.clone())
-                    .await
-                    .expect("failed to create Balancer V2 liquidity"),
-            ),
-        )
-    } else {
-        (None, None)
-    };
+        } else {
+            (None, None)
+        };
 
     let price_estimator = Arc::new(BaselinePriceEstimator::new(
         pool_aggregator,
