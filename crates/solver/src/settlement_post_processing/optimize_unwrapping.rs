@@ -30,7 +30,7 @@ pub async fn optimize_unwrapping(
         .settlement_would_succeed(optimized_settlement.clone())
         .await
     {
-        tracing::debug!("use internal buffer to unwraps");
+        tracing::debug!("use internal buffer for unwraps");
         return optimized_settlement;
     }
 
