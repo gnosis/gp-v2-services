@@ -76,21 +76,22 @@ where
         config: Configuration,
         calls: mpsc::UnboundedReceiver<CallContext>,
     ) -> JoinHandle<()> {
-        tokio::task::spawn(batched_for_each(config, calls, move |mut batch| {
+        tokio::task::spawn(batched_for_each(config, calls, move |batch| {
             let inner = inner.clone();
             async move {
-                match batch.len() {
+                let (mut requests, mut senders): (Vec<_>, Vec<_>) = batch
+                    .into_iter()
+                    .filter(|(_, _, sender)| !sender.is_canceled())
+                    .map(|(id, request, sender)| ((id, request), sender))
+                    .unzip();
+                match requests.len() {
                     0 => (),
                     1 => {
-                        let (id, request, sender) = batch.remove(0);
+                        let ((id, request), sender) = (requests.remove(0), senders.remove(0));
                         let result = inner.send(id, request).await;
                         let _ = sender.send(result);
                     }
                     n => {
-                        let (requests, senders): (Vec<_>, Vec<_>) = batch
-                            .into_iter()
-                            .map(|(id, request, sender)| ((id, request), sender))
-                            .unzip();
                         let results = inner
                             .send_batch(requests)
                             .await
@@ -128,8 +129,13 @@ where
     }
 
     fn send(&self, id: RequestId, request: Call) -> Self::Out {
-        let response = self.queue_call(id, request);
-        async move { response.await.expect("worker task unexpectedly dropped") }.boxed()
+        let this = self.clone();
+
+        async move {
+            let response = this.queue_call(id, request);
+            response.await.expect("worker task unexpectedly dropped")
+        }
+        .boxed()
     }
 }
 
@@ -145,11 +151,13 @@ where
     where
         T: IntoIterator<Item = (RequestId, Call)>,
     {
-        let responses = requests
-            .into_iter()
-            .map(|(id, request)| self.queue_call(id, request))
-            .collect::<Vec<_>>();
+        let this = self.clone();
+        let requests = requests.into_iter().collect::<Vec<_>>();
+
         async move {
+            let responses = requests
+                .into_iter()
+                .map(|(id, request)| this.queue_call(id, request));
             Ok(future::try_join_all(responses)
                 .await
                 .expect("worker task unexpectedly dropped"))
@@ -286,19 +294,18 @@ mod tests {
         let transport = MockTransport::new();
         transport
             .mock()
-            .expect_execute_batch()
-            .with(predicate::eq(vec![
-                ("unused".to_owned(), vec![]),
-                ("used".to_owned(), vec![]),
-            ]))
-            .returning(|_| Ok(vec![Ok(json!(0)), Ok(json!(1))]));
+            .expect_execute()
+            .with(predicate::eq("used".to_owned()), predicate::eq(vec![]))
+            .returning(|_, _| Ok(json!(1337)));
 
         let transport = Buffered::new(transport);
 
         let unused = transport.execute("unused", vec![]);
+        let unpolled = transport.execute("unpolled", vec![]);
         let used = transport.execute("used", vec![]);
         drop((unused, transport));
 
-        assert_eq!(used.await.unwrap(), 1);
+        assert_eq!(used.await.unwrap(), json!(1337));
+        drop(unpolled);
     }
 }
