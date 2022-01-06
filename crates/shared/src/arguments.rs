@@ -1,7 +1,7 @@
 //! Contains command line arguments and related helpers that are shared between the binaries.
 use crate::{
     gas_price_estimation::GasEstimatorType, price_estimation::PriceEstimatorType,
-    sources::BaselineSource,
+    sources::{BaselineSource, balancer_v2::BalancerFactoryKind},
 };
 use anyhow::{ensure, Result};
 use ethcontract::{H160, U256};
@@ -139,6 +139,19 @@ pub struct Arguments {
     /// If mipsolver should use internal buffers to improve solution quality.
     #[structopt(long, env)]
     pub mip_uses_internal_buffers: bool,
+
+    /// The Balancer V2 factories to consider for indexing liquidity. Allows
+    /// specific pool kinds to be disabled via configuration. Will use all
+    /// supported Balancer V2 factory kinds if not specified.
+    #[structopt(
+        long,
+        env,
+        possible_values = &BalancerFactoryKind::variants(),
+        case_insensitive = true,
+        use_delimiter = true
+    )]
+    pub balancer_factories: Option<Vec<BalancerFactoryKind>>,
+
 }
 
 pub fn parse_unbounded_factor(s: &str) -> Result<f64> {
