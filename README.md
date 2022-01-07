@@ -126,11 +126,23 @@ flyway -user=$USER -password="" -locations="filesystem:database/sql/" -url=jdbc:
 
 ### Local Test Network
 
-With a testnet (e.g. [Ganache](https://www.trufflesuite.com/ganache)) running on `localhost:8545` deploy the contracts via:
+In order to run the `e2e` tests you have to have a testnet running locally.
+Due to the RPC calls the services issue `Ganache` is incompatible, so we will use `hardhat`.
 
-```sh
-cd contracts; cargo run --bin deploy --features bin; cd -
-```
+1. Install [npm](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm)  
+2. Install hardhat with `npm install --save-dev hardhat`  
+3. Create `hardhat.config.js` in the directory you installed `hardhat` in with following content:
+<pre><code>module.exports = {
+        networks: { 
+            hardhat: {
+                initialBaseFeePerGas: 0,
+                accounts: {
+                    accountsBalance: "1000000000000000000000000"
+                }
+            }
+        }
+};</code></pre>
+4. Run local testnet with `npx hardhat node`
 
 ## Running the services
 
