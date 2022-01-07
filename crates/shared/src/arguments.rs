@@ -1,7 +1,8 @@
 //! Contains command line arguments and related helpers that are shared between the binaries.
 use crate::{
-    gas_price_estimation::GasEstimatorType, price_estimation::PriceEstimatorType,
-    sources::{BaselineSource, balancer_v2::BalancerFactoryKind},
+    gas_price_estimation::GasEstimatorType,
+    price_estimation::PriceEstimatorType,
+    sources::{balancer_v2::BalancerFactoryKind, BaselineSource},
 };
 use anyhow::{ensure, Result};
 use ethcontract::{H160, U256};
@@ -151,7 +152,6 @@ pub struct Arguments {
         use_delimiter = true
     )]
     pub balancer_factories: Option<Vec<BalancerFactoryKind>>,
-
 }
 
 pub fn parse_unbounded_factor(s: &str) -> Result<f64> {

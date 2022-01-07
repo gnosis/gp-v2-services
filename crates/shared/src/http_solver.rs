@@ -3,8 +3,8 @@ use reqwest::header::HeaderValue;
 use reqwest::{Client, Url};
 use std::time::Duration;
 
-pub mod model;
 pub mod gas_model;
+pub mod model;
 
 /// Implements an abstract HTTP solver API, can be mocked, instrumented, etc.
 #[mockall::automock]
