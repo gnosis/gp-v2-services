@@ -16,9 +16,8 @@ use model::order::OrderKind;
 use num::ToPrimitive;
 use num::{BigInt, BigRational};
 use primitive_types::H160;
-use shared::http_solver_api::model::*;
-use shared::http_solver_api::{DefaultHttpSolverApi, HttpSolverApi};
-use shared::price_estimation::gas::{GAS_PER_BALANCER_SWAP, GAS_PER_ORDER, GAS_PER_UNISWAP};
+use shared::http_solver::{gas_model::GasModel, model::*};
+use shared::http_solver::{DefaultHttpSolverApi, HttpSolverApi};
 use shared::{
     measure_time,
     token_info::{TokenInfo, TokenInfoFetching},
@@ -173,36 +172,10 @@ fn map_tokens_for_solver(orders: &[LimitOrder], liquidity: &[Liquidity]) -> Vec<
     Vec::from_iter(token_set)
 }
 
-struct GasModel {
-    native_token: H160,
-    gas_price: f64,
-}
-
-impl GasModel {
-    fn cost_for_gas(&self, gas: U256) -> CostModel {
-        CostModel {
-            amount: U256::from_f64_lossy(self.gas_price) * gas,
-            token: self.native_token,
-        }
-    }
-
-    fn order_cost(&self) -> CostModel {
-        self.cost_for_gas(GAS_PER_ORDER.into())
-    }
-
-    fn uniswap_cost(&self) -> CostModel {
-        self.cost_for_gas(GAS_PER_UNISWAP.into())
-    }
-
-    fn balancer_cost(&self) -> CostModel {
-        self.cost_for_gas(GAS_PER_BALANCER_SWAP.into())
-    }
-
-    fn order_fee(&self, order: &LimitOrder) -> FeeModel {
-        FeeModel {
-            amount: order.scaled_fee_amount,
-            token: order.sell_token,
-        }
+fn order_fee(order: &LimitOrder) -> FeeModel {
+    FeeModel {
+        amount: order.scaled_fee_amount,
+        token: order.sell_token,
     }
 }
 
@@ -262,7 +235,7 @@ fn order_models(
                     buy_amount: order.buy_amount,
                     allow_partial_fill: order.partially_fillable,
                     is_sell_order: matches!(order.kind, OrderKind::Sell),
-                    fee: gas_model.order_fee(order),
+                    fee: order_fee(order),
                     cost: gas_model.order_cost(),
                     is_liquidity_order: order.is_liquidity_order,
                     mandatory: false,
@@ -466,7 +439,7 @@ mod tests {
     use maplit::hashmap;
     use num::rational::Ratio;
     use reqwest::Client;
-    use shared::http_solver_api::SolverConfig;
+    use shared::http_solver::SolverConfig;
     use shared::token_info::MockTokenInfoFetching;
     use shared::token_info::TokenInfo;
     use std::sync::Arc;

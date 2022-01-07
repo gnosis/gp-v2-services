@@ -57,7 +57,7 @@ use shared::{
     transport::http::HttpTransport,
 };
 use shared::{
-    http_solver_api::{DefaultHttpSolverApi, SolverConfig},
+    http_solver::{DefaultHttpSolverApi, SolverConfig},
     sources::{
         balancer_v2::{pool_fetching::BalancerContracts, BalancerPoolFetcher},
         BaselineSource,
@@ -477,6 +477,7 @@ async fn main() {
                                 },
                             }),
                             pools: pool_fetcher.clone(),
+                            balancer_pools: balancer_pool_fetcher.clone(),
                             token_info: token_info_fetcher.clone(),
                             gas_info: gas_price_estimator.clone(),
                             native_token: native_token.address(),
