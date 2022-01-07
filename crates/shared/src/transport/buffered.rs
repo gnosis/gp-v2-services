@@ -12,13 +12,15 @@ use futures::{
     stream::{self, FusedStream, Stream, StreamExt as _},
 };
 use serde_json::Value;
-use std::{future::Future, sync::Arc, time::Duration};
+use std::{future::Future, num::NonZeroUsize, sync::Arc, time::Duration};
 use tokio::task::JoinHandle;
 
 /// Buffered transport configuration.
 pub struct Configuration {
     /// The maximum amount of concurrent batches to send to the node.
-    pub max_concurrent_requests: usize,
+    ///
+    /// Specifying `None` means no limit on concurrency.
+    pub max_concurrent_requests: Option<NonZeroUsize>,
     /// The maximum batch size.
     pub max_batch_len: usize,
     /// An additional minimum delay to wait for collecting requests.
@@ -31,7 +33,7 @@ impl Default for Configuration {
     fn default() -> Self {
         // Default configuration behaves kind of like TCP Nagle.
         Self {
-            max_concurrent_requests: 1,
+            max_concurrent_requests: NonZeroUsize::new(1),
             max_batch_len: MAX_BATCH_SIZE,
             batch_delay: Duration::default(),
         }
@@ -182,7 +184,7 @@ where
     F: Fn(Vec<T>) -> Fut,
     Fut: Future<Output = ()>,
 {
-    let concurrency_limit = config.max_concurrent_requests;
+    let concurrency_limit = config.max_concurrent_requests.map(NonZeroUsize::get);
 
     let batches = stream::unfold(items, move |mut items| async move {
         let mut chunk = vec![items.next().await?];
