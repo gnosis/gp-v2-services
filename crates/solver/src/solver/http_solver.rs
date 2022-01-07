@@ -16,8 +16,11 @@ use model::order::OrderKind;
 use num::ToPrimitive;
 use num::{BigInt, BigRational};
 use primitive_types::H160;
-use shared::http_solver::{gas_model::GasModel, model::*};
 use shared::http_solver::{DefaultHttpSolverApi, HttpSolverApi};
+use shared::{
+    http_solver::{gas_model::GasModel, model::*},
+    sources::balancer_v2::pools::common::compute_scaling_rate,
+};
 use shared::{
     measure_time,
     token_info::{TokenInfo, TokenInfoFetching},
@@ -356,26 +359,6 @@ fn compute_fee_connected_tokens(liquidity: &[Liquidity], native_token: H160) -> 
     fee_connected_tokens
 }
 
-/// Compute the scaling rate from a Balancer pool's scaling exponent.
-///
-/// This method returns an error on any arithmetic underflow when computing the
-/// token decimals. Note that in theory, this should be impossible to happen.
-/// However, we are extra careful and return an `Error` in case it does to avoid
-/// panicking. Additionally, wrapped math could have been used here, but that
-/// would create invalid settlements.
-fn compute_scaling_rate(scaling_exponent: u8) -> Result<U256> {
-    // Balancer `scaling_exponent`s are `18 - decimals`, we want the rate which
-    // is `10 ** decimals`.
-    let decimals = 18_u8.checked_sub(scaling_exponent).ok_or_else(|| {
-        anyhow!("underflow computing decimals from Balancer pool scaling exponent")
-    })?;
-
-    debug_assert!(decimals <= 18);
-    // `decimals` is guaranteed to be between 0 and 18, and 10**18 cannot
-    // cannot overflow a `U256`, so we do not need to use `checked_pow`.
-    Ok(U256::from(10).pow(decimals.into()))
-}
-
 #[async_trait::async_trait]
 impl Solver for HttpSolver {
     async fn solve(
@@ -697,21 +680,5 @@ mod tests {
         "#;
         let parsed_response = serde_json::from_str::<SettledBatchAuctionModel>(example_response);
         assert!(parsed_response.is_ok());
-    }
-
-    #[test]
-    fn compute_scaling_rates() {
-        // Tokens with 18 decimals
-        assert_eq!(
-            compute_scaling_rate(0).unwrap(),
-            U256::from(1_000_000_000_000_000_000_u128),
-        );
-        // Tokens with 6 decimals
-        assert_eq!(compute_scaling_rate(12).unwrap(), U256::from(1_000_000));
-        // Tokens with 0 decimals
-        assert_eq!(compute_scaling_rate(18).unwrap(), U256::from(1));
-
-        // Tokens with invalid number of decimals, i.e. greater than 18
-        assert!(compute_scaling_rate(42).is_err());
     }
 }
