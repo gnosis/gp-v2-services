@@ -114,6 +114,8 @@ docker build --tag gp-v2-migrations -f docker/Dockerfile.migration .
 docker run -ti -e FLYWAY_URL="jdbc:postgresql://host.docker.internal/?user="$USER"&password=" -v $PWD/database/sql:/flyway/sql gp-v2-migrations migrate
 ```
 
+In case you run into `java.net.UnknownHostException: host.docker.internal` add `--add-host=host.docker.internal:host-gateway` right after `docker run`.
+
 If you're combining a local postgres installation with docker flyway you have to add to the above `--network host` and change `host.docker.internal` to `localhost`.
 
 - Local [flyway installation](https://flywaydb.org/documentation/usage/commandline/#download-and-installation)
