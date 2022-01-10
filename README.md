@@ -164,8 +164,11 @@ Run an `orderbook` on `localhost:8080` with:
 ```sh
 cargo run --bin orderbook -- \
   --skip-trace-api true \
+  --skip-event-sync \
   --node-url <YOUR_NODE_URL>
 ```
+
+`--skip-event-sync` will skip some work to speed up the initialization process.
 
 `--skip-trace-api true` will make the orderbook compatible with more ethereum nodes. If your node supports `trace_callMany` you can drop this argument.
 
@@ -178,11 +181,11 @@ Run a solver which is connected to an `orderbook` at `localhost:8080` with:
 ```sh
 cargo run -p solver -- \
   --solver-account 0xa6DDBD0dE6B310819b49f680F65871beE85f517e \
-  --baseline-sources UniswapV2,SushiSwap \
+  --transaction-strategy DryRun \
   --node-url <YOUR_NODE_URL>
 ```
 
-Because this command was designed to work with `node-urls` from mainnet and rinkeby it limits the `baseline-sources` to `UniswapV2` and `SushiSwap`. If your `node-url` belongs to mainnet, you can drop this argument all together to get access to all supported `baseline-sources`.
+`--transaction-strategy DryRun` will make the solver only print the solution but not submit it on-chain. This command is absolutely safe and will not use any funds.
 
 The `solver-account` is responsible for signing transactions. Solutions for settlements need to come from an address the settlement contract trusts in order to make the contract actually consider the solution. Adding your personal solver account is quite involved and requires you to get in touch with the team, so we are using this public solver address for now.
 
