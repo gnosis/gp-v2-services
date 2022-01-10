@@ -1,6 +1,7 @@
 mod settlement_encoder;
 
 pub use self::settlement_encoder::SettlementEncoder;
+use crate::settlement::TokenIndex::{CustomBuyPriceIndex, UniformClearingPriceIndex};
 use crate::{
     encoding::{self, EncodedInteraction, EncodedSettlement, EncodedTrade},
     liquidity::Settleable,
@@ -12,11 +13,23 @@ use primitive_types::{H160, U256};
 use shared::conversions::U256Ext as _;
 use std::collections::HashMap;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TokenIndex {
+    UniformClearingPriceIndex(usize),
+    CustomBuyPriceIndex(usize),
+}
+
+impl Default for TokenIndex {
+    fn default() -> Self {
+        TokenIndex::UniformClearingPriceIndex(0)
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Trade {
     pub order: Order,
     pub sell_token_index: usize,
-    pub buy_token_index: usize,
+    pub buy_token_index: TokenIndex,
     pub executed_amount: U256,
     pub scaled_fee_amount: U256,
     pub is_liquidity_order: bool,
@@ -122,11 +135,15 @@ impl Trade {
 
     /// Encodes the settlement trade as a tuple, as expected by the smart
     /// contract.
-    pub fn encode(&self) -> EncodedTrade {
+    pub fn encode(&self, clearing_price_vec_length: usize) -> EncodedTrade {
+        let buy_token_index = match self.buy_token_index {
+            UniformClearingPriceIndex(index) => index,
+            CustomBuyPriceIndex(index) => clearing_price_vec_length + index,
+        };
         encoding::encode_trade(
             &self.order.order_creation,
             self.sell_token_index,
-            self.buy_token_index,
+            buy_token_index,
             &self.executed_amount,
         )
     }

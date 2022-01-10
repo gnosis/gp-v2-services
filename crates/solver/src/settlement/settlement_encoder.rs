@@ -1,6 +1,7 @@
 use super::{Interaction, Trade, TradeExecution};
+use crate::settlement::TokenIndex::{CustomBuyPriceIndex, UniformClearingPriceIndex};
 use crate::{encoding::EncodedSettlement, interactions::UnwrapWethInteraction};
-use anyhow::{bail, ensure, Context as _, Result};
+use anyhow::{ensure, Context as _, Result};
 use model::order::{Order, OrderKind};
 use num::{BigRational, One, Zero};
 use primitive_types::{H160, U256};
@@ -10,6 +11,12 @@ use std::{
     iter,
     sync::Arc,
 };
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CustomBuyPrice {
+    token: H160,
+    price: U256,
+}
 
 /// An intermediate settlement representation that can be incrementally
 /// constructed.
@@ -26,6 +33,10 @@ pub struct SettlementEncoder {
     // Invariant: tokens is all keys in clearing_prices sorted.
     tokens: Vec<H160>,
     clearing_prices: HashMap<H160, U256>,
+    // Liquidity orders are supposed to be settled without a uniform clearing price
+    // Each liquidity order will be settled with the sell_price from the uniform clearing
+    // price vector and a custom buy_price represented by the follow vector element
+    non_uniform_clearing_prices: Vec<CustomBuyPrice>,
     // Invariant: Every trade's buy and sell token has an entry in clearing_prices.
     trades: Vec<Trade>,
     // This is an Arc so that this struct is Clone. Cannot require `Interaction: Clone` because it
@@ -55,6 +66,7 @@ impl SettlementEncoder {
         SettlementEncoder {
             tokens,
             clearing_prices,
+            non_uniform_clearing_prices: Vec::new(),
             trades: Vec::new(),
             execution_plan: Vec::new(),
             unwraps: Vec::new(),
@@ -73,6 +85,7 @@ impl SettlementEncoder {
         SettlementEncoder {
             tokens: self.tokens.clone(),
             clearing_prices: self.clearing_prices.clone(),
+            non_uniform_clearing_prices: self.non_uniform_clearing_prices.clone(),
             trades: self.trades.clone(),
             execution_plan: Vec::new(),
             unwraps: self.unwraps.clone(),
@@ -102,27 +115,75 @@ impl SettlementEncoder {
         let sell_token_index = self
             .token_index(order.order_creation.sell_token)
             .expect("missing sell token with price");
+        let (trade, execution) = match is_liquidity_order {
+            false => {
+                // settle normal order with the uniform clearing price
 
-        let buy_price = self
-            .clearing_prices
-            .get(&order.order_creation.buy_token)
-            .context("settlement missing buy token")?;
-        let buy_token_index = self
-            .token_index(order.order_creation.buy_token)
-            .expect("missing buy token with price");
+                let buy_price = self
+                    .clearing_prices
+                    .get(&order.order_creation.buy_token)
+                    .context("settlement missing buy token")?;
+                let buy_token_index = self
+                    .token_index(order.order_creation.buy_token)
+                    .expect("missing buy token with price");
 
-        let trade = Trade {
-            order,
-            sell_token_index,
-            buy_token_index,
-            executed_amount,
-            scaled_fee_amount,
-            is_liquidity_order,
+                let trade = Trade {
+                    order,
+                    sell_token_index,
+                    buy_token_index: UniformClearingPriceIndex(buy_token_index),
+                    executed_amount,
+                    scaled_fee_amount,
+                    is_liquidity_order,
+                };
+                let execution = trade
+                    .executed_amounts(*sell_price, *buy_price)
+                    .context("impossible trade execution")?;
+                (trade, execution)
+            }
+            true => {
+                // Liquidity orders are settled at their limit price. We set:
+                // buy_price =  sell_price * order.sellAmount / order.buyAmount, where sell_price is given from uniform clearing prices
+
+                // Rounding error checks:
+                // Following limit price constraint is checked in the smart contract:
+                // order.sellAmount.mul(sellPrice) >= order.buyAmount.mul(buyPrice),
+                // For each order, we get
+                // order.sellAmount.mul(sellPrice)  >= order.buyAmount.mul(buyPrice)
+                // <=> order.sellAmount.mul(sellPrice)  >= order.buyAmount.mul(sell_price * order.sellAmount / order.buyAmount)
+                // <=> always true
+
+                let buy_price = self
+                    .clearing_prices
+                    .get(&order.order_creation.sell_token)
+                    .context("settlement missing buy token")?
+                    .checked_mul(order.order_creation.sell_amount)
+                    .context("buy_price calculation failed")?
+                    .checked_div(order.order_creation.buy_amount)
+                    .context("buy_price calculation failed")?;
+
+                let non_uniform_clearing_prices = CustomBuyPrice {
+                    token: order.order_creation.buy_token,
+                    price: buy_price,
+                };
+                self.non_uniform_clearing_prices
+                    .push(non_uniform_clearing_prices);
+
+                let trade = Trade {
+                    order,
+                    sell_token_index,
+                    buy_token_index: CustomBuyPriceIndex(
+                        self.non_uniform_clearing_prices.len() - 1,
+                    ),
+                    executed_amount,
+                    scaled_fee_amount,
+                    is_liquidity_order,
+                };
+                let execution = trade
+                    .executed_amounts(*sell_price, buy_price)
+                    .context("impossible trade execution")?;
+                (trade, execution)
+            }
         };
-        let execution = trade
-            .executed_amounts(*sell_price, *buy_price)
-            .context("impossible trade execution")?;
-
         self.trades.push(trade);
         Ok(execution)
     }
@@ -157,7 +218,9 @@ impl SettlementEncoder {
                 // have the same price (i.e. are equivalent).
                 return Ok(());
             }
-            (None, None) => bail!("tokens not part of solution for equivalency"),
+            // If token_b is only the buy token of a liquidity order,
+            // the price does not need to be in the uniform clearing prices
+            (None, None) => return Ok(()),
             (Some(price_a), None) => (token_b, *price_a),
             (None, Some(price_b)) => (token_a, *price_b),
         };
@@ -179,9 +242,19 @@ impl SettlementEncoder {
             self.trades[i].sell_token_index = self
                 .token_index(self.trades[i].order.order_creation.sell_token)
                 .expect("missing sell token for existing trade");
-            self.trades[i].buy_token_index = self
-                .token_index(self.trades[i].order.order_creation.buy_token)
-                .expect("missing buy token for existing trade");
+            if let UniformClearingPriceIndex(_) = self.trades[i].buy_token_index {
+                self.trades[i].buy_token_index = UniformClearingPriceIndex(
+                    self.token_index(self.trades[i].order.order_creation.buy_token)
+                        .expect("missing buy token for existing trade"),
+                )
+            }
+        }
+    }
+    fn modify_token_index_for_liquidity_orders_after_change(&mut self, offset: usize) {
+        for i in 0..self.trades.len() {
+            if let CustomBuyPriceIndex(index) = self.trades[i].buy_token_index {
+                self.trades[i].buy_token_index = CustomBuyPriceIndex(index + offset)
+            }
         }
     }
 
@@ -243,11 +316,12 @@ impl SettlementEncoder {
         let traded_tokens: HashSet<_> = self
             .trades()
             .iter()
-            .flat_map(|trade| {
-                [
+            .flat_map(|trade| match trade.buy_token_index {
+                UniformClearingPriceIndex(_) => vec![
                     trade.order.order_creation.buy_token,
                     trade.order.order_creation.sell_token,
-                ]
+                ],
+                CustomBuyPriceIndex(_) => vec![trade.order.order_creation.sell_token],
             })
             .collect();
 
@@ -260,7 +334,15 @@ impl SettlementEncoder {
     pub fn finish(mut self) -> EncodedSettlement {
         self.drop_unnecessary_tokens_and_prices();
 
-        let clearing_prices = self
+        let (mut additional_tokens, mut additional_prices): (Vec<H160>, Vec<U256>) = self
+            .non_uniform_clearing_prices
+            .iter()
+            .map(|x| (x.token, x.price))
+            .unzip();
+        let uniform_clearing_price_vec_length = self.tokens.len();
+        let mut tokens = self.tokens.clone();
+        tokens.append(&mut additional_tokens);
+        let mut clearing_prices: Vec<U256> = self
             .tokens
             .iter()
             .map(|token| {
@@ -270,14 +352,14 @@ impl SettlementEncoder {
                     .expect("missing clearing price for token")
             })
             .collect();
-
+        clearing_prices.append(&mut additional_prices);
         EncodedSettlement {
-            tokens: self.tokens,
+            tokens,
             clearing_prices,
             trades: self
                 .trades
                 .into_iter()
-                .map(|trade| trade.encode())
+                .map(|trade| trade.encode(uniform_clearing_price_vec_length))
                 .collect(),
             interactions: [
                 Vec::new(),
@@ -303,7 +385,7 @@ impl SettlementEncoder {
         if scaling_factor < BigRational::one() {
             return other.merge(self);
         }
-        for (key, value) in other.clearing_prices {
+        for (key, value) in other.clearing_prices.clone() {
             let scaled_price = big_rational_to_u256(&(value.to_big_rational() * &scaling_factor))
                 .context("Invalid price scaling factor")?;
             match self.clearing_prices.entry(key) {
@@ -317,8 +399,21 @@ impl SettlementEncoder {
                 }
             }
         }
+        other.non_uniform_clearing_prices = other
+            .non_uniform_clearing_prices
+            .iter()
+            .map(|token_price_pair| {
+                Ok(CustomBuyPrice {
+                    token: token_price_pair.token,
+                    price: big_rational_to_u256(
+                        &(token_price_pair.price.to_big_rational() * &scaling_factor),
+                    )
+                    .context("Invalid price scaling factor")?,
+                })
+            })
+            .collect::<Result<Vec<CustomBuyPrice>>>()?;
 
-        for other_trade in other.trades.iter() {
+        for other_trade in other.trades.iter().clone() {
             ensure!(
                 self.trades
                     .iter()
@@ -327,6 +422,12 @@ impl SettlementEncoder {
                 "duplicate trade"
             );
         }
+
+        other.modify_token_index_for_liquidity_orders_after_change(
+            self.non_uniform_clearing_prices.len(),
+        );
+        self.non_uniform_clearing_prices
+            .append(&mut other.non_uniform_clearing_prices);
         self.trades.append(&mut other.trades);
         self.sort_tokens_and_update_indices();
 
@@ -453,6 +554,53 @@ pub mod tests {
     }
 
     #[test]
+    fn settlement_reflects_different_price_for_normal_and_liquidity_order() {
+        let mut settlement = SettlementEncoder::new(maplit::hashmap! {
+            token(0) => 3.into(),
+            token(1) => 10.into(),
+        });
+
+        let order01 = OrderBuilder::default()
+            .with_sell_token(token(0))
+            .with_sell_amount(30.into())
+            .with_buy_token(token(1))
+            .with_buy_amount(10.into())
+            .build();
+
+        let order10 = OrderBuilder::default()
+            .with_sell_token(token(1))
+            .with_sell_amount(10.into())
+            .with_buy_token(token(0))
+            .with_buy_amount(20.into())
+            .build();
+
+        assert!(settlement
+            .add_trade(order01, 33.into(), 0.into(), false)
+            .is_ok());
+        assert!(settlement
+            .add_trade(order10, 11.into(), 0.into(), true)
+            .is_ok());
+        let finished_settlement = settlement.finish();
+        assert_eq!(
+            finished_settlement.tokens,
+            vec![token(0), token(1), token(0)]
+        );
+        assert_eq!(
+            finished_settlement.clearing_prices,
+            vec![3.into(), 10.into(), 5.into()]
+        );
+        assert_eq!(
+            finished_settlement.trades[1].1, // <-- is the buy token index of liquidity order
+            2.into()
+        );
+
+        assert_eq!(
+            finished_settlement.trades[0].1, // <-- is the buy token index of normal order
+            1.into()
+        );
+    }
+
+    #[test]
     fn settlement_encoder_appends_unwraps_for_different_tokens() {
         let mut encoder = SettlementEncoder::new(HashMap::new());
         encoder.add_unwrap(UnwrapWethInteraction {
@@ -520,7 +668,10 @@ pub mod tests {
 
         assert_eq!(encoder.tokens, [token_a, token_b]);
         assert_eq!(encoder.trades[0].sell_token_index, 0);
-        assert_eq!(encoder.trades[0].buy_token_index, 1);
+        assert_eq!(
+            encoder.trades[0].buy_token_index,
+            UniformClearingPriceIndex(1)
+        );
 
         let token_c = H160([0xee; 20]);
         encoder.add_token_equivalency(token_a, token_c).unwrap();
@@ -531,7 +682,10 @@ pub mod tests {
             encoder.clearing_prices[&token_c],
         );
         assert_eq!(encoder.trades[0].sell_token_index, 0);
-        assert_eq!(encoder.trades[0].buy_token_index, 2);
+        assert_eq!(
+            encoder.trades[0].buy_token_index,
+            UniformClearingPriceIndex(2)
+        );
     }
 
     #[test]
@@ -539,7 +693,11 @@ pub mod tests {
         let mut encoder = SettlementEncoder::new(HashMap::new());
         assert!(encoder
             .add_token_equivalency(H160([0; 20]), H160([1; 20]))
-            .is_err());
+            .is_ok());
+        assert_eq!(
+            encoder.tokens,
+            SettlementEncoder::new(HashMap::new()).tokens
+        );
     }
 
     #[test]
@@ -558,9 +716,8 @@ pub mod tests {
     }
 
     #[test]
-    fn merge_ok() {
+    fn merge_ok_with_liquidity_orders() {
         let weth = dummy_contract!(WETH9, H160::zero());
-
         let prices = hashmap! { token(1) => 1.into(), token(3) => 3.into() };
         let mut encoder0 = SettlementEncoder::new(prices);
         let mut order13 = OrderBuilder::default()
@@ -569,9 +726,19 @@ pub mod tests {
             .with_buy_token(token(3))
             .with_buy_amount(11.into())
             .build();
+        let mut order12 = OrderBuilder::default()
+            .with_sell_token(token(1))
+            .with_sell_amount(23.into())
+            .with_buy_token(token(2))
+            .with_buy_amount(11.into())
+            .build();
         order13.order_meta_data.uid.0[0] = 0;
+        order12.order_meta_data.uid.0[0] = 2;
         encoder0
             .add_trade(order13, 13.into(), 0.into(), false)
+            .unwrap();
+        encoder0
+            .add_trade(order12, 13.into(), 0.into(), true)
             .unwrap();
         encoder0.append_to_execution_plan(NoopInteraction {});
         encoder0.add_unwrap(UnwrapWethInteraction {
@@ -587,9 +754,19 @@ pub mod tests {
             .with_buy_token(token(4))
             .with_buy_amount(22.into())
             .build();
+        let mut order23 = OrderBuilder::default()
+            .with_sell_token(token(2))
+            .with_sell_amount(19.into())
+            .with_buy_token(token(3))
+            .with_buy_amount(11.into())
+            .build();
         order24.order_meta_data.uid.0[0] = 1;
+        order23.order_meta_data.uid.0[0] = 4;
         encoder1
             .add_trade(order24, 24.into(), 0.into(), false)
+            .unwrap();
+        encoder1
+            .add_trade(order23, 19.into(), 0.into(), true)
             .unwrap();
         encoder1.append_to_execution_plan(NoopInteraction {});
         encoder1.add_unwrap(UnwrapWethInteraction {
@@ -604,7 +781,21 @@ pub mod tests {
         };
         assert_eq!(merged.clearing_prices, prices);
         assert_eq!(merged.tokens, [token(1), token(2), token(3), token(4)]);
-        assert_eq!(merged.trades.len(), 2);
+        assert_eq!(
+            merged.non_uniform_clearing_prices,
+            vec![
+                CustomBuyPrice {
+                    token: token(2),
+                    price: 2.into()
+                },
+                CustomBuyPrice {
+                    token: token(3),
+                    price: 3.into()
+                }
+            ]
+        );
+
+        assert_eq!(merged.trades.len(), 4);
         assert_eq!(merged.execution_plan.len(), 2);
         assert_eq!(merged.unwraps[0].amount, 3.into());
     }
@@ -623,7 +814,12 @@ pub mod tests {
         let prices = hashmap! { token(1) => 2.into(), token(2) => 2.into() };
         let encoder0 = SettlementEncoder::new(prices);
         let prices = hashmap! { token(1) => 1.into(), token(3) => 3.into() };
-        let encoder1 = SettlementEncoder::new(prices);
+        let mut encoder1 = SettlementEncoder::new(prices);
+        let non_uniform_clearing_prices = vec![CustomBuyPrice {
+            token: token(1),
+            price: 1.into(),
+        }];
+        encoder1.non_uniform_clearing_prices = non_uniform_clearing_prices;
 
         let merged = encoder0.merge(encoder1).unwrap();
         let prices = hashmap! {
@@ -632,6 +828,13 @@ pub mod tests {
             token(3) => 6.into(),
         };
         assert_eq!(merged.clearing_prices, prices);
+        assert_eq!(
+            merged.non_uniform_clearing_prices,
+            vec![CustomBuyPrice {
+                token: token(1),
+                price: 2.into(),
+            }]
+        );
     }
 
     #[test]

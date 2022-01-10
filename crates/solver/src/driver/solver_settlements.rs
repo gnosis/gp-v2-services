@@ -156,6 +156,7 @@ pub fn retain_mature_settlements(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settlement::TokenIndex::UniformClearingPriceIndex;
     use crate::settlement::Trade;
     use chrono::{offset::Utc, DateTime, Duration, Local};
     use maplit::hashmap;
@@ -251,7 +252,7 @@ mod tests {
 
         let trade = |executed_amount, uid_: u8| Trade {
             sell_token_index: 0,
-            buy_token_index: 1,
+            buy_token_index: UniformClearingPriceIndex(1),
             executed_amount,
             order: Order {
                 order_meta_data: OrderMetaData {
