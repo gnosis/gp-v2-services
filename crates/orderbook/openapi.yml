@@ -11,9 +11,9 @@ servers:
     url: https://barn.api.cow.fi/rinkeby
   - description: Rinkeby (Prod)
     url: https://api.cow.fi/rinkeby
-  - description: xDai (Staging)
+  - description: Gnosis Chain (Staging)
     url: https://barn.api.cow.fi/xdai
-  - description: xDai (Prod)
+  - description: Gnosis Chain (Prod)
     url: https://api.cow.fi/xdai
   - description: Local
     url: http://localhost:8080
