@@ -75,7 +75,7 @@ impl SettlementHandling<LimitOrder> for OrderSettlementHandler {
     fn encode(&self, executed_amount: U256, encoder: &mut SettlementEncoder) -> Result<()> {
         let is_native_token_buy_order = self.order.order_creation.buy_token == BUY_ETH_ADDRESS;
 
-        if is_native_token_buy_order {
+        if !self.is_liquidity_order && is_native_token_buy_order {
             encoder.add_token_equivalency(self.native_token.address(), BUY_ETH_ADDRESS)?;
         }
 

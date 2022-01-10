@@ -1,7 +1,7 @@
 use super::{Interaction, Trade, TradeExecution};
 use crate::settlement::TokenIndex::{CustomBuyPriceIndex, UniformClearingPriceIndex};
 use crate::{encoding::EncodedSettlement, interactions::UnwrapWethInteraction};
-use anyhow::{ensure, Context as _, Result};
+use anyhow::{bail, ensure, Context as _, Result};
 use model::order::{Order, OrderKind};
 use num::{BigRational, One, Zero};
 use primitive_types::{H160, U256};
@@ -35,7 +35,7 @@ pub struct SettlementEncoder {
     clearing_prices: HashMap<H160, U256>,
     // Liquidity orders are supposed to be settled without a uniform clearing price
     // Each liquidity order will be settled with the sell_price from the uniform clearing
-    // price vector and a custom buy_price represented by the follow vector element
+    // price vector and a custom buy_price represented by the following vector
     non_uniform_clearing_prices: Vec<CustomBuyPrice>,
     // Invariant: Every trade's buy and sell token has an entry in clearing_prices.
     trades: Vec<Trade>,
@@ -150,6 +150,8 @@ impl SettlementEncoder {
                 // For each order, we get
                 // order.sellAmount.mul(sellPrice)  >= order.buyAmount.mul(buyPrice)
                 // <=> order.sellAmount.mul(sellPrice)  >= order.buyAmount.mul(sell_price * order.sellAmount / order.buyAmount)
+                // dividing first and then multiplying by order.buyAmount can only make the right side smaller
+                // <=> order.sellAmount.mul(sellPrice) >= order.sellAmount.mul(sellPrice)
                 // <=> always true
 
                 let buy_price = self
@@ -218,9 +220,7 @@ impl SettlementEncoder {
                 // have the same price (i.e. are equivalent).
                 return Ok(());
             }
-            // If token_b is only the buy token of a liquidity order,
-            // the price does not need to be in the uniform clearing prices
-            (None, None) => return Ok(()),
+            (None, None) => bail!("tokens not part of solution for equivalency"),
             (Some(price_a), None) => (token_b, *price_a),
             (None, Some(price_b)) => (token_a, *price_b),
         };
@@ -341,7 +341,6 @@ impl SettlementEncoder {
             .unzip();
         let uniform_clearing_price_vec_length = self.tokens.len();
         let mut tokens = self.tokens.clone();
-        tokens.append(&mut additional_tokens);
         let mut clearing_prices: Vec<U256> = self
             .tokens
             .iter()
@@ -352,6 +351,7 @@ impl SettlementEncoder {
                     .expect("missing clearing price for token")
             })
             .collect();
+        tokens.append(&mut additional_tokens);
         clearing_prices.append(&mut additional_prices);
         EncodedSettlement {
             tokens,
@@ -413,7 +413,7 @@ impl SettlementEncoder {
             })
             .collect::<Result<Vec<CustomBuyPrice>>>()?;
 
-        for other_trade in other.trades.iter().clone() {
+        for other_trade in other.trades.iter() {
             ensure!(
                 self.trades
                     .iter()
@@ -693,11 +693,7 @@ pub mod tests {
         let mut encoder = SettlementEncoder::new(HashMap::new());
         assert!(encoder
             .add_token_equivalency(H160([0; 20]), H160([1; 20]))
-            .is_ok());
-        assert_eq!(
-            encoder.tokens,
-            SettlementEncoder::new(HashMap::new()).tokens
-        );
+            .is_err());
     }
 
     #[test]
