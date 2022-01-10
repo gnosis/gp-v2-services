@@ -144,9 +144,61 @@ Due to the RPC calls the services issue `Ganache` is incompatible, so we will us
 };</code></pre>
 4. Run local testnet with `npx hardhat node`
 
-## Running the services
+## Running the Services Locally
 
-- `cargo run --bin orderbook -- --help`
-- `cargo run --bin solver -- --help`
+### Prerequisites
+Reading the state of the blockchain requires issuing RPC calls to an ethereum node. This can be a testnet you are running locally, some "real" node you have access to or the most convenient thing is to use a third party service like [infura](https://infura.io/) to get access to an ethereum node which we recommend.
+After you made a free infura account they offer you "endpoints" for the mainnet and different testnets. We will refer those as `node-urls`.
+Because Gnosis only runs their services on mainnet, rinkeby and gnosis chain you need to select one of those.
 
-To test the system end to end checkout the [GPv2 UI](https://github.com/gnosis/gp-swap-ui) and point it to your local instance.
+Note that the `node-url` is sensitive data. The `orderbook` and `solver` executables allow you to pass it with the `--node-url` parameter. This is very convenient for our examples but to minimize the possibility of sharing this information by accident you should consider setting the `NODE_URL` environment variable so you don't have to pass the `--node-url` argument to the executables.
+
+To avoid confusion during your tests, always double check that the token and account addresses you use actually correspond to the network of the `node-url` you are running the executables with.
+
+### Orderbook
+
+To see all supported command line arguments run `cargo run --bin orderbook -- --help`.
+
+Run an `orderbook` on `localhost:8080` with:
+
+```sh
+cargo run --bin orderbook -- \
+  --skip-trace-api true \
+  --node-url <YOUR_NODE_URL>
+```
+
+`--skip-trace-api true` will make the orderbook compatible with more ethereum nodes. If your node supports `trace_callMany` you can drop this argument.
+
+### Solvers
+
+To see all supported command line arguments run `cargo run --bin solver -- --help`.
+
+Run a solver which is connected to an `orderbook` at `localhost:8080` with:
+
+```sh
+cargo run -p solver -- \
+  --solver-account 0xa6DDBD0dE6B310819b49f680F65871beE85f517e \
+  --baseline-sources UniswapV2,SushiSwap \
+  --node-url <YOUR_NODE_URL>
+```
+
+Because this command was designed to work with `node-urls` from mainnet and rinkeby it limits the `baseline-sources` to `UniswapV2` and `SushiSwap`. If your `node-url` belongs to mainnet, you can drop this argument all together to get access to all supported `baseline-sources`.
+
+The `solver-account` is responsible for signing transactions. Solutions for settlements need to come from an address the settlement contract trusts in order to make the contract actually consider the solution. Adding your personal solver account is quite involved and requires you to get in touch with the team, so we are using this public solver address for now.
+
+To make things more interesting and see some real orders you can connect the `solver` to our real `orderbook` service. There are several orderbooks for production and staging environments on different networks. Find the `orderbook-url` corresponding to your `node-url` which suits your purposes and connect your solver to it with `--orderbook-url <URL>`.
+
+| Orderbook URL                   | Network      | Environment |
+|---------------------------------|--------------|-------------|
+| https://barn.api.cow.fi/mainnet | Mainnet      | Staging     |
+| https://api.cow.fi/mainnet      | Mainnet      | Production  |
+| https://barn.api.cow.fi/rinkeby | Rinkeby      | Staging     |
+| https://api.cow.fi/rinkeby      | Rinkeby      | Production  |
+| https://barn.api.cow.fi/xdai    | Gnosis Chain | Staging     |
+| https://api.cow.fi/xdai         | Gnosis Chain | Production  |
+
+Always make sure that the `solver` and the `orderbook` it connects to are configured to use the same network.
+
+### Frontend
+
+To conveniently submit orders checkout the [GPv2 UI](https://github.com/gnosis/gp-swap-ui) and point it to your local instance.
