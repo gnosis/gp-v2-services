@@ -132,16 +132,18 @@ Due to the RPC calls the services issue `Ganache` is incompatible, so we will us
 1. Install [npm](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm)  
 2. Install hardhat with `npm install --save-dev hardhat`  
 3. Create `hardhat.config.js` in the directory you installed `hardhat` in with following content:
-<pre><code>module.exports = {
-        networks: { 
-            hardhat: {
-                initialBaseFeePerGas: 0,
-                accounts: {
-                    accountsBalance: "1000000000000000000000000"
-                }
-            }
-        }
-};</code></pre>
+   ```javascript
+   module.exports = {
+       networks: { 
+           hardhat: {
+               initialBaseFeePerGas: 0,
+               accounts: {
+                   accountsBalance: "1000000000000000000000000"
+               }
+           }
+       }
+   };
+   ```
 4. Run local testnet with `npx hardhat node`
 
 ## Running the Services Locally
