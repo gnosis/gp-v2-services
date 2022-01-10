@@ -204,4 +204,4 @@ Always make sure that the `solver` and the `orderbook` it connects to are config
 
 ### Frontend
 
-To conveniently submit orders checkout the [GPv2 UI](https://github.com/gnosis/gp-swap-ui) and point it to your local instance.
+To conveniently submit orders checkout the [CowSwap](https://github.com/gnosis/cowswap) frontend and point it to your local instance.
