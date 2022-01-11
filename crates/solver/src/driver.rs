@@ -61,6 +61,7 @@ pub struct Driver {
     order_converter: OrderConverter,
     in_flight_orders: InFlightOrders,
     post_processing_pipeline: PostProcessingPipeline,
+    simulation_gas_limit: u128,
 }
 impl Driver {
     #[allow(clippy::too_many_arguments)]
@@ -86,6 +87,7 @@ impl Driver {
         api: OrderBookApi,
         order_converter: OrderConverter,
         weth_unwrap_factor: f64,
+        simulation_gas_limit: u128,
     ) -> Self {
         let post_processing_pipeline = PostProcessingPipeline::new(
             native_token,
@@ -118,6 +120,7 @@ impl Driver {
             order_converter,
             in_flight_orders: InFlightOrders::default(),
             post_processing_pipeline,
+            simulation_gas_limit,
         }
     }
 
@@ -239,6 +242,7 @@ impl Driver {
         errors: Vec<(Arc<dyn Solver>, Settlement, ExecutionError)>,
         current_block_during_liquidity_fetch: u64,
         gas_price: EstimatedGasPrice,
+        simulation_gas_limit: u128,
     ) {
         let contract = self.settlement_contract.clone();
         let web3 = self.web3.clone();
@@ -254,6 +258,7 @@ impl Driver {
                 gas_price,
                 &network_id,
                 current_block_during_liquidity_fetch,
+                simulation_gas_limit,
             )
             .await;
 
@@ -537,7 +542,12 @@ impl Driver {
             self.report_on_batch(&(winning_solver, winning_settlement), rated_settlements);
         }
         // Happens after settlement submission so that we do not delay it.
-        self.report_simulation_errors(errors, current_block_during_liquidity_fetch, gas_price);
+        self.report_simulation_errors(
+            errors,
+            current_block_during_liquidity_fetch,
+            gas_price,
+            self.simulation_gas_limit,
+        );
         Ok(())
     }
 
