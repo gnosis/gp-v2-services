@@ -80,8 +80,10 @@ impl QuasimodoPriceEstimator {
             gas_price: gas_price.to_f64_lossy(),
         };
 
-        let uniswap_pools = self.uniswap_pools(pairs.clone(), &gas_model).await?;
-        let balancer_pools = self.balancer_pools(pairs.clone(), &gas_model).await?;
+        let (uniswap_pools, balancer_pools) = futures::try_join!(
+            self.uniswap_pools(pairs.clone(), &gas_model),
+            self.balancer_pools(pairs.clone(), &gas_model)
+        )?;
         let mut amms: BTreeMap<usize, AmmModel> = uniswap_pools
             .into_iter()
             .chain(balancer_pools)
