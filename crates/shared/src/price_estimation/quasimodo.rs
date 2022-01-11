@@ -80,37 +80,16 @@ impl QuasimodoPriceEstimator {
             gas_price: gas_price.to_f64_lossy(),
         };
 
+        let uniswap_pools = self.uniswap_pools(pairs.clone(), &gas_model).await?;
         let balancer_pools = self.balancer_pools(pairs.clone(), &gas_model).await?;
-        let mut amms: BTreeMap<usize, AmmModel> = self
-            .pools
-            .fetch(pairs, Block::Recent)
-            .await
-            .context("pools")?
-            .iter()
-            .map(|pool| AmmModel {
-                parameters: AmmParameters::ConstantProduct(ConstantProductPoolParameters {
-                    reserves: BTreeMap::from([
-                        (pool.tokens.get().0, pool.reserves.0.into()),
-                        (pool.tokens.get().1, pool.reserves.1.into()),
-                    ]),
-                }),
-                fee: BigRational::from((
-                    BigInt::from(*pool.fee.numer()),
-                    BigInt::from(*pool.fee.denom()),
-                )),
-                cost: gas_model.uniswap_cost(),
-                mandatory: false,
-            })
+        let mut amms: BTreeMap<usize, AmmModel> = uniswap_pools
+            .into_iter()
             .chain(balancer_pools)
             .enumerate()
             .collect();
 
         // Solver cannot handle 0 reserves so filter these pools out until that is fixed.
-        amms.retain(|_, v| match &v.parameters {
-            AmmParameters::ConstantProduct(p) => p.reserves.values().all(|r| !r.is_zero()),
-            AmmParameters::WeightedProduct(p) => p.reserves.values().all(|r| !r.balance.is_zero()),
-            AmmParameters::Stable(p) => p.reserves.values().all(|r| !r.is_zero()),
-        });
+        amms.retain(|_, v| v.has_sufficient_reserves());
 
         let mut tokens: HashSet<H160> = Default::default();
         tokens.insert(query.sell_token);
@@ -196,6 +175,35 @@ impl QuasimodoPriceEstimator {
             },
             gas,
         })
+    }
+
+    async fn uniswap_pools(
+        &self,
+        pairs: HashSet<TokenPair>,
+        gas_model: &GasModel,
+    ) -> Result<Vec<AmmModel>> {
+        let pools = self
+            .pools
+            .fetch(pairs, Block::Recent)
+            .await
+            .context("pools")?;
+        Ok(pools
+            .into_iter()
+            .map(|pool| AmmModel {
+                parameters: AmmParameters::ConstantProduct(ConstantProductPoolParameters {
+                    reserves: BTreeMap::from([
+                        (pool.tokens.get().0, pool.reserves.0.into()),
+                        (pool.tokens.get().1, pool.reserves.1.into()),
+                    ]),
+                }),
+                fee: BigRational::from((
+                    BigInt::from(*pool.fee.numer()),
+                    BigInt::from(*pool.fee.denom()),
+                )),
+                cost: gas_model.uniswap_cost(),
+                mandatory: false,
+            })
+            .collect())
     }
 
     async fn balancer_pools(
