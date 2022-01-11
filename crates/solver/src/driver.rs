@@ -242,12 +242,12 @@ impl Driver {
         errors: Vec<(Arc<dyn Solver>, Settlement, ExecutionError)>,
         current_block_during_liquidity_fetch: u64,
         gas_price: EstimatedGasPrice,
-        simulation_gas_limit: u128,
     ) {
         let contract = self.settlement_contract.clone();
         let web3 = self.web3.clone();
         let network_id = self.network_id.clone();
         let metrics = self.metrics.clone();
+        let simulation_gas_limit = self.simulation_gas_limit;
         let task = async move {
             let simulations = settlement_simulation::simulate_and_error_with_tenderly_link(
                 errors
@@ -542,12 +542,7 @@ impl Driver {
             self.report_on_batch(&(winning_solver, winning_settlement), rated_settlements);
         }
         // Happens after settlement submission so that we do not delay it.
-        self.report_simulation_errors(
-            errors,
-            current_block_during_liquidity_fetch,
-            gas_price,
-            self.simulation_gas_limit,
-        );
+        self.report_simulation_errors(errors, current_block_during_liquidity_fetch, gas_price);
         Ok(())
     }
 
