@@ -20,6 +20,8 @@ use orderbook::{
     verify_deployed_contract_constants,
 };
 use primitive_types::H160;
+use shared::oneinch_api::OneInchClientImpl;
+use shared::price_estimation::oneinch::OneInchPriceEstimator;
 use shared::price_estimation::quasimodo::QuasimodoPriceEstimator;
 use shared::price_estimation::sanitized::SanitizedPriceEstimator;
 use shared::price_estimation::zeroex::ZeroExPriceEstimator;
@@ -509,6 +511,12 @@ async fn main() {
                         }),
                         &estimator.name(),
                     )),
+                    PriceEstimatorType::OneInch => Box::new(instrumented(
+                            Box::new(OneInchPriceEstimator {
+                                api: Arc::new(OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, client.clone()).unwrap())
+                            }),
+                            &estimator.name(),
+                    ))
                 },
             )
         })

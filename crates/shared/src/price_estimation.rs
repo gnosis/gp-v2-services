@@ -25,6 +25,7 @@ arg_enum! {
         Paraswap,
         ZeroEx,
         Quasimodo,
+        OneInch,
     }
 }
 
