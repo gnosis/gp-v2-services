@@ -3,6 +3,7 @@ pub mod cached;
 pub mod competition;
 pub mod gas;
 pub mod instrumented;
+pub mod oneinch;
 pub mod paraswap;
 pub mod priority;
 pub mod quasimodo;
