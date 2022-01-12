@@ -37,6 +37,13 @@ impl<const MIN: usize, const MAX: usize> Display for Amount<MIN, MAX> {
     }
 }
 
+// The `Display` implementation for `H160` unfortunately does not print
+// the full address and instead uses ellipsis (e.g. "0xeeee…eeee"). This
+// helper just works around that.
+fn addr2str(addr: H160) -> String {
+    format!("{:?}", addr)
+}
+
 /// A 1Inch API quote query parameters.
 ///
 /// These parameters are currently incomplete, and missing parameters can be
@@ -73,13 +80,6 @@ pub struct SwapQuery {
 impl SwapQuery {
     /// Encodes the swap query as
     fn into_url(self, base_url: &Url) -> Url {
-        // The `Display` implementation for `H160` unfortunately does not print
-        // the full address and instead uses ellipsis (e.g. "0xeeee…eeee"). This
-        // helper just works around that.
-        fn addr2str(addr: H160) -> String {
-            format!("{:?}", addr)
-        }
-
         let mut url = base_url
             .join("v3.0/1/swap")
             .expect("unexpectedly invalid URL segment");
