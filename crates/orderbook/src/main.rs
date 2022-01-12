@@ -20,7 +20,6 @@ use orderbook::{
     verify_deployed_contract_constants,
 };
 use primitive_types::H160;
-use shared::http_solver_api::{DefaultHttpSolverApi, SolverConfig};
 use shared::network::network_name;
 use shared::price_estimation::quasimodo::QuasimodoPriceEstimator;
 use shared::price_estimation::sanitized::SanitizedPriceEstimator;
@@ -57,6 +56,10 @@ use shared::{
     token_info::{CachedTokenInfoFetcher, TokenInfoFetcher},
     transport::create_instrumented_transport,
     transport::http::HttpTransport,
+};
+use shared::{
+    http_solver_api::{DefaultHttpSolverApi, SolverConfig},
+    price_estimation::cached::CachingPriceEstimator,
 };
 use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 use structopt::StructOpt;
@@ -175,6 +178,19 @@ struct Arguments {
     /// The API endpoint to call the mip v2 solver for price estimation
     #[structopt(long, env)]
     quasimodo_solver_url: Option<Url>,
+
+    /// The maximum time price estimates will be cache for.
+    #[structopt(
+        long,
+        default_value = "10",
+        parse(try_from_str = shared::arguments::duration_from_seconds),
+    )]
+    price_estimator_cache_max_age_secs: Duration,
+
+
+    /// The maximum number of price estimates that will be cached.
+    #[structopt(long, default_value = "1000")]
+    price_estimator_cache_size: usize,
 }
 
 pub async fn database_metrics(metrics: Arc<Metrics>, database: Postgres) -> ! {
@@ -390,6 +406,13 @@ async fn main() {
         )
         .unwrap(),
     );
+    let cached = |inner| {
+        CachingPriceEstimator::new(
+            inner,
+            args.price_estimator_cache_max_age_secs,
+            args.price_estimator_cache_size,
+        )
+    };
     let price_estimators = args
         .shared
         .price_estimators
@@ -410,21 +433,21 @@ async fn main() {
                         metrics.clone(),
                     )),
                     PriceEstimatorType::Paraswap => Box::new(InstrumentedPriceEstimator::new(
-                        ParaswapPriceEstimator {
+                        cached(Box::new(ParaswapPriceEstimator {
                             paraswap: Arc::new(DefaultParaswapApi {
                                 client: client.clone(),
                                 partner: args.shared.paraswap_partner.clone().unwrap_or_default(),
                             }),
                             token_info: token_info_fetcher.clone(),
                             disabled_paraswap_dexs: args.shared.disabled_paraswap_dexs.clone(),
-                        },
+                        })),
                         estimator.name(),
                         metrics.clone(),
                     )),
                     PriceEstimatorType::ZeroEx => Box::new(InstrumentedPriceEstimator::new(
-                        ZeroExPriceEstimator {
+                        cached(Box::new(ZeroExPriceEstimator {
                             api: zeroex_api.clone(),
-                        },
+                        })),
                         estimator.name(),
                         metrics.clone(),
                     )),
