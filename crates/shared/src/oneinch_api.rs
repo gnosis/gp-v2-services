@@ -673,4 +673,236 @@ mod tests {
             .unwrap();
         println!("{:#?}", spender);
     }
+
+    #[test]
+    fn sell_order_quote_query_serialization() {
+        let base_url = Url::parse("https://api.1inch.exchange/").unwrap();
+        let url = SellOrderQuoteQuery {
+            from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
+            to_token_address: addr!("111111111117dc0aa78b770fa6a738034120c302"),
+            amount: 1_000_000_000_000_000_000u128.into(),
+            protocols: None,
+            fee: None,
+            gas_limit: None,
+            connector_tokens: None,
+            complexity_level: None,
+            main_route_parts: None,
+            virtual_parts: None,
+            parts: None,
+            gas_price: None,
+        }
+        .into_url(&base_url);
+
+        assert_eq!(
+            url.as_str(),
+            "https://api.1inch.exchange/v4.0/1/quote\
+                ?fromTokenAddress=0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\
+                &toTokenAddress=0x111111111117dc0aa78b770fa6a738034120c302\
+                &amount=1000000000000000000"
+        );
+    }
+
+    #[test]
+    fn sell_order_quote_query_serialization_optional_parameters() {
+        let base_url = Url::parse("https://api.1inch.exchange/").unwrap();
+        let url = SellOrderQuoteQuery {
+            from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
+            to_token_address: addr!("111111111117dc0aa78b770fa6a738034120c302"),
+            amount: 1_000_000_000_000_000_000u128.into(),
+            protocols: Some(vec!["WETH".to_string(), "UNISWAP_V3".to_string()]),
+            fee: Some(0.5),
+            gas_limit: Some(Amount::new(100_000).unwrap()),
+            connector_tokens: Some(vec![
+                addr!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+                addr!("6810e776880c02933d47db1b9fc05908e5386b96"),
+            ]),
+            complexity_level: Some(Amount::new(1).unwrap()),
+            main_route_parts: Some(Amount::new(41).unwrap()),
+            virtual_parts: Some(Amount::new(42).unwrap()),
+            parts: Some(Amount::new(43).unwrap()),
+            gas_price: Some(200_000.into()),
+        }
+        .into_url(&base_url);
+
+        assert_eq!(
+            url.as_str(),
+            "https://api.1inch.exchange/v4.0/1/quote\
+                ?fromTokenAddress=0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\
+                &toTokenAddress=0x111111111117dc0aa78b770fa6a738034120c302\
+                &amount=1000000000000000000\
+                &protocols=WETH%2CUNISWAP_V3\
+                &fee=0.5\
+                &gasLimit=100000\
+                &connectorTokens=0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2%2C0x6810e776880c02933d47db1b9fc05908e5386b96\
+                &complexityLevel=1\
+                &mainRouteParts=41\
+                &virtualParts=42\
+                &parts=43\
+                &gasPrice=200000"
+        );
+    }
+
+    #[test]
+    fn deserialize_sell_order_quote_response() {
+        let swap = serde_json::from_str::<RestResponse<SellOrderQuote>>(
+            r#"{
+                "fromToken": {
+                    "symbol": "USDC",
+                    "name": "USD Coin",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                    "decimals": 6,
+                    "logoURI": "https://tokens.1inch.io/0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.png"
+                },
+                "toToken": {
+                    "symbol": "USDT",
+                    "name": "Tether USD",
+                    "address": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+                    "decimals": 6,
+                    "logoURI": "https://tokens.1inch.io/0xdac17f958d2ee523a2206206994597c13d831ec7.png"
+                },
+                "toTokenAmount": "8387323826205172",
+                "fromTokenAmount": "10000000000000000",
+                "protocols": [
+                    [
+                        [
+                            {
+                                "name": "CURVE_V2_EURT_2_ASSET",
+                                "part": 20,
+                                "fromTokenAddress": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                                "toTokenAddress": "0xdac17f958d2ee523a2206206994597c13d831ec7"
+                            },
+                            {
+                                "name": "CURVE_V2_XAUT_2_ASSET",
+                                "part": 20,
+                                "fromTokenAddress": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                                "toTokenAddress": "0xdac17f958d2ee523a2206206994597c13d831ec7"
+                            },
+                            {
+                                "name": "CURVE",
+                                "part": 20,
+                                "fromTokenAddress": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                                "toTokenAddress": "0xdac17f958d2ee523a2206206994597c13d831ec7"
+                            },
+                            {
+                                "name": "SHELL",
+                                "part": 40,
+                                "fromTokenAddress": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                                "toTokenAddress": "0xdac17f958d2ee523a2206206994597c13d831ec7"
+                            }
+                        ]
+                    ]
+                ],
+                "estimatedGas": 1456155
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            swap,
+            RestResponse::Ok(SellOrderQuote {
+                from_token: Token {
+                    address: addr!("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
+                },
+                to_token: Token {
+                    address: addr!("dac17f958d2ee523a2206206994597c13d831ec7"),
+                },
+                from_token_amount: 10_000_000_000_000_000u128.into(),
+                to_token_amount: 8_387_323_826_205_172u128.into(),
+                protocols: vec![vec![vec![
+                    Protocol {
+                        name: "CURVE_V2_EURT_2_ASSET".to_owned(),
+                        part: 20.,
+                        from_token_address: addr!("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
+                        to_token_address: addr!("dac17f958d2ee523a2206206994597c13d831ec7"),
+                    },
+                    Protocol {
+                        name: "CURVE_V2_XAUT_2_ASSET".to_owned(),
+                        part: 20.,
+                        from_token_address: addr!("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
+                        to_token_address: addr!("dac17f958d2ee523a2206206994597c13d831ec7"),
+                    },
+                    Protocol {
+                        name: "CURVE".to_owned(),
+                        part: 20.,
+                        from_token_address: addr!("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
+                        to_token_address: addr!("dac17f958d2ee523a2206206994597c13d831ec7"),
+                    },
+                    Protocol {
+                        name: "SHELL".to_owned(),
+                        part: 40.,
+                        from_token_address: addr!("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
+                        to_token_address: addr!("dac17f958d2ee523a2206206994597c13d831ec7"),
+                    }
+                ]]],
+                estimated_gas: 1_456_155
+            })
+        );
+
+        let swap_error = serde_json::from_str::<RestResponse<SellOrderQuote>>(
+            r#"{
+                "statusCode":500,
+                "description":"Internal server error"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            swap_error,
+            RestResponse::Err(RestError {
+                status_code: 500,
+                description: "Internal server error".into()
+            })
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn oneinch_sell_order_quote() {
+        let swap = OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, Client::new())
+            .unwrap()
+            .get_sell_order_quote(SellOrderQuoteQuery {
+                from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
+                to_token_address: addr!("111111111117dc0aa78b770fa6a738034120c302"),
+                amount: 1_000_000_000_000_000_000u128.into(),
+                protocols: None,
+                fee: None,
+                gas_limit: None,
+                connector_tokens: None,
+                complexity_level: None,
+                main_route_parts: None,
+                virtual_parts: None,
+                parts: None,
+                gas_price: None,
+            })
+            .await
+            .unwrap();
+        println!("{:#?}", swap);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn oneinch_sell_order_quote_fully_parameterized() {
+        let swap = OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, Client::new())
+            .unwrap()
+            .get_sell_order_quote(SellOrderQuoteQuery {
+                from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
+                to_token_address: addr!("111111111117dc0aa78b770fa6a738034120c302"),
+                amount: 1_000_000_000_000_000_000u128.into(),
+                protocols: Some(vec!["WETH".to_string(), "UNISWAP_V3".to_string()]),
+                fee: Some(0.5),
+                gas_limit: Some(Amount::new(100_000).unwrap()),
+                connector_tokens: Some(vec![
+                    addr!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+                    addr!("6810e776880c02933d47db1b9fc05908e5386b96"),
+                ]),
+                complexity_level: Some(Amount::new(1).unwrap()),
+                main_route_parts: Some(Amount::new(41).unwrap()),
+                virtual_parts: Some(Amount::new(42).unwrap()),
+                parts: Some(Amount::new(43).unwrap()),
+                gas_price: Some(200_000.into()),
+            })
+            .await
+            .unwrap();
+        println!("{:#?}", swap);
+    }
 }
