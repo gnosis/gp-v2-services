@@ -187,7 +187,6 @@ struct Arguments {
     )]
     price_estimator_cache_max_age_secs: Duration,
 
-
     /// The maximum number of price estimates that will be cached.
     #[structopt(long, default_value = "1000")]
     price_estimator_cache_size: usize,
@@ -432,25 +431,25 @@ async fn main() {
                         estimator.name(),
                         metrics.clone(),
                     )),
-                    PriceEstimatorType::Paraswap => Box::new(InstrumentedPriceEstimator::new(
-                        cached(Box::new(ParaswapPriceEstimator {
+                    PriceEstimatorType::Paraswap => Box::new(cached(Box::new(InstrumentedPriceEstimator::new(
+                        ParaswapPriceEstimator {
                             paraswap: Arc::new(DefaultParaswapApi {
                                 client: client.clone(),
                                 partner: args.shared.paraswap_partner.clone().unwrap_or_default(),
                             }),
                             token_info: token_info_fetcher.clone(),
                             disabled_paraswap_dexs: args.shared.disabled_paraswap_dexs.clone(),
-                        })),
+                        },
                         estimator.name(),
                         metrics.clone(),
-                    )),
-                    PriceEstimatorType::ZeroEx => Box::new(InstrumentedPriceEstimator::new(
-                        cached(Box::new(ZeroExPriceEstimator {
+                    )))),
+                    PriceEstimatorType::ZeroEx => Box::new(cached(Box::new(InstrumentedPriceEstimator::new(
+                        ZeroExPriceEstimator {
                             api: zeroex_api.clone(),
-                        })),
+                        },
                         estimator.name(),
                         metrics.clone(),
-                    )),
+                    )))),
                     PriceEstimatorType::Quasimodo => Box::new(InstrumentedPriceEstimator::new(
                         QuasimodoPriceEstimator {
                             api: Arc::new(DefaultHttpSolverApi {
