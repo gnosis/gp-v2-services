@@ -45,6 +45,9 @@ pub enum PriceEstimationError {
     #[error("Zero Amount")]
     ZeroAmount,
 
+    #[error("Unsupported Order Type")]
+    UnsupportedOrderType,
+
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -55,6 +58,7 @@ impl Clone for PriceEstimationError {
             Self::UnsupportedToken(token) => Self::UnsupportedToken(*token),
             Self::NoLiquidity => Self::NoLiquidity,
             Self::ZeroAmount => Self::ZeroAmount,
+            Self::UnsupportedOrderType => Self::UnsupportedOrderType,
             Self::Other(err) => Self::Other(crate::clone_anyhow_error(err)),
         }
     }
