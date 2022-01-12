@@ -341,7 +341,7 @@ impl<'a> Submitter<'a> {
 
             match self.submit_api.submit_transaction(method.tx).await {
                 Ok(handle) => {
-                    previous_tx = Some((gas_price, handle.clone()));
+                    previous_tx = Some((gas_price, handle));
                     transactions.push(handle.tx_hash)
                 }
                 Err(err) => match err {
