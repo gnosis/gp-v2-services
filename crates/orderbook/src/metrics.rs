@@ -26,6 +26,7 @@ pub struct Metrics {
     /// Gas estimate metrics
     gas_price: Gauge,
     price_estimates: IntCounterVec,
+    price_estimator_cache: IntCounterVec,
 }
 
 impl Metrics {
@@ -57,7 +58,6 @@ impl Metrics {
             "Number of cache hits in the pool fetcher cache.",
         )?;
         registry.register(Box::new(pool_cache_hits.clone()))?;
-
         let pool_cache_misses = IntCounter::new(
             "pool_cache_misses",
             "Number of cache misses in the pool fetcher cache.",
@@ -81,6 +81,15 @@ impl Metrics {
         )?;
         registry.register(Box::new(price_estimates.clone()))?;
 
+        let price_estimator_cache = IntCounterVec::new(
+            Opts::new(
+                "price_estimator_cache",
+                "Price estimator cache hit/miss counter.",
+            ),
+            &["estimator_type", "result"],
+        )?;
+        registry.register(Box::new(price_estimates.clone()))?;
+
         Ok(Self {
             api_requests,
             db_table_row_count,
@@ -90,6 +99,7 @@ impl Metrics {
             database_queries,
             gas_price,
             price_estimates,
+            price_estimator_cache,
         })
     }
 
@@ -141,6 +151,17 @@ impl shared::price_estimation::instrumented::Metrics for Metrics {
         self.price_estimates
             .with_label_values(&[name, result])
             .inc();
+    }
+}
+
+impl shared::price_estimation::cached::Metrics for Metrics {
+    fn price_estimator_cache(&self, name: &str, misses: usize, hits: usize) {
+        self.price_estimator_cache
+            .with_label_values(&[name, "misses"])
+            .inc_by(misses as u64);
+        self.price_estimator_cache
+            .with_label_values(&[name, "hits"])
+            .inc_by(hits as u64);
     }
 }
 

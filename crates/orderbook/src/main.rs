@@ -179,7 +179,7 @@ struct Arguments {
     #[structopt(long, env)]
     quasimodo_solver_url: Option<Url>,
 
-    /// The maximum time price estimates will be cache for.
+    /// The maximum time price estimates will be cached for.
     #[structopt(
         long,
         default_value = "10",
@@ -405,11 +405,17 @@ async fn main() {
         )
         .unwrap(),
     );
-    let cached = |inner| {
+    let instrumented = |inner: Box<dyn PriceEstimating>, name: &str| {
+        InstrumentedPriceEstimator::new(inner, name.to_string(), metrics.clone())
+    };
+    let instrumented_and_cached = |inner: Box<dyn PriceEstimating>, name: &str| {
+        // Instrument first then cache so instrumented is close to inner estimator.
         CachingPriceEstimator::new(
-            inner,
+            Box::new(instrumented(inner, name)),
             args.price_estimator_cache_max_age_secs,
             args.price_estimator_cache_size,
+            metrics.clone(),
+            name.to_string(),
         )
     };
     let price_estimators = args
@@ -420,38 +426,35 @@ async fn main() {
             (
                 estimator.name(),
                 match estimator {
-                    PriceEstimatorType::Baseline => Box::new(InstrumentedPriceEstimator::new(
-                        BaselinePriceEstimator::new(
+                    PriceEstimatorType::Baseline => Box::new(instrumented(
+                        Box::new(BaselinePriceEstimator::new(
                             pool_fetcher.clone(),
                             gas_price_estimator.clone(),
                             base_tokens.clone(),
                             native_token.address(),
                             native_token_price_estimation_amount,
-                        ),
-                        estimator.name(),
-                        metrics.clone(),
+                        )),
+                        &estimator.name(),
                     )),
-                    PriceEstimatorType::Paraswap => Box::new(cached(Box::new(InstrumentedPriceEstimator::new(
-                        ParaswapPriceEstimator {
+                    PriceEstimatorType::Paraswap => Box::new(instrumented_and_cached(
+                        Box::new(ParaswapPriceEstimator {
                             paraswap: Arc::new(DefaultParaswapApi {
                                 client: client.clone(),
                                 partner: args.shared.paraswap_partner.clone().unwrap_or_default(),
                             }),
                             token_info: token_info_fetcher.clone(),
                             disabled_paraswap_dexs: args.shared.disabled_paraswap_dexs.clone(),
-                        },
-                        estimator.name(),
-                        metrics.clone(),
-                    )))),
-                    PriceEstimatorType::ZeroEx => Box::new(cached(Box::new(InstrumentedPriceEstimator::new(
+                        }),
+                        &estimator.name(),
+                    )),
+                    PriceEstimatorType::ZeroEx => Box::new(instrumented_and_cached(Box::new(
                         ZeroExPriceEstimator {
                             api: zeroex_api.clone(),
-                        },
-                        estimator.name(),
-                        metrics.clone(),
-                    )))),
-                    PriceEstimatorType::Quasimodo => Box::new(InstrumentedPriceEstimator::new(
-                        QuasimodoPriceEstimator {
+                        }),
+                        &estimator.name(),
+                    )),
+                    PriceEstimatorType::Quasimodo => Box::new(instrumented(
+                        Box::new(QuasimodoPriceEstimator {
                             api: Arc::new(DefaultHttpSolverApi {
                                 name: "quasimodo-price-estimator",
                                 network_name: network_name.to_string(),
@@ -473,9 +476,8 @@ async fn main() {
                             gas_info: gas_price_estimator.clone(),
                             native_token: native_token.address(),
                             base_tokens: base_tokens.clone(),
-                        },
-                        estimator.name(),
-                        metrics.clone(),
+                        }),
+                        &estimator.name(),
                     )),
                 },
             )
