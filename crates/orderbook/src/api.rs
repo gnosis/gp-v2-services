@@ -295,11 +295,8 @@ impl IntoWarpReply for PriceEstimationError {
                 StatusCode::BAD_REQUEST,
             ),
             Self::UnsupportedOrderType => with_status(
-                error(
-                    "UnsupportedOrderType",
-                    "Can not estimate price for this order type",
-                ),
-                StatusCode::BAD_REQUEST,
+                internal_error(anyhow::anyhow!("UnsupportedOrderType").context("price_estimation")),
+                StatusCode::INTERNAL_SERVER_ERROR,
             ),
             Self::Other(err) => with_status(
                 internal_error(err.context("price_estimation")),

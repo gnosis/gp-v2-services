@@ -118,8 +118,8 @@ fn join_error(a: PriceEstimationError, b: PriceEstimationError) -> PriceEstimati
     // - ZeroAmount
     // - UnsupportedToken
     // - NoLiquidity
-    // - UnsupportedOrderType
     // - Other
+    // - UnsupportedOrderType
     match (a, b) {
         (err @ PriceEstimationError::ZeroAmount, _)
         | (_, err @ PriceEstimationError::ZeroAmount) => err,
@@ -127,9 +127,10 @@ fn join_error(a: PriceEstimationError, b: PriceEstimationError) -> PriceEstimati
         | (_, err @ PriceEstimationError::UnsupportedToken(_)) => err,
         (err @ PriceEstimationError::NoLiquidity, _)
         | (_, err @ PriceEstimationError::NoLiquidity) => err,
-        (err @ PriceEstimationError::UnsupportedOrderType, _)
-        | (_, err @ PriceEstimationError::UnsupportedOrderType) => err,
-        (err @ PriceEstimationError::Other(_), _) => err,
+        (err @ PriceEstimationError::Other(_), _) | (_, err @ PriceEstimationError::Other(_)) => {
+            err
+        }
+        (err @ PriceEstimationError::UnsupportedOrderType, _) => err,
     }
 }
 
