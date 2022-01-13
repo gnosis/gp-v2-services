@@ -11,7 +11,7 @@ use shared::{
     },
     transport::instrumented::TransportMetrics,
 };
-use std::time::{Duration};
+use std::time::Duration;
 
 pub struct Metrics {
     db_table_row_count: IntGaugeVec,
