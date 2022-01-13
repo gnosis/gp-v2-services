@@ -113,7 +113,8 @@ pub fn handle_all_routes(
     // Routes for api v2.
 
     let get_solvable_orders_v2 = get_solvable_orders_v2::get_solvable_orders(orderbook)
-        .map(|result| (result, "v2/get_solvable_orders"));
+        .map(|result| (result, "v2/get_solvable_orders"))
+        .boxed();
 
     let routes_v2 = warp::path!("api" / "v2" / ..)
         .and(get_solvable_orders_v2)
