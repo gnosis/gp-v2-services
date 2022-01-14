@@ -115,7 +115,7 @@ impl PriceEstimating for OneInchPriceEstimator {
 mod tests {
     use super::*;
     use crate::oneinch_api::{
-        MockOneInchClient, OneInchClientImpl, RestError, SellOrderQuote, Token,
+        MockOneInchClient, OneInchClientImpl, Protocols, RestError, SellOrderQuote, Token,
     };
     use reqwest::Client;
 
@@ -237,6 +237,52 @@ mod tests {
             est,
             Err(PriceEstimationError::Other(e)) if e.to_string() == "malformed JSON"
         ));
+    }
+
+    #[tokio::test]
+    async fn filter_out_disabled_protocols_and_cache_them() {
+        let mut one_inch = MockOneInchClient::new();
+        // We are estimating 2 orders but fetch the protocols only once
+        one_inch.expect_get_protocols().times(1).returning(|| {
+            Ok(Protocols {
+                protocols: vec!["PMM1".into(), "UNISWAP_V3".into()],
+            })
+        });
+        one_inch
+            .expect_get_sell_order_quote()
+            .times(2)
+            .withf(|query| {
+                let protocols = query.protocols.as_ref().unwrap();
+                protocols.len() == 1 && protocols[0] == "UNISWAP_V3"
+            })
+            .returning(|_| {
+                Ok(RestResponse::<_>::Ok(SellOrderQuote {
+                    from_token: Token {
+                        address: testlib::tokens::WETH,
+                    },
+                    to_token: Token {
+                        address: testlib::tokens::GNO,
+                    },
+                    to_token_amount: 808_069_760_400_778_577u128.into(),
+                    from_token_amount: 100_000_000_000_000_000u128.into(),
+                    protocols: Vec::default(),
+                    estimated_gas: 189_386,
+                }))
+            });
+
+        let estimator = OneInchPriceEstimator::new(Arc::new(one_inch), vec!["PMM1".to_string()]);
+
+        for _ in 0..=1 {
+            estimator
+                .estimate(&Query {
+                    sell_token: testlib::tokens::WETH,
+                    buy_token: testlib::tokens::GNO,
+                    in_amount: 1_000_000_000_000_000_000u128.into(),
+                    kind: OrderKind::Sell,
+                })
+                .await
+                .unwrap();
+        }
     }
 
     #[tokio::test]
