@@ -197,6 +197,12 @@ struct Arguments {
     /// The maximum number of price estimates that will be cached.
     #[structopt(long, default_value = "1000")]
     price_estimator_cache_size: usize,
+
+    /// The list of disabled 1Inch protocols. By default, the `PMM1` protocol
+    /// (representing a private market maker) is disabled as it seems to
+    /// produce invalid swaps.
+    #[structopt(long, env, default_value = "PMM1", use_delimiter = true)]
+    disabled_one_inch_protocols: Vec<String>,
 }
 
 pub async fn database_metrics(metrics: Arc<Metrics>, database: Postgres) -> ! {
@@ -511,10 +517,11 @@ async fn main() {
                         }),
                         &estimator.name(),
                     )),
-                    PriceEstimatorType::OneInch => Box::new(instrumented(
-                            Box::new(OneInchPriceEstimator {
-                                api: Arc::new(OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, client.clone()).unwrap())
-                            }),
+                    PriceEstimatorType::OneInch => Box::new(instrumented_and_cached(
+                            Box::new(OneInchPriceEstimator::new(
+                                Arc::new(OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, client.clone()).unwrap()),
+                                args.disabled_one_inch_protocols.clone()
+                            )),
                             &estimator.name(),
                     ))
                 },

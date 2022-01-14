@@ -1,13 +1,17 @@
 use super::gas;
 use crate::oneinch_api::{OneInchClient, RestResponse, SellOrderQuoteQuery};
 use crate::price_estimation::{Estimate, PriceEstimating, PriceEstimationError, Query};
+use anyhow::Result;
+use cached::{Cached, TimedSizedCache};
 use futures::future;
 use model::order::OrderKind;
 use primitive_types::U256;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub struct OneInchPriceEstimator {
-    pub api: Arc<dyn OneInchClient>,
+    api: Arc<dyn OneInchClient>,
+    disabled_protocols: Vec<String>,
+    allowed_protocols: Arc<Mutex<TimedSizedCache<Vec<String>, Vec<String>>>>,
 }
 
 impl OneInchPriceEstimator {
@@ -22,7 +26,7 @@ impl OneInchPriceEstimator {
                 from_token_address: query.sell_token,
                 to_token_address: query.buy_token,
                 amount: query.in_amount,
-                protocols: None,
+                protocols: self.get_protocol_argument().await?,
                 fee: None,
                 gas_limit: None,
                 connector_tokens: None,
@@ -44,6 +48,45 @@ impl OneInchPriceEstimator {
                 Err(PriceEstimationError::Other(anyhow::anyhow!(e.description)))
             }
         }
+    }
+
+    pub fn new(api: Arc<dyn OneInchClient>, disabled_protocols: Vec<String>) -> Self {
+        Self {
+            api,
+            disabled_protocols,
+            allowed_protocols: Arc::new(Mutex::new(
+                TimedSizedCache::with_size_and_lifespan_and_refresh(1, 60, false),
+            )),
+        }
+    }
+
+    async fn get_protocol_argument(&self) -> Result<Option<Vec<String>>> {
+        if self.disabled_protocols.is_empty() {
+            return Ok(None);
+        }
+
+        if let Some(allowed_protocols) = self
+            .allowed_protocols
+            .lock()
+            .unwrap()
+            .cache_get(&self.disabled_protocols)
+        {
+            return Ok(Some(allowed_protocols.clone()));
+        }
+
+        let current_protocols = self.api.get_protocols().await?.protocols;
+        let allowed_protocols: Vec<String> = current_protocols
+            .into_iter()
+            // linear search through the Vec is okay because it's very small
+            .filter(|protocol| !self.disabled_protocols.contains(protocol))
+            .collect();
+
+        self.allowed_protocols
+            .lock()
+            .unwrap()
+            .cache_set(self.disabled_protocols.clone(), allowed_protocols.clone());
+
+        Ok(Some(allowed_protocols))
     }
 }
 
@@ -102,9 +145,7 @@ mod tests {
             }))
         });
 
-        let estimator = OneInchPriceEstimator {
-            api: Arc::new(one_inch),
-        };
+        let estimator = OneInchPriceEstimator::new(Arc::new(one_inch), Vec::default());
 
         let est = estimator
             .estimate(&Query {
@@ -126,9 +167,7 @@ mod tests {
 
         one_inch.expect_get_sell_order_quote().times(0);
 
-        let estimator = OneInchPriceEstimator {
-            api: Arc::new(one_inch),
-        };
+        let estimator = OneInchPriceEstimator::new(Arc::new(one_inch), Vec::default());
 
         let est = estimator
             .estimate(&Query {
@@ -158,9 +197,7 @@ mod tests {
                 }))
             });
 
-        let estimator = OneInchPriceEstimator {
-            api: Arc::new(one_inch),
-        };
+        let estimator = OneInchPriceEstimator::new(Arc::new(one_inch), Vec::default());
 
         let est = estimator
             .estimate(&Query {
@@ -185,9 +222,7 @@ mod tests {
             .times(1)
             .return_once(|_| Err(anyhow::anyhow!("malformed JSON")));
 
-        let estimator = OneInchPriceEstimator {
-            api: Arc::new(one_inch),
-        };
+        let estimator = OneInchPriceEstimator::new(Arc::new(one_inch), Vec::default());
 
         let est = estimator
             .estimate(&Query {
@@ -210,11 +245,12 @@ mod tests {
         let weth = testlib::tokens::WETH;
         let gno = testlib::tokens::GNO;
 
-        let estimator = OneInchPriceEstimator {
-            api: Arc::new(
+        let estimator = OneInchPriceEstimator::new(
+            Arc::new(
                 OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, Client::new()).unwrap(),
             ),
-        };
+            Vec::default(),
+        );
 
         let result = estimator
             .estimate(&Query {
