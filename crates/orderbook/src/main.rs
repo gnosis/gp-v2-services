@@ -482,7 +482,7 @@ async fn main() {
                         }),
                         &estimator.name(),
                     )),
-                    PriceEstimatorType::Quasimodo => Box::new(instrumented(
+                    PriceEstimatorType::Quasimodo => Box::new(instrumented_and_cached(
                         Box::new(QuasimodoPriceEstimator {
                             api: Arc::new(DefaultHttpSolverApi {
                                 name: "quasimodo-price-estimator",
@@ -655,7 +655,7 @@ fn parse_partner_fee_factor(s: &str) -> Result<HashMap<AppId, f64>> {
     if s.is_empty() {
         return Ok(res);
     }
-    for pair_str in s.split(',').into_iter() {
+    for pair_str in s.split(',') {
         let mut split = pair_str.trim().split(':');
         let key = split
             .next()
