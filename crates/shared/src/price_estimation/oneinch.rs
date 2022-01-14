@@ -100,7 +100,7 @@ impl PriceEstimating for OneInchPriceEstimator {
             query.buy_token != model::order::BUY_ETH_ADDRESS
                 && query.sell_token != model::order::BUY_ETH_ADDRESS
                 && query.sell_token != query.buy_token
-        }));
+        }), "the hierarchy of price estimators should be set up such that OneInchPriceEstimator is a descendant of SanitizedPriceEstimator");
 
         future::join_all(
             queries
