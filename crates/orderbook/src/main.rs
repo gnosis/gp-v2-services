@@ -20,8 +20,8 @@ use orderbook::{
     verify_deployed_contract_constants,
 };
 use primitive_types::H160;
-use shared::http_solver_api::{DefaultHttpSolverApi, SolverConfig};
-use shared::network::network_name;
+use shared::oneinch_api::OneInchClientImpl;
+use shared::price_estimation::oneinch::OneInchPriceEstimator;
 use shared::price_estimation::quasimodo::QuasimodoPriceEstimator;
 use shared::price_estimation::sanitized::SanitizedPriceEstimator;
 use shared::price_estimation::zeroex::ZeroExPriceEstimator;
@@ -57,6 +57,16 @@ use shared::{
     token_info::{CachedTokenInfoFetcher, TokenInfoFetcher},
     transport::create_instrumented_transport,
     transport::http::HttpTransport,
+};
+use shared::{
+    http_solver::{DefaultHttpSolverApi, SolverConfig},
+    network::network_name,
+    price_estimation::cached::CachingPriceEstimator,
+    sources::balancer_v2::BalancerFactoryKind,
+    sources::{
+        balancer_v2::{pool_fetching::BalancerContracts, BalancerPoolFetcher},
+        BaselineSource,
+    },
 };
 use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 use structopt::StructOpt;
@@ -175,6 +185,24 @@ struct Arguments {
     /// The API endpoint to call the mip v2 solver for price estimation
     #[structopt(long, env)]
     quasimodo_solver_url: Option<Url>,
+
+    /// The maximum time price estimates will be cached for.
+    #[structopt(
+        long,
+        default_value = "10",
+        parse(try_from_str = shared::arguments::duration_from_seconds),
+    )]
+    price_estimator_cache_max_age_secs: Duration,
+
+    /// The maximum number of price estimates that will be cached.
+    #[structopt(long, default_value = "1000")]
+    price_estimator_cache_size: usize,
+
+    /// The list of disabled 1Inch protocols. By default, the `PMM1` protocol
+    /// (representing a private market maker) is disabled as it seems to
+    /// produce invalid swaps.
+    #[structopt(long, env, default_value = "PMM1", use_delimiter = true)]
+    disabled_one_inch_protocols: Vec<String>,
 }
 
 pub async fn database_metrics(metrics: Arc<Metrics>, database: Postgres) -> ! {
@@ -361,15 +389,17 @@ async fn main() {
             })
             .collect(),
     };
+
+    let cache_config = CacheConfig {
+        number_of_blocks_to_cache: args.shared.pool_cache_blocks,
+        number_of_entries_to_auto_update: args.pool_cache_lru_size,
+        maximum_recent_block_age: args.shared.pool_cache_maximum_recent_block_age,
+        max_retries: args.shared.pool_cache_maximum_retries,
+        delay_between_retries: args.shared.pool_cache_delay_between_retries_seconds,
+    };
     let pool_fetcher = Arc::new(
         PoolCache::new(
-            CacheConfig {
-                number_of_blocks_to_cache: args.shared.pool_cache_blocks,
-                number_of_entries_to_auto_update: args.pool_cache_lru_size,
-                maximum_recent_block_age: args.shared.pool_cache_maximum_recent_block_age,
-                max_retries: args.shared.pool_cache_maximum_retries,
-                delay_between_retries: args.shared.pool_cache_delay_between_retries_seconds,
-            },
+            cache_config,
             Box::new(pool_aggregator),
             current_block_stream.clone(),
             metrics.clone(),
@@ -379,6 +409,28 @@ async fn main() {
     let token_info_fetcher = Arc::new(CachedTokenInfoFetcher::new(Box::new(TokenInfoFetcher {
         web3: web3.clone(),
     })));
+    let balancer_pool_fetcher = if baseline_sources.contains(&BaselineSource::BalancerV2) {
+        let contracts = BalancerContracts::new(&web3).await.unwrap();
+        let balancer_pool_fetcher = Arc::new(
+            BalancerPoolFetcher::new(
+                chain_id,
+                token_info_fetcher.clone(),
+                args.shared
+                    .balancer_factories
+                    .unwrap_or_else(BalancerFactoryKind::all),
+                cache_config,
+                current_block_stream.clone(),
+                metrics.clone(),
+                client.clone(),
+                &contracts,
+            )
+            .await
+            .expect("failed to create Balancer pool fetcher"),
+        );
+        Some(balancer_pool_fetcher)
+    } else {
+        None
+    };
     let zeroex_api = Arc::new(
         DefaultZeroExApi::new(
             args.shared
@@ -390,6 +442,19 @@ async fn main() {
         )
         .unwrap(),
     );
+    let instrumented = |inner: Box<dyn PriceEstimating>, name: &str| {
+        InstrumentedPriceEstimator::new(inner, name.to_string(), metrics.clone())
+    };
+    let instrumented_and_cached = |inner: Box<dyn PriceEstimating>, name: &str| {
+        // Instrument first then cache so instrumented is close to inner estimator.
+        CachingPriceEstimator::new(
+            Box::new(instrumented(inner, name)),
+            args.price_estimator_cache_max_age_secs,
+            args.price_estimator_cache_size,
+            metrics.clone(),
+            name.to_string(),
+        )
+    };
     let price_estimators = args
         .shared
         .price_estimators
@@ -398,38 +463,35 @@ async fn main() {
             (
                 estimator.name(),
                 match estimator {
-                    PriceEstimatorType::Baseline => Box::new(InstrumentedPriceEstimator::new(
-                        BaselinePriceEstimator::new(
+                    PriceEstimatorType::Baseline => Box::new(instrumented(
+                        Box::new(BaselinePriceEstimator::new(
                             pool_fetcher.clone(),
                             gas_price_estimator.clone(),
                             base_tokens.clone(),
                             native_token.address(),
                             native_token_price_estimation_amount,
-                        ),
-                        estimator.name(),
-                        metrics.clone(),
+                        )),
+                        &estimator.name(),
                     )),
-                    PriceEstimatorType::Paraswap => Box::new(InstrumentedPriceEstimator::new(
-                        ParaswapPriceEstimator {
+                    PriceEstimatorType::Paraswap => Box::new(instrumented_and_cached(
+                        Box::new(ParaswapPriceEstimator {
                             paraswap: Arc::new(DefaultParaswapApi {
                                 client: client.clone(),
                                 partner: args.shared.paraswap_partner.clone().unwrap_or_default(),
                             }),
                             token_info: token_info_fetcher.clone(),
                             disabled_paraswap_dexs: args.shared.disabled_paraswap_dexs.clone(),
-                        },
-                        estimator.name(),
-                        metrics.clone(),
+                        }),
+                        &estimator.name(),
                     )),
-                    PriceEstimatorType::ZeroEx => Box::new(InstrumentedPriceEstimator::new(
+                    PriceEstimatorType::ZeroEx => Box::new(instrumented_and_cached(Box::new(
                         ZeroExPriceEstimator {
                             api: zeroex_api.clone(),
-                        },
-                        estimator.name(),
-                        metrics.clone(),
+                        }),
+                        &estimator.name(),
                     )),
-                    PriceEstimatorType::Quasimodo => Box::new(InstrumentedPriceEstimator::new(
-                        QuasimodoPriceEstimator {
+                    PriceEstimatorType::Quasimodo => Box::new(instrumented_and_cached(
+                        Box::new(QuasimodoPriceEstimator {
                             api: Arc::new(DefaultHttpSolverApi {
                                 name: "quasimodo-price-estimator",
                                 network_name: network_name.to_string(),
@@ -447,14 +509,21 @@ async fn main() {
                                 },
                             }),
                             pools: pool_fetcher.clone(),
+                            balancer_pools: balancer_pool_fetcher.clone(),
                             token_info: token_info_fetcher.clone(),
                             gas_info: gas_price_estimator.clone(),
                             native_token: native_token.address(),
                             base_tokens: base_tokens.clone(),
-                        },
-                        estimator.name(),
-                        metrics.clone(),
+                        }),
+                        &estimator.name(),
                     )),
+                    PriceEstimatorType::OneInch => Box::new(instrumented_and_cached(
+                        Box::new(OneInchPriceEstimator::new(
+                            Arc::new(OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, client.clone()).unwrap()),
+                            args.disabled_one_inch_protocols.clone()
+                        )),
+                        &estimator.name(),
+                    ))
                 },
             )
         })
@@ -510,9 +579,12 @@ async fn main() {
         args.solvable_orders_max_update_age,
         order_validator.clone(),
     ));
-    let service_maintainer = ServiceMaintenance {
+    let mut service_maintainer = ServiceMaintenance {
         maintainers: vec![database.clone(), Arc::new(event_updater), pool_fetcher],
     };
+    if let Some(balancer) = balancer_pool_fetcher {
+        service_maintainer.maintainers.push(balancer);
+    }
     check_database_connection(orderbook.as_ref()).await;
     let quoter = Arc::new(OrderQuoter::new(
         fee_calculator,
@@ -598,7 +670,7 @@ fn parse_partner_fee_factor(s: &str) -> Result<HashMap<AppId, f64>> {
     if s.is_empty() {
         return Ok(res);
     }
-    for pair_str in s.split(',').into_iter() {
+    for pair_str in s.split(',') {
         let mut split = pair_str.trim().split(':');
         let key = split
             .next()

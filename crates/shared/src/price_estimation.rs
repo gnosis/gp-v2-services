@@ -1,7 +1,9 @@
 pub mod baseline;
+pub mod cached;
 pub mod competition;
 pub mod gas;
 pub mod instrumented;
+pub mod oneinch;
 pub mod paraswap;
 pub mod priority;
 pub mod quasimodo;
@@ -23,6 +25,7 @@ arg_enum! {
         Paraswap,
         ZeroEx,
         Quasimodo,
+        OneInch,
     }
 }
 
@@ -44,6 +47,9 @@ pub enum PriceEstimationError {
     #[error("Zero Amount")]
     ZeroAmount,
 
+    #[error("Unsupported Order Type")]
+    UnsupportedOrderType,
+
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -54,12 +60,13 @@ impl Clone for PriceEstimationError {
             Self::UnsupportedToken(token) => Self::UnsupportedToken(*token),
             Self::NoLiquidity => Self::NoLiquidity,
             Self::ZeroAmount => Self::ZeroAmount,
+            Self::UnsupportedOrderType => Self::UnsupportedOrderType,
             Self::Other(err) => Self::Other(crate::clone_anyhow_error(err)),
         }
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct Query {
     pub sell_token: H160,
     pub buy_token: H160,

@@ -258,18 +258,6 @@ struct Arguments {
     #[structopt(long, env, default_value = "20")]
     max_settlements_per_solver: usize,
 
-    /// The Balancer V2 factories to consider for indexing liquidity. Allows
-    /// specific pool kinds to be disabled via configuration. Will use all
-    /// supported Balancer V2 factory kinds if not specified.
-    #[structopt(
-        long,
-        env,
-        possible_values = &BalancerFactoryKind::variants(),
-        case_insensitive = true,
-        use_delimiter = true
-    )]
-    balancer_factories: Option<Vec<BalancerFactoryKind>>,
-
     /// Factor how much of the WETH buffer should be unwrapped if ETH buffer is not big enough to
     /// settle ETH buy orders.
     /// Unwrapping a bigger amount will cause fewer unwraps to happen and thereby reduce the cost
@@ -277,6 +265,12 @@ struct Arguments {
     /// Only values in the range [0.0, 1.0] make sense.
     #[structopt(long, env, default_value = "0.6", parse(try_from_str = shared::arguments::parse_percentage_factor))]
     weth_unwrap_factor: f64,
+
+    /// Gas limit for simulations. This parameter is important to set correctly, such that
+    /// there are no simulation errors due to: err: insufficient funds for gas * price + value,
+    /// but at the same time we don't restrict solutions sizes too much
+    #[structopt(long, env, default_value = "15000000")]
+    simulation_gas_limit: u128,
 }
 
 arg_enum! {
@@ -439,7 +433,8 @@ async fn main() {
                 BalancerPoolFetcher::new(
                     chain_id,
                     token_info_fetcher.clone(),
-                    args.balancer_factories
+                    args.shared
+                        .balancer_factories
                         .unwrap_or_else(BalancerFactoryKind::all),
                     cache_config,
                     current_block_stream.clone(),
@@ -638,6 +633,7 @@ async fn main() {
         api,
         order_converter,
         args.weth_unwrap_factor,
+        args.simulation_gas_limit,
     );
 
     let maintainer = ServiceMaintenance {
