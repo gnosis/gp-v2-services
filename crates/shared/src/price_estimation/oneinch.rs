@@ -91,7 +91,7 @@ impl PriceEstimating for OneInchPriceEstimator {
 mod tests {
     use super::*;
     use crate::oneinch_api::{
-        MockOneInchClient, OneInchClientImpl, Protocols, RestError, SellOrderQuote, Token,
+        MockOneInchClient, OneInchClientImpl, RestError, SellOrderQuote, Token,
     };
     use reqwest::Client;
 
