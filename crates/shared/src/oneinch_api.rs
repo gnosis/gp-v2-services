@@ -387,43 +387,48 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct ProtocolCache(Arc<Mutex<TimedSizedCache<Vec<String>, Vec<String>>>>);
+pub struct ProtocolCache(Arc<Mutex<TimedSizedCache<(), Vec<String>>>>);
 
 impl ProtocolCache {
-    pub fn new(cache_size: usize, cache_validity_in_seconds: u64) -> Self {
+    pub fn new(cache_validity_in_seconds: u64) -> Self {
         Self(Arc::new(Mutex::new(
             TimedSizedCache::with_size_and_lifespan_and_refresh(
-                cache_size,
+                1,
                 cache_validity_in_seconds,
                 false,
             ),
         )))
     }
 
+    pub async fn get_all_protocols(&self, api: &dyn OneInchClient) -> Result<Vec<String>> {
+        if let Some(cached) = self.0.lock().unwrap().cache_get(&()) {
+            return Ok(cached.clone());
+        }
+
+        let all_protocols = api.get_protocols().await?.protocols;
+        // In the mean time the cache could have already been populated with new protocols,
+        // which we would now overwrite. This is fine.
+        self.0.lock().unwrap().cache_set((), all_protocols.clone());
+
+        Ok(all_protocols)
+    }
+
     pub async fn get_allowed_protocols(
         &self,
-        #[allow(clippy::ptr_arg)] disabled_protocols: &Vec<String>,
+        disabled_protocols: &[String],
         api: &dyn OneInchClient,
     ) -> Result<Option<Vec<String>>> {
         if disabled_protocols.is_empty() {
             return Ok(None);
         }
 
-        if let Some(allowed_protocols) = self.0.lock().unwrap().cache_get(disabled_protocols) {
-            return Ok(Some(allowed_protocols.clone()));
-        }
-
-        let current_protocols = api.get_protocols().await?.protocols;
-        let allowed_protocols: Vec<String> = current_protocols
+        let allowed_protocols = self
+            .get_all_protocols(api)
+            .await?
             .into_iter()
-            // linear search through the Vec is okay because it's very small
+            // linear search through the slice is okay because it's very small
             .filter(|protocol| !disabled_protocols.contains(protocol))
             .collect();
-
-        self.0
-            .lock()
-            .unwrap()
-            .cache_set(disabled_protocols.clone(), allowed_protocols.clone());
 
         Ok(Some(allowed_protocols))
     }
@@ -431,7 +436,7 @@ impl ProtocolCache {
 
 impl Default for ProtocolCache {
     fn default() -> Self {
-        Self::new(1, 60)
+        Self::new(60)
     }
 }
 
