@@ -4,13 +4,14 @@
 //! <https://docs.1inch.io/docs/aggregation-protocol/api/swagger>
 use crate::solver_utils::{deserialize_prefixed_hex, Slippage};
 use anyhow::{ensure, Context, Result};
-use cached::{Cached, TimedSizedCache};
+use cached::{Cached, TimedCache};
 use ethcontract::{H160, U256};
 use model::u256_decimal;
 use reqwest::{Client, IntoUrl, Url};
 use serde::Deserialize;
 use std::fmt::{self, Display, Formatter};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 /// Parts to split a swap.
 ///
@@ -387,17 +388,14 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct ProtocolCache(Arc<Mutex<TimedSizedCache<(), Vec<String>>>>);
+pub struct ProtocolCache(Arc<Mutex<TimedCache<(), Vec<String>>>>);
 
 impl ProtocolCache {
-    pub fn new(cache_validity_in_seconds: u64) -> Self {
-        Self(Arc::new(Mutex::new(
-            TimedSizedCache::with_size_and_lifespan_and_refresh(
-                1,
-                cache_validity_in_seconds,
-                false,
-            ),
-        )))
+    pub fn new(cache_validity_in_seconds: Duration) -> Self {
+        Self(Arc::new(Mutex::new(TimedCache::with_lifespan_and_refresh(
+            cache_validity_in_seconds.as_secs(),
+            false,
+        ))))
     }
 
     pub async fn get_all_protocols(&self, api: &dyn OneInchClient) -> Result<Vec<String>> {
@@ -436,7 +434,7 @@ impl ProtocolCache {
 
 impl Default for ProtocolCache {
     fn default() -> Self {
-        Self::new(60)
+        Self::new(Duration::from_secs(60))
     }
 }
 
