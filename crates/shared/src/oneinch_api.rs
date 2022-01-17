@@ -956,4 +956,38 @@ mod tests {
             .unwrap();
         println!("{:#?}", swap);
     }
+
+    #[tokio::test]
+    async fn allowing_all_protocols_will_not_use_api() {
+        let mut api = MockOneInchClient::new();
+        api.expect_get_protocols().times(0);
+        let allowed_protocols = ProtocolCache::default()
+            .get_allowed_protocols(&Vec::default(), &api)
+            .await;
+        matches!(allowed_protocols, Ok(None));
+    }
+
+    #[tokio::test]
+    async fn allowed_protocols_get_cached() {
+        let mut api = MockOneInchClient::new();
+        // only 1 API call when calling get_allowed_protocols 2 times
+        api.expect_get_protocols().times(1).returning(|| {
+            Ok(Protocols {
+                protocols: vec!["PMM1".into(), "UNISWAP_V3".into()],
+            })
+        });
+
+        let cache = ProtocolCache::default();
+        let disabled_protocols = vec!["PMM1".to_string()];
+
+        for _ in 0..2 {
+            let allowed_protocols = cache
+                .get_allowed_protocols(&disabled_protocols, &api)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(1, allowed_protocols.len());
+            assert_eq!("UNISWAP_V3", allowed_protocols[0]);
+        }
+    }
 }
