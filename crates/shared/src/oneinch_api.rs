@@ -495,7 +495,7 @@ impl OneInchClient for OneInchClientImpl {
     }
 
     async fn get_spender(&self) -> Result<Spender> {
-        let endpoint = format!("v3.0/{}/approve/spender", self.chain_id);
+        let endpoint = format!("v4.1/{}/approve/spender", self.chain_id);
         let url = self
             .base_url
             .join(&endpoint)
