@@ -4,11 +4,13 @@
 //! <https://docs.1inch.io/docs/aggregation-protocol/api/swagger>
 use crate::solver_utils::{deserialize_prefixed_hex, Slippage};
 use anyhow::{ensure, Context, Result};
+use cached::{Cached, TimedSizedCache};
 use ethcontract::{H160, U256};
 use model::u256_decimal;
 use reqwest::{Client, IntoUrl, Url};
 use serde::Deserialize;
 use std::fmt::{self, Display, Formatter};
+use std::sync::{Arc, Mutex};
 
 /// Parts to split a swap.
 ///
@@ -382,6 +384,55 @@ where
     let response = client.get(url).send().await?.text().await;
     tracing::debug!("Response from 1inch API: {:?}", response);
     serde_json::from_str(&response?).context("1inch result parsing failed")
+}
+
+#[derive(Debug, Clone)]
+pub struct ProtocolCache(Arc<Mutex<TimedSizedCache<Vec<String>, Vec<String>>>>);
+
+impl ProtocolCache {
+    pub fn new(cache_size: usize, cache_validity_in_seconds: u64) -> Self {
+        Self(Arc::new(Mutex::new(
+            TimedSizedCache::with_size_and_lifespan_and_refresh(
+                cache_size,
+                cache_validity_in_seconds,
+                false,
+            ),
+        )))
+    }
+
+    pub async fn get_allowed_protocols(
+        &self,
+        #[allow(clippy::ptr_arg)] disabled_protocols: &Vec<String>,
+        api: &dyn OneInchClient,
+    ) -> Result<Option<Vec<String>>> {
+        if disabled_protocols.is_empty() {
+            return Ok(None);
+        }
+
+        if let Some(allowed_protocols) = self.0.lock().unwrap().cache_get(disabled_protocols) {
+            return Ok(Some(allowed_protocols.clone()));
+        }
+
+        let current_protocols = api.get_protocols().await?.protocols;
+        let allowed_protocols: Vec<String> = current_protocols
+            .into_iter()
+            // linear search through the Vec is okay because it's very small
+            .filter(|protocol| !disabled_protocols.contains(protocol))
+            .collect();
+
+        self.0
+            .lock()
+            .unwrap()
+            .cache_set(disabled_protocols.clone(), allowed_protocols.clone());
+
+        Ok(Some(allowed_protocols))
+    }
+}
+
+impl Default for ProtocolCache {
+    fn default() -> Self {
+        Self::new(1, 60)
+    }
 }
 
 #[cfg(test)]
