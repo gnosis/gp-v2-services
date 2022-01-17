@@ -57,6 +57,16 @@ pub struct QuoteAndSwapCommonOptions {
     pub main_route_parts: Option<Amount<1, 50>>,
     /// Limit maximum number of parts each main route part can be split into.
     pub parts: Option<Amount<1, 100>>,
+    /// This percentage of from_token_address token amount will be sent
+    /// to referrer_address. The rest will be used as input for the swap.
+    /// min: 0, max: 3, default: 0
+    pub fee: Option<f64>,
+    /// Gas price in smallest divisible unit. default: "fast" from network
+    pub gas_price: Option<U256>,
+    /// Limit the number of virtual split parts. default: 50
+    pub virtual_parts: Option<Amount<1, 500>>,
+    /// Which tokens should be used for intermediate trading hops.
+    pub connector_tokens: Option<Vec<H160>>,
 }
 
 impl QuoteAndSwapCommonOptions {
@@ -78,6 +88,10 @@ impl QuoteAndSwapCommonOptions {
             // Use only 3 main route for cheaper trades.
             main_route_parts: Some(Amount::new(3).unwrap()),
             parts: Some(Amount::new(3).unwrap()),
+            fee: None,
+            gas_price: None,
+            virtual_parts: None,
+            connector_tokens: None,
         }
     }
 }
@@ -211,13 +225,24 @@ pub struct SwapQuery {
     pub slippage: Slippage,
     /// Flag to disable checks of the required quantities.
     pub disable_estimate: Option<bool>,
+    /// Receiver of destination currency. default: from_address
+    pub dest_receiver: Option<H160>,
+    /// Who is referring this swap to 1Inch.
+    pub referrer_address: Option<H160>,
+    /// Should Chi of from_token_address be burnt to compensate for gas.
+    /// default: false
+    pub burn_chi: Option<bool>,
+    /// If true, the algorithm can cancel part of the route, if the rate has become
+    /// less attractive. Unswapped tokens will return to the from_address
+    /// default: true
+    pub allow_partial_fill: Option<bool>,
     pub common: QuoteAndSwapCommonOptions,
 }
 
 impl SwapQuery {
     /// Encodes the swap query as
     fn into_url(self, base_url: &Url, chain_id: u64) -> Url {
-        let endpoint = format!("v3.0/{}/swap", chain_id);
+        let endpoint = format!("v4.1/{}/swap", chain_id);
         let mut url = base_url
             .join(&endpoint)
             .expect("unexpectedly invalid URL segment");
@@ -255,6 +280,43 @@ impl SwapQuery {
             url.query_pairs_mut()
                 .append_pair("parts", &parts.to_string());
         }
+        if let Some(dest_receiver) = self.dest_receiver {
+            url.query_pairs_mut()
+                .append_pair("destReceiver", &addr2str(dest_receiver));
+        }
+        if let Some(referrer_address) = self.referrer_address {
+            url.query_pairs_mut()
+                .append_pair("referrerAddress", &addr2str(referrer_address));
+        }
+        if let Some(fee) = self.common.fee {
+            url.query_pairs_mut().append_pair("fee", &fee.to_string());
+        }
+        if let Some(gas_price) = self.common.gas_price {
+            url.query_pairs_mut()
+                .append_pair("gasPrice", &gas_price.to_string());
+        }
+        if let Some(burn_chi) = self.burn_chi {
+            url.query_pairs_mut()
+                .append_pair("burnChi", &burn_chi.to_string());
+        }
+        if let Some(allow_partial_fill) = self.allow_partial_fill {
+            url.query_pairs_mut()
+                .append_pair("allowPartialFill", &allow_partial_fill.to_string());
+        }
+        if let Some(virtual_parts) = self.common.virtual_parts {
+            url.query_pairs_mut()
+                .append_pair("virtualParts", &virtual_parts.to_string());
+        }
+        if let Some(connector_tokens) = self.common.connector_tokens {
+            url.query_pairs_mut().append_pair(
+                "connectorTokens",
+                &connector_tokens
+                    .into_iter()
+                    .map(addr2str)
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
+        }
 
         url
     }
@@ -276,6 +338,10 @@ impl SwapQuery {
             common: QuoteAndSwapCommonOptions::with_default_options(
                 sell_token, buy_token, protocols, in_amount,
             ),
+            dest_receiver: None,
+            referrer_address: None,
+            burn_chi: None,
+            allow_partial_fill: Some(false),
         }
     }
 }
@@ -551,13 +617,21 @@ mod tests {
                 gas_limit: None,
                 main_route_parts: None,
                 parts: None,
+                fee: None,
+                gas_price: None,
+                virtual_parts: None,
+                connector_tokens: None,
             },
+            dest_receiver: None,
+            referrer_address: None,
+            burn_chi: None,
+            allow_partial_fill: None,
         }
         .into_url(&base_url, 1);
 
         assert_eq!(
             url.as_str(),
-            "https://api.1inch.exchange/v3.0/1/swap\
+            "https://api.1inch.exchange/v4.1/1/swap\
                 ?fromTokenAddress=0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\
                 &toTokenAddress=0x111111111117dc0aa78b770fa6a738034120c302\
                 &amount=1000000000000000000\
@@ -573,18 +647,33 @@ mod tests {
             from_address: addr!("00000000219ab540356cBB839Cbe05303d7705Fa"),
             slippage: Slippage::percentage_from_basis_points(50).unwrap(),
             disable_estimate: Some(true),
-            common: QuoteAndSwapCommonOptions::with_default_options(
-                addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
-                addr!("111111111117dc0aa78b770fa6a738034120c302"),
-                Some(vec!["WETH".to_string(), "UNISWAP_V3".to_string()]),
-                1_000_000_000_000_000_000u128.into(),
-            ),
+            common: QuoteAndSwapCommonOptions {
+                from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
+                to_token_address: addr!("111111111117dc0aa78b770fa6a738034120c302"),
+                protocols: Some(vec!["WETH".to_string(), "UNISWAP_V3".to_string()]),
+                amount: 1_000_000_000_000_000_000u128.into(),
+                complexity_level: Some(Amount::new(2).unwrap()),
+                gas_limit: Some(Amount::new(133700).unwrap()),
+                main_route_parts: Some(Amount::new(28).unwrap()),
+                parts: Some(Amount::new(42).unwrap()),
+                fee: Some(1.5),
+                gas_price: Some(100_000.into()),
+                virtual_parts: Some(Amount::new(10).unwrap()),
+                connector_tokens: Some(vec![
+                    addr!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+                    addr!("6810e776880c02933d47db1b9fc05908e5386b96"),
+                ]),
+            },
+            burn_chi: Some(false),
+            allow_partial_fill: Some(false),
+            dest_receiver: Some(addr!("41111a111217dc0aa78b774fa6a738024120c302")),
+            referrer_address: Some(addr!("41111a111217dc0aa78b774fa6a738024120c302")),
         }
         .into_url(&base_url, 1);
 
         assert_eq!(
             url.as_str(),
-            "https://api.1inch.exchange/v3.0/1/swap\
+            "https://api.1inch.exchange/v4.1/1/swap\
                 ?fromTokenAddress=0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\
                 &toTokenAddress=0x111111111117dc0aa78b770fa6a738034120c302\
                 &amount=1000000000000000000\
@@ -593,9 +682,18 @@ mod tests {
                 &protocols=WETH%2CUNISWAP_V3\
                 &disableEstimate=true\
                 &complexityLevel=2\
-                &gasLimit=750000\
-                &mainRouteParts=3\
-                &parts=3",
+                &gasLimit=133700\
+                &mainRouteParts=28\
+                &parts=42\
+                &destReceiver=0x41111a111217dc0aa78b774fa6a738024120c302\
+                &referrerAddress=0x41111a111217dc0aa78b774fa6a738024120c302\
+                &fee=1.5\
+                &gasPrice=100000\
+                &burnChi=false\
+                &allowPartialFill=false\
+                &virtualParts=10\
+                &connectorTokens=0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2%2C\
+                    0x6810e776880c02933d47db1b9fc05908e5386b96"
         );
     }
 
@@ -745,6 +843,10 @@ mod tests {
                     None,
                     1_000_000_000_000_000_000u128.into(),
                 ),
+                burn_chi: None,
+                allow_partial_fill: None,
+                dest_receiver: None,
+                referrer_address: None,
             })
             .await
             .unwrap();
@@ -760,12 +862,27 @@ mod tests {
                 from_address: addr!("4e608b7da83f8e9213f554bdaa77c72e125529d0"),
                 slippage: Slippage::percentage_from_basis_points(50).unwrap(),
                 disable_estimate: Some(true),
-                common: QuoteAndSwapCommonOptions::with_default_options(
-                    addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
-                    addr!("a3BeD4E1c75D00fa6f4E5E6922DB7261B5E9AcD2"),
-                    Some(vec!["WETH".to_string(), "UNISWAP_V2".to_string()]),
-                    100_000_000_000_000_000_000u128.into(),
-                ),
+                common: QuoteAndSwapCommonOptions {
+                    from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
+                    to_token_address: addr!("a3BeD4E1c75D00fa6f4E5E6922DB7261B5E9AcD2"),
+                    protocols: Some(vec!["WETH".to_string(), "UNISWAP_V2".to_string()]),
+                    amount: 100_000_000_000_000_000_000u128.into(),
+                    complexity_level: Some(Amount::new(2).unwrap()),
+                    gas_limit: Some(Amount::new(750_000).unwrap()),
+                    main_route_parts: Some(Amount::new(3).unwrap()),
+                    parts: Some(Amount::new(3).unwrap()),
+                    fee: Some(1.5),
+                    gas_price: Some(100_000.into()),
+                    connector_tokens: Some(vec![
+                        addr!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+                        addr!("6810e776880c02933d47db1b9fc05908e5386b96"),
+                    ]),
+                    virtual_parts: Some(Amount::new(10).unwrap()),
+                },
+                dest_receiver: Some(addr!("9008D19f58AAbD9eD0D60971565AA8510560ab41")),
+                referrer_address: Some(addr!("9008D19f58AAbD9eD0D60971565AA8510560ab41")),
+                burn_chi: Some(false),
+                allow_partial_fill: Some(false),
             })
             .await
             .unwrap();
@@ -811,6 +928,10 @@ mod tests {
                 gas_limit: None,
                 main_route_parts: None,
                 parts: None,
+                fee: None,
+                gas_price: None,
+                virtual_parts: None,
+                connector_tokens: None,
             },
         }
         .into_url(&base_url, 1);
