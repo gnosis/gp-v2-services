@@ -39,6 +39,29 @@ impl<const MIN: usize, const MAX: usize> Display for Amount<MIN, MAX> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct QuoteAndSwapCommonOptions {
+    /// Maximum number of token-connectors to be used in a transaction.
+    pub complexity_level: Option<Amount<0, 3>>,
+    /// Maximum amount of gas for a swap. Default: 11500000
+    pub gas_limit: Option<Amount<0, 11500000>>,
+    /// Limit maximum number of main route parts.
+    pub main_route_parts: Option<Amount<1, 50>>,
+    /// Limit maximum number of parts each main route part can be split into.
+    pub parts: Option<Amount<1, 100>>,
+}
+
+impl Default for QuoteAndSwapCommonOptions {
+    fn default() -> Self {
+        Self {
+            complexity_level: Some(Amount::new(2).unwrap()),
+            gas_limit: Some(Amount::new(750_000).unwrap()),
+            main_route_parts: Some(Amount::new(3).unwrap()),
+            parts: Some(Amount::new(3).unwrap()),
+        }
+    }
+}
+
 // The `Display` implementation for `H160` unfortunately does not print
 // the full address and instead uses ellipsis (e.g. "0xeeee…eeee"). This
 // helper just works around that.
@@ -60,20 +83,13 @@ pub struct SellOrderQuoteQuery {
     /// Percentage how much of the from_token_address amount should be sent to the referrer
     /// address. Values: [0, 3], Default 0.0
     pub fee: Option<f64>,
-    /// Maximum amount of gas for a swap. Default: 11500000
-    pub gas_limit: Option<Amount<0, 11500000>>,
     /// Which tokens should be used for intermediate trading hops.
     pub connector_tokens: Option<Vec<H160>>,
-    /// Maximum number of token-connectors to be used in a transaction. Default: 2
-    pub complexity_level: Option<Amount<0, 3>>,
-    /// Limit maximum number of main route parts. Default: 20
-    pub main_route_parts: Option<Amount<1, 50>>,
     /// Limit the number of virtual split parts.
     pub virtual_parts: Option<Amount<1, 500>>,
-    /// Limit maximum number of parts each main route part can be split into. Default: 20
-    pub parts: Option<Amount<1, 100>>,
     /// Gas price in smallest divisible unit. Default: "fast" from network
     pub gas_price: Option<U256>,
+    pub common: QuoteAndSwapCommonOptions,
 }
 
 impl SellOrderQuoteQuery {
@@ -95,7 +111,7 @@ impl SellOrderQuoteQuery {
         if let Some(fee) = self.fee {
             url.query_pairs_mut().append_pair("fee", &fee.to_string());
         }
-        if let Some(gas_limit) = self.gas_limit {
+        if let Some(gas_limit) = self.common.gas_limit {
             url.query_pairs_mut()
                 .append_pair("gasLimit", &gas_limit.to_string());
         }
@@ -109,11 +125,11 @@ impl SellOrderQuoteQuery {
                     .join(","),
             );
         }
-        if let Some(complexity_level) = self.complexity_level {
+        if let Some(complexity_level) = self.common.complexity_level {
             url.query_pairs_mut()
                 .append_pair("complexityLevel", &complexity_level.to_string());
         }
-        if let Some(main_route_parts) = self.main_route_parts {
+        if let Some(main_route_parts) = self.common.main_route_parts {
             url.query_pairs_mut()
                 .append_pair("mainRouteParts", &main_route_parts.to_string());
         }
@@ -121,7 +137,7 @@ impl SellOrderQuoteQuery {
             url.query_pairs_mut()
                 .append_pair("virtualParts", &virtual_parts.to_string());
         }
-        if let Some(parts) = self.parts {
+        if let Some(parts) = self.common.parts {
             url.query_pairs_mut()
                 .append_pair("parts", &parts.to_string());
         }
@@ -131,6 +147,25 @@ impl SellOrderQuoteQuery {
         }
 
         url
+    }
+
+    pub fn with_default_options(
+        sell_token: H160,
+        buy_token: H160,
+        in_amount: U256,
+        protocols: Option<Vec<String>>,
+    ) -> Self {
+        Self {
+            from_token_address: sell_token,
+            to_token_address: buy_token,
+            amount: in_amount,
+            protocols,
+            fee: None,
+            connector_tokens: None,
+            virtual_parts: None,
+            gas_price: None,
+            common: QuoteAndSwapCommonOptions::default(),
+        }
     }
 }
 
@@ -171,14 +206,7 @@ pub struct SwapQuery {
     pub protocols: Option<Vec<String>>,
     /// Flag to disable checks of the required quantities.
     pub disable_estimate: Option<bool>,
-    /// Maximum number of token-connectors to be used in a transaction.
-    pub complexity_level: Option<Amount<0, 3>>,
-    /// Maximum amount of gas for a swap.
-    pub gas_limit: Option<u64>,
-    /// Limit maximum number of main route parts.
-    pub main_route_parts: Option<Amount<1, 50>>,
-    /// Limit maximum number of parts each main route part can be split into.
-    pub parts: Option<Amount<1, 100>>,
+    pub common: QuoteAndSwapCommonOptions,
 }
 
 impl SwapQuery {
@@ -203,24 +231,44 @@ impl SwapQuery {
             url.query_pairs_mut()
                 .append_pair("disableEstimate", &disable_estimate.to_string());
         }
-        if let Some(complexity_level) = self.complexity_level {
+        if let Some(complexity_level) = self.common.complexity_level {
             url.query_pairs_mut()
                 .append_pair("complexityLevel", &complexity_level.to_string());
         }
-        if let Some(gas_limit) = self.gas_limit {
+        if let Some(gas_limit) = self.common.gas_limit {
             url.query_pairs_mut()
                 .append_pair("gasLimit", &gas_limit.to_string());
         }
-        if let Some(main_route_parts) = self.main_route_parts {
+        if let Some(main_route_parts) = self.common.main_route_parts {
             url.query_pairs_mut()
                 .append_pair("mainRouteParts", &main_route_parts.to_string());
         }
-        if let Some(parts) = self.parts {
+        if let Some(parts) = self.common.parts {
             url.query_pairs_mut()
                 .append_pair("parts", &parts.to_string());
         }
 
         url
+    }
+
+    pub fn with_default_options(
+        sell_token: H160,
+        buy_token: H160,
+        in_amount: U256,
+        from_address: H160,
+        protocols: Option<Vec<String>>,
+        slippage: Slippage,
+    ) -> Self {
+        Self {
+            from_token_address: sell_token,
+            to_token_address: buy_token,
+            amount: in_amount,
+            from_address,
+            slippage,
+            protocols,
+            disable_estimate: Some(true),
+            common: QuoteAndSwapCommonOptions::default(),
+        }
     }
 }
 
@@ -490,10 +538,12 @@ mod tests {
             slippage: Slippage::percentage_from_basis_points(50).unwrap(),
             protocols: None,
             disable_estimate: None,
-            complexity_level: None,
-            gas_limit: None,
-            main_route_parts: None,
-            parts: None,
+            common: QuoteAndSwapCommonOptions {
+                complexity_level: None,
+                gas_limit: None,
+                main_route_parts: None,
+                parts: None,
+            },
         }
         .into_url(&base_url, 1);
 
@@ -519,10 +569,7 @@ mod tests {
             slippage: Slippage::percentage_from_basis_points(50).unwrap(),
             protocols: Some(vec!["WETH".to_string(), "UNISWAP_V3".to_string()]),
             disable_estimate: Some(true),
-            complexity_level: Some(Amount::new(1).unwrap()),
-            gas_limit: Some(133700),
-            main_route_parts: Some(Amount::new(28).unwrap()),
-            parts: Some(Amount::new(42).unwrap()),
+            common: QuoteAndSwapCommonOptions::default(),
         }
         .into_url(&base_url, 1);
 
@@ -536,10 +583,10 @@ mod tests {
                 &slippage=0.5\
                 &protocols=WETH%2CUNISWAP_V3\
                 &disableEstimate=true\
-                &complexityLevel=1\
-                &gasLimit=133700\
-                &mainRouteParts=28\
-                &parts=42",
+                &complexityLevel=2\
+                &gasLimit=750000\
+                &mainRouteParts=3\
+                &parts=3",
         );
     }
 
@@ -687,10 +734,7 @@ mod tests {
                 slippage: Slippage::percentage_from_basis_points(50).unwrap(),
                 protocols: None,
                 disable_estimate: None,
-                complexity_level: None,
-                gas_limit: None,
-                main_route_parts: None,
-                parts: None,
+                common: QuoteAndSwapCommonOptions::default(),
             })
             .await
             .unwrap();
@@ -710,10 +754,7 @@ mod tests {
                 slippage: Slippage::percentage_from_basis_points(50).unwrap(),
                 protocols: Some(vec!["WETH".to_string(), "UNISWAP_V2".to_string()]),
                 disable_estimate: Some(true),
-                complexity_level: Some(Amount::new(2).unwrap()),
-                gas_limit: Some(750_000),
-                main_route_parts: Some(Amount::new(3).unwrap()),
-                parts: Some(Amount::new(3).unwrap()),
+                common: QuoteAndSwapCommonOptions::default(),
             })
             .await
             .unwrap();
@@ -751,13 +792,15 @@ mod tests {
             amount: 1_000_000_000_000_000_000u128.into(),
             protocols: None,
             fee: None,
-            gas_limit: None,
             connector_tokens: None,
-            complexity_level: None,
-            main_route_parts: None,
             virtual_parts: None,
-            parts: None,
             gas_price: None,
+            common: QuoteAndSwapCommonOptions {
+                complexity_level: None,
+                gas_limit: None,
+                main_route_parts: None,
+                parts: None,
+            },
         }
         .into_url(&base_url, 1);
 
@@ -779,16 +822,13 @@ mod tests {
             amount: 1_000_000_000_000_000_000u128.into(),
             protocols: Some(vec!["WETH".to_string(), "UNISWAP_V3".to_string()]),
             fee: Some(0.5),
-            gas_limit: Some(Amount::new(100_000).unwrap()),
             connector_tokens: Some(vec![
                 addr!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
                 addr!("6810e776880c02933d47db1b9fc05908e5386b96"),
             ]),
-            complexity_level: Some(Amount::new(1).unwrap()),
-            main_route_parts: Some(Amount::new(41).unwrap()),
             virtual_parts: Some(Amount::new(42).unwrap()),
-            parts: Some(Amount::new(43).unwrap()),
             gas_price: Some(200_000.into()),
+            common: QuoteAndSwapCommonOptions::default(),
         }
         .into_url(&base_url, 1);
 
@@ -800,12 +840,12 @@ mod tests {
                 &amount=1000000000000000000\
                 &protocols=WETH%2CUNISWAP_V3\
                 &fee=0.5\
-                &gasLimit=100000\
+                &gasLimit=750000\
                 &connectorTokens=0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2%2C0x6810e776880c02933d47db1b9fc05908e5386b96\
-                &complexityLevel=1\
-                &mainRouteParts=41\
+                &complexityLevel=2\
+                &mainRouteParts=3\
                 &virtualParts=42\
-                &parts=43\
+                &parts=3\
                 &gasPrice=200000"
         );
     }
@@ -934,13 +974,10 @@ mod tests {
                 amount: 1_000_000_000_000_000_000u128.into(),
                 protocols: None,
                 fee: None,
-                gas_limit: None,
                 connector_tokens: None,
-                complexity_level: None,
-                main_route_parts: None,
                 virtual_parts: None,
-                parts: None,
                 gas_price: None,
+                common: QuoteAndSwapCommonOptions::default(),
             })
             .await
             .unwrap();
@@ -958,16 +995,13 @@ mod tests {
                 amount: 1_000_000_000_000_000_000u128.into(),
                 protocols: Some(vec!["WETH".to_string(), "UNISWAP_V3".to_string()]),
                 fee: Some(0.5),
-                gas_limit: Some(Amount::new(100_000).unwrap()),
                 connector_tokens: Some(vec![
                     addr!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
                     addr!("6810e776880c02933d47db1b9fc05908e5386b96"),
                 ]),
-                complexity_level: Some(Amount::new(1).unwrap()),
-                main_route_parts: Some(Amount::new(41).unwrap()),
                 virtual_parts: Some(Amount::new(42).unwrap()),
-                parts: Some(Amount::new(43).unwrap()),
                 gas_price: Some(200_000.into()),
+                common: QuoteAndSwapCommonOptions::default(),
             })
             .await
             .unwrap();
