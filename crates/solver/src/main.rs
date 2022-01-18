@@ -203,6 +203,14 @@ struct Arguments {
         use_delimiter = true)]
     transaction_strategy: Vec<TransactionStrategyArg>,
 
+    /// The API endpoint of the Eden network for transaction submission.
+    #[structopt(long, env, default_value = "https://api.edennetwork.io/v1/rpc")]
+    eden_api_url: Url,
+
+    /// The API endpoint of the Flashbots network for transaction submission.
+    #[structopt(long, env, default_value = "https://rpc.flashbots.net")]
+    flashbots_api_url: Url,
+
     /// Additional tip in gwei that we are willing to give to eden above regular gas price estimation
     #[structopt(
         long,
@@ -265,6 +273,12 @@ struct Arguments {
     /// Only values in the range [0.0, 1.0] make sense.
     #[structopt(long, env, default_value = "0.6", parse(try_from_str = shared::arguments::parse_percentage_factor))]
     weth_unwrap_factor: f64,
+
+    /// Gas limit for simulations. This parameter is important to set correctly, such that
+    /// there are no simulation errors due to: err: insufficient funds for gas * price + value,
+    /// but at the same time we don't restrict solutions sizes too much
+    #[structopt(long, env, default_value = "15000000")]
+    simulation_gas_limit: u128,
 }
 
 arg_enum! {
@@ -569,11 +583,15 @@ async fn main() {
                 })
             }
             TransactionStrategyArg::Eden => TransactionStrategy::Eden(StrategyArgs {
-                submit_api: Box::new(EdenApi::new(client.clone())),
+                submit_api: Box::new(
+                    EdenApi::new(client.clone(), args.eden_api_url.clone()).unwrap(),
+                ),
                 additional_tip: args.additional_eden_tip,
             }),
             TransactionStrategyArg::Flashbots => TransactionStrategy::Flashbots(StrategyArgs {
-                submit_api: Box::new(FlashbotsApi::new(client.clone())),
+                submit_api: Box::new(
+                    FlashbotsApi::new(client.clone(), args.flashbots_api_url.clone()).unwrap(),
+                ),
                 additional_tip: args.additional_flashbot_tip,
             }),
             TransactionStrategyArg::CustomNodes => {
@@ -627,6 +645,7 @@ async fn main() {
         api,
         order_converter,
         args.weth_unwrap_factor,
+        args.simulation_gas_limit,
     );
 
     let maintainer = ServiceMaintenance {

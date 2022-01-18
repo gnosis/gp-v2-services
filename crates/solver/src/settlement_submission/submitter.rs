@@ -65,6 +65,14 @@ pub struct TransactionHandle {
     pub tx_hash: H256,
 }
 
+#[derive(Debug, Clone)]
+pub struct CancelHandle {
+    /// transaction previosly submitted using TransactionSubmitting::submit_transaction()
+    pub submitted_transaction: TransactionHandle,
+    /// empty transaction with the same nonce used for cancelling the previously submitted transaction
+    pub noop_transaction: TransactionBuilder<DynTransport>,
+}
+
 #[cfg_attr(test, mockall::automock)]
 #[async_trait::async_trait]
 pub trait TransactionSubmitting: Send + Sync {
@@ -74,8 +82,10 @@ pub trait TransactionSubmitting: Send + Sync {
         &self,
         tx: TransactionBuilder<DynTransport>,
     ) -> Result<TransactionHandle, SubmitApiError>;
-    /// Cancels already submitted transaction using the transaction handle
-    async fn cancel_transaction(&self, id: &TransactionHandle) -> Result<()>;
+    /// Cancels already submitted transaction using the cancel handle
+    async fn cancel_transaction(&self, id: &CancelHandle) -> Result<()>;
+    /// Marks previously submitted transaction as outdated and prevents from being mined
+    async fn mark_transaction_outdated(&self, id: &TransactionHandle) -> Result<()>;
 }
 
 /// Gas price estimator specialized for sending transactions to the network
@@ -176,7 +186,15 @@ impl<'a> Submitter<'a> {
                 Ok(None)
             },
             _ = deadline_future.fuse() => {
-                tracing::info!("stopping submission because deadline has been reached");
+                tracing::info!("stopping submission because deadline has been reached. cancelling last submitted transaction...");
+
+                if let Some(transaction) = transactions.last() {
+                    if let Ok(gas_price) = self.gas_price_estimator.estimate_with_limits(21000., Duration::from_secs(0)).await {
+                        if let Err(err) = self.cancel_transaction(transaction, &gas_price, nonce).await {
+                            tracing::warn!("cancellation failed: {:?}", err);
+                        }
+                    }
+                }
                 Ok(None)
             },
         };
@@ -201,6 +219,11 @@ impl<'a> Submitter<'a> {
                 "waiting up to {} seconds to see if a transaction was mined",
                 MINED_TX_PROPAGATE_TIME.as_secs()
             );
+
+            let transactions = transactions
+                .into_iter()
+                .map(|handle| handle.tx_hash)
+                .collect::<Vec<_>>();
 
             loop {
                 if let Some(receipt) =
@@ -258,11 +281,10 @@ impl<'a> Submitter<'a> {
         settlement: Settlement,
         nonce: U256,
         params: &SubmitterParams,
-        transactions: &mut Vec<H256>,
+        transactions: &mut Vec<TransactionHandle>,
     ) -> SubmissionError {
         let target_confirm_time = Instant::now() + params.target_confirm_time;
 
-        // gas price and raw signed transaction
         let mut previous_tx: Option<(EstimatedGasPrice, TransactionHandle)> = None;
 
         loop {
@@ -289,8 +311,11 @@ impl<'a> Submitter<'a> {
             // simulate transaction
 
             if let Err(err) = method.clone().view().call().await {
-                if let Some((_, previous_tx)) = previous_tx.as_ref() {
-                    if let Err(err) = self.submit_api.cancel_transaction(previous_tx).await {
+                if let Some((_, previous_tx)) = previous_tx {
+                    if let Err(err) = self
+                        .cancel_transaction(&previous_tx, &gas_price, nonce)
+                        .await
+                    {
                         tracing::warn!("cancellation failed: {:?}", err);
                     }
                 }
@@ -304,7 +329,7 @@ impl<'a> Submitter<'a> {
                 if gas_price.cap() > previous_gas_price.cap()
                     && gas_price.tip() > previous_gas_price.tip()
                 {
-                    if let Err(err) = self.submit_api.cancel_transaction(previous_tx).await {
+                    if let Err(err) = self.submit_api.mark_transaction_outdated(previous_tx).await {
                         tracing::warn!("cancellation failed: {:?}", err);
                     }
                 } else {
@@ -324,7 +349,7 @@ impl<'a> Submitter<'a> {
             match self.submit_api.submit_transaction(method.tx).await {
                 Ok(handle) => {
                     previous_tx = Some((gas_price, handle));
-                    transactions.push(handle.tx_hash)
+                    transactions.push(handle)
                 }
                 Err(err) => match err {
                     SubmitApiError::InvalidNonce => {
@@ -358,6 +383,40 @@ impl<'a> Submitter<'a> {
             .nonce(nonce)
             .gas(U256::from_f64_lossy(gas_limit))
             .gas_price(gas_price)
+    }
+
+    /// Prepare noop transaction. This transaction does transfer of 0 value to self and always spends 21000 gas.
+    fn build_noop_transaction(
+        &self,
+        gas_price: &EstimatedGasPrice,
+        nonce: U256,
+    ) -> TransactionBuilder<DynTransport> {
+        let gas_price = if let Some(eip1559) = gas_price.eip1559 {
+            (eip1559.max_fee_per_gas, eip1559.max_priority_fee_per_gas).into()
+        } else {
+            gas_price.legacy.into()
+        };
+
+        TransactionBuilder::new(self.contract.raw_instance().web3())
+            .from(self.account.clone())
+            .to(self.account.address())
+            .nonce(nonce)
+            .gas_price(gas_price)
+            .gas(21000.into())
+    }
+
+    /// Prepare all data needed for cancellation of previously submitted transaction and execute cancellation
+    async fn cancel_transaction(
+        &self,
+        transaction: &TransactionHandle,
+        gas_price: &EstimatedGasPrice,
+        nonce: U256,
+    ) -> Result<()> {
+        let cancel_handle = CancelHandle {
+            submitted_transaction: *transaction,
+            noop_transaction: self.build_noop_transaction(&gas_price.bump(3.), nonce),
+        };
+        self.submit_api.cancel_transaction(&cancel_handle).await
     }
 }
 
@@ -411,7 +470,7 @@ mod tests {
         let private_key: PrivateKey = std::env::var("PRIVATE_KEY").unwrap().parse().unwrap();
         let account = Account::Offline(private_key, Some(chain_id));
         let contract = crate::get_settlement_contract(&web3).await.unwrap();
-        let flashbots_api = FlashbotsApi::new(Client::new());
+        let flashbots_api = FlashbotsApi::new(Client::new(), "https://rpc.flashbots.net").unwrap();
         let mut header = reqwest::header::HeaderMap::new();
         header.insert(
             "AUTHORIZATION",
