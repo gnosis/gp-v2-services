@@ -2,6 +2,8 @@
 //!
 //! For more information on the HTTP API, consult:
 //! <https://docs.1inch.io/docs/aggregation-protocol/api/swagger>
+//! Although there is no documentation about API v4.1, it exists and is identical to v4.0 except it
+//! uses EIP 1559 gas prices.
 use crate::solver_utils::{deserialize_prefixed_hex, Slippage};
 use anyhow::{ensure, Context, Result};
 use cached::{Cached, TimedCache};
@@ -120,7 +122,7 @@ pub struct SellOrderQuoteQuery {
 
 impl SellOrderQuoteQuery {
     fn into_url(self, base_url: &Url, chain_id: u64) -> Url {
-        let endpoint = format!("v4.0/{}/quote", chain_id);
+        let endpoint = format!("v4.1/{}/quote", chain_id);
         let mut url = base_url
             .join(&endpoint)
             .expect("unexpectedly invalid URL segment");
@@ -938,7 +940,7 @@ mod tests {
 
         assert_eq!(
             url.as_str(),
-            "https://api.1inch.exchange/v4.0/1/quote\
+            "https://api.1inch.exchange/v4.1/1/quote\
                 ?fromTokenAddress=0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\
                 &toTokenAddress=0x111111111117dc0aa78b770fa6a738034120c302\
                 &amount=1000000000000000000"
@@ -967,7 +969,7 @@ mod tests {
 
         assert_eq!(
             url.as_str(),
-            "https://api.1inch.exchange/v4.0/1/quote\
+            "https://api.1inch.exchange/v4.1/1/quote\
                 ?fromTokenAddress=0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\
                 &toTokenAddress=0x111111111117dc0aa78b770fa6a738034120c302\
                 &amount=1000000000000000000\
