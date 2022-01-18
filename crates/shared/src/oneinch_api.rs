@@ -428,10 +428,21 @@ pub struct Spender {
     pub address: H160,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct LiquidiySource {
+    pub id: String,
+}
+
+impl From<&str> for LiquidiySource {
+    fn from(id: &str) -> Self {
+        Self { id: id.to_string() }
+    }
+}
+
 /// Protocols query response.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct Protocols {
-    pub protocols: Vec<String>,
+    pub protocols: Vec<LiquidiySource>,
 }
 
 // Mockable version of API Client
@@ -506,7 +517,7 @@ impl OneInchClient for OneInchClientImpl {
     }
 
     async fn get_protocols(&self) -> Result<Protocols> {
-        let endpoint = format!("v3.0/{}/protocols", self.chain_id);
+        let endpoint = format!("v4.1/{}/liquidity-sources", self.chain_id);
         let url = self
             .base_url
             .join(&endpoint)
@@ -526,7 +537,7 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct ProtocolCache(Arc<Mutex<TimedCache<(), Vec<String>>>>);
+pub struct ProtocolCache(Arc<Mutex<TimedCache<(), Vec<LiquidiySource>>>>);
 
 impl ProtocolCache {
     pub fn new(cache_validity_in_seconds: Duration) -> Self {
@@ -536,7 +547,7 @@ impl ProtocolCache {
         ))))
     }
 
-    pub async fn get_all_protocols(&self, api: &dyn OneInchClient) -> Result<Vec<String>> {
+    pub async fn get_all_protocols(&self, api: &dyn OneInchClient) -> Result<Vec<LiquidiySource>> {
         if let Some(cached) = self.0.lock().unwrap().cache_get(&()) {
             return Ok(cached.clone());
         }
@@ -563,7 +574,8 @@ impl ProtocolCache {
             .await?
             .into_iter()
             // linear search through the slice is okay because it's very small
-            .filter(|protocol| !disabled_protocols.contains(protocol))
+            .filter(|protocol| !disabled_protocols.contains(&protocol.id))
+            .map(|protocol| protocol.id)
             .collect();
 
         Ok(Some(allowed_protocols))
@@ -1183,5 +1195,42 @@ mod tests {
     fn creation_fails_on_unsupported_chain() {
         let api = OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, Client::new(), 2);
         assert!(api.is_err());
+    }
+
+    #[test]
+    fn deserialize_liquidity_sources_response() {
+        let swap = serde_json::from_str::<Protocols>(
+            r#"{
+                "protocols": [
+                    {
+                      "id": "PMMX",
+                      "title": "LiqPool X",
+                      "img": "https://api.1inch.io/pmm.png"
+                    },
+                    {
+                      "id": "UNIFI",
+                      "title": "Unifi",
+                      "img": "https://api.1inch.io/unifi.png"
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            swap,
+            Protocols {
+                protocols: vec!["PMMX".into(), "UNIFI".into()]
+            }
+        );
+
+        let swap_error = serde_json::from_str::<Protocols>(
+            r#"{
+                "statusCode":500,
+                "description":"Internal server error"
+            }"#,
+        );
+
+        assert!(swap_error.is_err());
     }
 }
