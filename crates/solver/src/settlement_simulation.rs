@@ -131,7 +131,8 @@ fn settle_method(
     // a block may have been mined that increases the base gas fee and causes the
     // `eth_call` simulation to fail with `max fee per gas less than block base fee`.
     let gas_price = gas_price.bump(MAX_BASE_GAS_FEE_INCREASE);
-    settle_method_builder(contract, settlement.into(), account).gas_price(crate::into_gas_price(&gas_price))
+    settle_method_builder(contract, settlement.into(), account)
+        .gas_price(crate::into_gas_price(&gas_price))
 }
 
 pub fn settle_method_builder(
