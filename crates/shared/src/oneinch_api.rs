@@ -1,15 +1,17 @@
 //! 1Inch HTTP API client implementation.
 //!
 //! For more information on the HTTP API, consult:
-//! <https://docs.1inch.io/api/quote-swap>
-//! <https://api.1inch.exchange/swagger/ethereum/>
+//! <https://docs.1inch.io/docs/aggregation-protocol/api/swagger>
 use crate::solver_utils::{deserialize_prefixed_hex, Slippage};
 use anyhow::{ensure, Context, Result};
+use cached::{Cached, TimedCache};
 use ethcontract::{H160, U256};
 use model::u256_decimal;
 use reqwest::{Client, IntoUrl, Url};
 use serde::Deserialize;
 use std::fmt::{self, Display, Formatter};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 /// Parts to split a swap.
 ///
@@ -35,6 +37,115 @@ impl<const MIN: usize, const MAX: usize> Display for Amount<MIN, MAX> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "{}", self.0)
     }
+}
+
+// The `Display` implementation for `H160` unfortunately does not print
+// the full address and instead uses ellipsis (e.g. "0xeeee…eeee"). This
+// helper just works around that.
+fn addr2str(addr: H160) -> String {
+    format!("{:?}", addr)
+}
+
+/// A query to get a quote for a sell order with 1Inch.
+#[derive(Clone, Debug)]
+pub struct SellOrderQuoteQuery {
+    /// Contract address of a token to sell.
+    pub from_token_address: H160,
+    /// Contract address of a token to buy.
+    pub to_token_address: H160,
+    /// Amount of a token to sell, set in smallest divisible unit.
+    pub amount: U256,
+    /// List of protocols to use for the quote. Default: all protocols
+    pub protocols: Option<Vec<String>>,
+    /// Percentage how much of the from_token_address amount should be sent to the referrer
+    /// address. Values: [0, 3], Default 0.0
+    pub fee: Option<f64>,
+    /// Maximum amount of gas for a swap. Default: 11500000
+    pub gas_limit: Option<Amount<0, 11500000>>,
+    /// Which tokens should be used for intermediate trading hops.
+    pub connector_tokens: Option<Vec<H160>>,
+    /// Maximum number of token-connectors to be used in a transaction. Default: 2
+    pub complexity_level: Option<Amount<0, 3>>,
+    /// Limit maximum number of main route parts. Default: 20
+    pub main_route_parts: Option<Amount<1, 50>>,
+    /// Limit the number of virtual split parts.
+    pub virtual_parts: Option<Amount<1, 500>>,
+    /// Limit maximum number of parts each main route part can be split into. Default: 20
+    pub parts: Option<Amount<1, 100>>,
+    /// Gas price in smallest divisible unit. Default: "fast" from network
+    pub gas_price: Option<U256>,
+}
+
+impl SellOrderQuoteQuery {
+    fn into_url(self, base_url: &Url, chain_id: u64) -> Url {
+        let endpoint = format!("v4.0/{}/quote", chain_id);
+        let mut url = base_url
+            .join(&endpoint)
+            .expect("unexpectedly invalid URL segment");
+
+        url.query_pairs_mut()
+            .append_pair("fromTokenAddress", &addr2str(self.from_token_address))
+            .append_pair("toTokenAddress", &addr2str(self.to_token_address))
+            .append_pair("amount", &self.amount.to_string());
+
+        if let Some(protocols) = self.protocols {
+            url.query_pairs_mut()
+                .append_pair("protocols", &protocols.join(","));
+        }
+        if let Some(fee) = self.fee {
+            url.query_pairs_mut().append_pair("fee", &fee.to_string());
+        }
+        if let Some(gas_limit) = self.gas_limit {
+            url.query_pairs_mut()
+                .append_pair("gasLimit", &gas_limit.to_string());
+        }
+        if let Some(connector_tokens) = self.connector_tokens {
+            url.query_pairs_mut().append_pair(
+                "connectorTokens",
+                &connector_tokens
+                    .into_iter()
+                    .map(addr2str)
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
+        }
+        if let Some(complexity_level) = self.complexity_level {
+            url.query_pairs_mut()
+                .append_pair("complexityLevel", &complexity_level.to_string());
+        }
+        if let Some(main_route_parts) = self.main_route_parts {
+            url.query_pairs_mut()
+                .append_pair("mainRouteParts", &main_route_parts.to_string());
+        }
+        if let Some(virtual_parts) = self.virtual_parts {
+            url.query_pairs_mut()
+                .append_pair("virtualParts", &virtual_parts.to_string());
+        }
+        if let Some(parts) = self.parts {
+            url.query_pairs_mut()
+                .append_pair("parts", &parts.to_string());
+        }
+        if let Some(gas_price) = self.gas_price {
+            url.query_pairs_mut()
+                .append_pair("gasPrice", &gas_price.to_string());
+        }
+
+        url
+    }
+}
+
+/// A sell order quote from 1Inch.
+#[derive(Clone, Debug, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SellOrderQuote {
+    pub from_token: Token,
+    pub to_token: Token,
+    #[serde(with = "u256_decimal")]
+    pub from_token_amount: U256,
+    #[serde(with = "u256_decimal")]
+    pub to_token_amount: U256,
+    pub protocols: Vec<Vec<Vec<Protocol>>>,
+    pub estimated_gas: u64,
 }
 
 /// A 1Inch API quote query parameters.
@@ -72,16 +183,10 @@ pub struct SwapQuery {
 
 impl SwapQuery {
     /// Encodes the swap query as
-    fn into_url(self, base_url: &Url) -> Url {
-        // The `Display` implementation for `H160` unfortunately does not print
-        // the full address and instead uses ellipsis (e.g. "0xeeee…eeee"). This
-        // helper just works around that.
-        fn addr2str(addr: H160) -> String {
-            format!("{:?}", addr)
-        }
-
+    fn into_url(self, base_url: &Url, chain_id: u64) -> Url {
+        let endpoint = format!("v3.0/{}/swap", chain_id);
         let mut url = base_url
-            .join("v3.0/1/swap")
+            .join(&endpoint)
             .expect("unexpectedly invalid URL segment");
         url.query_pairs_mut()
             .append_pair("fromTokenAddress", &addr2str(self.from_token_address))
@@ -212,6 +317,12 @@ pub trait OneInchClient: Send + Sync {
     /// Retrieves a swap for the specified parameters from the 1Inch API.
     async fn get_swap(&self, query: SwapQuery) -> Result<RestResponse<Swap>>;
 
+    /// Quotes a sell order with the 1Inch API.
+    async fn get_sell_order_quote(
+        &self,
+        query: SellOrderQuoteQuery,
+    ) -> Result<RestResponse<SellOrderQuote>>;
+
     /// Retrieves the address of the spender to use for token approvals.
     async fn get_spender(&self) -> Result<Spender>;
 
@@ -224,16 +335,26 @@ pub trait OneInchClient: Send + Sync {
 pub struct OneInchClientImpl {
     client: Client,
     base_url: Url,
+    chain_id: u64,
 }
 
 impl OneInchClientImpl {
     pub const DEFAULT_URL: &'static str = "https://api.1inch.exchange/";
 
+    // Right now only mainnet is relevant but in the future 1Inch will also run on Gnosis Chain.
+    pub const SUPPORTED_CHAINS: &'static [u64] = &[1];
+
     /// Create a new 1Inch HTTP API client with the specified base URL.
-    pub fn new(base_url: impl IntoUrl, client: Client) -> Result<Self> {
+    pub fn new(base_url: impl IntoUrl, client: Client, chain_id: u64) -> Result<Self> {
+        ensure!(
+            Self::SUPPORTED_CHAINS.contains(&chain_id),
+            "1Inch is not supported on this chain"
+        );
+
         Ok(Self {
             client,
             base_url: base_url.into_url()?,
+            chain_id,
         })
     }
 }
@@ -241,21 +362,30 @@ impl OneInchClientImpl {
 #[async_trait::async_trait]
 impl OneInchClient for OneInchClientImpl {
     async fn get_swap(&self, query: SwapQuery) -> Result<RestResponse<Swap>> {
-        logged_query(&self.client, query.into_url(&self.base_url)).await
+        logged_query(&self.client, query.into_url(&self.base_url, self.chain_id)).await
+    }
+
+    async fn get_sell_order_quote(
+        &self,
+        query: SellOrderQuoteQuery,
+    ) -> Result<RestResponse<SellOrderQuote>> {
+        logged_query(&self.client, query.into_url(&self.base_url, self.chain_id)).await
     }
 
     async fn get_spender(&self) -> Result<Spender> {
+        let endpoint = format!("v3.0/{}/approve/spender", self.chain_id);
         let url = self
             .base_url
-            .join("v3.0/1/approve/spender")
+            .join(&endpoint)
             .expect("unexpectedly invalid URL");
         logged_query(&self.client, url).await
     }
 
     async fn get_protocols(&self) -> Result<Protocols> {
+        let endpoint = format!("v3.0/{}/protocols", self.chain_id);
         let url = self
             .base_url
-            .join("v3.0/1/protocols")
+            .join(&endpoint)
             .expect("unexpectedly invalid URL");
         logged_query(&self.client, url).await
     }
@@ -269,6 +399,57 @@ where
     let response = client.get(url).send().await?.text().await;
     tracing::debug!("Response from 1inch API: {:?}", response);
     serde_json::from_str(&response?).context("1inch result parsing failed")
+}
+
+#[derive(Debug, Clone)]
+pub struct ProtocolCache(Arc<Mutex<TimedCache<(), Vec<String>>>>);
+
+impl ProtocolCache {
+    pub fn new(cache_validity_in_seconds: Duration) -> Self {
+        Self(Arc::new(Mutex::new(TimedCache::with_lifespan_and_refresh(
+            cache_validity_in_seconds.as_secs(),
+            false,
+        ))))
+    }
+
+    pub async fn get_all_protocols(&self, api: &dyn OneInchClient) -> Result<Vec<String>> {
+        if let Some(cached) = self.0.lock().unwrap().cache_get(&()) {
+            return Ok(cached.clone());
+        }
+
+        let all_protocols = api.get_protocols().await?.protocols;
+        // In the mean time the cache could have already been populated with new protocols,
+        // which we would now overwrite. This is fine.
+        self.0.lock().unwrap().cache_set((), all_protocols.clone());
+
+        Ok(all_protocols)
+    }
+
+    pub async fn get_allowed_protocols(
+        &self,
+        disabled_protocols: &[String],
+        api: &dyn OneInchClient,
+    ) -> Result<Option<Vec<String>>> {
+        if disabled_protocols.is_empty() {
+            return Ok(None);
+        }
+
+        let allowed_protocols = self
+            .get_all_protocols(api)
+            .await?
+            .into_iter()
+            // linear search through the slice is okay because it's very small
+            .filter(|protocol| !disabled_protocols.contains(protocol))
+            .collect();
+
+        Ok(Some(allowed_protocols))
+    }
+}
+
+impl Default for ProtocolCache {
+    fn default() -> Self {
+        Self::new(Duration::from_secs(60))
+    }
 }
 
 #[cfg(test)]
@@ -314,7 +495,7 @@ mod tests {
             main_route_parts: None,
             parts: None,
         }
-        .into_url(&base_url);
+        .into_url(&base_url, 1);
 
         assert_eq!(
             url.as_str(),
@@ -343,7 +524,7 @@ mod tests {
             main_route_parts: Some(Amount::new(28).unwrap()),
             parts: Some(Amount::new(42).unwrap()),
         }
-        .into_url(&base_url);
+        .into_url(&base_url, 1);
 
         assert_eq!(
             url.as_str(),
@@ -496,7 +677,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn oneinch_swap() {
-        let swap = OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, Client::new())
+        let swap = OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, Client::new(), 1)
             .unwrap()
             .get_swap(SwapQuery {
                 from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
@@ -519,7 +700,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn oneinch_swap_fully_parameterized() {
-        let swap = OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, Client::new())
+        let swap = OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, Client::new(), 1)
             .unwrap()
             .get_swap(SwapQuery {
                 from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
@@ -542,7 +723,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn oneinch_protocols() {
-        let protocols = OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, Client::new())
+        let protocols = OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, Client::new(), 1)
             .unwrap()
             .get_protocols()
             .await
@@ -553,11 +734,283 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn oneinch_spender_address() {
-        let spender = OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, Client::new())
+        let spender = OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, Client::new(), 1)
             .unwrap()
             .get_spender()
             .await
             .unwrap();
         println!("{:#?}", spender);
+    }
+
+    #[test]
+    fn sell_order_quote_query_serialization() {
+        let base_url = Url::parse("https://api.1inch.exchange/").unwrap();
+        let url = SellOrderQuoteQuery {
+            from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
+            to_token_address: addr!("111111111117dc0aa78b770fa6a738034120c302"),
+            amount: 1_000_000_000_000_000_000u128.into(),
+            protocols: None,
+            fee: None,
+            gas_limit: None,
+            connector_tokens: None,
+            complexity_level: None,
+            main_route_parts: None,
+            virtual_parts: None,
+            parts: None,
+            gas_price: None,
+        }
+        .into_url(&base_url, 1);
+
+        assert_eq!(
+            url.as_str(),
+            "https://api.1inch.exchange/v4.0/1/quote\
+                ?fromTokenAddress=0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\
+                &toTokenAddress=0x111111111117dc0aa78b770fa6a738034120c302\
+                &amount=1000000000000000000"
+        );
+    }
+
+    #[test]
+    fn sell_order_quote_query_serialization_optional_parameters() {
+        let base_url = Url::parse("https://api.1inch.exchange/").unwrap();
+        let url = SellOrderQuoteQuery {
+            from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
+            to_token_address: addr!("111111111117dc0aa78b770fa6a738034120c302"),
+            amount: 1_000_000_000_000_000_000u128.into(),
+            protocols: Some(vec!["WETH".to_string(), "UNISWAP_V3".to_string()]),
+            fee: Some(0.5),
+            gas_limit: Some(Amount::new(100_000).unwrap()),
+            connector_tokens: Some(vec![
+                addr!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+                addr!("6810e776880c02933d47db1b9fc05908e5386b96"),
+            ]),
+            complexity_level: Some(Amount::new(1).unwrap()),
+            main_route_parts: Some(Amount::new(41).unwrap()),
+            virtual_parts: Some(Amount::new(42).unwrap()),
+            parts: Some(Amount::new(43).unwrap()),
+            gas_price: Some(200_000.into()),
+        }
+        .into_url(&base_url, 1);
+
+        assert_eq!(
+            url.as_str(),
+            "https://api.1inch.exchange/v4.0/1/quote\
+                ?fromTokenAddress=0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\
+                &toTokenAddress=0x111111111117dc0aa78b770fa6a738034120c302\
+                &amount=1000000000000000000\
+                &protocols=WETH%2CUNISWAP_V3\
+                &fee=0.5\
+                &gasLimit=100000\
+                &connectorTokens=0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2%2C0x6810e776880c02933d47db1b9fc05908e5386b96\
+                &complexityLevel=1\
+                &mainRouteParts=41\
+                &virtualParts=42\
+                &parts=43\
+                &gasPrice=200000"
+        );
+    }
+
+    #[test]
+    fn deserialize_sell_order_quote_response() {
+        let swap = serde_json::from_str::<RestResponse<SellOrderQuote>>(
+            r#"{
+                "fromToken": {
+                    "symbol": "USDC",
+                    "name": "USD Coin",
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                    "decimals": 6,
+                    "logoURI": "https://tokens.1inch.io/0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.png"
+                },
+                "toToken": {
+                    "symbol": "USDT",
+                    "name": "Tether USD",
+                    "address": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+                    "decimals": 6,
+                    "logoURI": "https://tokens.1inch.io/0xdac17f958d2ee523a2206206994597c13d831ec7.png"
+                },
+                "toTokenAmount": "8387323826205172",
+                "fromTokenAmount": "10000000000000000",
+                "protocols": [
+                    [
+                        [
+                            {
+                                "name": "CURVE_V2_EURT_2_ASSET",
+                                "part": 20,
+                                "fromTokenAddress": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                                "toTokenAddress": "0xdac17f958d2ee523a2206206994597c13d831ec7"
+                            },
+                            {
+                                "name": "CURVE_V2_XAUT_2_ASSET",
+                                "part": 20,
+                                "fromTokenAddress": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                                "toTokenAddress": "0xdac17f958d2ee523a2206206994597c13d831ec7"
+                            },
+                            {
+                                "name": "CURVE",
+                                "part": 20,
+                                "fromTokenAddress": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                                "toTokenAddress": "0xdac17f958d2ee523a2206206994597c13d831ec7"
+                            },
+                            {
+                                "name": "SHELL",
+                                "part": 40,
+                                "fromTokenAddress": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                                "toTokenAddress": "0xdac17f958d2ee523a2206206994597c13d831ec7"
+                            }
+                        ]
+                    ]
+                ],
+                "estimatedGas": 1456155
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            swap,
+            RestResponse::Ok(SellOrderQuote {
+                from_token: Token {
+                    address: addr!("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
+                },
+                to_token: Token {
+                    address: addr!("dac17f958d2ee523a2206206994597c13d831ec7"),
+                },
+                from_token_amount: 10_000_000_000_000_000u128.into(),
+                to_token_amount: 8_387_323_826_205_172u128.into(),
+                protocols: vec![vec![vec![
+                    Protocol {
+                        name: "CURVE_V2_EURT_2_ASSET".to_owned(),
+                        part: 20.,
+                        from_token_address: addr!("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
+                        to_token_address: addr!("dac17f958d2ee523a2206206994597c13d831ec7"),
+                    },
+                    Protocol {
+                        name: "CURVE_V2_XAUT_2_ASSET".to_owned(),
+                        part: 20.,
+                        from_token_address: addr!("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
+                        to_token_address: addr!("dac17f958d2ee523a2206206994597c13d831ec7"),
+                    },
+                    Protocol {
+                        name: "CURVE".to_owned(),
+                        part: 20.,
+                        from_token_address: addr!("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
+                        to_token_address: addr!("dac17f958d2ee523a2206206994597c13d831ec7"),
+                    },
+                    Protocol {
+                        name: "SHELL".to_owned(),
+                        part: 40.,
+                        from_token_address: addr!("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
+                        to_token_address: addr!("dac17f958d2ee523a2206206994597c13d831ec7"),
+                    }
+                ]]],
+                estimated_gas: 1_456_155
+            })
+        );
+
+        let swap_error = serde_json::from_str::<RestResponse<SellOrderQuote>>(
+            r#"{
+                "statusCode":500,
+                "description":"Internal server error"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            swap_error,
+            RestResponse::Err(RestError {
+                status_code: 500,
+                description: "Internal server error".into()
+            })
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn oneinch_sell_order_quote() {
+        let swap = OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, Client::new(), 1)
+            .unwrap()
+            .get_sell_order_quote(SellOrderQuoteQuery {
+                from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
+                to_token_address: addr!("111111111117dc0aa78b770fa6a738034120c302"),
+                amount: 1_000_000_000_000_000_000u128.into(),
+                protocols: None,
+                fee: None,
+                gas_limit: None,
+                connector_tokens: None,
+                complexity_level: None,
+                main_route_parts: None,
+                virtual_parts: None,
+                parts: None,
+                gas_price: None,
+            })
+            .await
+            .unwrap();
+        println!("{:#?}", swap);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn oneinch_sell_order_quote_fully_parameterized() {
+        let swap = OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, Client::new(), 1)
+            .unwrap()
+            .get_sell_order_quote(SellOrderQuoteQuery {
+                from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
+                to_token_address: addr!("111111111117dc0aa78b770fa6a738034120c302"),
+                amount: 1_000_000_000_000_000_000u128.into(),
+                protocols: Some(vec!["WETH".to_string(), "UNISWAP_V3".to_string()]),
+                fee: Some(0.5),
+                gas_limit: Some(Amount::new(100_000).unwrap()),
+                connector_tokens: Some(vec![
+                    addr!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+                    addr!("6810e776880c02933d47db1b9fc05908e5386b96"),
+                ]),
+                complexity_level: Some(Amount::new(1).unwrap()),
+                main_route_parts: Some(Amount::new(41).unwrap()),
+                virtual_parts: Some(Amount::new(42).unwrap()),
+                parts: Some(Amount::new(43).unwrap()),
+                gas_price: Some(200_000.into()),
+            })
+            .await
+            .unwrap();
+        println!("{:#?}", swap);
+    }
+
+    #[tokio::test]
+    async fn allowing_all_protocols_will_not_use_api() {
+        let mut api = MockOneInchClient::new();
+        api.expect_get_protocols().times(0);
+        let allowed_protocols = ProtocolCache::default()
+            .get_allowed_protocols(&Vec::default(), &api)
+            .await;
+        matches!(allowed_protocols, Ok(None));
+    }
+
+    #[tokio::test]
+    async fn allowed_protocols_get_cached() {
+        let mut api = MockOneInchClient::new();
+        // only 1 API call when calling get_allowed_protocols 2 times
+        api.expect_get_protocols().times(1).returning(|| {
+            Ok(Protocols {
+                protocols: vec!["PMM1".into(), "UNISWAP_V3".into()],
+            })
+        });
+
+        let cache = ProtocolCache::default();
+        let disabled_protocols = vec!["PMM1".to_string()];
+
+        for _ in 0..2 {
+            let allowed_protocols = cache
+                .get_allowed_protocols(&disabled_protocols, &api)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(1, allowed_protocols.len());
+            assert_eq!("UNISWAP_V3", allowed_protocols[0]);
+        }
+    }
+
+    #[test]
+    fn creation_fails_on_unsupported_chain() {
+        let api = OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, Client::new(), 2);
+        assert!(api.is_err());
     }
 }
