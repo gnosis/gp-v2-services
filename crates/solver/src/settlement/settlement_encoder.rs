@@ -160,12 +160,13 @@ impl SettlementEncoder {
         // Rounding error checks:
         // Following limit price constraint is checked in the smart contract:
         // order.sellAmount.mul(sellPrice) >= order.buyAmount.mul(buyPrice),
-        // For each order, we get
-        // order.sellAmount.mul(sellPrice)  >= order.buyAmount.mul(buyPrice)
+
+        // This equation will always be true, as the following equivalence is showing
+        // order.sellAmount.mul(sellPrice)  >= order.sellAmount.mul(sellPrice) holds, as the left and ride side are equal.
+        // Dividing first and then multiplying by order.buyAmount can only make the right side smaller
         // <=> order.sellAmount.mul(sellPrice)  >= order.buyAmount.mul(sell_price * order.sellAmount / order.buyAmount)
-        // dividing first and then multiplying by order.buyAmount can only make the right side smaller
-        // <=> order.sellAmount.mul(sellPrice) >= order.sellAmount.mul(sellPrice)
-        // <=> always true
+        // <=> order.sellAmount.mul(sellPrice)  >= order.buyAmount.mul(buyPrice)
+        // <=> equation from smart contract
 
         let buy_price = self
             .clearing_prices
