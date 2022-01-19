@@ -306,7 +306,7 @@ mod tests {
             })
         });
         client.expect_get_swap().times(1).returning(|query| {
-            assert_eq!(query.common.protocols, Some(vec!["GoodProtocol".into()]));
+            assert_eq!(query.quote.protocols, Some(vec!["GoodProtocol".into()]));
             Ok(RestResponse::Ok(Swap {
                 from_token_amount: 100.into(),
                 to_token_amount: 100.into(),
