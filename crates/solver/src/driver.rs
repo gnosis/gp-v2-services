@@ -628,6 +628,7 @@ mod tests {
         let settlement = Settlement::with_trades(
             HashMap::new(),
             vec![trade(good_token), trade(another_good_token)],
+            vec![],
         );
         assert!(is_only_selling_trusted_tokens(&settlement, &token_list));
 
@@ -638,6 +639,7 @@ mod tests {
                 trade(another_good_token),
                 trade(bad_token),
             ],
+            vec![],
         );
         assert!(!is_only_selling_trusted_tokens(&settlement, &token_list));
     }

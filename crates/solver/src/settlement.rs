@@ -1,7 +1,6 @@
 mod settlement_encoder;
 
 pub use self::settlement_encoder::SettlementEncoder;
-use crate::settlement::TokenIndex::{CustomBuyPriceIndex, UniformClearingPriceIndex};
 use crate::{
     encoding::{self, EncodedInteraction, EncodedSettlement, EncodedTrade},
     liquidity::Settleable,
@@ -13,26 +12,19 @@ use primitive_types::{H160, U256};
 use shared::conversions::U256Ext as _;
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum TokenIndex {
-    UniformClearingPriceIndex(usize),
-    CustomBuyPriceIndex(usize),
-}
-
-impl Default for TokenIndex {
-    fn default() -> Self {
-        TokenIndex::UniformClearingPriceIndex(0)
-    }
-}
-
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Trade {
     pub order: Order,
     pub sell_token_index: usize,
-    pub buy_token_index: TokenIndex,
+    pub buy_token_index: usize,
     pub executed_amount: U256,
     pub scaled_fee_amount: U256,
-    pub is_liquidity_order: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct LiquidityOrderTrade {
+    pub trade: Trade,
+    pub buy_token_price: U256,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -132,19 +124,26 @@ impl Trade {
             fee_amount,
         })
     }
-
-    /// Encodes the settlement trade as a tuple, as expected by the smart
-    /// contract.
-    pub fn encode(&self, clearing_price_vec_length: usize) -> EncodedTrade {
-        let buy_token_index = match self.buy_token_index {
-            UniformClearingPriceIndex(index) => index,
-            CustomBuyPriceIndex(index) => clearing_price_vec_length + index,
-        };
+    pub fn encode(&self) -> EncodedTrade {
         encoding::encode_trade(
             &self.order.order_creation,
             self.sell_token_index,
-            buy_token_index,
+            self.buy_token_index,
             &self.executed_amount,
+        )
+    }
+}
+
+impl LiquidityOrderTrade {
+    /// Encodes the settlement liquidity_order_trade as a tuple, as expected by the smart
+    /// contract.
+    pub fn encode(&self, clearing_price_vec_length: usize) -> EncodedTrade {
+        let buy_token_index = clearing_price_vec_length + self.trade.buy_token_index;
+        encoding::encode_trade(
+            &self.trade.order.order_creation,
+            self.trade.sell_token_index,
+            buy_token_index,
+            &self.trade.executed_amount,
         )
     }
 }
@@ -204,8 +203,13 @@ impl Settlement {
     }
 
     #[cfg(test)]
-    pub fn with_trades(clearing_prices: HashMap<H160, U256>, trades: Vec<Trade>) -> Self {
-        let encoder = SettlementEncoder::with_trades(clearing_prices, trades);
+    pub fn with_trades(
+        clearing_prices: HashMap<H160, U256>,
+        trades: Vec<Trade>,
+        liquidity_order_trades: Vec<LiquidityOrderTrade>,
+    ) -> Self {
+        let encoder =
+            SettlementEncoder::with_trades(clearing_prices, trades, liquidity_order_trades);
         Self { encoder }
     }
 
@@ -259,7 +263,6 @@ impl Settlement {
         self.encoder
             .trades()
             .iter()
-            .filter(|trade| !trade.is_liquidity_order)
             .filter_map(|trade| {
                 let fee_token_price =
                     external_prices.get(&trade.order.order_creation.sell_token)?;
@@ -386,9 +389,13 @@ pub mod tests {
 
     /// Helper function for creating a settlement for the specified prices and
     /// trades for testing objective value computations.
-    fn test_settlement(prices: HashMap<H160, U256>, trades: Vec<Trade>) -> Settlement {
+    fn test_settlement(
+        prices: HashMap<H160, U256>,
+        trades: Vec<Trade>,
+        liquidity_order_trades: Vec<LiquidityOrderTrade>,
+    ) -> Settlement {
         Settlement {
-            encoder: SettlementEncoder::with_trades(prices, trades),
+            encoder: SettlementEncoder::with_trades(prices, trades, liquidity_order_trades),
         }
     }
 
@@ -515,9 +522,13 @@ pub mod tests {
         let clearing_prices0 = maplit::hashmap! {token0 => 1.into(), token1 => 1.into()};
         let clearing_prices1 = maplit::hashmap! {token0 => 2.into(), token1 => 2.into()};
 
-        let settlement0 = test_settlement(clearing_prices0, vec![trade0.clone(), trade1.clone()]);
+        let settlement0 = test_settlement(
+            clearing_prices0,
+            vec![trade0.clone(), trade1.clone()],
+            vec![],
+        );
 
-        let settlement1 = test_settlement(clearing_prices1, vec![trade0, trade1]);
+        let settlement1 = test_settlement(clearing_prices1, vec![trade0, trade1], vec![]);
 
         let external_prices = maplit::hashmap! {token0 => r(1), token1 => r(1)};
         assert_eq!(
@@ -549,7 +560,7 @@ pub mod tests {
         // Settlement0 gets the following surpluses:
         // trade0: 81 - 81 = 0
         // trade1: 100 - 81 = 19
-        let settlement0 = test_settlement(clearing_prices0, vec![trade0, trade1]);
+        let settlement0 = test_settlement(clearing_prices0, vec![trade0, trade1], vec![]);
 
         let trade0 = Trade {
             order: order0,
@@ -567,7 +578,7 @@ pub mod tests {
         // Settlement1 gets the following surpluses:
         // trade0: 90 - 72.9 = 17.1
         // trade1: 100 - 100 = 0
-        let settlement1 = test_settlement(clearing_prices1, vec![trade0, trade1]);
+        let settlement1 = test_settlement(clearing_prices1, vec![trade0, trade1], vec![]);
 
         // If the external prices of the two tokens is the same, then both settlements are symmetric.
         let external_prices = maplit::hashmap! {token0 => r(1), token1 => r(1)};
@@ -629,7 +640,7 @@ pub mod tests {
 
         let clearing_prices = maplit::hashmap! {token0 => 1.into(), token1 => 0.into()};
 
-        let settlement = test_settlement(clearing_prices, vec![trade]);
+        let settlement = test_settlement(clearing_prices, vec![trade], vec![]);
 
         let external_prices = maplit::hashmap! {token0 => r(1), token1 => r(1)};
         settlement.total_surplus(&external_prices);
@@ -917,80 +928,11 @@ pub mod tests {
         assert_eq!(trade1.executed_scaled_unsubsidized_fee().unwrap(), 2.into());
 
         // Fee in wei of ETH
-        let settlement = test_settlement(clearing_prices, vec![trade0, trade1]);
+        let settlement = test_settlement(clearing_prices, vec![trade0, trade1], vec![]);
         assert_eq!(
             settlement.total_scaled_unsubsidized_fees(&external_prices),
             BigRational::from_integer(45.into())
         );
-    }
-
-    #[test]
-    fn total_surplus_excludes_liquidity_orders() {
-        let token0 = H160::from_low_u64_be(0);
-        let token1 = H160::from_low_u64_be(1);
-
-        let order0 = Order {
-            order_creation: OrderCreation {
-                sell_token: token0,
-                buy_token: token1,
-                sell_amount: 10.into(),
-                buy_amount: 7.into(),
-                kind: OrderKind::Sell,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let order1 = Order {
-            order_creation: OrderCreation {
-                sell_token: token1,
-                buy_token: token0,
-                sell_amount: 10.into(),
-                buy_amount: 6.into(),
-                kind: OrderKind::Sell,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        let trade0 = Trade {
-            order: order0,
-            executed_amount: 10.into(),
-            is_liquidity_order: false,
-            ..Default::default()
-        };
-        let trade1 = Trade {
-            order: order1,
-            executed_amount: 9.into(),
-            is_liquidity_order: false,
-            ..Default::default()
-        };
-
-        let clearing_prices = maplit::hashmap! {token0 => 9.into(), token1 => 10.into()};
-        let external_prices = maplit::hashmap! {token0 => r(1), token1 => r(1)};
-
-        let compute_total_surplus = |trade0_is_pmm: bool, trade1_is_pmm: bool| {
-            let settlement = test_settlement(
-                clearing_prices.clone(),
-                vec![
-                    Trade {
-                        is_liquidity_order: trade0_is_pmm,
-                        ..trade0.clone()
-                    },
-                    Trade {
-                        is_liquidity_order: trade1_is_pmm,
-                        ..trade1.clone()
-                    },
-                ],
-            );
-            settlement.total_surplus(&external_prices)
-        };
-
-        let total_surplus_without_pmms = compute_total_surplus(false, false);
-        let surplus_order1 = compute_total_surplus(false, true);
-        let surplus_order0 = compute_total_surplus(true, false);
-        let both_pmm = compute_total_surplus(true, true);
-        assert_eq!(total_surplus_without_pmms, surplus_order0 + surplus_order1);
-        assert!(both_pmm.is_zero());
     }
 
     #[test]
@@ -999,27 +941,26 @@ pub mod tests {
         let token1 = H160([1; 20]);
         let settlement = test_settlement(
             hashmap! { token0 => 1.into(), token1 => 1.into() },
-            vec![
-                Trade {
-                    order: Order {
-                        order_creation: OrderCreation {
-                            sell_token: token0,
-                            buy_token: token1,
-                            sell_amount: 1.into(),
-                            kind: OrderKind::Sell,
-                            // Note that this fee amount is NOT used!
-                            fee_amount: 6.into(),
-                            ..Default::default()
-                        },
+            vec![Trade {
+                order: Order {
+                    order_creation: OrderCreation {
+                        sell_token: token0,
+                        buy_token: token1,
+                        sell_amount: 1.into(),
+                        kind: OrderKind::Sell,
+                        // Note that this fee amount is NOT used!
+                        fee_amount: 6.into(),
                         ..Default::default()
                     },
-                    executed_amount: 1.into(),
-                    // This is what matters for the objective value
-                    scaled_fee_amount: 42.into(),
-                    is_liquidity_order: false,
                     ..Default::default()
                 },
-                Trade {
+                executed_amount: 1.into(),
+                // This is what matters for the objective value
+                scaled_fee_amount: 42.into(),
+                ..Default::default()
+            }],
+            vec![LiquidityOrderTrade {
+                trade: Trade {
                     order: Order {
                         order_creation: OrderCreation {
                             sell_token: token1,
@@ -1034,10 +975,10 @@ pub mod tests {
                     executed_amount: 1.into(),
                     // Doesn't count because it is a "liquidity order"
                     scaled_fee_amount: 1337.into(),
-                    is_liquidity_order: true,
                     ..Default::default()
                 },
-            ],
+                buy_token_price: Default::default(),
+            }],
         );
 
         assert_eq!(
@@ -1068,9 +1009,9 @@ pub mod tests {
                 },
                 executed_amount: 99760667014_u128.into(),
                 scaled_fee_amount: 239332986_u128.into(),
-                is_liquidity_order: false,
                 ..Default::default()
             }],
+            vec![],
         );
 
         let pmm = test_settlement(
@@ -1079,26 +1020,25 @@ pub mod tests {
                 addr!("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48") => 235665799111775530988005794_u128.into(),
                 addr!("dac17f958d2ee523a2206206994597c13d831ec7") => 235593507027683452564881428_u128.into(),
             },
-            vec![
-                Trade {
-                    order: Order {
-                        order_creation: OrderCreation {
-                            sell_token: addr!("dac17f958d2ee523a2206206994597c13d831ec7"),
-                            buy_token: addr!("4e3fbd56cd56c3e72c1403e103b45db9da5b9d2b"),
-                            sell_amount: 99760667014_u128.into(),
-                            buy_amount: 3805639472457226077863_u128.into(),
-                            fee_amount: 239332986_u128.into(),
-                            kind: OrderKind::Sell,
-                            ..Default::default()
-                        },
+            vec![Trade {
+                order: Order {
+                    order_creation: OrderCreation {
+                        sell_token: addr!("dac17f958d2ee523a2206206994597c13d831ec7"),
+                        buy_token: addr!("4e3fbd56cd56c3e72c1403e103b45db9da5b9d2b"),
+                        sell_amount: 99760667014_u128.into(),
+                        buy_amount: 3805639472457226077863_u128.into(),
+                        fee_amount: 239332986_u128.into(),
+                        kind: OrderKind::Sell,
                         ..Default::default()
                     },
-                    executed_amount: 99760667014_u128.into(),
-                    scaled_fee_amount: 239332986_u128.into(),
-                    is_liquidity_order: false,
                     ..Default::default()
                 },
-                Trade {
+                executed_amount: 99760667014_u128.into(),
+                scaled_fee_amount: 239332986_u128.into(),
+                ..Default::default()
+            }],
+            vec![LiquidityOrderTrade {
+                trade: Trade {
                     order: Order {
                         order_creation: OrderCreation {
                             sell_token: addr!("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
@@ -1113,10 +1053,10 @@ pub mod tests {
                     },
                     executed_amount: 99760667014_u128.into(),
                     scaled_fee_amount: 77577144_u128.into(),
-                    is_liquidity_order: true,
                     ..Default::default()
                 },
-            ],
+                buy_token_price: Default::default(),
+            }],
         );
 
         let external_prices = hashmap! {

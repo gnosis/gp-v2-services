@@ -9,10 +9,7 @@ use std::{
 };
 
 pub fn has_user_order(settlement: &Settlement) -> bool {
-    settlement
-        .trades()
-        .iter()
-        .any(|trade| !trade.is_liquidity_order)
+    !settlement.trades().is_empty()
 }
 
 // Each individual settlement has an objective value.
@@ -156,8 +153,7 @@ pub fn retain_mature_settlements(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settlement::TokenIndex::UniformClearingPriceIndex;
-    use crate::settlement::Trade;
+    use crate::settlement::{LiquidityOrderTrade, Trade};
     use chrono::{offset::Utc, DateTime, Duration, Local};
     use maplit::hashmap;
     use model::order::{Order, OrderCreation, OrderKind, OrderMetaData, OrderUid};
@@ -193,7 +189,7 @@ mod tests {
         let recent = Local::now().with_timezone(&Utc);
         let min_age = std::time::Duration::from_secs(50);
 
-        let settlement = |trades| Settlement::with_trades(hashmap!(), trades);
+        let settlement = |trades| Settlement::with_trades(hashmap!(), trades, vec![]);
         let s1 = settlement(vec![trade(recent, 1), trade(recent, 2)]);
         let s2 = settlement(vec![trade(recent, 2), trade(recent, 3)]);
         let s3 = settlement(vec![trade(recent, 4), trade(recent, 5)]);
@@ -209,7 +205,7 @@ mod tests {
         let old = Local::now().with_timezone(&Utc).sub(Duration::seconds(600));
         let min_age = std::time::Duration::from_secs(60);
 
-        let settlement = |trades| Settlement::with_trades(hashmap!(), trades);
+        let settlement = |trades| Settlement::with_trades(hashmap!(), trades, vec![]);
         let s1 = settlement(vec![trade(old, 1), trade(recent, 2)]);
         let s2 = settlement(vec![trade(recent, 3), trade(recent, 4)]);
         let settlements = vec![s1.clone(), s2];
@@ -224,7 +220,7 @@ mod tests {
         let old = Local::now().with_timezone(&Utc).sub(Duration::seconds(600));
         let min_age = std::time::Duration::from_secs(60);
 
-        let settlement = |trades| Settlement::with_trades(hashmap!(), trades);
+        let settlement = |trades| Settlement::with_trades(hashmap!(), trades, vec![]);
         let s1 = settlement(vec![trade(recent, 1), trade(recent, 2)]);
         let s2 = settlement(vec![trade(recent, 2), trade(recent, 3)]);
         let s3 = settlement(vec![trade(recent, 3), trade(old, 4)]);
@@ -252,7 +248,7 @@ mod tests {
 
         let trade = |executed_amount, uid_: u8| Trade {
             sell_token_index: 0,
-            buy_token_index: UniformClearingPriceIndex(1),
+            buy_token_index: 1,
             executed_amount,
             order: Order {
                 order_meta_data: OrderMetaData {
@@ -271,7 +267,11 @@ mod tests {
             ..Default::default()
         };
         let settlement = |executed_amount: U256, order_uid: u8| {
-            Settlement::with_trades(prices.clone(), vec![trade(executed_amount, order_uid)])
+            Settlement::with_trades(
+                prices.clone(),
+                vec![trade(executed_amount, order_uid)],
+                vec![],
+            )
         };
 
         let mut settlements = vec![
@@ -409,39 +409,26 @@ mod tests {
 
     #[test]
     fn has_user_order_() {
-        let settlement = Settlement::with_trades(Default::default(), vec![]);
+        let settlement = Settlement::with_trades(Default::default(), vec![], vec![]);
         assert!(!has_user_order(&settlement));
 
         let settlement = Settlement::with_trades(
             Default::default(),
-            vec![Trade {
-                is_liquidity_order: true,
-                ..Default::default()
-            }],
+            vec![],
+            vec![LiquidityOrderTrade::default()],
         );
         assert!(!has_user_order(&settlement));
 
-        let settlement = Settlement::with_trades(
-            Default::default(),
-            vec![Trade {
-                is_liquidity_order: false,
-                ..Default::default()
-            }],
-        );
+        let settlement =
+            Settlement::with_trades(Default::default(), vec![Trade::default()], vec![]);
         assert!(has_user_order(&settlement));
 
         let settlement = Settlement::with_trades(
             Default::default(),
-            vec![
-                Trade {
-                    is_liquidity_order: true,
-                    ..Default::default()
-                },
-                Trade {
-                    is_liquidity_order: false,
-                    ..Default::default()
-                },
-            ],
+            vec![Trade {
+                ..Default::default()
+            }],
+            vec![LiquidityOrderTrade::default()],
         );
         assert!(has_user_order(&settlement));
     }

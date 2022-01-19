@@ -191,7 +191,7 @@ mod tests {
     use model::{order::Order, TokenPair};
     use num::{rational::Ratio, BigRational};
     use serde_json::json;
-    use shared::http_solver_api::model::SettledBatchAuctionModel;
+    use shared::http_solver::model::SettledBatchAuctionModel;
     use shared::sources::balancer_v2::pools::{common::TokenState, stable::AmplificationParameter};
     use shared::transport::create_env_test_transport;
     use std::sync::{Arc, Mutex};
@@ -212,7 +212,7 @@ mod tests {
         let settlements = vec![
             (
                 account.clone(),
-                Settlement::with_trades(Default::default(), vec![Default::default()]),
+                Settlement::with_trades(Default::default(), vec![Default::default()], vec![]),
             ),
             (account.clone(), Settlement::new(Default::default())),
         ];
