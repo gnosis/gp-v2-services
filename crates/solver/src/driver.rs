@@ -182,9 +182,10 @@ impl Driver {
                     name,
                     receipt.transaction_hash
                 );
-                trades
-                    .iter()
-                    .for_each(|trade| self.metrics.order_settled(&trade.order, name));
+                trades.iter().for_each(|normal_order_trade| {
+                    self.metrics
+                        .order_settled(&normal_order_trade.trade.order, name)
+                });
                 self.metrics.settlement_submitted(
                     crate::metrics::SettlementSubmissionOutcome::Success,
                     name,
@@ -525,7 +526,7 @@ impl Driver {
                     .settlement
                     .trades()
                     .iter()
-                    .map(|t| t.order.order_meta_data.uid);
+                    .map(|t| t.trade.order.order_meta_data.uid);
                 let block = match receipt.block_number {
                     Some(block) => block.as_u64(),
                     None => {
@@ -554,11 +555,15 @@ impl Driver {
 }
 
 fn is_only_selling_trusted_tokens(settlement: &Settlement, token_list: &TokenList) -> bool {
-    !settlement.encoder.trades().iter().any(|trade| {
-        token_list
-            .get(&trade.order.order_creation.sell_token)
-            .is_none()
-    })
+    !settlement
+        .encoder
+        .trades()
+        .iter()
+        .any(|normal_order_trade| {
+            token_list
+                .get(&normal_order_trade.trade.order.order_creation.sell_token)
+                .is_none()
+        })
 }
 
 fn print_settlements(rated_settlements: &[(Arc<dyn Solver>, RatedSettlement)]) {
@@ -588,7 +593,7 @@ enum SolverRunError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settlement::Trade;
+    use crate::settlement::{NormalOrderTrade, Trade};
     use maplit::hashmap;
     use model::order::{Order, OrderCreation};
     use shared::token_list::Token;
@@ -614,10 +619,13 @@ mod tests {
             }
         });
 
-        let trade = |token| Trade {
-            order: Order {
-                order_creation: OrderCreation {
-                    sell_token: token,
+        let trade = |token| NormalOrderTrade {
+            trade: Trade {
+                order: Order {
+                    order_creation: OrderCreation {
+                        sell_token: token,
+                        ..Default::default()
+                    },
                     ..Default::default()
                 },
                 ..Default::default()

@@ -119,17 +119,18 @@ pub fn retain_mature_settlements(
                     break;
                 }
 
-                let contains_valid_trade = settlement.trades().iter().any(|trade| {
+                let contains_valid_trade = settlement.trades().iter().any(|normal_order_trade| {
                     // mature by age
-                    trade.order.order_meta_data.creation_date <= settle_orders_older_than
+                    normal_order_trade.trade.order.order_meta_data.creation_date <= settle_orders_older_than
                     // mature by association
-                    || valid_trades.contains(&trade.order.order_meta_data.uid)
+                    || valid_trades.contains(&normal_order_trade.trade.order.order_meta_data.uid)
                 });
 
                 if contains_valid_trade {
-                    for trade in settlement.trades() {
+                    for normal_order_trade in settlement.trades() {
                         // make all orders within this settlement mature by association
-                        new_order_added |= valid_trades.insert(&trade.order.order_meta_data.uid);
+                        new_order_added |= valid_trades
+                            .insert(&normal_order_trade.trade.order.order_meta_data.uid);
                     }
                     valid_settlement_indices.insert(index);
                 }
@@ -153,7 +154,7 @@ pub fn retain_mature_settlements(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settlement::{LiquidityOrderTrade, Trade};
+    use crate::settlement::{LiquidityOrderTrade, NormalOrderTrade, Trade};
     use chrono::{offset::Utc, DateTime, Duration, Local};
     use maplit::hashmap;
     use model::order::{Order, OrderCreation, OrderKind, OrderMetaData, OrderUid};
@@ -163,12 +164,15 @@ mod tests {
     use std::collections::HashSet;
     use std::ops::Sub;
 
-    fn trade(created_at: DateTime<Utc>, uid: u8) -> Trade {
-        Trade {
-            order: Order {
-                order_meta_data: OrderMetaData {
-                    creation_date: created_at,
-                    uid: OrderUid([uid; 56]),
+    fn trade(created_at: DateTime<Utc>, uid: u8) -> NormalOrderTrade {
+        NormalOrderTrade {
+            trade: Trade {
+                order: Order {
+                    order_meta_data: OrderMetaData {
+                        creation_date: created_at,
+                        uid: OrderUid([uid; 56]),
+                        ..Default::default()
+                    },
                     ..Default::default()
                 },
                 ..Default::default()
@@ -246,25 +250,27 @@ mod tests {
             OrderUid([number; 56])
         }
 
-        let trade = |executed_amount, uid_: u8| Trade {
-            sell_token_index: 0,
-            buy_token_index: 1,
-            executed_amount,
-            order: Order {
-                order_meta_data: OrderMetaData {
-                    uid: uid(uid_),
-                    ..Default::default()
+        let trade = |executed_amount, uid_: u8| NormalOrderTrade {
+            trade: Trade {
+                sell_token_index: 0,
+                executed_amount,
+                order: Order {
+                    order_meta_data: OrderMetaData {
+                        uid: uid(uid_),
+                        ..Default::default()
+                    },
+                    order_creation: OrderCreation {
+                        sell_token: token0,
+                        buy_token: token1,
+                        sell_amount: executed_amount,
+                        buy_amount: 1.into(),
+                        kind: OrderKind::Buy,
+                        ..Default::default()
+                    },
                 },
-                order_creation: OrderCreation {
-                    sell_token: token0,
-                    buy_token: token1,
-                    sell_amount: executed_amount,
-                    buy_amount: 1.into(),
-                    kind: OrderKind::Buy,
-                    ..Default::default()
-                },
+                ..Default::default()
             },
-            ..Default::default()
+            buy_token_index: 1,
         };
         let settlement = |executed_amount: U256, order_uid: u8| {
             Settlement::with_trades(
@@ -286,7 +292,7 @@ mod tests {
             let trades = settlement.trades();
             let uids: HashSet<OrderUid> = trades
                 .iter()
-                .map(|trade| trade.order.order_meta_data.uid)
+                .map(|normal_order_trade| normal_order_trade.trade.order.order_meta_data.uid)
                 .collect();
             uids.len() == 2 && uids.contains(&uid(2)) && uids.contains(&uid(3))
         }));
@@ -419,13 +425,16 @@ mod tests {
         );
         assert!(!has_user_order(&settlement));
 
-        let settlement =
-            Settlement::with_trades(Default::default(), vec![Trade::default()], vec![]);
+        let settlement = Settlement::with_trades(
+            Default::default(),
+            vec![NormalOrderTrade::default()],
+            vec![],
+        );
         assert!(has_user_order(&settlement));
 
         let settlement = Settlement::with_trades(
             Default::default(),
-            vec![Trade {
+            vec![NormalOrderTrade {
                 ..Default::default()
             }],
             vec![LiquidityOrderTrade::default()],
