@@ -42,7 +42,7 @@ impl<const MIN: usize, const MAX: usize> Display for Amount<MIN, MAX> {
 }
 
 #[derive(Debug, Clone)]
-pub struct QuoteAndSwapCommonOptions {
+pub struct SellOrderQuoteQuery {
     /// Contract address of a token to sell.
     pub from_token_address: H160,
     /// Contract address of a token to buy.
@@ -71,8 +71,71 @@ pub struct QuoteAndSwapCommonOptions {
     pub connector_tokens: Option<Vec<H160>>,
 }
 
-impl QuoteAndSwapCommonOptions {
-    fn with_default_options(
+// The `Display` implementation for `H160` unfortunately does not print
+// the full address and instead uses ellipsis (e.g. "0xeeee…eeee"). This
+// helper just works around that.
+fn addr2str(addr: H160) -> String {
+    format!("{:?}", addr)
+}
+
+impl SellOrderQuoteQuery {
+    fn into_url(self, base_url: &Url, chain_id: u64) -> Url {
+        let endpoint = format!("v4.1/{}/quote", chain_id);
+        let mut url = base_url
+            .join(&endpoint)
+            .expect("unexpectedly invalid URL segment");
+
+        url.query_pairs_mut()
+            .append_pair("fromTokenAddress", &addr2str(self.from_token_address))
+            .append_pair("toTokenAddress", &addr2str(self.to_token_address))
+            .append_pair("amount", &self.amount.to_string());
+
+        if let Some(protocols) = self.protocols {
+            url.query_pairs_mut()
+                .append_pair("protocols", &protocols.join(","));
+        }
+        if let Some(fee) = self.fee {
+            url.query_pairs_mut().append_pair("fee", &fee.to_string());
+        }
+        if let Some(gas_limit) = self.gas_limit {
+            url.query_pairs_mut()
+                .append_pair("gasLimit", &gas_limit.to_string());
+        }
+        if let Some(connector_tokens) = self.connector_tokens {
+            url.query_pairs_mut().append_pair(
+                "connectorTokens",
+                &connector_tokens
+                    .into_iter()
+                    .map(addr2str)
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
+        }
+        if let Some(complexity_level) = self.complexity_level {
+            url.query_pairs_mut()
+                .append_pair("complexityLevel", &complexity_level.to_string());
+        }
+        if let Some(main_route_parts) = self.main_route_parts {
+            url.query_pairs_mut()
+                .append_pair("mainRouteParts", &main_route_parts.to_string());
+        }
+        if let Some(virtual_parts) = self.virtual_parts {
+            url.query_pairs_mut()
+                .append_pair("virtualParts", &virtual_parts.to_string());
+        }
+        if let Some(parts) = self.parts {
+            url.query_pairs_mut()
+                .append_pair("parts", &parts.to_string());
+        }
+        if let Some(gas_price) = self.gas_price {
+            url.query_pairs_mut()
+                .append_pair("gasPrice", &gas_price.to_string());
+        }
+
+        url
+    }
+
+    pub fn with_default_options(
         sell_token: H160,
         buy_token: H160,
         protocols: Option<Vec<String>>,
@@ -94,93 +157,6 @@ impl QuoteAndSwapCommonOptions {
             gas_price: None,
             virtual_parts: None,
             connector_tokens: None,
-        }
-    }
-}
-
-// The `Display` implementation for `H160` unfortunately does not print
-// the full address and instead uses ellipsis (e.g. "0xeeee…eeee"). This
-// helper just works around that.
-fn addr2str(addr: H160) -> String {
-    format!("{:?}", addr)
-}
-
-/// A query to get a quote for a sell order with 1Inch.
-#[derive(Clone, Debug)]
-pub struct SellOrderQuoteQuery {
-    pub common: QuoteAndSwapCommonOptions,
-}
-
-impl SellOrderQuoteQuery {
-    fn into_url(self, base_url: &Url, chain_id: u64) -> Url {
-        let endpoint = format!("v4.1/{}/quote", chain_id);
-        let mut url = base_url
-            .join(&endpoint)
-            .expect("unexpectedly invalid URL segment");
-
-        url.query_pairs_mut()
-            .append_pair(
-                "fromTokenAddress",
-                &addr2str(self.common.from_token_address),
-            )
-            .append_pair("toTokenAddress", &addr2str(self.common.to_token_address))
-            .append_pair("amount", &self.common.amount.to_string());
-
-        if let Some(protocols) = self.common.protocols {
-            url.query_pairs_mut()
-                .append_pair("protocols", &protocols.join(","));
-        }
-        if let Some(fee) = self.common.fee {
-            url.query_pairs_mut().append_pair("fee", &fee.to_string());
-        }
-        if let Some(gas_limit) = self.common.gas_limit {
-            url.query_pairs_mut()
-                .append_pair("gasLimit", &gas_limit.to_string());
-        }
-        if let Some(connector_tokens) = self.common.connector_tokens {
-            url.query_pairs_mut().append_pair(
-                "connectorTokens",
-                &connector_tokens
-                    .into_iter()
-                    .map(addr2str)
-                    .collect::<Vec<_>>()
-                    .join(","),
-            );
-        }
-        if let Some(complexity_level) = self.common.complexity_level {
-            url.query_pairs_mut()
-                .append_pair("complexityLevel", &complexity_level.to_string());
-        }
-        if let Some(main_route_parts) = self.common.main_route_parts {
-            url.query_pairs_mut()
-                .append_pair("mainRouteParts", &main_route_parts.to_string());
-        }
-        if let Some(virtual_parts) = self.common.virtual_parts {
-            url.query_pairs_mut()
-                .append_pair("virtualParts", &virtual_parts.to_string());
-        }
-        if let Some(parts) = self.common.parts {
-            url.query_pairs_mut()
-                .append_pair("parts", &parts.to_string());
-        }
-        if let Some(gas_price) = self.common.gas_price {
-            url.query_pairs_mut()
-                .append_pair("gasPrice", &gas_price.to_string());
-        }
-
-        url
-    }
-
-    pub fn with_default_options(
-        sell_token: H160,
-        buy_token: H160,
-        in_amount: U256,
-        protocols: Option<Vec<String>>,
-    ) -> Self {
-        Self {
-            common: QuoteAndSwapCommonOptions::with_default_options(
-                sell_token, buy_token, protocols, in_amount,
-            ),
         }
     }
 }
@@ -225,7 +201,7 @@ pub struct SwapQuery {
     /// less attractive. Unswapped tokens will return to the from_address
     /// default: true
     pub allow_partial_fill: Option<bool>,
-    pub common: QuoteAndSwapCommonOptions,
+    pub quote: SellOrderQuoteQuery,
 }
 
 impl SwapQuery {
@@ -236,16 +212,13 @@ impl SwapQuery {
             .join(&endpoint)
             .expect("unexpectedly invalid URL segment");
         url.query_pairs_mut()
-            .append_pair(
-                "fromTokenAddress",
-                &addr2str(self.common.from_token_address),
-            )
-            .append_pair("toTokenAddress", &addr2str(self.common.to_token_address))
-            .append_pair("amount", &self.common.amount.to_string())
+            .append_pair("fromTokenAddress", &addr2str(self.quote.from_token_address))
+            .append_pair("toTokenAddress", &addr2str(self.quote.to_token_address))
+            .append_pair("amount", &self.quote.amount.to_string())
             .append_pair("fromAddress", &addr2str(self.from_address))
             .append_pair("slippage", &self.slippage.to_string());
 
-        if let Some(protocols) = self.common.protocols {
+        if let Some(protocols) = self.quote.protocols {
             url.query_pairs_mut()
                 .append_pair("protocols", &protocols.join(","));
         }
@@ -253,19 +226,19 @@ impl SwapQuery {
             url.query_pairs_mut()
                 .append_pair("disableEstimate", &disable_estimate.to_string());
         }
-        if let Some(complexity_level) = self.common.complexity_level {
+        if let Some(complexity_level) = self.quote.complexity_level {
             url.query_pairs_mut()
                 .append_pair("complexityLevel", &complexity_level.to_string());
         }
-        if let Some(gas_limit) = self.common.gas_limit {
+        if let Some(gas_limit) = self.quote.gas_limit {
             url.query_pairs_mut()
                 .append_pair("gasLimit", &gas_limit.to_string());
         }
-        if let Some(main_route_parts) = self.common.main_route_parts {
+        if let Some(main_route_parts) = self.quote.main_route_parts {
             url.query_pairs_mut()
                 .append_pair("mainRouteParts", &main_route_parts.to_string());
         }
-        if let Some(parts) = self.common.parts {
+        if let Some(parts) = self.quote.parts {
             url.query_pairs_mut()
                 .append_pair("parts", &parts.to_string());
         }
@@ -277,10 +250,10 @@ impl SwapQuery {
             url.query_pairs_mut()
                 .append_pair("referrerAddress", &addr2str(referrer_address));
         }
-        if let Some(fee) = self.common.fee {
+        if let Some(fee) = self.quote.fee {
             url.query_pairs_mut().append_pair("fee", &fee.to_string());
         }
-        if let Some(gas_price) = self.common.gas_price {
+        if let Some(gas_price) = self.quote.gas_price {
             url.query_pairs_mut()
                 .append_pair("gasPrice", &gas_price.to_string());
         }
@@ -292,11 +265,11 @@ impl SwapQuery {
             url.query_pairs_mut()
                 .append_pair("allowPartialFill", &allow_partial_fill.to_string());
         }
-        if let Some(virtual_parts) = self.common.virtual_parts {
+        if let Some(virtual_parts) = self.quote.virtual_parts {
             url.query_pairs_mut()
                 .append_pair("virtualParts", &virtual_parts.to_string());
         }
-        if let Some(connector_tokens) = self.common.connector_tokens {
+        if let Some(connector_tokens) = self.quote.connector_tokens {
             url.query_pairs_mut().append_pair(
                 "connectorTokens",
                 &connector_tokens
@@ -324,7 +297,7 @@ impl SwapQuery {
             // Disable balance/allowance checks, as the settlement contract
             // does not hold balances to traded tokens.
             disable_estimate: Some(true),
-            common: QuoteAndSwapCommonOptions::with_default_options(
+            quote: SellOrderQuoteQuery::with_default_options(
                 sell_token, buy_token, protocols, in_amount,
             ),
             dest_receiver: None,
@@ -609,7 +582,7 @@ mod tests {
             from_address: addr!("00000000219ab540356cBB839Cbe05303d7705Fa"),
             slippage: Slippage::percentage_from_basis_points(50).unwrap(),
             disable_estimate: None,
-            common: QuoteAndSwapCommonOptions {
+            quote: SellOrderQuoteQuery {
                 from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
                 to_token_address: addr!("111111111117dc0aa78b770fa6a738034120c302"),
                 amount: 1_000_000_000_000_000_000u128.into(),
@@ -648,7 +621,7 @@ mod tests {
             from_address: addr!("00000000219ab540356cBB839Cbe05303d7705Fa"),
             slippage: Slippage::percentage_from_basis_points(50).unwrap(),
             disable_estimate: Some(true),
-            common: QuoteAndSwapCommonOptions {
+            quote: SellOrderQuoteQuery {
                 from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
                 to_token_address: addr!("111111111117dc0aa78b770fa6a738034120c302"),
                 protocols: Some(vec!["WETH".to_string(), "UNISWAP_V3".to_string()]),
@@ -838,7 +811,7 @@ mod tests {
                 from_address: addr!("00000000219ab540356cBB839Cbe05303d7705Fa"),
                 slippage: Slippage::percentage_from_basis_points(50).unwrap(),
                 disable_estimate: None,
-                common: QuoteAndSwapCommonOptions::with_default_options(
+                quote: SellOrderQuoteQuery::with_default_options(
                     addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
                     addr!("111111111117dc0aa78b770fa6a738034120c302"),
                     None,
@@ -863,7 +836,7 @@ mod tests {
                 from_address: addr!("4e608b7da83f8e9213f554bdaa77c72e125529d0"),
                 slippage: Slippage::percentage_from_basis_points(50).unwrap(),
                 disable_estimate: Some(true),
-                common: QuoteAndSwapCommonOptions {
+                quote: SellOrderQuoteQuery {
                     from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
                     to_token_address: addr!("a3BeD4E1c75D00fa6f4E5E6922DB7261B5E9AcD2"),
                     protocols: Some(vec!["WETH".to_string(), "UNISWAP_V2".to_string()]),
@@ -916,20 +889,18 @@ mod tests {
     fn sell_order_quote_query_serialization() {
         let base_url = Url::parse("https://api.1inch.exchange/").unwrap();
         let url = SellOrderQuoteQuery {
-            common: QuoteAndSwapCommonOptions {
-                from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
-                to_token_address: addr!("111111111117dc0aa78b770fa6a738034120c302"),
-                amount: 1_000_000_000_000_000_000u128.into(),
-                protocols: None,
-                complexity_level: None,
-                gas_limit: None,
-                main_route_parts: None,
-                parts: None,
-                fee: None,
-                gas_price: None,
-                virtual_parts: None,
-                connector_tokens: None,
-            },
+            from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
+            to_token_address: addr!("111111111117dc0aa78b770fa6a738034120c302"),
+            amount: 1_000_000_000_000_000_000u128.into(),
+            protocols: None,
+            complexity_level: None,
+            gas_limit: None,
+            main_route_parts: None,
+            parts: None,
+            fee: None,
+            gas_price: None,
+            virtual_parts: None,
+            connector_tokens: None,
         }
         .into_url(&base_url, 1);
 
@@ -946,23 +917,21 @@ mod tests {
     fn sell_order_quote_query_serialization_optional_parameters() {
         let base_url = Url::parse("https://api.1inch.exchange/").unwrap();
         let url = SellOrderQuoteQuery {
-            common: QuoteAndSwapCommonOptions {
-                from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
-                to_token_address: addr!("111111111117dc0aa78b770fa6a738034120c302"),
-                protocols: Some(vec!["WETH".to_string(), "UNISWAP_V3".to_string()]),
-                amount: 1_000_000_000_000_000_000u128.into(),
-                fee: Some(0.5),
-                connector_tokens: Some(vec![
-                    addr!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
-                    addr!("6810e776880c02933d47db1b9fc05908e5386b96"),
-                ]),
-                virtual_parts: Some(Amount::new(42).unwrap()),
-                gas_price: Some(200_000.into()),
-                complexity_level: Some(Amount::new(2).unwrap()),
-                gas_limit: Some(Amount::new(750_000).unwrap()),
-                main_route_parts: Some(Amount::new(3).unwrap()),
-                parts: Some(Amount::new(3).unwrap()),
-            },
+            from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
+            to_token_address: addr!("111111111117dc0aa78b770fa6a738034120c302"),
+            protocols: Some(vec!["WETH".to_string(), "UNISWAP_V3".to_string()]),
+            amount: 1_000_000_000_000_000_000u128.into(),
+            fee: Some(0.5),
+            connector_tokens: Some(vec![
+                addr!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+                addr!("6810e776880c02933d47db1b9fc05908e5386b96"),
+            ]),
+            virtual_parts: Some(Amount::new(42).unwrap()),
+            gas_price: Some(200_000.into()),
+            complexity_level: Some(Amount::new(2).unwrap()),
+            gas_limit: Some(Amount::new(750_000).unwrap()),
+            main_route_parts: Some(Amount::new(3).unwrap()),
+            parts: Some(Amount::new(3).unwrap()),
         }
         .into_url(&base_url, 1);
 
@@ -1102,14 +1071,12 @@ mod tests {
     async fn oneinch_sell_order_quote() {
         let swap = OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, Client::new(), 1)
             .unwrap()
-            .get_sell_order_quote(SellOrderQuoteQuery {
-                common: QuoteAndSwapCommonOptions::with_default_options(
-                    addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
-                    addr!("111111111117dc0aa78b770fa6a738034120c302"),
-                    None,
-                    1_000_000_000_000_000_000u128.into(),
-                ),
-            })
+            .get_sell_order_quote(SellOrderQuoteQuery::with_default_options(
+                addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
+                addr!("111111111117dc0aa78b770fa6a738034120c302"),
+                None,
+                1_000_000_000_000_000_000u128.into(),
+            ))
             .await
             .unwrap();
         println!("{:#?}", swap);
@@ -1121,23 +1088,21 @@ mod tests {
         let swap = OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, Client::new(), 1)
             .unwrap()
             .get_sell_order_quote(SellOrderQuoteQuery {
-                common: QuoteAndSwapCommonOptions {
-                    from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
-                    to_token_address: addr!("111111111117dc0aa78b770fa6a738034120c302"),
-                    protocols: Some(vec!["WETH".to_string(), "UNISWAP_V3".to_string()]),
-                    amount: 1_000_000_000_000_000_000u128.into(),
-                    fee: Some(0.5),
-                    connector_tokens: Some(vec![
-                        addr!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
-                        addr!("6810e776880c02933d47db1b9fc05908e5386b96"),
-                    ]),
-                    virtual_parts: Some(Amount::new(42).unwrap()),
-                    gas_price: Some(200_000.into()),
-                    complexity_level: Some(Amount::new(3).unwrap()),
-                    gas_limit: Some(Amount::new(750_000).unwrap()),
-                    main_route_parts: Some(Amount::new(2).unwrap()),
-                    parts: Some(Amount::new(2).unwrap()),
-                },
+                from_token_address: addr!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"),
+                to_token_address: addr!("111111111117dc0aa78b770fa6a738034120c302"),
+                protocols: Some(vec!["WETH".to_string(), "UNISWAP_V3".to_string()]),
+                amount: 1_000_000_000_000_000_000u128.into(),
+                fee: Some(0.5),
+                connector_tokens: Some(vec![
+                    addr!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+                    addr!("6810e776880c02933d47db1b9fc05908e5386b96"),
+                ]),
+                virtual_parts: Some(Amount::new(42).unwrap()),
+                gas_price: Some(200_000.into()),
+                complexity_level: Some(Amount::new(3).unwrap()),
+                gas_limit: Some(Amount::new(750_000).unwrap()),
+                main_route_parts: Some(Amount::new(2).unwrap()),
+                parts: Some(Amount::new(2).unwrap()),
             })
             .await
             .unwrap();
