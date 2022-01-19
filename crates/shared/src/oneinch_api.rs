@@ -71,8 +71,11 @@ impl QuoteAndSwapCommonOptions {
             to_token_address: buy_token,
             amount,
             protocols,
+            // Use at most 2 connector tokens
             complexity_level: Some(Amount::new(2).unwrap()),
+            // Cap swap gas to 750K.
             gas_limit: Some(Amount::new(750_000).unwrap()),
+            // Use only 3 main route for cheaper trades.
             main_route_parts: Some(Amount::new(3).unwrap()),
             parts: Some(Amount::new(3).unwrap()),
         }
@@ -267,6 +270,8 @@ impl SwapQuery {
         Self {
             from_address,
             slippage,
+            // Disable balance/allowance checks, as the settlement contract
+            // does not hold balances to traded tokens.
             disable_estimate: Some(true),
             common: QuoteAndSwapCommonOptions::with_default_options(
                 sell_token, buy_token, protocols, in_amount,
