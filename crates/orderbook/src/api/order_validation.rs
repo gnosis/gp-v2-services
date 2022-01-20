@@ -383,11 +383,11 @@ impl OrderValidating for OrderValidator {
             ) if order.order_creation.signature.scheme() == SigningScheme::PreSign => {
                 // We have an exception for pre-sign orders where they do not
                 // require sufficient balance or allowance. The idea, is that
-                // this allows SC orders to place orders bundled with other
-                // transactions that either produce the required balance or set
-                // the allowance. This would, for example, allow a Gnosis Safe
-                // to bundle the pre-signature transaction with a WETH wrap and
-                // WETH approval to the vault relayer contract.
+                // this allows smart contracts to place orders bundled with
+                // other transactions that either produce the required balance
+                // or set the allowance. This would, for example, allow a Gnosis
+                // Safe to bundle the pre-signature transaction with a WETH wrap
+                // and WETH approval to the vault relayer contract.
                 Ok((order, unsubsidized_fee))
             }
             Err(err) => match err {
