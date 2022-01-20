@@ -377,9 +377,17 @@ impl OrderValidating for OrderValidator {
             .await
         {
             Ok(_) => Ok((order, unsubsidized_fee)),
-            Err(TransferSimulationError::InsufficientAllowance)
-                if order.order_creation.signature.scheme() == SigningScheme::PreSign =>
-            {
+            Err(
+                TransferSimulationError::InsufficientAllowance
+                | TransferSimulationError::InsufficientBalance,
+            ) if order.order_creation.signature.scheme() == SigningScheme::PreSign => {
+                // We have an exception for pre-sign orders where they do not
+                // require sufficient balance or allowance. The idea, is that
+                // this allows SC orders to place orders bundled with other
+                // transactions that either produce the required balance or set
+                // the allowance. This would, for example, allow a Gnosis Safe
+                // to bundle the pre-signature transaction with a WETH wrap and
+                // WETH approval to the vault relayer contract.
                 Ok((order, unsubsidized_fee))
             }
             Err(err) => match err {
@@ -823,66 +831,70 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn allows_missing_allowance_for_presign_orders() {
-        let mut fee_calculator = MockMinFeeCalculating::new();
-        let mut bad_token_detector = MockBadTokenDetecting::new();
-        let mut balance_fetcher = MockBalanceFetching::new();
-        fee_calculator
-            .expect_get_unsubsidized_min_fee()
-            .returning(|_, _, _| Ok(Default::default()));
-        bad_token_detector
-            .expect_detect()
-            .returning(|_| Ok(TokenQuality::Good));
-        balance_fetcher
-            .expect_can_transfer()
-            .returning(|_, _, _, _| Err(TransferSimulationError::InsufficientAllowance));
-        let validator = OrderValidator::new(
-            Box::new(MockCodeFetching::new()),
-            dummy_contract!(WETH9, [0xef; 20]),
-            vec![],
-            Duration::from_secs(1),
-            Arc::new(fee_calculator),
-            Arc::new(bad_token_detector),
-            Arc::new(balance_fetcher),
-        );
+    async fn allows_insufficient_allowance_and_balance_for_presign_orders() {
+        macro_rules! assert_allows_failed_transfer {
+            ($err:ident) => {
+                let mut fee_calculator = MockMinFeeCalculating::new();
+                let mut bad_token_detector = MockBadTokenDetecting::new();
+                let mut balance_fetcher = MockBalanceFetching::new();
+                fee_calculator
+                    .expect_get_unsubsidized_min_fee()
+                    .returning(|_, _, _| Ok(Default::default()));
+                bad_token_detector
+                    .expect_detect()
+                    .returning(|_| Ok(TokenQuality::Good));
+                balance_fetcher
+                    .expect_can_transfer()
+                    .returning(|_, _, _, _| Err(TransferSimulationError::$err));
+                let validator = OrderValidator::new(
+                    Box::new(MockCodeFetching::new()),
+                    dummy_contract!(WETH9, [0xef; 20]),
+                    vec![],
+                    Duration::from_secs(1),
+                    Arc::new(fee_calculator),
+                    Arc::new(bad_token_detector),
+                    Arc::new(balance_fetcher),
+                );
 
-        let order = OrderCreation {
-            valid_to: u32::MAX,
-            sell_token: H160::from_low_u64_be(1),
-            sell_amount: 1.into(),
-            buy_token: H160::from_low_u64_be(2),
-            buy_amount: 1.into(),
-            ..Default::default()
-        };
+                let order = OrderCreation {
+                    valid_to: u32::MAX,
+                    sell_token: H160::from_low_u64_be(1),
+                    sell_amount: 1.into(),
+                    buy_token: H160::from_low_u64_be(2),
+                    buy_amount: 1.into(),
+                    ..Default::default()
+                };
 
-        // In general, orders will return an insufficent allowance error if the
-        // balance fetcher says so.
-        assert!(matches!(
-            validator
-                .validate_and_construct_order(
-                    order.clone(),
-                    None,
-                    &Default::default(),
-                    Default::default()
-                )
-                .await,
-            Err(ValidationError::InsufficientAllowance)
-        ));
+                assert!(matches!(
+                    validator
+                        .validate_and_construct_order(
+                            order.clone(),
+                            None,
+                            &Default::default(),
+                            Default::default()
+                        )
+                        .await,
+                    Err(ValidationError::$err)
+                ));
 
-        // With an exception for pre-sign orders!
-        assert!(matches!(
-            validator
-                .validate_and_construct_order(
-                    OrderCreation {
-                        signature: Signature::default_with(SigningScheme::PreSign),
-                        ..order
-                    },
-                    None,
-                    &Default::default(),
-                    Default::default()
-                )
-                .await,
-            Ok(_)
-        ));
+                assert!(matches!(
+                    validator
+                        .validate_and_construct_order(
+                            OrderCreation {
+                                signature: Signature::default_with(SigningScheme::PreSign),
+                                ..order
+                            },
+                            None,
+                            &Default::default(),
+                            Default::default()
+                        )
+                        .await,
+                    Ok(_)
+                ));
+            };
+        }
+
+        assert_allows_failed_transfer!(InsufficientAllowance);
+        assert_allows_failed_transfer!(InsufficientBalance);
     }
 }
