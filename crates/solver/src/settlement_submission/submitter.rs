@@ -19,14 +19,16 @@ pub mod eden_api;
 pub mod flashbots_api;
 
 use super::{SubmissionError, ESTIMATE_GAS_LIMIT_FACTOR};
-use crate::{settlement::Settlement, settlement_simulation::settle_method_builder};
+use crate::{
+    pending_transactions::Fee, settlement::Settlement, settlement_simulation::settle_method_builder,
+};
 use anyhow::{anyhow, Context, Result};
 use contracts::GPv2Settlement;
 use ethcontract::{
-    contract::MethodBuilder, dyns::DynTransport, transaction::TransactionBuilder, Account,
+    contract::MethodBuilder, dyns::DynTransport, transaction::TransactionBuilder, Account, H160,
 };
 use futures::FutureExt;
-use gas_estimation::{EstimatedGasPrice, GasPriceEstimating};
+use gas_estimation::{EstimatedGasPrice, GasPrice1559, GasPriceEstimating};
 use primitive_types::{H256, U256};
 use shared::Web3;
 use std::time::{Duration, Instant};
@@ -43,12 +45,15 @@ pub struct SubmitterParams {
     pub deadline: Option<Instant>,
     /// Resimulate and resend transaction on every retry_interval seconds
     pub retry_interval: Duration,
+    /// Searches for mempool transaction submitted in previous submission loop
+    pub try_to_recover_gas_price: bool,
 }
 
 #[derive(Debug)]
 /// Enum used to handle all kind of messages received from implementers of trait TransactionSubmitting
 pub enum SubmitApiError {
     InvalidNonce,
+    ReplacementTransactionUnderpriced,
     OpenEthereumTooCheapToReplace, // todo ds safe to remove after dropping OE support
     Other(anyhow::Error),
 }
@@ -84,8 +89,6 @@ pub trait TransactionSubmitting: Send + Sync {
     ) -> Result<TransactionHandle, SubmitApiError>;
     /// Cancels already submitted transaction using the cancel handle
     async fn cancel_transaction(&self, id: &CancelHandle) -> Result<()>;
-    /// Marks previously submitted transaction as outdated and prevents from being mined
-    async fn mark_transaction_outdated(&self, id: &TransactionHandle) -> Result<()>;
 }
 
 /// Gas price estimator specialized for sending transactions to the network
@@ -284,6 +287,18 @@ impl<'a> Submitter<'a> {
     ) -> SubmissionError {
         let target_confirm_time = Instant::now() + params.target_confirm_time;
 
+        let pending_gas_price = if params.try_to_recover_gas_price {
+            recover_gas_price_from_pending_transaction(
+                &self.contract.raw_instance().web3(),
+                &self.account.address(),
+                nonce,
+            )
+            .await
+            .unwrap_or(None)
+        } else {
+            None
+        };
+
         loop {
             // Account for some buffer in the gas limit in case racing state changes result in slightly more heavy computation at execution time.
             let gas_limit = params.gas_estimate.to_f64_lossy() * ESTIMATE_GAS_LIMIT_FACTOR;
@@ -319,17 +334,16 @@ impl<'a> Submitter<'a> {
                 return SubmissionError::from(err);
             }
 
-            // if gas price has increased cancel old transaction so new transaction could be submitted.
-
-            if let Some((previous_tx, previous_gas_price)) = transactions.last() {
+            // if gas price has not increased enough, skip submitting the transaction.
+            if let Some(previous_gas_price) = transactions
+                .last()
+                .map(|(_, previous_gas_price)| previous_gas_price)
+                .or_else(|| pending_gas_price.as_ref())
+            {
                 let previous_gas_price = previous_gas_price.bump(1.125).ceil();
-                if gas_price.cap() > previous_gas_price.cap()
-                    && gas_price.tip() > previous_gas_price.tip()
+                if gas_price.tip() < previous_gas_price.tip()
+                    || gas_price.cap() < previous_gas_price.cap()
                 {
-                    if let Err(err) = self.submit_api.mark_transaction_outdated(previous_tx).await {
-                        tracing::warn!("cancellation failed: {:?}", err);
-                    }
-                } else {
                     tokio::time::sleep(params.retry_interval).await;
                     continue;
                 }
@@ -348,6 +362,9 @@ impl<'a> Submitter<'a> {
                 Err(err) => match err {
                     SubmitApiError::InvalidNonce => {
                         tracing::warn!("submission failed: invalid nonce")
+                    }
+                    SubmitApiError::ReplacementTransactionUnderpriced => {
+                        tracing::warn!("submission failed: replacement transaction underpriced")
                     }
                     SubmitApiError::OpenEthereumTooCheapToReplace => {
                         tracing::debug!("submission failed: OE has different replacement rules than our algorithm")
@@ -427,6 +444,42 @@ async fn find_mined_transaction(web3: &Web3, hashes: &[H256]) -> Option<Transact
     None
 }
 
+async fn recover_gas_price_from_pending_transaction(
+    web3: &Web3,
+    address: &H160,
+    nonce: U256,
+) -> Result<Option<EstimatedGasPrice>> {
+    let transactions = crate::pending_transactions::pending_transactions(web3.transport())
+        .await
+        .context("pending_transactions failed")?;
+    let transaction = match transactions
+        .iter()
+        .find(|transaction| transaction.from == *address && transaction.nonce == nonce)
+    {
+        Some(transaction) => transaction,
+        None => return Ok(None),
+    };
+    match transaction.fee {
+        Fee::Legacy { gas_price } => Ok(Some(EstimatedGasPrice {
+            legacy: gas_price.to_f64_lossy(),
+            ..Default::default()
+        })),
+        Fee::Eip1559 {
+            max_priority_fee_per_gas,
+            max_fee_per_gas,
+        } => Ok(Some(EstimatedGasPrice {
+            eip1559: Some(GasPrice1559 {
+                max_fee_per_gas: max_fee_per_gas.to_f64_lossy(),
+                max_priority_fee_per_gas: max_priority_fee_per_gas.to_f64_lossy(),
+                base_fee_per_gas: crate::pending_transactions::base_fee_per_gas(web3.transport())
+                    .await?
+                    .to_f64_lossy(),
+            }),
+            ..Default::default()
+        })),
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -494,6 +547,7 @@ mod tests {
             gas_estimate,
             deadline: Some(Instant::now() + Duration::from_secs(90)),
             retry_interval: Duration::from_secs(5),
+            try_to_recover_gas_price: false,
         };
         let result = submitter.submit(settlement, params).await;
         tracing::info!("finished with result {:?}", result);

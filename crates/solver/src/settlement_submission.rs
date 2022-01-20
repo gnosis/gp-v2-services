@@ -80,15 +80,16 @@ impl SolutionSubmitter {
                 .iter()
                 .map(|strategy| {
                     async {
-                        match &*strategy {
+                        let try_to_recover_gas_price = match &*strategy {
                             TransactionStrategy::Eden(_) | TransactionStrategy::Flashbots(_) => {
                                 if !matches!(account, Account::Offline(..)) {
                                     return Err(SubmissionError::from(anyhow!(
                                         "Submission to private network requires offline account for signing"
                                     )));
                                 }
+                                false
                             }
-                            TransactionStrategy::CustomNodes(_) => {}
+                            TransactionStrategy::CustomNodes(_) => true,
                             TransactionStrategy::DryRun => unreachable!(),
                         };
 
@@ -98,6 +99,7 @@ impl SolutionSubmitter {
                             gas_estimate,
                             deadline: Some(Instant::now() + self.max_confirm_time),
                             retry_interval: self.retry_interval,
+                            try_to_recover_gas_price,
                         };
                         let gas_price_estimator = SubmitterGasPriceEstimator {
                             inner: self.gas_price_estimator.as_ref(),

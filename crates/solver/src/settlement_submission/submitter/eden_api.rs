@@ -44,8 +44,4 @@ impl TransactionSubmitting for EdenApi {
             Err(err) => Err(anyhow!("{:?}", err)),
         }
     }
-
-    async fn mark_transaction_outdated(&self, _id: &TransactionHandle) -> Result<()> {
-        Ok(())
-    }
 }

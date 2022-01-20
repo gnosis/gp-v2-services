@@ -33,8 +33,4 @@ impl TransactionSubmitting for FlashbotsApi {
     async fn cancel_transaction(&self, _id: &CancelHandle) -> Result<()> {
         Ok(())
     }
-
-    async fn mark_transaction_outdated(&self, _id: &TransactionHandle) -> Result<()> {
-        Ok(())
-    }
 }
