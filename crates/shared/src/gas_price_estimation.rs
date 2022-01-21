@@ -73,8 +73,9 @@ pub async fn create_priority_estimator(
                 } else {
                     http::header::HeaderMap::new()
                 };
-                if let Ok(estimator) = BlockNative::new(client.clone(), headers).await {
-                    estimators.push(Box::new(estimator))
+                match BlockNative::new(client.clone(), headers).await {
+                    Ok(estimator) => estimators.push(Box::new(estimator)),
+                    Err(err) => tracing::error!("blocknative failed: {}", err),
                 }
             }
             GasEstimatorType::EthGasStation => {
@@ -93,9 +94,9 @@ pub async fn create_priority_estimator(
             )),
             GasEstimatorType::Web3 => estimators.push(Box::new(web3.clone())),
             GasEstimatorType::Native => {
-                if let Ok(estimator) = NativeGasEstimator::new(web3.transport().clone(), None).await
-                {
-                    estimators.push(Box::new(estimator))
+                match NativeGasEstimator::new(web3.transport().clone(), None).await {
+                    Ok(estimator) => estimators.push(Box::new(estimator)),
+                    Err(err) => tracing::error!("nativegasestimator failed: {}", err),
                 }
             }
         }
