@@ -88,7 +88,7 @@ impl SolutionSubmitter {
                                     )));
                                 }
                             }
-                            TransactionStrategy::CustomNodes(_) => {},
+                            TransactionStrategy::CustomNodes(_) => {}
                             TransactionStrategy::DryRun => unreachable!(),
                         };
 
