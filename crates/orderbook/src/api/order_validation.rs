@@ -434,7 +434,9 @@ mod tests {
     use super::*;
     use crate::{account_balances::MockBalanceFetching, fee::MockMinFeeCalculating};
     use anyhow::anyhow;
-    use model::{order::OrderCreation, signature::Signature};
+    use ethcontract::web3::signing::SecretKeyRef;
+    use model::{order::OrderBuilder, signature::EcdsaSigningScheme};
+    use secp256k1::key::ONE_KEY;
     use shared::{
         bad_token::{MockBadTokenDetecting, TokenQuality},
         dummy_contract,
@@ -856,34 +858,42 @@ mod tests {
                     Arc::new(balance_fetcher),
                 );
 
-                let order = OrderCreation {
-                    valid_to: u32::MAX,
-                    sell_token: H160::from_low_u64_be(1),
-                    sell_amount: 1.into(),
-                    buy_token: H160::from_low_u64_be(2),
-                    buy_amount: 1.into(),
-                    ..Default::default()
-                };
+                let order = OrderBuilder::default()
+                    .with_valid_to(u32::MAX)
+                    .with_sell_token(H160::from_low_u64_be(1))
+                    .with_sell_amount(1.into())
+                    .with_buy_token(H160::from_low_u64_be(2))
+                    .with_buy_amount(1.into());
+
+                for signing_scheme in [EcdsaSigningScheme::Eip712, EcdsaSigningScheme::EthSign] {
+                    assert!(matches!(
+                        validator
+                            .validate_and_construct_order(
+                                order
+                                    .clone()
+                                    .sign_with(
+                                        signing_scheme,
+                                        &Default::default(),
+                                        SecretKeyRef::new(&ONE_KEY)
+                                    )
+                                    .build()
+                                    .order_creation,
+                                None,
+                                &Default::default(),
+                                Default::default()
+                            )
+                            .await,
+                        Err(ValidationError::$err)
+                    ));
+                }
 
                 assert!(matches!(
                     validator
                         .validate_and_construct_order(
-                            order.clone(),
-                            None,
-                            &Default::default(),
-                            Default::default()
-                        )
-                        .await,
-                    Err(ValidationError::$err)
-                ));
-
-                assert!(matches!(
-                    validator
-                        .validate_and_construct_order(
-                            OrderCreation {
-                                signature: Signature::default_with(SigningScheme::PreSign),
-                                ..order
-                            },
+                            order
+                                .with_presign(Default::default())
+                                .build()
+                                .order_creation,
                             None,
                             &Default::default(),
                             Default::default()
