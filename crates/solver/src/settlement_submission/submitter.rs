@@ -43,8 +43,6 @@ pub struct SubmitterParams {
     pub deadline: Option<Instant>,
     /// Resimulate and resend transaction on every retry_interval seconds
     pub retry_interval: Duration,
-    /// Searches for mempool transaction submitted in previous submission loop
-    pub try_to_recover_gas_price: bool,
 }
 
 #[derive(Debug)]
@@ -515,7 +513,6 @@ mod tests {
             gas_estimate,
             deadline: Some(Instant::now() + Duration::from_secs(90)),
             retry_interval: Duration::from_secs(5),
-            try_to_recover_gas_price: false,
         };
         let result = submitter.submit(settlement, params).await;
         tracing::info!("finished with result {:?}", result);
