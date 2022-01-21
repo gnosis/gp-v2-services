@@ -19,16 +19,14 @@ pub mod eden_api;
 pub mod flashbots_api;
 
 use super::{SubmissionError, ESTIMATE_GAS_LIMIT_FACTOR};
-use crate::{
-    pending_transactions::Fee, settlement::Settlement, settlement_simulation::settle_method_builder,
-};
+use crate::{settlement::Settlement, settlement_simulation::settle_method_builder};
 use anyhow::{anyhow, Context, Result};
 use contracts::GPv2Settlement;
 use ethcontract::{
     contract::MethodBuilder, dyns::DynTransport, transaction::TransactionBuilder, Account, H160,
 };
 use futures::FutureExt;
-use gas_estimation::{EstimatedGasPrice, GasPrice1559, GasPriceEstimating};
+use gas_estimation::{EstimatedGasPrice, GasPriceEstimating};
 use primitive_types::{H256, U256};
 use shared::Web3;
 use std::time::{Duration, Instant};
@@ -89,6 +87,13 @@ pub trait TransactionSubmitting: Send + Sync {
     ) -> Result<TransactionHandle, SubmitApiError>;
     /// Cancels already submitted transaction using the cancel handle
     async fn cancel_transaction(&self, id: &CancelHandle) -> Result<()>;
+    /// Try to find submitted transaction from previous submission loop (in this case we don't have a TransactionHandle)
+    async fn recover_pending_transaction(
+        &self,
+        web3: &Web3,
+        address: &H160,
+        nonce: U256,
+    ) -> Result<Option<EstimatedGasPrice>>;
 }
 
 /// Gas price estimator specialized for sending transactions to the network
@@ -287,17 +292,16 @@ impl<'a> Submitter<'a> {
     ) -> SubmissionError {
         let target_confirm_time = Instant::now() + params.target_confirm_time;
 
-        let pending_gas_price = if params.try_to_recover_gas_price {
-            recover_gas_price_from_pending_transaction(
+        // Try to find submitted transaction from previous submission loop (with the same address and nonce)
+        let pending_gas_price = self
+            .submit_api
+            .recover_pending_transaction(
                 &self.contract.raw_instance().web3(),
                 &self.account.address(),
                 nonce,
             )
             .await
-            .unwrap_or(None)
-        } else {
-            None
-        };
+            .unwrap_or(None);
 
         loop {
             // Account for some buffer in the gas limit in case racing state changes result in slightly more heavy computation at execution time.
@@ -442,42 +446,6 @@ async fn find_mined_transaction(web3: &Web3, hashes: &[H256]) -> Option<Transact
         }
     }
     None
-}
-
-async fn recover_gas_price_from_pending_transaction(
-    web3: &Web3,
-    address: &H160,
-    nonce: U256,
-) -> Result<Option<EstimatedGasPrice>> {
-    let transactions = crate::pending_transactions::pending_transactions(web3.transport())
-        .await
-        .context("pending_transactions failed")?;
-    let transaction = match transactions
-        .iter()
-        .find(|transaction| transaction.from == *address && transaction.nonce == nonce)
-    {
-        Some(transaction) => transaction,
-        None => return Ok(None),
-    };
-    match transaction.fee {
-        Fee::Legacy { gas_price } => Ok(Some(EstimatedGasPrice {
-            legacy: gas_price.to_f64_lossy(),
-            ..Default::default()
-        })),
-        Fee::Eip1559 {
-            max_priority_fee_per_gas,
-            max_fee_per_gas,
-        } => Ok(Some(EstimatedGasPrice {
-            eip1559: Some(GasPrice1559 {
-                max_fee_per_gas: max_fee_per_gas.to_f64_lossy(),
-                max_priority_fee_per_gas: max_priority_fee_per_gas.to_f64_lossy(),
-                base_fee_per_gas: crate::pending_transactions::base_fee_per_gas(web3.transport())
-                    .await?
-                    .to_f64_lossy(),
-            }),
-            ..Default::default()
-        })),
-    }
 }
 
 #[cfg(test)]
