@@ -62,7 +62,7 @@ impl PriceEstimating for CompetitionPriceEstimator {
                             .queries_won
                             .with_label_values(&[
                                 winning_estimate.estimator_name,
-                                winning_estimate.kind_label(),
+                                winning_estimate.kind.label(),
                             ])
                             .inc();
                         winning_estimate.estimate
@@ -78,16 +78,6 @@ struct EstimateData<'a> {
     estimator_name: &'a str,
     estimate: Estimate,
     sell_over_buy: BigRational,
-}
-
-impl EstimateData<'_> {
-    /// Returns a label for the estimate's query kind.
-    pub fn kind_label(&self) -> &'static str {
-        match self.kind {
-            OrderKind::Buy => "buy",
-            OrderKind::Sell => "sell",
-        }
-    }
 }
 
 fn fold_price_estimation_result<'a>(
