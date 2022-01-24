@@ -139,6 +139,8 @@ pub enum SubmissionError {
     Revert(Option<String>),
     /// The settlement submission timed out.
     Timeout,
+    /// Canceled after revert or timeout
+    Canceled,
     /// An error occured.
     Other(anyhow::Error),
 }
@@ -149,6 +151,7 @@ impl SubmissionError {
         match self {
             Self::Timeout => SettlementSubmissionOutcome::Timeout,
             Self::Revert(_) => SettlementSubmissionOutcome::Revert,
+            Self::Canceled => SettlementSubmissionOutcome::Cancel,
             Self::Other(_) => SettlementSubmissionOutcome::Failure,
         }
     }
@@ -163,6 +166,9 @@ impl SubmissionError {
             SubmissionError::Timeout => anyhow!("transaction did not get mined in time"),
             SubmissionError::Revert(Some(message)) => {
                 anyhow!("transaction reverted with message {}", message)
+            }
+            SubmissionError::Canceled => {
+                anyhow!("transaction cancelled after revert or timeout")
             }
             SubmissionError::Revert(None) => anyhow!("transaction reverted"),
             SubmissionError::Other(err) => err,
