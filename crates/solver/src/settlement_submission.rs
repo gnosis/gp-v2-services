@@ -135,6 +135,8 @@ impl SolutionSubmitter {
 /// An error during settlement submission.
 #[derive(Debug)]
 pub enum SubmissionError {
+    /// Transaction successfully mined but with fail status
+    MinedFailed,
     /// The transaction reverted.
     Revert(Option<String>),
     /// The settlement submission timed out.
@@ -149,6 +151,7 @@ impl SubmissionError {
     /// Returns the outcome for use with metrics.
     pub fn as_outcome(&self) -> SettlementSubmissionOutcome {
         match self {
+            Self::MinedFailed => SettlementSubmissionOutcome::MinedFailed,
             Self::Timeout => SettlementSubmissionOutcome::Timeout,
             Self::Revert(_) => SettlementSubmissionOutcome::Revert,
             Self::Canceled => SettlementSubmissionOutcome::Cancel,
@@ -163,6 +166,7 @@ impl SubmissionError {
     /// `impl<T: Display> From<T> for anyhow::Error`.
     pub fn into_anyhow(self) -> anyhow::Error {
         match self {
+            SubmissionError::MinedFailed => anyhow!("transaction mined as failed"),
             SubmissionError::Timeout => anyhow!("transaction did not get mined in time"),
             SubmissionError::Revert(Some(message)) => {
                 anyhow!("transaction reverted with message {}", message)

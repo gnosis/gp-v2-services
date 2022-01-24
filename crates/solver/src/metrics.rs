@@ -41,6 +41,8 @@ pub enum SolverRunOutcome {
 pub enum SettlementSubmissionOutcome {
     /// A settlement transaction was mined and included on the blockchain.
     Success,
+    /// A settlement transaction was mined and included on the blockchain with a failed status.
+    MinedFailed,
     /// A transaction reverted.
     Revert,
     /// Submission timed-out while waiting for the transaction to get mined.
@@ -324,6 +326,7 @@ impl SolverMetrics for Metrics {
             SettlementSubmissionOutcome::Timeout => "timeout",
             SettlementSubmissionOutcome::Cancel => "cancel",
             SettlementSubmissionOutcome::Failure => "failure",
+            SettlementSubmissionOutcome::MinedFailed => "minedfailed",
         };
         self.settlement_submissions
             .with_label_values(&[result, solver])
