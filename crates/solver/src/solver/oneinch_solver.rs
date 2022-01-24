@@ -295,7 +295,7 @@ mod tests {
             .expect_get_approval()
             .returning(|_, _, _| Ok(Approval::AllowanceSufficient));
 
-        client.expect_get_protocols().returning(|| {
+        client.expect_get_liquidity_sources().returning(|| {
             Ok(Protocols {
                 protocols: vec!["GoodProtocol".into(), "BadProtocol".into()],
             })
