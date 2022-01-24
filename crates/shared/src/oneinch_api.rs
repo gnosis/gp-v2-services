@@ -171,7 +171,7 @@ pub struct SellOrderQuote {
     pub from_token_amount: U256,
     #[serde(with = "u256_decimal")]
     pub to_token_amount: U256,
-    pub protocols: Vec<Vec<Vec<Protocol>>>,
+    pub protocols: Vec<Vec<Vec<ProtocolRouteSegment>>>,
     pub estimated_gas: u64,
 }
 
@@ -332,7 +332,7 @@ pub struct Swap {
     pub from_token_amount: U256,
     #[serde(with = "u256_decimal")]
     pub to_token_amount: U256,
-    pub protocols: Vec<Vec<Vec<Protocol>>>,
+    pub protocols: Vec<Vec<Vec<ProtocolRouteSegment>>>,
     pub tx: Transaction,
 }
 
@@ -348,7 +348,7 @@ pub struct Token {
 /// Metadata associated with a protocol used for part of a 1Inch swap.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct Protocol {
+pub struct ProtocolRouteSegment {
     pub name: String,
     pub part: f64,
     pub from_token_address: H160,
@@ -392,11 +392,11 @@ pub struct Spender {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-pub struct LiquidiySource {
+pub struct ProtocolInfo {
     pub id: String,
 }
 
-impl From<&str> for LiquidiySource {
+impl From<&str> for ProtocolInfo {
     fn from(id: &str) -> Self {
         Self { id: id.to_string() }
     }
@@ -405,7 +405,7 @@ impl From<&str> for LiquidiySource {
 /// Protocols query response.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct Protocols {
-    pub protocols: Vec<LiquidiySource>,
+    pub protocols: Vec<ProtocolInfo>,
 }
 
 // Mockable version of API Client
@@ -425,7 +425,7 @@ pub trait OneInchClient: Send + Sync {
     async fn get_spender(&self) -> Result<Spender>;
 
     /// Retrieves a list of the on-chain protocols supported by 1Inch.
-    async fn get_protocols(&self) -> Result<Protocols>;
+    async fn get_liquidity_sources(&self) -> Result<Protocols>;
 }
 
 /// 1Inch API Client implementation.
@@ -479,7 +479,7 @@ impl OneInchClient for OneInchClientImpl {
         logged_query(&self.client, url).await
     }
 
-    async fn get_protocols(&self) -> Result<Protocols> {
+    async fn get_liquidity_sources(&self) -> Result<Protocols> {
         let endpoint = format!("v4.1/{}/liquidity-sources", self.chain_id);
         let url = self
             .base_url
@@ -500,7 +500,7 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct ProtocolCache(Arc<Mutex<TimedCache<(), Vec<LiquidiySource>>>>);
+pub struct ProtocolCache(Arc<Mutex<TimedCache<(), Vec<ProtocolInfo>>>>);
 
 impl ProtocolCache {
     pub fn new(cache_validity_in_seconds: Duration) -> Self {
@@ -510,12 +510,12 @@ impl ProtocolCache {
         ))))
     }
 
-    pub async fn get_all_protocols(&self, api: &dyn OneInchClient) -> Result<Vec<LiquidiySource>> {
+    pub async fn get_all_protocols(&self, api: &dyn OneInchClient) -> Result<Vec<ProtocolInfo>> {
         if let Some(cached) = self.0.lock().unwrap().cache_get(&()) {
             return Ok(cached.clone());
         }
 
-        let all_protocols = api.get_protocols().await?.protocols;
+        let all_protocols = api.get_liquidity_sources().await?.protocols;
         // In the mean time the cache could have already been populated with new protocols,
         // which we would now overwrite. This is fine.
         self.0.lock().unwrap().cache_set((), all_protocols.clone());
@@ -739,13 +739,13 @@ mod tests {
                 from_token_amount: 1_000_000_000_000_000_000u128.into(),
                 to_token_amount: 501_739_725_821_378_713_485u128.into(),
                 protocols: vec![vec![
-                    vec![Protocol {
+                    vec![ProtocolRouteSegment {
                         name: "WETH".to_owned(),
                         part: 100.,
                         from_token_address: addr!("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"),
                         to_token_address: testlib::tokens::WETH,
                     }],
-                    vec![Protocol {
+                    vec![ProtocolRouteSegment {
                         name: "UNISWAP_V2".to_owned(),
                         part: 100.,
                         from_token_address: addr!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
@@ -870,10 +870,10 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
-    async fn oneinch_protocols() {
+    async fn oneinch_liquidity_sources() {
         let protocols = OneInchClientImpl::new(OneInchClientImpl::DEFAULT_URL, Client::new(), 1)
             .unwrap()
-            .get_protocols()
+            .get_liquidity_sources()
             .await
             .unwrap();
         println!("{:#?}", protocols);
@@ -1025,25 +1025,25 @@ mod tests {
                 from_token_amount: 10_000_000_000_000_000u128.into(),
                 to_token_amount: 8_387_323_826_205_172u128.into(),
                 protocols: vec![vec![vec![
-                    Protocol {
+                    ProtocolRouteSegment {
                         name: "CURVE_V2_EURT_2_ASSET".to_owned(),
                         part: 20.,
                         from_token_address: addr!("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
                         to_token_address: addr!("dac17f958d2ee523a2206206994597c13d831ec7"),
                     },
-                    Protocol {
+                    ProtocolRouteSegment {
                         name: "CURVE_V2_XAUT_2_ASSET".to_owned(),
                         part: 20.,
                         from_token_address: addr!("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
                         to_token_address: addr!("dac17f958d2ee523a2206206994597c13d831ec7"),
                     },
-                    Protocol {
+                    ProtocolRouteSegment {
                         name: "CURVE".to_owned(),
                         part: 20.,
                         from_token_address: addr!("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
                         to_token_address: addr!("dac17f958d2ee523a2206206994597c13d831ec7"),
                     },
-                    Protocol {
+                    ProtocolRouteSegment {
                         name: "SHELL".to_owned(),
                         part: 40.,
                         from_token_address: addr!("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
@@ -1117,7 +1117,7 @@ mod tests {
     #[tokio::test]
     async fn allowing_all_protocols_will_not_use_api() {
         let mut api = MockOneInchClient::new();
-        api.expect_get_protocols().times(0);
+        api.expect_get_liquidity_sources().times(0);
         let allowed_protocols = ProtocolCache::default()
             .get_allowed_protocols(&Vec::default(), &api)
             .await;
@@ -1128,7 +1128,7 @@ mod tests {
     async fn allowed_protocols_get_cached() {
         let mut api = MockOneInchClient::new();
         // only 1 API call when calling get_allowed_protocols 2 times
-        api.expect_get_protocols().times(1).returning(|| {
+        api.expect_get_liquidity_sources().times(1).returning(|| {
             Ok(Protocols {
                 protocols: vec!["PMM1".into(), "UNISWAP_V3".into()],
             })
