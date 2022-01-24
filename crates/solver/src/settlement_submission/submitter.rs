@@ -433,7 +433,7 @@ fn status(receipt: TransactionReceipt) -> Result<TransactionReceipt, SubmissionE
     if let Some(status) = receipt.status {
         if status == U64::zero() {
             // failing transaction
-            return Err(SubmissionError::MinedFailed);
+            return Err(SubmissionError::Revert);
         } else if status == U64::one() && receipt.from == receipt.to.unwrap_or_default() {
             // noop transaction
             return Err(SubmissionError::Canceled);

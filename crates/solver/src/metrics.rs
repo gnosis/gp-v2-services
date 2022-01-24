@@ -41,18 +41,14 @@ pub enum SolverRunOutcome {
 pub enum SettlementSubmissionOutcome {
     /// A settlement transaction was mined and included on the blockchain.
     Success,
-    /// A settlement transaction was mined and included on the blockchain with a failed status.
-    MinedFailed,
-    /// A transaction reverted.
+    /// A settlement transaction was mined and included on the blockchain but reverted.
     Revert,
+    /// A transaction reverted in the simulation stage.
+    SimulationRevert,
     /// Submission timed-out while waiting for the transaction to get mined.
     Timeout,
-    /// Transaction sucessfully cancelled after revert or timeout
+    /// Transaction sucessfully cancelled after simulation revert or timeout
     Cancel,
-    /// A transaction failed to be submitted or, in the case of private network
-    /// submission, the blockchain state changed and the transaction is no
-    /// longer valid.
-    Failure,
 }
 
 pub trait SolverMetrics: Send + Sync {
@@ -325,8 +321,7 @@ impl SolverMetrics for Metrics {
             SettlementSubmissionOutcome::Revert => "revert",
             SettlementSubmissionOutcome::Timeout => "timeout",
             SettlementSubmissionOutcome::Cancel => "cancel",
-            SettlementSubmissionOutcome::Failure => "failure",
-            SettlementSubmissionOutcome::MinedFailed => "minedfailed",
+            SettlementSubmissionOutcome::SimulationRevert => "simulationrevert",
         };
         self.settlement_submissions
             .with_label_values(&[result, solver])
