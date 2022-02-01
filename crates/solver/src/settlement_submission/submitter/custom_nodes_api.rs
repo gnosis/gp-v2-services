@@ -2,7 +2,7 @@ use crate::pending_transactions::Fee;
 
 use super::{
     super::submitter::{SubmitApiError, TransactionHandle, TransactionSubmitting},
-    CancelHandle,
+    CancelHandle, SubmissionLoopStatus,
 };
 use anyhow::{Context, Result};
 use ethcontract::{
@@ -117,5 +117,9 @@ impl TransactionSubmitting for CustomNodesApi {
                 ..Default::default()
             })),
         }
+    }
+
+    fn submission_status(&self, _gas_price: &EstimatedGasPrice) -> SubmissionLoopStatus {
+        SubmissionLoopStatus::Enabled
     }
 }

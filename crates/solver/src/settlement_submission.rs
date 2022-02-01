@@ -16,7 +16,9 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use submitter::{Submitter, SubmitterGasPriceEstimator, SubmitterParams, TransactionSubmitting};
+use submitter::{
+    DisabledReason, Submitter, SubmitterGasPriceEstimator, SubmitterParams, TransactionSubmitting,
+};
 use web3::types::TransactionReceipt;
 
 const ESTIMATE_GAS_LIMIT_FACTOR: f64 = 1.2;
@@ -88,7 +90,11 @@ impl SolutionSubmitter {
                                     )));
                                 }
                             }
-                            TransactionStrategy::CustomNodes(_) => {}
+                            TransactionStrategy::CustomNodes(_) => {
+                                if settlement.mev_extractable() {
+                                    return Err(SubmissionError::Disabled(DisabledReason::CustomNodesDisabledMevExtractable));
+                                }
+                            }
                             TransactionStrategy::DryRun => unreachable!(),
                         };
 
@@ -143,6 +149,8 @@ pub enum SubmissionError {
     Timeout,
     /// Canceled after revert or timeout
     Canceled,
+    /// The submission is disabled
+    Disabled(DisabledReason),
     /// An error occured.
     Other(anyhow::Error),
 }
@@ -155,6 +163,7 @@ impl SubmissionError {
             Self::Timeout => SettlementSubmissionOutcome::Timeout,
             Self::Revert => SettlementSubmissionOutcome::Revert,
             Self::Canceled => SettlementSubmissionOutcome::Cancel,
+            Self::Disabled(_) => SettlementSubmissionOutcome::Disabled,
             Self::Other(_) => SettlementSubmissionOutcome::SimulationRevert,
         }
     }
@@ -175,6 +184,9 @@ impl SubmissionError {
                 anyhow!("transaction cancelled after revert or timeout")
             }
             SubmissionError::SimulationRevert(None) => anyhow!("transaction simulation reverted"),
+            SubmissionError::Disabled(reason) => {
+                anyhow!("transaction disabled, reason: {:?}", reason)
+            }
             SubmissionError::Other(err) => err,
         }
     }
@@ -186,6 +198,7 @@ impl SubmissionError {
             SubmissionError::Timeout => false,
             SubmissionError::Canceled => true,
             SubmissionError::Other(_) => false,
+            SubmissionError::Disabled(_) => false,
         }
     }
 }

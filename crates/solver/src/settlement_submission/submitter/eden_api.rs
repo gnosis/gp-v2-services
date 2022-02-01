@@ -2,7 +2,7 @@
 
 use super::{
     super::submitter::{SubmitApiError, TransactionHandle, TransactionSubmitting},
-    CancelHandle,
+    CancelHandle, DisabledReason, SubmissionLoopStatus,
 };
 use anyhow::{Context, Result};
 use ethcontract::{dyns::DynTransport, transaction::TransactionBuilder, H160, U256};
@@ -53,5 +53,14 @@ impl TransactionSubmitting for EdenApi {
         _nonce: U256,
     ) -> Result<Option<EstimatedGasPrice>> {
         Ok(None)
+    }
+
+    fn submission_status(&self, gas_price: &EstimatedGasPrice) -> SubmissionLoopStatus {
+        if gas_price.effective_gas_price() < 500. {
+            //500 as argument?
+            SubmissionLoopStatus::Enabled
+        } else {
+            SubmissionLoopStatus::Disabled(DisabledReason::EdenDisabledNetworkCongested)
+        }
     }
 }
