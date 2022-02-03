@@ -1,8 +1,10 @@
 //! https://docs.edennetwork.io/for-traders/getting-started
 
+use crate::settlement::Settlement;
+
 use super::{
     super::submitter::{SubmitApiError, TransactionHandle, TransactionSubmitting},
-    CancelHandle, DisabledReason, SubmissionLoopStatus,
+    CancelHandle, SubmissionLoopStatus,
 };
 use anyhow::{Context, Result};
 use ethcontract::{dyns::DynTransport, transaction::TransactionBuilder, H160, U256};
@@ -55,12 +57,7 @@ impl TransactionSubmitting for EdenApi {
         Ok(None)
     }
 
-    fn submission_status(&self, gas_price: &EstimatedGasPrice) -> SubmissionLoopStatus {
-        if gas_price.effective_gas_price() < 500. {
-            //500 as argument?
-            SubmissionLoopStatus::Enabled
-        } else {
-            SubmissionLoopStatus::Disabled(DisabledReason::EdenDisabledNetworkCongested)
-        }
+    fn submission_status(&self, _settlement: &Settlement) -> SubmissionLoopStatus {
+        SubmissionLoopStatus::Enabled
     }
 }

@@ -68,7 +68,6 @@ pub enum SubmissionLoopStatus {
 
 #[derive(Debug)]
 pub enum DisabledReason {
-    EdenDisabledNetworkCongested,
     CustomNodesDisabledMevExtractable,
 }
 
@@ -108,7 +107,7 @@ pub trait TransactionSubmitting: Send + Sync {
         nonce: U256,
     ) -> Result<Option<EstimatedGasPrice>>;
     /// Checks if transaction submitting is enabled at the moment
-    fn submission_status(&self, gas_price: &EstimatedGasPrice) -> SubmissionLoopStatus;
+    fn submission_status(&self, settlement: &Settlement) -> SubmissionLoopStatus;
 }
 
 /// Gas price estimator specialized for sending transactions to the network
@@ -342,7 +341,7 @@ impl<'a> Submitter<'a> {
             // before submitting, check if the currently executing strategy is temporarily disabled
 
             if let SubmissionLoopStatus::Disabled(reason) =
-                self.submit_api.submission_status(&gas_price)
+                self.submit_api.submission_status(&settlement)
             {
                 tracing::debug!("strategy temporarily disabled, reason: {:?}", reason);
                 tokio::time::sleep(params.retry_interval).await;

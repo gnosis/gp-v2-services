@@ -257,9 +257,9 @@ impl Settlement {
         Ok(Self { encoder: merged })
     }
 
-    // Move to a separate struct to enable caching the result?
-    pub fn mev_extractable(&self) -> bool {
-        todo!()
+    // Checks if the settlement is safe from MEV extraction
+    pub fn mev_safe(&self) -> bool {
+        false
     }
 }
 

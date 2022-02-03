@@ -1,8 +1,8 @@
-use crate::pending_transactions::Fee;
+use crate::{pending_transactions::Fee, settlement::Settlement};
 
 use super::{
     super::submitter::{SubmitApiError, TransactionHandle, TransactionSubmitting},
-    CancelHandle, SubmissionLoopStatus,
+    CancelHandle, DisabledReason, SubmissionLoopStatus,
 };
 use anyhow::{Context, Result};
 use ethcontract::{
@@ -119,7 +119,13 @@ impl TransactionSubmitting for CustomNodesApi {
         }
     }
 
-    fn submission_status(&self, _gas_price: &EstimatedGasPrice) -> SubmissionLoopStatus {
+    fn submission_status(&self, settlement: &Settlement) -> SubmissionLoopStatus {
+        if !settlement.mev_safe() {
+            return SubmissionLoopStatus::Disabled(
+                DisabledReason::CustomNodesDisabledMevExtractable,
+            );
+        }
+
         SubmissionLoopStatus::Enabled
     }
 }

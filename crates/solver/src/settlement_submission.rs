@@ -90,11 +90,7 @@ impl SolutionSubmitter {
                                     )));
                                 }
                             }
-                            TransactionStrategy::CustomNodes(_) => {
-                                if settlement.mev_extractable() {
-                                    return Err(SubmissionError::Disabled(DisabledReason::CustomNodesDisabledMevExtractable));
-                                }
-                            }
+                            TransactionStrategy::CustomNodes(_) => {}
                             TransactionStrategy::DryRun => unreachable!(),
                         };
 

@@ -1,3 +1,5 @@
+use crate::settlement::Settlement;
+
 use super::{
     super::submitter::{SubmitApiError, TransactionHandle, TransactionSubmitting},
     CancelHandle, SubmissionLoopStatus,
@@ -48,7 +50,7 @@ impl TransactionSubmitting for FlashbotsApi {
         Ok(None)
     }
 
-    fn submission_status(&self, _gas_price: &EstimatedGasPrice) -> SubmissionLoopStatus {
+    fn submission_status(&self, _settlement: &Settlement) -> SubmissionLoopStatus {
         SubmissionLoopStatus::Enabled
     }
 }
