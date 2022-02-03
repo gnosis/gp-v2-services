@@ -133,6 +133,24 @@ pub async fn ensure_token_supported(
     }
 }
 
+#[mockall::automock]
+#[async_trait::async_trait]
+pub trait NativePriceEstimating: Send + Sync {
+    async fn estimate_native_price(&self, token: &H160) -> Result<f64, PriceEstimationError> {
+        self.estimate_native_prices(std::slice::from_ref(token))
+            .await
+            .into_iter()
+            .next()
+            .unwrap()
+    }
+
+    /// Returns one result for each query.
+    async fn estimate_native_prices(
+        &self,
+        tokens: &[H160],
+    ) -> Vec<Result<f64, PriceEstimationError>>;
+}
+
 pub fn amounts_to_price(sell_amount: U256, buy_amount: U256) -> Option<BigRational> {
     if buy_amount.is_zero() {
         return None;
