@@ -53,3 +53,60 @@ impl NativePriceEstimating for NativePriceEstimator {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::price_estimation::{Estimate, MockPriceEstimating};
+    use futures::FutureExt;
+    use primitive_types::H160;
+
+    #[test]
+    fn prices_dont_get_modified() {
+        let mut inner = MockPriceEstimating::new();
+        inner.expect_estimates().times(1).returning(|queries| {
+            assert!(queries.len() == 1);
+            assert!(queries[0].buy_token.to_low_u64_be() == 7);
+            assert!(queries[0].sell_token.to_low_u64_be() == 3);
+            vec![Ok(Estimate {
+                out_amount: 123_456_789_000_000_000u128.into(),
+                gas: 0.into(),
+            })]
+        });
+
+        let native_price_estimator = NativePriceEstimator {
+            inner: Arc::new(inner),
+            native_token: H160::from_low_u64_be(7),
+            price_estimation_amount: U256::exp10(18),
+        };
+
+        let price = native_price_estimator
+            .estimate_native_price(&H160::from_low_u64_be(3))
+            .now_or_never()
+            .unwrap()
+            .unwrap();
+        assert_eq!(price, 0.123456789);
+    }
+
+    #[test]
+    fn errors_get_propagated() {
+        let mut inner = MockPriceEstimating::new();
+        inner.expect_estimates().times(1).returning(|queries| {
+            assert!(queries.len() == 1);
+            assert!(queries[0].buy_token.to_low_u64_be() == 7);
+            assert!(queries[0].sell_token.to_low_u64_be() == 2);
+            vec![Err(PriceEstimationError::NoLiquidity)]
+        });
+
+        let native_price_estimator = NativePriceEstimator {
+            inner: Arc::new(inner),
+            native_token: H160::from_low_u64_be(7),
+            price_estimation_amount: U256::exp10(18),
+        };
+
+        let price = native_price_estimator
+            .estimate_native_price(&H160::from_low_u64_be(2))
+            .now_or_never()
+            .unwrap();
+        assert!(matches!(price, Err(PriceEstimationError::NoLiquidity)));
+    }
+}
