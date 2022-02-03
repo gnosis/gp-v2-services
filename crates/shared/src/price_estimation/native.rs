@@ -1,7 +1,29 @@
-use super::{NativePriceEstimating, PriceEstimating, PriceEstimationError, Query};
+use super::{PriceEstimating, PriceEstimationError, Query};
 use model::order::OrderKind;
 use primitive_types::{H160, U256};
 use std::sync::Arc;
+
+#[mockall::automock]
+#[async_trait::async_trait]
+pub trait NativePriceEstimating: Send + Sync {
+    /// The resulting price is how many units of token needs to be sold for one unit of
+    /// the chain's native token (sell_amount / buy_amount).
+    async fn estimate_native_price(&self, token: &H160) -> Result<f64, PriceEstimationError> {
+        self.estimate_native_prices(std::slice::from_ref(token))
+            .await
+            .into_iter()
+            .next()
+            .unwrap()
+    }
+
+    /// The resulting price is how many units of token needs to be sold for one unit of
+    /// the chain's native token (sell_amount / buy_amount).
+    /// Returns one result for each query.
+    async fn estimate_native_prices(
+        &self,
+        tokens: &[H160],
+    ) -> Vec<Result<f64, PriceEstimationError>>;
+}
 
 /// Wrapper around price estimators specialized to estimate a token's price compared to the current
 /// chain's native token.

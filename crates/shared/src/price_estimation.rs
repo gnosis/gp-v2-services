@@ -97,6 +97,8 @@ impl Estimate {
         amounts_to_price(sell_amount, buy_amount)
     }
 
+    /// The resulting price is how many units of sell_token needs to be sold for one unit of
+    /// buy_token (sell_amount / buy_amount).
     pub fn price_in_sell_token_f64(&self, query: &Query) -> f64 {
         let (sell_amount, buy_amount) = self.amounts(query);
         sell_amount.to_f64_lossy() / buy_amount.to_f64_lossy()
@@ -132,24 +134,6 @@ pub async fn ensure_token_supported(
         }
         Err(err) => Err(PriceEstimationError::Other(err)),
     }
-}
-
-#[mockall::automock]
-#[async_trait::async_trait]
-pub trait NativePriceEstimating: Send + Sync {
-    async fn estimate_native_price(&self, token: &H160) -> Result<f64, PriceEstimationError> {
-        self.estimate_native_prices(std::slice::from_ref(token))
-            .await
-            .into_iter()
-            .next()
-            .unwrap()
-    }
-
-    /// Returns one result for each query.
-    async fn estimate_native_prices(
-        &self,
-        tokens: &[H160],
-    ) -> Vec<Result<f64, PriceEstimationError>>;
 }
 
 pub fn amounts_to_price(sell_amount: U256, buy_amount: U256) -> Option<BigRational> {
