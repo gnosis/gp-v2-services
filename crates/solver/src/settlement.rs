@@ -259,7 +259,7 @@ impl Settlement {
 
     // Checks if the settlement is safe from MEV extraction
     pub fn mev_safe(&self) -> bool {
-        false
+        true
     }
 }
 

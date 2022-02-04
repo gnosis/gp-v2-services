@@ -68,7 +68,7 @@ pub enum SubmissionLoopStatus {
 
 #[derive(Debug)]
 pub enum DisabledReason {
-    CustomNodesDisabledMevExtractable,
+    MevExtractable,
 }
 
 #[derive(Debug, Clone, Copy)]

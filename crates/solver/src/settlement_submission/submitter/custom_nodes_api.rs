@@ -121,9 +121,7 @@ impl TransactionSubmitting for CustomNodesApi {
 
     fn submission_status(&self, settlement: &Settlement) -> SubmissionLoopStatus {
         if !settlement.mev_safe() {
-            return SubmissionLoopStatus::Disabled(
-                DisabledReason::CustomNodesDisabledMevExtractable,
-            );
+            return SubmissionLoopStatus::Disabled(DisabledReason::MevExtractable);
         }
 
         SubmissionLoopStatus::Enabled
