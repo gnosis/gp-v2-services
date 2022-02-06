@@ -23,14 +23,14 @@ use crate::{settlement::Settlement, settlement_simulation::settle_method_builder
 use anyhow::{anyhow, Context, Result};
 use contracts::GPv2Settlement;
 use ethcontract::{
-    contract::MethodBuilder, dyns::DynTransport, transaction::TransactionBuilder, Account,
+    contract::MethodBuilder, dyns::DynTransport, transaction::TransactionBuilder, Account, H160,
 };
 use futures::FutureExt;
 use gas_estimation::{EstimatedGasPrice, GasPriceEstimating};
 use primitive_types::{H256, U256};
 use shared::Web3;
 use std::time::{Duration, Instant};
-use web3::types::TransactionReceipt;
+use web3::types::{TransactionReceipt, U64};
 
 /// Parameters for transaction submitting
 #[derive(Clone, Default)]
@@ -49,6 +49,7 @@ pub struct SubmitterParams {
 /// Enum used to handle all kind of messages received from implementers of trait TransactionSubmitting
 pub enum SubmitApiError {
     InvalidNonce,
+    ReplacementTransactionUnderpriced,
     OpenEthereumTooCheapToReplace, // todo ds safe to remove after dropping OE support
     Other(anyhow::Error),
 }
@@ -83,9 +84,17 @@ pub trait TransactionSubmitting: Send + Sync {
         tx: TransactionBuilder<DynTransport>,
     ) -> Result<TransactionHandle, SubmitApiError>;
     /// Cancels already submitted transaction using the cancel handle
-    async fn cancel_transaction(&self, id: &CancelHandle) -> Result<()>;
-    /// Marks previously submitted transaction as outdated and prevents from being mined
-    async fn mark_transaction_outdated(&self, id: &TransactionHandle) -> Result<()>;
+    async fn cancel_transaction(
+        &self,
+        id: &CancelHandle,
+    ) -> Result<TransactionHandle, SubmitApiError>;
+    /// Try to find submitted transaction from previous submission loop (in this case we don't have a TransactionHandle)
+    async fn recover_pending_transaction(
+        &self,
+        web3: &Web3,
+        address: &H160,
+        nonce: U256,
+    ) -> Result<Option<EstimatedGasPrice>>;
 }
 
 /// Gas price estimator specialized for sending transactions to the network
@@ -188,11 +197,14 @@ impl<'a> Submitter<'a> {
             _ = deadline_future.fuse() => {
                 tracing::info!("stopping submission because deadline has been reached. cancelling last submitted transaction...");
 
-                if let Some(transaction) = transactions.last() {
-                    if let Ok(gas_price) = self.gas_price_estimator.estimate_with_limits(21000., Duration::from_secs(0)).await {
-                        if let Err(err) = self.cancel_transaction(transaction, &gas_price, nonce).await {
-                            tracing::warn!("cancellation failed: {:?}", err);
-                        }
+                if let Some((transaction, gas_price)) = transactions.last() {
+                    let gas_price = gas_price.bump(1.125).ceil();
+                    match self
+                        .cancel_transaction(transaction, &gas_price, nonce)
+                        .await
+                    {
+                        Ok(handle) => transactions.push((handle, gas_price)),
+                        Err(err) => tracing::warn!("cancellation failed: {:?}", err),
                     }
                 }
                 Ok(None)
@@ -222,7 +234,7 @@ impl<'a> Submitter<'a> {
 
             let transactions = transactions
                 .into_iter()
-                .map(|handle| handle.tx_hash)
+                .map(|(handle, _)| handle.tx_hash)
                 .collect::<Vec<_>>();
 
             loop {
@@ -230,8 +242,8 @@ impl<'a> Submitter<'a> {
                     find_mined_transaction(&self.contract.raw_instance().web3(), &transactions)
                         .await
                 {
-                    tracing::info!("found mined transaction {}", receipt.transaction_hash);
-                    return Ok(receipt);
+                    tracing::info!("found mined transaction {:?}", receipt);
+                    return status(receipt);
                 }
                 if Instant::now() + MINED_TX_CHECK_INTERVAL > tx_to_propagate_deadline {
                     break;
@@ -281,11 +293,20 @@ impl<'a> Submitter<'a> {
         settlement: Settlement,
         nonce: U256,
         params: &SubmitterParams,
-        transactions: &mut Vec<TransactionHandle>,
+        transactions: &mut Vec<(TransactionHandle, EstimatedGasPrice)>,
     ) -> SubmissionError {
         let target_confirm_time = Instant::now() + params.target_confirm_time;
 
-        let mut previous_tx: Option<(EstimatedGasPrice, TransactionHandle)> = None;
+        // Try to find submitted transaction from previous submission loop (with the same address and nonce)
+        let pending_gas_price = self
+            .submit_api
+            .recover_pending_transaction(
+                &self.contract.raw_instance().web3(),
+                &self.account.address(),
+                nonce,
+            )
+            .await
+            .unwrap_or(None);
 
         loop {
             // Account for some buffer in the gas limit in case racing state changes result in slightly more heavy computation at execution time.
@@ -311,28 +332,28 @@ impl<'a> Submitter<'a> {
             // simulate transaction
 
             if let Err(err) = method.clone().view().call().await {
-                if let Some((_, previous_tx)) = previous_tx {
-                    if let Err(err) = self
-                        .cancel_transaction(&previous_tx, &gas_price, nonce)
+                if let Some((previous_tx, _)) = transactions.last() {
+                    match self
+                        .cancel_transaction(previous_tx, &gas_price, nonce)
                         .await
                     {
-                        tracing::warn!("cancellation failed: {:?}", err);
+                        Ok(handle) => transactions.push((handle, gas_price)),
+                        Err(err) => tracing::warn!("cancellation failed: {:?}", err),
                     }
                 }
                 return SubmissionError::from(err);
             }
 
-            // if gas price has increased cancel old transaction so new transaction could be submitted.
-
-            if let Some((previous_gas_price, previous_tx)) = previous_tx.as_ref() {
+            // if gas price has not increased enough, skip submitting the transaction.
+            if let Some(previous_gas_price) = transactions
+                .last()
+                .map(|(_, previous_gas_price)| previous_gas_price)
+                .or_else(|| pending_gas_price.as_ref())
+            {
                 let previous_gas_price = previous_gas_price.bump(1.125).ceil();
-                if gas_price.cap() > previous_gas_price.cap()
-                    && gas_price.tip() > previous_gas_price.tip()
+                if gas_price.tip() < previous_gas_price.tip()
+                    || gas_price.cap() < previous_gas_price.cap()
                 {
-                    if let Err(err) = self.submit_api.mark_transaction_outdated(previous_tx).await {
-                        tracing::warn!("cancellation failed: {:?}", err);
-                    }
-                } else {
                     tokio::time::sleep(params.retry_interval).await;
                     continue;
                 }
@@ -347,13 +368,13 @@ impl<'a> Submitter<'a> {
             // execute transaction
 
             match self.submit_api.submit_transaction(method.tx).await {
-                Ok(handle) => {
-                    previous_tx = Some((gas_price, handle));
-                    transactions.push(handle)
-                }
+                Ok(handle) => transactions.push((handle, gas_price)),
                 Err(err) => match err {
                     SubmitApiError::InvalidNonce => {
                         tracing::warn!("submission failed: invalid nonce")
+                    }
+                    SubmitApiError::ReplacementTransactionUnderpriced => {
+                        tracing::warn!("submission failed: replacement transaction underpriced")
                     }
                     SubmitApiError::OpenEthereumTooCheapToReplace => {
                         tracing::debug!("submission failed: OE has different replacement rules than our algorithm")
@@ -373,16 +394,10 @@ impl<'a> Submitter<'a> {
         nonce: U256,
         gas_limit: f64,
     ) -> MethodBuilder<DynTransport, ()> {
-        let gas_price = if let Some(eip1559) = gas_price.eip1559 {
-            (eip1559.max_fee_per_gas, eip1559.max_priority_fee_per_gas).into()
-        } else {
-            gas_price.legacy.into()
-        };
-
         settle_method_builder(self.contract, settlement.into(), self.account.clone())
             .nonce(nonce)
             .gas(U256::from_f64_lossy(gas_limit))
-            .gas_price(gas_price)
+            .gas_price(crate::into_gas_price(gas_price))
     }
 
     /// Prepare noop transaction. This transaction does transfer of 0 value to self and always spends 21000 gas.
@@ -391,17 +406,11 @@ impl<'a> Submitter<'a> {
         gas_price: &EstimatedGasPrice,
         nonce: U256,
     ) -> TransactionBuilder<DynTransport> {
-        let gas_price = if let Some(eip1559) = gas_price.eip1559 {
-            (eip1559.max_fee_per_gas, eip1559.max_priority_fee_per_gas).into()
-        } else {
-            gas_price.legacy.into()
-        };
-
         TransactionBuilder::new(self.contract.raw_instance().web3())
             .from(self.account.clone())
             .to(self.account.address())
             .nonce(nonce)
-            .gas_price(gas_price)
+            .gas_price(crate::into_gas_price(gas_price))
             .gas(21000.into())
     }
 
@@ -411,13 +420,27 @@ impl<'a> Submitter<'a> {
         transaction: &TransactionHandle,
         gas_price: &EstimatedGasPrice,
         nonce: U256,
-    ) -> Result<()> {
+    ) -> Result<TransactionHandle, SubmitApiError> {
         let cancel_handle = CancelHandle {
             submitted_transaction: *transaction,
             noop_transaction: self.build_noop_transaction(&gas_price.bump(3.), nonce),
         };
         self.submit_api.cancel_transaction(&cancel_handle).await
     }
+}
+
+fn status(receipt: TransactionReceipt) -> Result<TransactionReceipt, SubmissionError> {
+    if let Some(status) = receipt.status {
+        if status == U64::zero() {
+            // failing transaction
+            return Err(SubmissionError::Revert);
+        } else if status == U64::one() && receipt.from == receipt.to.unwrap_or_default() {
+            // noop transaction
+            return Err(SubmissionError::Canceled);
+        }
+    }
+    // successfull transaction
+    Ok(receipt)
 }
 
 /// From a list of potential hashes find one that was mined.
@@ -470,7 +493,7 @@ mod tests {
         let private_key: PrivateKey = std::env::var("PRIVATE_KEY").unwrap().parse().unwrap();
         let account = Account::Offline(private_key, Some(chain_id));
         let contract = crate::get_settlement_contract(&web3).await.unwrap();
-        let flashbots_api = FlashbotsApi::new(Client::new());
+        let flashbots_api = FlashbotsApi::new(Client::new(), "https://rpc.flashbots.net").unwrap();
         let mut header = reqwest::header::HeaderMap::new();
         header.insert(
             "AUTHORIZATION",

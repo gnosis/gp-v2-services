@@ -96,7 +96,7 @@ impl Order {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct OrderBuilder(Order);
 
 impl OrderBuilder {
@@ -521,6 +521,16 @@ impl<'de> Deserialize<'de> for OrderUid {
 pub enum OrderKind {
     Buy,
     Sell,
+}
+
+impl OrderKind {
+    /// Returns a the order kind as a string label that can be used in metrics.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Buy => "buy",
+            Self::Sell => "sell",
+        }
+    }
 }
 
 impl Default for OrderKind {

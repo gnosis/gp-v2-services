@@ -84,14 +84,11 @@ impl QuasimodoPriceEstimator {
             self.uniswap_pools(pairs.clone(), &gas_model),
             self.balancer_pools(pairs.clone(), &gas_model)
         )?;
-        let mut amms: BTreeMap<usize, AmmModel> = uniswap_pools
+        let amms: BTreeMap<usize, AmmModel> = uniswap_pools
             .into_iter()
             .chain(balancer_pools)
             .enumerate()
             .collect();
-
-        // Solver cannot handle 0 reserves so filter these pools out until that is fixed.
-        amms.retain(|_, v| v.has_sufficient_reserves());
 
         let mut tokens: HashSet<H160> = Default::default();
         tokens.insert(query.sell_token);
@@ -326,6 +323,7 @@ mod tests {
     use crate::token_info::TokenInfoFetcher;
     use crate::transport::http::HttpTransport;
     use crate::Web3;
+    use clap::ArgEnum;
     use ethcontract::dyns::DynTransport;
     use model::order::OrderKind;
     use reqwest::Client;
@@ -406,7 +404,7 @@ mod tests {
             BalancerPoolFetcher::new(
                 chain_id,
                 token_info.clone(),
-                BalancerFactoryKind::all(),
+                BalancerFactoryKind::value_variants(),
                 Default::default(),
                 current_block_stream.clone(),
                 Arc::new(crate::sources::balancer_v2::pool_fetching::NoopBalancerPoolCacheMetrics),

@@ -4,14 +4,14 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use clap::Parser;
 use model::{
     order::{OrderKind, OrderStatus, OrderUid, BUY_ETH_ADDRESS},
     u256_decimal,
 };
 use primitive_types::{H160, U256};
 use reqwest::Client;
-use std::time::{Duration, Instant, SystemTime};
-use structopt::StructOpt;
+use std::time::{Duration, Instant};
 use url::Url;
 
 #[derive(Debug, serde::Deserialize, Eq, PartialEq)]
@@ -138,14 +138,15 @@ struct Alerter {
     config: AlertConfig,
     last_observed_trade: Instant,
     last_alert: Option<Instant>,
-    open_orders: Vec<Order>,
+    // order and for how long it has been matchable
+    open_orders: Vec<(Order, Option<Instant>)>,
 }
 
 struct AlertConfig {
     // Alert if no trades have been observed for this long.
     time_without_trade: Duration,
-    // Give the solver some time to settle an order after it has been created before we alert.
-    min_order_age: Duration,
+    // Give the solver some time to settle an order after it has become solvable before we alert.
+    min_order_solvable_time: Duration,
     // Do not alert more often than this.
     min_alert_interval: Duration,
 }
@@ -167,13 +168,24 @@ impl Alerter {
             .orderbook_api
             .solvable_orders()
             .await
-            .context("solvable_orders")?;
+            .context("solvable_orders")?
+            .into_iter()
+            .map(|order| {
+                let existing_time = self
+                    .open_orders
+                    .iter()
+                    .find(|(order_, _)| order_.uid == order.uid)
+                    .map(|o| o.1)
+                    .flatten();
+                (order, existing_time)
+            })
+            .collect::<Vec<_>>();
         tracing::debug!("found {} open orders", orders.len());
         std::mem::swap(&mut self.open_orders, &mut orders);
         // Keep only orders that were open last update and are not open this update.
         orders.retain(|order| !self.open_orders.contains(order));
         for closed_order in orders {
-            let order = self.orderbook_api.order(&closed_order.uid).await?;
+            let order = self.orderbook_api.order(&closed_order.0.uid).await?;
             if order.status == OrderStatus::Fulfilled {
                 tracing::debug!(
                     "updating last observed trade because order {} was fulfilled",
@@ -185,14 +197,6 @@ impl Alerter {
         }
         tracing::debug!("found no fulfilled orders");
         Ok(())
-    }
-
-    fn order_has_minimum_age(&self, order: &Order) -> bool {
-        let order_time = Duration::from_secs(order.creation_date.timestamp() as u64);
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap();
-        now.saturating_sub(order_time) > self.config.min_order_age
     }
 
     fn alert(&self, order: &Order) {
@@ -214,30 +218,32 @@ impl Alerter {
         ) {
             return Ok(());
         }
-        for order in &self.open_orders {
-            if !self.order_has_minimum_age(order) {
-                continue;
-            }
-
-            if self
+        for i in 0..self.open_orders.len() {
+            let can_be_settled = self
                 .zeroex_api
-                .can_be_settled(order)
+                .can_be_settled(&self.open_orders[i].0)
                 .await
-                .context("can_be_settled")?
-            {
-                self.last_alert = Some(Instant::now());
-                self.alert(order);
+                .context("can_be_settled")?;
+            let now = Instant::now();
+            if can_be_settled {
+                let solvable_since = *self.open_orders[i].1.get_or_insert(now);
+                if now.duration_since(solvable_since) > self.config.min_order_solvable_time {
+                    self.last_alert = Some(now);
+                    self.alert(&self.open_orders[i].0);
+                }
                 break;
+            } else {
+                self.open_orders[i].1 = None;
             }
         }
         Ok(())
     }
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 struct Arguments {
     /// Minimum time without a trade before alerting.
-    #[structopt(
+    #[clap(
         long,
         env,
         default_value = "600",
@@ -245,8 +251,8 @@ struct Arguments {
     )]
     time_without_trade: Duration,
 
-    /// Minimum age a matchable order must have before alerting.
-    #[structopt(
+    /// Minimum time an order must have been matchable for before alerting.
+    #[clap(
         long,
         env,
         default_value = "180",
@@ -255,7 +261,7 @@ struct Arguments {
     min_order_age: Duration,
 
     /// Do not repeat the alert more often than this.
-    #[structopt(
+    #[clap(
         long,
         env,
         default_value = "1800",
@@ -265,16 +271,16 @@ struct Arguments {
 
     /// How many errors in the update loop (fetching solvable orders or querying 0x) in a row
     /// must happen before we alert about them.
-    #[structopt(long, env, default_value = "5")]
+    #[clap(long, env, default_value = "5")]
     errors_in_a_row_before_alert: u32,
 
-    #[structopt(long, env, default_value = "https://protocol-mainnet.gnosis.io")]
+    #[clap(long, env, default_value = "https://protocol-mainnet.gnosis.io")]
     orderbook_api: String,
 }
 
 #[tokio::main]
 async fn main() {
-    let args = Arguments::from_args();
+    let args = Arguments::parse();
     shared::tracing::initialize("alerter=debug", tracing::Level::ERROR.into());
     tracing::info!("running alerter with {:#?}", args);
 
@@ -288,7 +294,7 @@ async fn main() {
         ZeroExApi::new(client),
         AlertConfig {
             time_without_trade: args.time_without_trade,
-            min_order_age: args.min_order_age,
+            min_order_solvable_time: args.min_order_age,
             min_alert_interval: args.min_alert_interval,
         },
     );

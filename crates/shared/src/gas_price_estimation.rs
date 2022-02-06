@@ -7,18 +7,16 @@ use gas_estimation::{
 };
 use serde::de::DeserializeOwned;
 use std::sync::{Arc, Mutex};
-use structopt::clap::arg_enum;
 
-arg_enum! {
-    #[derive(Debug)]
-    pub enum GasEstimatorType {
-        EthGasStation,
-        GasNow,
-        GnosisSafe,
-        Web3,
-        BlockNative,
-        Native,
-    }
+#[derive(Copy, Clone, Debug, clap::ArgEnum)]
+#[clap(rename_all = "verbatim")]
+pub enum GasEstimatorType {
+    EthGasStation,
+    GasNow,
+    GnosisSafe,
+    Web3,
+    BlockNative,
+    Native,
 }
 
 #[derive(Clone)]
@@ -73,7 +71,10 @@ pub async fn create_priority_estimator(
                 } else {
                     http::header::HeaderMap::new()
                 };
-                estimators.push(Box::new(BlockNative::new(client.clone(), headers).await?))
+                match BlockNative::new(client.clone(), headers).await {
+                    Ok(estimator) => estimators.push(Box::new(estimator)),
+                    Err(err) => tracing::error!("blocknative failed: {}", err),
+                }
             }
             GasEstimatorType::EthGasStation => {
                 ensure!(
@@ -90,9 +91,12 @@ pub async fn create_priority_estimator(
                 GnosisSafeGasStation::with_network_id(&network_id, client.clone())?,
             )),
             GasEstimatorType::Web3 => estimators.push(Box::new(web3.clone())),
-            GasEstimatorType::Native => estimators.push(Box::new(
-                NativeGasEstimator::new(web3.transport().clone(), None).await?,
-            )),
+            GasEstimatorType::Native => {
+                match NativeGasEstimator::new(web3.transport().clone(), None).await {
+                    Ok(estimator) => estimators.push(Box::new(estimator)),
+                    Err(err) => tracing::error!("nativegasestimator failed: {}", err),
+                }
+            }
         }
     }
     Ok(PriorityGasPriceEstimating::new(estimators))

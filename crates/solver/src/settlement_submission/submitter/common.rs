@@ -7,13 +7,13 @@ use ethcontract::{
 use futures::FutureExt;
 use jsonrpc_core::Output;
 use primitive_types::H256;
-use reqwest::Client;
+use reqwest::{Client, Url};
 use serde::de::DeserializeOwned;
 
 /// Function for sending raw signed transaction to private networks
 pub async fn submit_raw_transaction(
     client: Client,
-    url: &str,
+    url: Url,
     tx: TransactionBuilder<DynTransport>,
 ) -> Result<TransactionHandle, SubmitApiError> {
     let (raw_signed_transaction, tx_hash) = match tx.build().now_or_never().unwrap().unwrap() {
@@ -32,7 +32,7 @@ pub async fn submit_raw_transaction(
         serde_json::to_string(&body).unwrap_or_else(|err| format!("error: {:?}", err)),
     );
     let response = client
-        .post(url)
+        .post(url.clone())
         .json(&body)
         .send()
         .await
@@ -44,10 +44,10 @@ pub async fn submit_raw_transaction(
 
     let handle = parse_json_rpc_response::<H256>(&body)?;
     tracing::info!(
-        "created transaction with hash: {:?} and handle: {:?}, url: {:?}",
+        "created transaction with hash: {:?} and handle: {:?}, url: {}",
         tx_hash,
         handle,
-        url
+        url.as_str()
     );
     Ok(TransactionHandle { tx_hash, handle })
 }
@@ -66,14 +66,22 @@ where
                 .into()
             }),
             Output::Failure(body) => {
-                if body.error.message.contains("invalid nonce") {
+                if body.error.message.starts_with("invalid nonce")
+                    || body.error.message.starts_with("nonce too low")
+                {
                     Err(SubmitApiError::InvalidNonce)
                 } else if body
                     .error
                     .message
-                    .contains("Transaction gas price supplied is too low")
+                    .starts_with("Transaction gas price supplied is too low")
                 {
                     Err(SubmitApiError::OpenEthereumTooCheapToReplace)
+                } else if body
+                    .error
+                    .message
+                    .starts_with("replacement transaction underpriced")
+                {
+                    Err(SubmitApiError::ReplacementTransactionUnderpriced)
                 } else {
                     Err(anyhow!("rpc error: {}", body.error).into())
                 }

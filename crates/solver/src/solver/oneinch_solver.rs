@@ -13,22 +13,20 @@ use crate::{
     liquidity::{slippage::MAX_SLIPPAGE_BPS, LimitOrder},
     settlement::{Interaction, Settlement},
 };
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{anyhow, Result};
 use contracts::GPv2Settlement;
 use derivative::Derivative;
 use ethcontract::{Account, Bytes};
 use maplit::hashmap;
 use model::order::OrderKind;
 use reqwest::Client;
+use reqwest::Url;
 use shared::oneinch_api::{
-    Amount, OneInchClient, OneInchClientImpl, RestError, RestResponse, Swap, SwapQuery,
+    OneInchClient, OneInchClientImpl, ProtocolCache, RestError, RestResponse, Swap, SwapQuery,
 };
 use shared::solver_utils::Slippage;
 use shared::Web3;
-use std::{
-    collections::HashSet,
-    fmt::{self, Display, Formatter},
-};
+use std::fmt::{self, Display, Formatter};
 
 /// A GPv2 solver that matches GP **sell** orders to direct 1Inch swaps.
 #[derive(Derivative)]
@@ -36,11 +34,12 @@ use std::{
 pub struct OneInchSolver {
     account: Account,
     settlement_contract: GPv2Settlement,
-    disabled_protocols: HashSet<String>,
+    disabled_protocols: Vec<String>,
     #[derivative(Debug = "ignore")]
     client: Box<dyn OneInchClient>,
     #[derivative(Debug = "ignore")]
     allowance_fetcher: Box<dyn AllowanceManaging>,
+    protocol_cache: ProtocolCache,
 }
 
 impl From<RestError> for SettlementError {
@@ -52,9 +51,6 @@ impl From<RestError> for SettlementError {
     }
 }
 
-/// Chain ID for Mainnet.
-const MAINNET_CHAIN_ID: u64 = 1;
-
 impl OneInchSolver {
     /// Creates a new 1Inch solver with a list of disabled protocols.
     pub fn with_disabled_protocols(
@@ -64,45 +60,21 @@ impl OneInchSolver {
         chain_id: u64,
         disabled_protocols: impl IntoIterator<Item = String>,
         client: Client,
+        one_inch_url: Url,
     ) -> Result<Self> {
-        ensure!(
-            chain_id == MAINNET_CHAIN_ID,
-            "1Inch solver only supported on Mainnet",
-        );
-
         let settlement_address = settlement_contract.address();
         Ok(Self {
             account,
             settlement_contract,
             disabled_protocols: disabled_protocols.into_iter().collect(),
-            client: Box::new(OneInchClientImpl::new(
-                OneInchClientImpl::DEFAULT_URL,
-                client,
-            )?),
+            client: Box::new(OneInchClientImpl::new(one_inch_url, client, chain_id)?),
             allowance_fetcher: Box::new(AllowanceManager::new(web3, settlement_address)),
+            protocol_cache: ProtocolCache::default(),
         })
     }
 }
 
 impl OneInchSolver {
-    /// Gets the list of supported protocols for the 1Inch solver.
-    async fn supported_protocols(&self) -> Result<Option<Vec<String>>> {
-        let protocols = if self.disabled_protocols.is_empty() {
-            None
-        } else {
-            Some(
-                self.client
-                    .get_protocols()
-                    .await?
-                    .protocols
-                    .into_iter()
-                    .filter(|protocol| !self.disabled_protocols.contains(protocol))
-                    .collect(),
-            )
-        };
-        Ok(protocols)
-    }
-
     /// Settles a single sell order against a 1Inch swap using the specified protocols.
     async fn settle_order_with_protocols(
         &self,
@@ -122,24 +94,14 @@ impl OneInchSolver {
             .get_approval(order.sell_token, spender.address, order.sell_amount)
             .await?;
 
-        let query = SwapQuery {
-            from_token_address: order.sell_token,
-            to_token_address: order.buy_token,
-            amount: order.sell_amount,
-            from_address: self.settlement_contract.address(),
-            slippage: Slippage::percentage_from_basis_points(MAX_SLIPPAGE_BPS).unwrap(),
+        let query = SwapQuery::with_default_options(
+            order.sell_token,
+            order.buy_token,
+            order.sell_amount,
+            self.settlement_contract.address(),
             protocols,
-            // Disable balance/allowance checks, as the settlement contract
-            // does not hold balances to traded tokens.
-            disable_estimate: Some(true),
-            // Use at most 2 connector tokens
-            complexity_level: Some(Amount::new(2).unwrap()),
-            // Cap swap gas to 750K.
-            gas_limit: Some(750_000),
-            // Use only 3 main route for cheaper trades.
-            main_route_parts: Some(Amount::new(3).unwrap()),
-            parts: Some(Amount::new(3).unwrap()),
-        };
+            Slippage::percentage_from_basis_points(MAX_SLIPPAGE_BPS).unwrap(),
+        );
 
         tracing::debug!("querying 1Inch swap api with {:?}", query);
         let swap = match self.client.get_swap(query).await? {
@@ -187,7 +149,10 @@ impl SingleOrderSolving for OneInchSolver {
             // 1Inch only supports sell orders
             return Ok(None);
         }
-        let protocols = self.supported_protocols().await?;
+        let protocols = self
+            .protocol_cache
+            .get_allowed_protocols(&self.disabled_protocols, self.client.as_ref())
+            .await?;
         self.settle_order_with_protocols(order, protocols).await
     }
 
@@ -214,15 +179,10 @@ mod tests {
     use crate::test::account;
     use contracts::{GPv2Settlement, WETH9};
     use ethcontract::{Web3, H160, U256};
-    use maplit::hashset;
     use mockall::{predicate::*, Sequence};
     use model::order::{Order, OrderCreation, OrderKind};
     use shared::oneinch_api::{MockOneInchClient, Protocols, Spender};
-    use shared::{
-        dummy_contract,
-        transport::{create_env_test_transport, create_test_transport},
-    };
-    use std::iter;
+    use shared::{dummy_contract, transport::create_env_test_transport};
 
     fn dummy_solver(
         client: MockOneInchClient,
@@ -232,9 +192,10 @@ mod tests {
         OneInchSolver {
             account: account(),
             settlement_contract,
-            disabled_protocols: HashSet::new(),
+            disabled_protocols: Vec::default(),
             client: Box::new(client),
             allowance_fetcher: Box::new(allowance_fetcher),
+            protocol_cache: ProtocolCache::default(),
         }
     }
 
@@ -253,15 +214,6 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-    }
-
-    #[tokio::test]
-    async fn returns_none_when_no_protocols_are_disabled() {
-        let protocols = dummy_solver(MockOneInchClient::new(), MockAllowanceManaging::new())
-            .supported_protocols()
-            .await
-            .unwrap();
-        assert!(protocols.is_none());
     }
 
     #[tokio::test]
@@ -341,7 +293,7 @@ mod tests {
             .expect_get_approval()
             .returning(|_, _, _| Ok(Approval::AllowanceSufficient));
 
-        client.expect_get_protocols().returning(|| {
+        client.expect_get_liquidity_sources().returning(|| {
             Ok(Protocols {
                 protocols: vec!["GoodProtocol".into(), "BadProtocol".into()],
             })
@@ -352,7 +304,7 @@ mod tests {
             })
         });
         client.expect_get_swap().times(1).returning(|query| {
-            assert_eq!(query.protocols, Some(vec!["GoodProtocol".into()]));
+            assert_eq!(query.quote.protocols, Some(vec!["GoodProtocol".into()]));
             Ok(RestResponse::Ok(Swap {
                 from_token_amount: 100.into(),
                 to_token_amount: 100.into(),
@@ -361,7 +313,7 @@ mod tests {
         });
 
         let solver = OneInchSolver {
-            disabled_protocols: hashset!["BadProtocol".to_string(), "VeryBadProtocol".to_string()],
+            disabled_protocols: vec!["BadProtocol".to_string(), "VeryBadProtocol".to_string()],
             ..dummy_solver(client, allowance_fetcher)
         };
 
@@ -448,23 +400,6 @@ mod tests {
         assert_eq!(result.encoder.finish().interactions[1].len(), 1)
     }
 
-    #[test]
-    fn returns_error_on_non_mainnet() {
-        let web3 = Web3::new(create_test_transport("http://never.used"));
-        let chain_id = 42;
-        let settlement = dummy_contract!(GPv2Settlement, H160::zero());
-
-        assert!(OneInchSolver::with_disabled_protocols(
-            account(),
-            web3,
-            settlement,
-            chain_id,
-            iter::empty(),
-            Client::new(),
-        )
-        .is_err())
-    }
-
     #[tokio::test]
     #[ignore]
     async fn solve_order_on_oneinch() {
@@ -482,6 +417,7 @@ mod tests {
             chain_id,
             vec!["PMM1".to_string()],
             Client::new(),
+            OneInchClientImpl::DEFAULT_URL.try_into().unwrap(),
         )
         .unwrap();
         let settlement = solver
