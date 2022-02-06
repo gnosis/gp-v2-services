@@ -684,7 +684,7 @@ dependencies = [
  "prometheus",
  "rand",
  "reqwest",
- "secp256k1",
+ "secp256k1 0.21.2",
  "serde_json",
  "shared",
  "solver",
@@ -788,7 +788,7 @@ dependencies = [
  "jsonrpc-core",
  "lazy_static",
  "primitive-types",
- "secp256k1",
+ "secp256k1 0.20.3",
  "serde",
  "serde_json",
  "thiserror",
@@ -1654,7 +1654,7 @@ dependencies = [
  "maplit",
  "num",
  "primitive-types",
- "secp256k1",
+ "secp256k1 0.21.2",
  "serde",
  "serde_json",
  "serde_with",
@@ -1896,7 +1896,7 @@ dependencies = [
  "prometheus",
  "prometheus-metric-storage",
  "reqwest",
- "secp256k1",
+ "secp256k1 0.21.2",
  "serde",
  "serde_json",
  "serde_with",
@@ -2440,6 +2440,15 @@ name = "secp256k1"
 version = "0.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97d03ceae636d0fed5bae6a7f4f664354c5f4fcedf6eef053fef17e49f837d0a"
+dependencies = [
+ "secp256k1-sys",
+]
+
+[[package]]
+name = "secp256k1"
+version = "0.21.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab7883017d5b21f011ef8040ea9c6c7ac90834c0df26a69e4c0b06276151f125"
 dependencies = [
  "secp256k1-sys",
 ]
@@ -3490,7 +3499,7 @@ dependencies = [
  "pin-project",
  "reqwest",
  "rlp",
- "secp256k1",
+ "secp256k1 0.20.3",
  "serde",
  "serde_json",
  "soketto",
