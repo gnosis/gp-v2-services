@@ -245,9 +245,9 @@ impl Settlement {
     pub fn executed_trades(&self) -> impl Iterator<Item = TradeExecution> + '_ {
         self.trades()
             .iter()
-            .map(move |normal_order_trade| {
-                let order = &normal_order_trade.trade.order.order_creation;
-                normal_order_trade.trade.executed_amounts(
+            .map(move |order_trade| {
+                let order = &order_trade.trade.order.order_creation;
+                order_trade.trade.executed_amounts(
                     self.clearing_price(order.sell_token)?,
                     self.clearing_price(order.buy_token)?,
                 )
@@ -274,11 +274,11 @@ impl Settlement {
         self.encoder
             .trades()
             .iter()
-            .filter_map(|normal_order_trade| {
-                let fee_token_price = external_prices
-                    .get(&normal_order_trade.trade.order.order_creation.sell_token)?;
+            .filter_map(|order_trade| {
+                let fee_token_price =
+                    external_prices.get(&order_trade.trade.order.order_creation.sell_token)?;
                 Some(
-                    normal_order_trade
+                    order_trade
                         .trade
                         .executed_scaled_unsubsidized_fee()?
                         .to_big_rational()

@@ -119,18 +119,18 @@ pub fn retain_mature_settlements(
                     break;
                 }
 
-                let contains_valid_trade = settlement.trades().iter().any(|normal_order_trade| {
+                let contains_valid_trade = settlement.trades().iter().any(|order_trade| {
                     // mature by age
-                    normal_order_trade.trade.order.order_meta_data.creation_date <= settle_orders_older_than
+                    order_trade.trade.order.order_meta_data.creation_date <= settle_orders_older_than
                     // mature by association
-                    || valid_trades.contains(&normal_order_trade.trade.order.order_meta_data.uid)
+                    || valid_trades.contains(&order_trade.trade.order.order_meta_data.uid)
                 });
 
                 if contains_valid_trade {
-                    for normal_order_trade in settlement.trades() {
+                    for order_trade in settlement.trades() {
                         // make all orders within this settlement mature by association
-                        new_order_added |= valid_trades
-                            .insert(&normal_order_trade.trade.order.order_meta_data.uid);
+                        new_order_added |=
+                            valid_trades.insert(&order_trade.trade.order.order_meta_data.uid);
                     }
                     valid_settlement_indices.insert(index);
                 }
@@ -292,7 +292,7 @@ mod tests {
             let trades = settlement.trades();
             let uids: HashSet<OrderUid> = trades
                 .iter()
-                .map(|normal_order_trade| normal_order_trade.trade.order.order_meta_data.uid)
+                .map(|order_trade| order_trade.trade.order.order_meta_data.uid)
                 .collect();
             uids.len() == 2 && uids.contains(&uid(2)) && uids.contains(&uid(3))
         }));

@@ -182,9 +182,8 @@ impl Driver {
                     name,
                     receipt.transaction_hash
                 );
-                trades.iter().for_each(|normal_order_trade| {
-                    self.metrics
-                        .order_settled(&normal_order_trade.trade.order, name)
+                trades.iter().for_each(|order_trade| {
+                    self.metrics.order_settled(&order_trade.trade.order, name)
                 });
                 self.metrics.settlement_submitted(
                     crate::metrics::SettlementSubmissionOutcome::Success,
@@ -555,15 +554,11 @@ impl Driver {
 }
 
 fn is_only_selling_trusted_tokens(settlement: &Settlement, token_list: &TokenList) -> bool {
-    !settlement
-        .encoder
-        .trades()
-        .iter()
-        .any(|normal_order_trade| {
-            token_list
-                .get(&normal_order_trade.trade.order.order_creation.sell_token)
-                .is_none()
-        })
+    !settlement.encoder.trades().iter().any(|order_trade| {
+        token_list
+            .get(&order_trade.trade.order.order_creation.sell_token)
+            .is_none()
+    })
 }
 
 fn print_settlements(rated_settlements: &[(Arc<dyn Solver>, RatedSettlement)]) {

@@ -30,7 +30,7 @@ pub struct SettlementEncoder {
     tokens: Vec<H160>,
     clearing_prices: HashMap<H160, U256>,
     // Invariant: Every trade's buy and sell token has an entry in clearing_prices.
-    trades: Vec<OrderTrade>,
+    order_trades: Vec<OrderTrade>,
     // Liquidity orders are supposed to be settled with the sell_price
     // from the uniform clearing price vector and a custom buy_price
     // defined in the struct LiquidityOrderTrade
@@ -62,7 +62,7 @@ impl SettlementEncoder {
         SettlementEncoder {
             tokens,
             clearing_prices,
-            trades: Vec::new(),
+            order_trades: Vec::new(),
             liquidity_order_trades: Vec::new(),
             execution_plan: Vec::new(),
             unwraps: Vec::new(),
@@ -76,7 +76,7 @@ impl SettlementEncoder {
         liquidity_order_trades: Vec<LiquidityOrderTrade>,
     ) -> Self {
         let mut result = Self::new(clearing_prices);
-        result.trades = trades;
+        result.order_trades = trades;
         result.liquidity_order_trades = liquidity_order_trades;
         result
     }
@@ -86,7 +86,7 @@ impl SettlementEncoder {
         SettlementEncoder {
             tokens: self.tokens.clone(),
             clearing_prices: self.clearing_prices.clone(),
-            trades: self.trades.clone(),
+            order_trades: self.order_trades.clone(),
             liquidity_order_trades: self.liquidity_order_trades.clone(),
             execution_plan: Vec::new(),
             unwraps: self.unwraps.clone(),
@@ -98,7 +98,7 @@ impl SettlementEncoder {
     }
 
     pub fn trades(&self) -> &[OrderTrade] {
-        &self.trades
+        &self.order_trades
     }
 
     // Fails if any used token doesn't have a price.
@@ -124,7 +124,7 @@ impl SettlementEncoder {
             .token_index(order.order_creation.buy_token)
             .expect("missing buy token with price");
 
-        let normal_order_trade = OrderTrade {
+        let order_trade = OrderTrade {
             trade: Trade {
                 order,
                 sell_token_index,
@@ -133,12 +133,12 @@ impl SettlementEncoder {
             },
             buy_token_index,
         };
-        let execution = normal_order_trade
+        let execution = order_trade
             .trade
             .executed_amounts(*sell_price, *buy_price)
             .context("impossible trade execution")?;
 
-        self.trades.push(normal_order_trade);
+        self.order_trades.push(order_trade);
         Ok(execution)
     }
 
@@ -247,13 +247,13 @@ impl SettlementEncoder {
     // Sort self.tokens and update all token indices in self.trades.
     fn sort_tokens_and_update_indices(&mut self) {
         self.tokens.sort();
-        for i in 0..self.trades.len() {
-            self.trades[i].trade.sell_token_index = self
-                .token_index(self.trades[i].trade.order.order_creation.sell_token)
+        for i in 0..self.order_trades.len() {
+            self.order_trades[i].trade.sell_token_index = self
+                .token_index(self.order_trades[i].trade.order.order_creation.sell_token)
                 .expect("missing sell token for existing trade");
 
-            self.trades[i].buy_token_index = self
-                .token_index(self.trades[i].trade.order.order_creation.buy_token)
+            self.order_trades[i].buy_token_index = self
+                .token_index(self.order_trades[i].trade.order.order_creation.buy_token)
                 .expect("missing buy token for existing trade");
         }
         for i in 0..self.liquidity_order_trades.len() {
@@ -282,10 +282,10 @@ impl SettlementEncoder {
         &self,
         normalizing_prices: &HashMap<H160, BigRational>,
     ) -> Option<BigRational> {
-        self.trades
+        self.order_trades
             .iter()
-            .fold(Some(num::zero()), |acc, normal_order_trade| {
-                let order = normal_order_trade.trade.order.clone();
+            .fold(Some(num::zero()), |acc, order_trade| {
+                let order = order_trade.trade.order.clone();
                 let sell_token_clearing_price = self
                     .clearing_prices
                     .get(&order.order_creation.sell_token)
@@ -313,7 +313,7 @@ impl SettlementEncoder {
                     return None;
                 }
 
-                let surplus = &normal_order_trade
+                let surplus = &order_trade
                     .trade
                     .surplus(&sell_token_clearing_price, &buy_token_clearing_price)?;
                 let normalized_surplus = match order.order_creation.kind {
@@ -332,10 +332,10 @@ impl SettlementEncoder {
         let traded_tokens: HashSet<_> = self
             .trades()
             .iter()
-            .flat_map(|normal_order_trade| {
+            .flat_map(|order_trade| {
                 vec![
-                    normal_order_trade.trade.order.order_creation.buy_token,
-                    normal_order_trade.trade.order.order_creation.sell_token,
+                    order_trade.trade.order.order_creation.buy_token,
+                    order_trade.trade.order.order_creation.sell_token,
                 ]
             })
             .collect();
@@ -384,7 +384,7 @@ impl SettlementEncoder {
         tokens.append(&mut additional_tokens);
         clearing_prices.append(&mut additional_prices);
         let mut trades: Vec<EncodedTrade> = self
-            .trades
+            .order_trades
             .into_iter()
             .map(|trade| trade.encode())
             .collect();
@@ -452,14 +452,14 @@ impl SettlementEncoder {
             })
             .collect::<Result<Vec<LiquidityOrderTrade>>>()?;
 
-        for other_normal_trade in other.trades.iter() {
+        for other_normal_trade in other.order_trades.iter() {
             ensure!(
-                self.trades.iter().all(|self_normal_trade| self_normal_trade
-                    .trade
-                    .order
-                    .order_meta_data
-                    .uid
-                    != other_normal_trade.trade.order.order_meta_data.uid),
+                self.order_trades
+                    .iter()
+                    .all(
+                        |self_normal_trade| self_normal_trade.trade.order.order_meta_data.uid
+                            != other_normal_trade.trade.order.order_meta_data.uid
+                    ),
                 "duplicate trade"
             );
         }
@@ -469,7 +469,7 @@ impl SettlementEncoder {
         );
         self.liquidity_order_trades
             .append(&mut other.liquidity_order_trades);
-        self.trades.append(&mut other.trades);
+        self.order_trades.append(&mut other.order_trades);
         self.sort_tokens_and_update_indices();
 
         self.execution_plan.append(&mut other.execution_plan);
@@ -701,8 +701,8 @@ pub mod tests {
             .unwrap();
 
         assert_eq!(encoder.tokens, [token_a, token_b]);
-        assert_eq!(encoder.trades[0].trade.sell_token_index, 0);
-        assert_eq!(encoder.trades[0].buy_token_index, 1);
+        assert_eq!(encoder.order_trades[0].trade.sell_token_index, 0);
+        assert_eq!(encoder.order_trades[0].buy_token_index, 1);
 
         let token_c = H160([0xee; 20]);
         encoder.add_token_equivalency(token_a, token_c).unwrap();
@@ -712,8 +712,8 @@ pub mod tests {
             encoder.clearing_prices[&token_a],
             encoder.clearing_prices[&token_c],
         );
-        assert_eq!(encoder.trades[0].trade.sell_token_index, 0);
-        assert_eq!(encoder.trades[0].buy_token_index, 2);
+        assert_eq!(encoder.order_trades[0].trade.sell_token_index, 0);
+        assert_eq!(encoder.order_trades[0].buy_token_index, 2);
     }
 
     #[test]
@@ -827,7 +827,7 @@ pub mod tests {
             ]
         );
 
-        assert_eq!(merged.trades.len(), 2);
+        assert_eq!(merged.order_trades.len(), 2);
         assert_eq!(merged.liquidity_order_trades.len(), 2);
         assert_eq!(merged.execution_plan.len(), 2);
         assert_eq!(merged.unwraps[0].amount, 3.into());
