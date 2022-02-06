@@ -593,7 +593,7 @@ enum SolverRunError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settlement::{NormalOrderTrade, Trade};
+    use crate::settlement::{OrderTrade, Trade};
     use maplit::hashmap;
     use model::order::{Order, OrderCreation};
     use shared::token_list::Token;
@@ -619,7 +619,7 @@ mod tests {
             }
         });
 
-        let trade = |token| NormalOrderTrade {
+        let trade = |token| OrderTrade {
             trade: Trade {
                 order: Order {
                     order_creation: OrderCreation {

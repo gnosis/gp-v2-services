@@ -154,7 +154,7 @@ pub fn retain_mature_settlements(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settlement::{LiquidityOrderTrade, NormalOrderTrade, Trade};
+    use crate::settlement::{LiquidityOrderTrade, OrderTrade, Trade};
     use chrono::{offset::Utc, DateTime, Duration, Local};
     use maplit::hashmap;
     use model::order::{Order, OrderCreation, OrderKind, OrderMetaData, OrderUid};
@@ -164,8 +164,8 @@ mod tests {
     use std::collections::HashSet;
     use std::ops::Sub;
 
-    fn trade(created_at: DateTime<Utc>, uid: u8) -> NormalOrderTrade {
-        NormalOrderTrade {
+    fn trade(created_at: DateTime<Utc>, uid: u8) -> OrderTrade {
+        OrderTrade {
             trade: Trade {
                 order: Order {
                     order_meta_data: OrderMetaData {
@@ -241,7 +241,7 @@ mod tests {
     fn merges_settlements_with_highest_objective_value() {
         let token0 = H160::from_low_u64_be(0);
         let token1 = H160::from_low_u64_be(1);
-        let prices = hashmap! { token0 => 1.into(), token1 => 1.into()};
+        let prices = hashmap! { token0 => 1u32.into(), token1 => 1u32.into()};
         let prices_rational = hashmap! {
             token0 => BigRational::from_u8(1).unwrap(),
             token1 => BigRational::from_u8(1).unwrap()
@@ -250,7 +250,7 @@ mod tests {
             OrderUid([number; 56])
         }
 
-        let trade = |executed_amount, uid_: u8| NormalOrderTrade {
+        let trade = |executed_amount, uid_: u8| OrderTrade {
             trade: Trade {
                 sell_token_index: 0,
                 executed_amount,
@@ -425,16 +425,13 @@ mod tests {
         );
         assert!(!has_user_order(&settlement));
 
-        let settlement = Settlement::with_trades(
-            Default::default(),
-            vec![NormalOrderTrade::default()],
-            vec![],
-        );
+        let settlement =
+            Settlement::with_trades(Default::default(), vec![OrderTrade::default()], vec![]);
         assert!(has_user_order(&settlement));
 
         let settlement = Settlement::with_trades(
             Default::default(),
-            vec![NormalOrderTrade {
+            vec![OrderTrade {
                 ..Default::default()
             }],
             vec![LiquidityOrderTrade::default()],

@@ -1,4 +1,4 @@
-use super::{Interaction, LiquidityOrderTrade, NormalOrderTrade, Trade, TradeExecution};
+use super::{Interaction, LiquidityOrderTrade, OrderTrade, Trade, TradeExecution};
 use crate::{
     encoding::{EncodedSettlement, EncodedTrade},
     interactions::UnwrapWethInteraction,
@@ -30,7 +30,7 @@ pub struct SettlementEncoder {
     tokens: Vec<H160>,
     clearing_prices: HashMap<H160, U256>,
     // Invariant: Every trade's buy and sell token has an entry in clearing_prices.
-    trades: Vec<NormalOrderTrade>,
+    trades: Vec<OrderTrade>,
     // Liquidity orders are supposed to be settled with the sell_price
     // from the uniform clearing price vector and a custom buy_price
     // defined in the struct LiquidityOrderTrade
@@ -72,7 +72,7 @@ impl SettlementEncoder {
     #[cfg(test)]
     pub fn with_trades(
         clearing_prices: HashMap<H160, U256>,
-        trades: Vec<NormalOrderTrade>,
+        trades: Vec<OrderTrade>,
         liquidity_order_trades: Vec<LiquidityOrderTrade>,
     ) -> Self {
         let mut result = Self::new(clearing_prices);
@@ -97,7 +97,7 @@ impl SettlementEncoder {
         &self.clearing_prices
     }
 
-    pub fn trades(&self) -> &[NormalOrderTrade] {
+    pub fn trades(&self) -> &[OrderTrade] {
         &self.trades
     }
 
@@ -124,7 +124,7 @@ impl SettlementEncoder {
             .token_index(order.order_creation.buy_token)
             .expect("missing buy token with price");
 
-        let normal_order_trade = NormalOrderTrade {
+        let normal_order_trade = OrderTrade {
             trade: Trade {
                 order,
                 sell_token_index,

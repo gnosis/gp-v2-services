@@ -21,7 +21,7 @@ pub struct Trade {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct NormalOrderTrade {
+pub struct OrderTrade {
     pub trade: Trade,
     pub buy_token_index: usize,
 }
@@ -132,7 +132,7 @@ impl Trade {
     }
 }
 
-impl NormalOrderTrade {
+impl OrderTrade {
     /// Encodes the settlement normal order as a tuple, as expected by the smart
     /// contract.
     pub fn encode(&self) -> EncodedTrade {
@@ -216,7 +216,7 @@ impl Settlement {
     #[cfg(test)]
     pub fn with_trades(
         clearing_prices: HashMap<H160, U256>,
-        trades: Vec<NormalOrderTrade>,
+        trades: Vec<OrderTrade>,
         liquidity_order_trades: Vec<LiquidityOrderTrade>,
     ) -> Self {
         let encoder =
@@ -237,7 +237,7 @@ impl Settlement {
     }
 
     /// Returns the currently encoded trades.
-    pub fn trades(&self) -> &[NormalOrderTrade] {
+    pub fn trades(&self) -> &[OrderTrade] {
         self.encoder.trades()
     }
 
@@ -408,7 +408,7 @@ pub mod tests {
     /// trades for testing objective value computations.
     fn test_settlement(
         prices: HashMap<H160, U256>,
-        trades: Vec<NormalOrderTrade>,
+        trades: Vec<OrderTrade>,
         liquidity_order_trades: Vec<LiquidityOrderTrade>,
     ) -> Settlement {
         Settlement {
@@ -523,7 +523,7 @@ pub mod tests {
             ..Default::default()
         };
 
-        let trade0 = NormalOrderTrade {
+        let trade0 = OrderTrade {
             trade: Trade {
                 order: order0.clone(),
                 executed_amount: 10.into(),
@@ -531,7 +531,7 @@ pub mod tests {
             },
             ..Default::default()
         };
-        let trade1 = NormalOrderTrade {
+        let trade1 = OrderTrade {
             trade: Trade {
                 order: order1.clone(),
                 executed_amount: 10.into(),
@@ -567,7 +567,7 @@ pub mod tests {
 
         // Case where external price vector influences ranking:
 
-        let trade0 = NormalOrderTrade {
+        let trade0 = OrderTrade {
             trade: Trade {
                 order: order0.clone(),
                 executed_amount: 10.into(),
@@ -575,7 +575,7 @@ pub mod tests {
             },
             ..Default::default()
         };
-        let trade1 = NormalOrderTrade {
+        let trade1 = OrderTrade {
             trade: Trade {
                 order: order1.clone(),
                 executed_amount: 9.into(),
@@ -591,7 +591,7 @@ pub mod tests {
         // trade1: 100 - 81 = 19
         let settlement0 = test_settlement(clearing_prices0, vec![trade0, trade1], vec![]);
 
-        let trade0 = NormalOrderTrade {
+        let trade0 = OrderTrade {
             trade: Trade {
                 order: order0,
                 executed_amount: 9.into(),
@@ -599,7 +599,7 @@ pub mod tests {
             },
             ..Default::default()
         };
-        let trade1 = NormalOrderTrade {
+        let trade1 = OrderTrade {
             trade: Trade {
                 order: order1,
                 executed_amount: 10.into(),
@@ -667,7 +667,7 @@ pub mod tests {
             ..Default::default()
         };
 
-        let trade = NormalOrderTrade {
+        let trade = OrderTrade {
             trade: Trade {
                 order,
                 executed_amount: 10.into(),
@@ -922,7 +922,7 @@ pub mod tests {
         let token0 = H160::from_low_u64_be(0);
         let token1 = H160::from_low_u64_be(1);
 
-        let trade0 = NormalOrderTrade {
+        let trade0 = OrderTrade {
             trade: Trade {
                 order: Order {
                     order_creation: OrderCreation {
@@ -943,7 +943,7 @@ pub mod tests {
             },
             ..Default::default()
         };
-        let trade1 = NormalOrderTrade {
+        let trade1 = OrderTrade {
             trade: Trade {
                 order: Order {
                     order_creation: OrderCreation {
@@ -991,7 +991,7 @@ pub mod tests {
         let token1 = H160([1; 20]);
         let settlement = test_settlement(
             hashmap! { token0 => 1.into(), token1 => 1.into() },
-            vec![NormalOrderTrade {
+            vec![OrderTrade {
                 trade: Trade {
                     order: Order {
                         order_creation: OrderCreation {
@@ -1047,7 +1047,7 @@ pub mod tests {
                 addr!("4e3fbd56cd56c3e72c1403e103b45db9da5b9d2b") => 99760667014_u128.into(),
                 addr!("dac17f958d2ee523a2206206994597c13d831ec7") => 3813250751402140530019_u128.into(),
             },
-            vec![NormalOrderTrade {
+            vec![OrderTrade {
                 trade: Trade {
                     order: Order {
                         order_creation: OrderCreation {
@@ -1076,7 +1076,7 @@ pub mod tests {
                 addr!("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48") => 235665799111775530988005794_u128.into(),
                 addr!("dac17f958d2ee523a2206206994597c13d831ec7") => 235593507027683452564881428_u128.into(),
             },
-            vec![NormalOrderTrade {
+            vec![OrderTrade {
                 trade: Trade {
                     order: Order {
                         order_creation: OrderCreation {
