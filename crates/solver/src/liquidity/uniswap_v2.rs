@@ -160,7 +160,7 @@ mod tests {
     use std::collections::HashMap;
 
     impl Inner {
-        fn dummy(allowances: HashMap<H160, U256>) -> Self {
+        fn new_dummy(allowances: HashMap<H160, U256>) -> Self {
             Self {
                 router: dummy_contract!(IUniswapLikeRouter, H160::zero()),
                 gpv2_settlement: dummy_contract!(GPv2Settlement, H160::zero()),
@@ -178,7 +178,7 @@ mod tests {
             token_b => 200.into(),
         };
 
-        let inner = Inner::dummy(allowances);
+        let inner = Inner::new_dummy(allowances);
 
         // Token A below, equal, above
         let (approval, _) = inner.settle((token_a, 50.into()), (token_b, 100.into()));
