@@ -133,7 +133,7 @@ impl Trade {
 }
 
 impl OrderTrade {
-    /// Encodes the settlement normal order as a tuple, as expected by the smart
+    /// Encodes the settlement's order_trade as a tuple, as expected by the smart
     /// contract.
     pub fn encode(&self) -> EncodedTrade {
         encoding::encode_trade(
@@ -146,7 +146,7 @@ impl OrderTrade {
 }
 
 impl LiquidityOrderTrade {
-    /// Encodes the settlement liquidity_order_trade as a tuple, as expected by the smart
+    /// Encodes the settlement's liquidity_order_trade as a tuple, as expected by the smart
     /// contract.
     pub fn encode(&self, clearing_price_vec_length: usize) -> EncodedTrade {
         let buy_token_index = clearing_price_vec_length + self.buy_token_offset_index;

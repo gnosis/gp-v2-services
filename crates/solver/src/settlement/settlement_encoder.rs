@@ -29,11 +29,15 @@ pub struct SettlementEncoder {
     // Invariant: tokens is all keys in clearing_prices sorted.
     tokens: Vec<H160>,
     clearing_prices: HashMap<H160, U256>,
+    // Order trades are trades of usual user orders. They will settled using the
+    // uniform clearing prices. Hence, every trade's buy and sell token has an entry
+    // in clearing_prices and we have the following invariant:
     // Invariant: Every trade's buy and sell token has an entry in clearing_prices.
     order_trades: Vec<OrderTrade>,
-    // Liquidity orders are supposed to be settled with the sell_price
-    // from the uniform clearing price vector and a custom buy_price
-    // defined in the struct LiquidityOrderTrade
+    // Liquidity orders will be settled at their limit prices.
+    // In order to represent the limit price, the sell_price is taken from the uniform
+    // clearing price vector and the buy_price is a custom buy_price defined in the
+    // struct LiquidityOrderTrade
     liquidity_order_trades: Vec<LiquidityOrderTrade>,
     // This is an Arc so that this struct is Clone. Cannot require `Interaction: Clone` because it
     // would make the trait not be object safe which prevents using it through `dyn`.
@@ -153,6 +157,12 @@ impl SettlementEncoder {
             .clearing_prices
             .get(&order.order_creation.sell_token)
             .context("settlement missing sell token")?;
+
+        // Note, for the encoding strategy of liquidity orders, there
+        // needs to be the sell_token_index present. Hence, we ask
+        // solvers to provide it in their solution. But actually, we could
+        // also set the sell token index in this function and not require the solvers
+        // to provide it.
         let sell_token_index = self
             .token_index(order.order_creation.sell_token)
             .expect("missing sell token with price");
@@ -359,16 +369,16 @@ impl SettlementEncoder {
     pub fn finish(mut self) -> EncodedSettlement {
         self.drop_unnecessary_tokens_and_prices();
 
-        let (mut additional_tokens, mut additional_prices): (Vec<H160>, Vec<U256>) = self
-            .liquidity_order_trades
-            .iter()
-            .map(|liquidity_order_trade| {
-                (
-                    liquidity_order_trade.trade.order.order_creation.buy_token,
-                    liquidity_order_trade.buy_token_price,
-                )
-            })
-            .unzip();
+        let (mut liquidity_order_buy_tokens, mut liquidity_order_prices): (Vec<H160>, Vec<U256>) =
+            self.liquidity_order_trades
+                .iter()
+                .map(|liquidity_order_trade| {
+                    (
+                        liquidity_order_trade.trade.order.order_creation.buy_token,
+                        liquidity_order_trade.buy_token_price,
+                    )
+                })
+                .unzip();
         let uniform_clearing_price_vec_length = self.tokens.len();
         let mut tokens = self.tokens.clone();
         let mut clearing_prices: Vec<U256> = self
@@ -381,8 +391,8 @@ impl SettlementEncoder {
                     .expect("missing clearing price for token")
             })
             .collect();
-        tokens.append(&mut additional_tokens);
-        clearing_prices.append(&mut additional_prices);
+        tokens.append(&mut liquidity_order_buy_tokens);
+        clearing_prices.append(&mut liquidity_order_prices);
         let mut trades: Vec<EncodedTrade> = self
             .order_trades
             .into_iter()
