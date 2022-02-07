@@ -652,7 +652,6 @@ pub mod tests {
             finished_settlement.trades[1].1, // <-- is the buy token index of liquidity order
             2.into()
         );
-
         assert_eq!(
             finished_settlement.trades[0].1, // <-- is the buy token index of normal order
             1.into()

@@ -245,15 +245,15 @@ mod tests {
         let _ = dbg!(result);
     }
 
+    // cargo test decode_quasimodo_solution_with_liquidity_orders_and_simulate_onchain_tx -- --ignored --nocapture
     #[tokio::test]
-    #[ignore] // cargo test decode_quasimodo_solution_with_liquidity_orders_and_simulate_onchain_tx -- --ignored --nocapture
+    #[ignore]
     async fn decode_quasimodo_solution_with_liquidity_orders_and_simulate_onchain_tx() {
         // This e2e test re-simulates the settlement from here: https://etherscan.io/tx/0x6756c294eb84c899247f2ec64d6eee73e7aaf50d6cb49ba9bab636f450240f51
         // This settlement was wrongly settled, because the liquidity order did receive a surplus.
         // The liquidity order is:
         // https://gnosis-protocol.io/orders/0x4da985bb7639bdac928553d0c39a3840388e27f825c572bb8addb47ef2de1f03e63a13eedd01b624958acfe32145298788a7a7ba61be1542
 
-        shared::tracing::initialize("solver=debug,shared=debug", tracing::Level::ERROR.into());
         let transport = create_env_test_transport();
         let web3 = Web3::new(transport);
         let native_token_contract = WETH9::deployed(&web3)
@@ -368,9 +368,9 @@ mod tests {
             "sellTokenBalance": "erc20",
             "buyTokenBalance": "erc20",
         });
-        let order3: Order = serde_json::from_value(value).unwrap();
+        let order2: Order = serde_json::from_value(value).unwrap();
 
-        let orders = vec![order0.clone(), order1, order0, order3];
+        let orders = vec![order0, order1, order2];
         let orders = orders
             .into_iter()
             .map(|order| order_converter.normalize_limit_order(order))
@@ -534,7 +534,7 @@ mod tests {
                     "sell_amount": "11722136152",
                     "sell_token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
                 },
-                "3": {
+                "2": {
                     "allow_partial_fill": false,
                     "buy_amount": "1475587283",
                     "buy_token": "0xdac17f958d2ee523a2206206994597c13d831ec7",
@@ -584,9 +584,12 @@ mod tests {
             .unwrap();
         let settlement = settlements.get(0).unwrap();
         let settlement_encoded = settlement.encoder.clone().finish();
-        println!("settlement_encoded{:?}", settlement_encoded);
+        println!("Settlement_encoded: {:?}", settlement_encoded);
         let settlement = settle_method_builder(&contract, settlement_encoded, account).tx;
-        println!("{:?}", tenderly_link(13830346u64, &network_id, settlement));
+        println!(
+            "Tenderly simulation for generated tx: {:?}",
+            tenderly_link(13830346u64, &network_id, settlement)
+        );
     }
 
     // cargo test -p solver settlement_simulation::tests::mainnet_chunked -- --ignored --nocapture
