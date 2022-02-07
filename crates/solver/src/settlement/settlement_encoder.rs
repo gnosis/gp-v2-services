@@ -452,13 +452,13 @@ impl SettlementEncoder {
             })
             .collect::<Result<Vec<LiquidityOrderTrade>>>()?;
 
-        for other_normal_trade in other.order_trades.iter() {
+        for other_order_trade in other.order_trades.iter() {
             ensure!(
                 self.order_trades
                     .iter()
                     .all(
-                        |self_normal_trade| self_normal_trade.trade.order.order_meta_data.uid
-                            != other_normal_trade.trade.order.order_meta_data.uid
+                        |self_order_trade| self_order_trade.trade.order.order_meta_data.uid
+                            != other_order_trade.trade.order.order_meta_data.uid
                     ),
                 "duplicate trade"
             );
