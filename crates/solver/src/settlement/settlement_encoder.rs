@@ -432,17 +432,17 @@ impl SettlementEncoder {
         if scaling_factor < BigRational::one() {
             return other.merge(self);
         }
-        for (key, value) in other.clearing_prices.clone() {
+        for (key, value) in &other.clearing_prices {
             let scaled_price = big_rational_to_u256(&(value.to_big_rational() * &scaling_factor))
                 .context("Invalid price scaling factor")?;
-            match self.clearing_prices.entry(key) {
+            match self.clearing_prices.entry(*key) {
                 Entry::Occupied(entry) => ensure!(
                     *entry.get() == scaled_price,
                     "different price after scaling"
                 ),
                 Entry::Vacant(entry) => {
                     entry.insert(scaled_price);
-                    self.tokens.push(key);
+                    self.tokens.push(*key);
                 }
             }
         }
