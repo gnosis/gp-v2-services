@@ -470,7 +470,21 @@ impl SettlementEncoder {
                         |self_order_trade| self_order_trade.trade.order.order_meta_data.uid
                             != other_order_trade.trade.order.order_meta_data.uid
                     ),
-                "duplicate trade"
+                "duplicate normal trade"
+            );
+        }
+
+        for other_liquidity_order_trade in other.liquidity_order_trades.iter() {
+            ensure!(
+                self.liquidity_order_trades
+                    .iter()
+                    .all(|self_liquidity_order_trade| self_liquidity_order_trade
+                        .trade
+                        .order
+                        .order_meta_data
+                        .uid
+                        != other_liquidity_order_trade.trade.order.order_meta_data.uid),
+                "duplicate liquidity trade"
             );
         }
 
