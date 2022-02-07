@@ -32,6 +32,9 @@ use shared::Web3;
 use std::time::{Duration, Instant};
 use web3::types::{TransactionReceipt, U64};
 
+/// Used for calculating the maximum additional tip based on the current value of max_fee_per_gas
+const MAX_FEE_PER_GAS_PERCENT: f64 = 0.05; //5%
+
 /// Parameters for transaction submitting
 #[derive(Clone, Default)]
 pub struct SubmitterParams {
@@ -117,7 +120,10 @@ impl GasPriceEstimating for SubmitterGasPriceEstimator<'_> {
             Ok(mut gas_price) if gas_price.cap() <= self.gas_price_cap => {
                 // boost miner tip to increase our chances of being included in a block
                 if let Some(ref mut eip1559) = gas_price.eip1559 {
-                    eip1559.max_priority_fee_per_gas += self.additional_tip.unwrap_or_default();
+                    eip1559.max_priority_fee_per_gas += self
+                        .additional_tip
+                        .unwrap_or_default()
+                        .min(eip1559.max_fee_per_gas * MAX_FEE_PER_GAS_PERCENT);
                 }
                 Ok(gas_price)
             }
