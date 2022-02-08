@@ -29,10 +29,9 @@ pub struct SettlementEncoder {
     // Invariant: tokens is all keys in clearing_prices sorted.
     tokens: Vec<H160>,
     clearing_prices: HashMap<H160, U256>,
-    // Order trades are trades of usual user orders. They will settled using the
+    // Order trades are trades of usual user orders. They will be settled using the
     // uniform clearing prices. Hence, every trade's buy and sell token has an entry
-    // in clearing_prices and we have the following invariant:
-    // Invariant: Every trade's buy and sell token has an entry in clearing_prices.
+    // in clearing_prices
     order_trades: Vec<OrderTrade>,
     // Liquidity orders will be settled at their limit prices.
     // In order to represent the limit price, the sell_price is taken from the uniform
@@ -168,7 +167,7 @@ impl SettlementEncoder {
             .expect("missing sell token with price");
 
         // Liquidity orders are settled at their limit price. We set:
-        // buy_price =  sell_price * order.sellAmount / order.buyAmount, where sell_price is given from uniform clearing prices
+        // buy_price = sell_price * order.sellAmount / order.buyAmount, where sell_price is given from uniform clearing prices
 
         // Rounding error checks:
         // Following limit price constraint is checked in the smart contract:
@@ -184,7 +183,7 @@ impl SettlementEncoder {
         let buy_price = self
             .clearing_prices
             .get(&order.order_creation.sell_token)
-            .context("settlement missing buy token")?
+            .context("settlement missing sell token")?
             .checked_mul(order.order_creation.sell_amount)
             .context("buy_price calculation failed")?
             .checked_div(order.order_creation.buy_amount)
@@ -343,7 +342,7 @@ impl SettlementEncoder {
             .trades()
             .iter()
             .flat_map(|order_trade| {
-                vec![
+                [
                     order_trade.trade.order.order_creation.buy_token,
                     order_trade.trade.order.order_creation.sell_token,
                 ]
@@ -353,8 +352,8 @@ impl SettlementEncoder {
         let liquidity_traded_tokens: HashSet<_> = self
             .liquidity_order_trades
             .iter()
-            .flat_map(|liquidity_order_trade| {
-                vec![liquidity_order_trade.trade.order.order_creation.sell_token]
+            .map(|liquidity_order_trade| {
+                liquidity_order_trade.trade.order.order_creation.sell_token
             })
             .collect();
 
