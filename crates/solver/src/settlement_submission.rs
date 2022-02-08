@@ -74,6 +74,8 @@ impl SolutionSubmitter {
             .iter()
             .any(|strategy| matches!(strategy, TransactionStrategy::DryRun));
 
+        let network_id = self.web3.net().version().await?;
+
         if is_dry_run {
             Ok(dry_run::log_settlement(account, &self.contract, settlement).await?)
         } else {
@@ -100,6 +102,7 @@ impl SolutionSubmitter {
                             gas_estimate,
                             deadline: Some(Instant::now() + self.max_confirm_time),
                             retry_interval: self.retry_interval,
+                            network_id: network_id.clone(),
                         };
                         let gas_price_estimator = SubmitterGasPriceEstimator {
                             inner: self.gas_price_estimator.as_ref(),
@@ -196,6 +199,12 @@ impl SubmissionError {
             SubmissionError::Other(_) => false,
             SubmissionError::Disabled(_) => false,
         }
+    }
+}
+
+impl From<web3::Error> for SubmissionError {
+    fn from(err: web3::Error) -> Self {
+        Self::Other(err.into())
     }
 }
 

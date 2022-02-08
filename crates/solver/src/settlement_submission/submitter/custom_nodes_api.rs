@@ -119,8 +119,9 @@ impl TransactionSubmitting for CustomNodesApi {
         }
     }
 
-    fn submission_status(&self, settlement: &Settlement) -> SubmissionLoopStatus {
-        if !settlement.mev_safe() {
+    fn submission_status(&self, settlement: &Settlement, network_id: &str) -> SubmissionLoopStatus {
+        // disable strategy if not mev safe (check done only for mainnet)
+        if !settlement.mev_safe() && shared::gas_price_estimation::is_mainnet(network_id) {
             return SubmissionLoopStatus::Disabled(DisabledReason::MevExtractable);
         }
 

@@ -50,7 +50,11 @@ impl TransactionSubmitting for FlashbotsApi {
         Ok(None)
     }
 
-    fn submission_status(&self, _settlement: &Settlement) -> SubmissionLoopStatus {
+    fn submission_status(
+        &self,
+        _settlement: &Settlement,
+        _network_id: &str,
+    ) -> SubmissionLoopStatus {
         SubmissionLoopStatus::Enabled
     }
 }
