@@ -1,8 +1,11 @@
-use crate::{pending_transactions::Fee, settlement::Settlement};
+use crate::{
+    pending_transactions::Fee,
+    settlement::{Revertable, Settlement},
+};
 
 use super::{
     super::submitter::{SubmitApiError, TransactionHandle, TransactionSubmitting},
-    CancelHandle, DisabledReason, SubmissionLoopStatus,
+    AdditionalTip, CancelHandle, DisabledReason, SubmissionLoopStatus,
 };
 use anyhow::{Context, Result};
 use ethcontract::{
@@ -123,11 +126,11 @@ impl TransactionSubmitting for CustomNodesApi {
         // disable strategy if there is a slighest posibility to be reverted (check done only for mainnet)
         if shared::gas_price_estimation::is_mainnet(network_id) {
             match settlement.revertable() {
-                crate::settlement::Revertable::NoRisk => return SubmissionLoopStatus::Enabled,
+                Revertable::NoRisk => return SubmissionLoopStatus::Enabled(AdditionalTip::Off),
                 _ => return SubmissionLoopStatus::Disabled(DisabledReason::MevExtractable),
             }
         }
 
-        SubmissionLoopStatus::Enabled
+        SubmissionLoopStatus::Enabled(AdditionalTip::Off)
     }
 }

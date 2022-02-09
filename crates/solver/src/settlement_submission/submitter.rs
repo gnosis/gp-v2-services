@@ -64,8 +64,14 @@ impl From<anyhow::Error> for SubmitApiError {
 
 #[derive(Debug)]
 pub enum SubmissionLoopStatus {
-    Enabled,
+    Enabled(AdditionalTip),
     Disabled(DisabledReason),
+}
+
+#[derive(Debug)]
+pub enum AdditionalTip {
+    Off,
+    On,
 }
 
 #[derive(Debug)]
@@ -123,14 +129,14 @@ pub struct SubmitterGasPriceEstimator<'a> {
     pub gas_price_cap: f64,
 }
 
-// impl SubmitterGasPriceEstimator<'_> {
-//     pub fn with_no_additional_tip(&self) -> Self {
-//         Self {
-//             max_additional_tip: None,
-//             ..*self
-//         }
-//     }
-// }
+impl SubmitterGasPriceEstimator<'_> {
+    pub fn with_no_additional_tip(&self) -> Self {
+        Self {
+            max_additional_tip: None,
+            ..*self
+        }
+    }
+}
 
 #[async_trait::async_trait]
 impl GasPriceEstimating for SubmitterGasPriceEstimator<'_> {
@@ -341,15 +347,38 @@ impl<'a> Submitter<'a> {
             .unwrap_or(None);
 
         loop {
+            let submission_status = self
+                .submit_api
+                .submission_status(&settlement, &params.network_id);
+
+            // check if the currently executing strategy is temporarily disabled
+
+            if let SubmissionLoopStatus::Disabled(reason) = submission_status {
+                tracing::debug!("strategy temporarily disabled, reason: {:?}", reason);
+                tokio::time::sleep(params.retry_interval).await;
+                continue;
+            }
+
             // Account for some buffer in the gas limit in case racing state changes result in slightly more heavy computation at execution time.
             let gas_limit = params.gas_estimate.to_f64_lossy() * ESTIMATE_GAS_LIMIT_FACTOR;
             let time_limit = target_confirm_time.saturating_duration_since(Instant::now());
-            let gas_price = match self
-                .gas_price_estimator
-                //.with_no_additional_tip()
-                .estimate_with_limits(gas_limit, time_limit)
-                .await
-            {
+            let gas_price = match submission_status {
+                SubmissionLoopStatus::Enabled(additional_tip) => match additional_tip {
+                    AdditionalTip::Off => {
+                        self.gas_price_estimator
+                            .with_no_additional_tip()
+                            .estimate_with_limits(gas_limit, time_limit)
+                            .await
+                    }
+                    AdditionalTip::On => {
+                        self.gas_price_estimator
+                            .estimate_with_limits(gas_limit, time_limit)
+                            .await
+                    }
+                },
+                SubmissionLoopStatus::Disabled(_) => unreachable!(),
+            };
+            let gas_price = match gas_price {
                 Ok(gas_price) => gas_price,
                 Err(err) => {
                     tracing::error!("gas estimation failed: {:?}", err);
@@ -357,17 +386,6 @@ impl<'a> Submitter<'a> {
                     continue;
                 }
             };
-
-            // before submitting, check if the currently executing strategy is temporarily disabled
-
-            if let SubmissionLoopStatus::Disabled(reason) = self
-                .submit_api
-                .submission_status(&settlement, &params.network_id)
-            {
-                tracing::debug!("strategy temporarily disabled, reason: {:?}", reason);
-                tokio::time::sleep(params.retry_interval).await;
-                continue;
-            }
 
             // create transaction
 
