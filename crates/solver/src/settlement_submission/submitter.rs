@@ -123,6 +123,15 @@ pub struct SubmitterGasPriceEstimator<'a> {
     pub gas_price_cap: f64,
 }
 
+// impl SubmitterGasPriceEstimator<'_> {
+//     pub fn with_no_additional_tip(&self) -> Self {
+//         Self {
+//             max_additional_tip: None,
+//             ..*self
+//         }
+//     }
+// }
+
 #[async_trait::async_trait]
 impl GasPriceEstimating for SubmitterGasPriceEstimator<'_> {
     async fn estimate_with_limits(
@@ -337,6 +346,7 @@ impl<'a> Submitter<'a> {
             let time_limit = target_confirm_time.saturating_duration_since(Instant::now());
             let gas_price = match self
                 .gas_price_estimator
+                //.with_no_additional_tip()
                 .estimate_with_limits(gas_limit, time_limit)
                 .await
             {

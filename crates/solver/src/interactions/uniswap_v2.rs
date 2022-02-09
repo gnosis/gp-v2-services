@@ -17,6 +17,10 @@ impl Interaction for UniswapInteraction {
     fn encode(&self) -> Vec<EncodedInteraction> {
         vec![self.encode_swap()]
     }
+
+    fn executed_amount(&self) -> Option<(H160, U256)> {
+        Some((self.token_out, self.amount_out))
+    }
 }
 
 impl UniswapInteraction {

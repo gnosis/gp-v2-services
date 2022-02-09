@@ -142,6 +142,11 @@ pub trait Interaction: std::fmt::Debug + Send + Sync {
     // never fail. Then the question becomes whether interactions should be allowed to fail encoding
     // for other reasons.
     fn encode(&self) -> Vec<EncodedInteraction>;
+
+    // Calculates executed amount (could be sell amount or buy amount depending on the impl)
+    fn executed_amount(&self) -> Option<(H160, U256)> {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -165,6 +170,12 @@ impl Interaction for NoopInteraction {
 #[derive(Debug, Clone)]
 pub struct Settlement {
     pub encoder: SettlementEncoder,
+}
+
+pub enum Revertable {
+    NoRisk,
+    LowRisk,
+    HighRisk,
 }
 
 impl Settlement {
@@ -278,9 +289,25 @@ impl Settlement {
         Ok(Self { encoder: merged })
     }
 
-    // Checks if the settlement is safe from MEV extraction
-    pub fn mev_safe(&self) -> bool {
-        true
+    // Calculates the risk level for settlement to be reverted
+    pub fn revertable(&self) -> Revertable {
+        if self.encoder.interactions().is_empty() {
+            return Revertable::NoRisk;
+        }
+
+        match self
+            .encoder
+            .interactions()
+            .iter()
+            .filter_map(|interaction| {
+                let (token, amount) = interaction.executed_amount()?;
+                amount.checked_mul(self.clearing_price(token)?)
+            })
+            .any(|executed_amount| executed_amount > U256::from_f64_lossy(5e36))
+        {
+            true => Revertable::HighRisk,
+            false => Revertable::LowRisk,
+        }
     }
 }
 
