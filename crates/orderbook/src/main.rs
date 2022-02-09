@@ -208,6 +208,9 @@ struct Arguments {
     /// The 1Inch REST API URL to use.
     #[structopt(long, env, default_value = "https://api.1inch.exchange/")]
     one_inch_url: Url,
+
+    #[clap(long, env, default_value = "Baseline", arg_enum, use_delimiter = true)]
+    price_estimators: Vec<PriceEstimatorType>,
 }
 
 pub async fn database_metrics(metrics: Arc<Metrics>, database: Postgres) -> ! {
@@ -462,7 +465,6 @@ async fn main() {
         )
     };
     let price_estimators = args
-        .shared
         .price_estimators
         .iter()
         .map(|estimator| -> (String, Box<dyn PriceEstimating>) {

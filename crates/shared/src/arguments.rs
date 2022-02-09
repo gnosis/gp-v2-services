@@ -1,7 +1,6 @@
 //! Contains command line arguments and related helpers that are shared between the binaries.
 use crate::{
     gas_price_estimation::GasEstimatorType,
-    price_estimation::PriceEstimatorType,
     sources::{balancer_v2::BalancerFactoryKind, BaselineSource},
 };
 use anyhow::{ensure, Result};
@@ -111,9 +110,6 @@ pub struct Arguments {
     /// price by 1% if built transactions don't actually get executed.
     #[clap(long, env, default_value = "ParaSwapPool4", use_delimiter = true)]
     pub disabled_paraswap_dexs: Vec<String>,
-
-    #[clap(long, env, default_value = "Baseline", arg_enum, use_delimiter = true)]
-    pub price_estimators: Vec<PriceEstimatorType>,
 
     #[clap(long, env)]
     pub zeroex_url: Option<String>,
