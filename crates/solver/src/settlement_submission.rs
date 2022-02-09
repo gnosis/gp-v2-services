@@ -163,7 +163,7 @@ impl SubmissionError {
             Self::Revert => SettlementSubmissionOutcome::Revert,
             Self::Canceled => SettlementSubmissionOutcome::Cancel,
             Self::Disabled(_) => SettlementSubmissionOutcome::Disabled,
-            Self::Other(_) => SettlementSubmissionOutcome::SimulationRevert,
+            Self::Other(_) => SettlementSubmissionOutcome::Failed,
         }
     }
 
