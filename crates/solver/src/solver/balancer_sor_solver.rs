@@ -527,7 +527,8 @@ mod tests {
                         ..Default::default()
                     },
                     ..Default::default()
-                }.into(),
+                }
+                .into(),
                 &Auction {
                     gas_price: 100e9,
                     ..Auction::default()
