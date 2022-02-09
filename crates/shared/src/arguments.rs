@@ -130,6 +130,16 @@ pub struct Arguments {
     /// supported Balancer V2 factory kinds if not specified.
     #[clap(long, env, arg_enum, ignore_case = true, use_delimiter = true)]
     pub balancer_factories: Option<Vec<BalancerFactoryKind>>,
+
+    /// The list of disabled 1Inch protocols. By default, the `PMM1` protocol
+    /// (representing a private market maker) is disabled as it seems to
+    /// produce invalid swaps.
+    #[clap(long, env, default_value = "PMM1", use_delimiter = true)]
+    pub disabled_one_inch_protocols: Vec<String>,
+
+    /// The 1Inch REST API URL to use.
+    #[structopt(long, env, default_value = "https://api.1inch.exchange/")]
+    pub one_inch_url: Url,
 }
 
 pub fn parse_unbounded_factor(s: &str) -> Result<f64> {
