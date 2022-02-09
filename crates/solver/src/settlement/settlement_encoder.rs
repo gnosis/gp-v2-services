@@ -92,7 +92,7 @@ impl SettlementEncoder {
         &mut self,
         order: Order,
         executed_amount: U256,
-        scaled_fee_amount: U256,
+        scaled_unsubsidized_fee: U256,
         is_liquidity_order: bool,
     ) -> Result<TradeExecution> {
         let sell_price = self
@@ -116,7 +116,7 @@ impl SettlementEncoder {
             sell_token_index,
             buy_token_index,
             executed_amount,
-            scaled_fee_amount,
+            scaled_unsubsidized_fee,
             is_liquidity_order,
         };
         let execution = trade
