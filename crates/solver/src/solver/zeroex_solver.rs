@@ -29,7 +29,7 @@ use crate::{
 };
 use anyhow::{anyhow, ensure, Result};
 use contracts::GPv2Settlement;
-use ethcontract::{Account, Bytes, H160, U256};
+use ethcontract::{Account, Bytes};
 use maplit::hashmap;
 use model::order::OrderKind;
 use shared::{
@@ -147,10 +147,6 @@ fn swap_respects_limit_price(swap: &SwapResponse, order: &LimitOrder) -> bool {
 impl Interaction for SwapResponse {
     fn encode(&self) -> Vec<EncodedInteraction> {
         vec![(self.to, self.value, Bytes(self.data.0.clone()))]
-    }
-
-    fn executed_amount(&self) -> Option<(H160, U256)> {
-        todo!();
     }
 }
 

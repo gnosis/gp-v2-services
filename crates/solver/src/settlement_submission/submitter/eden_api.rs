@@ -4,7 +4,7 @@ use crate::settlement::{Revertable, Settlement};
 
 use super::{
     super::submitter::{SubmitApiError, TransactionHandle, TransactionSubmitting},
-    AdditionalTip, CancelHandle, DisabledReason, SubmissionLoopStatus,
+    AdditionalTip, CancelHandle, SubmissionLoopStatus,
 };
 use anyhow::{Context, Result};
 use ethcontract::{dyns::DynTransport, transaction::TransactionBuilder, H160, U256};
@@ -60,12 +60,8 @@ impl TransactionSubmitting for EdenApi {
     fn submission_status(&self, settlement: &Settlement, network_id: &str) -> SubmissionLoopStatus {
         // disable strategy if there is a high posibility to be reverted (check done only for mainnet)
         if shared::gas_price_estimation::is_mainnet(network_id) {
-            match settlement.revertable() {
-                Revertable::NoRisk => return SubmissionLoopStatus::Enabled(AdditionalTip::Off),
-                Revertable::LowRisk => return SubmissionLoopStatus::Enabled(AdditionalTip::On),
-                Revertable::HighRisk => {
-                    return SubmissionLoopStatus::Disabled(DisabledReason::MevExtractable)
-                }
+            if let Revertable::NoRisk = settlement.revertable() {
+                return SubmissionLoopStatus::Enabled(AdditionalTip::Off);
             }
         }
 

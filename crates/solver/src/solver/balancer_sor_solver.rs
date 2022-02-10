@@ -16,7 +16,7 @@ use crate::{
 };
 use anyhow::Result;
 use contracts::{BalancerV2Vault, GPv2Settlement};
-use ethcontract::{Account, Bytes, H160, I256, U256};
+use ethcontract::{Account, Bytes, I256, U256};
 use maplit::hashmap;
 use model::order::OrderKind;
 use shared::balancer_sor_api::{BalancerSorApi, Query, Quote};
@@ -222,10 +222,6 @@ impl Interaction for BatchSwap {
             .0;
 
         vec![(self.vault.address(), 0.into(), Bytes(calldata))]
-    }
-
-    fn executed_amount(&self) -> Option<(H160, U256)> {
-        todo!();
     }
 }
 

@@ -1,7 +1,7 @@
 use crate::{encoding::EncodedInteraction, settlement::Interaction};
 use anyhow::{ensure, Result};
 use contracts::WETH9;
-use ethcontract::{Bytes, H160};
+use ethcontract::Bytes;
 use primitive_types::U256;
 
 #[derive(Clone, Debug)]
@@ -34,10 +34,6 @@ impl Interaction for UnwrapWethInteraction {
         let method = self.weth.withdraw(self.amount);
         let calldata = method.tx.data.expect("no calldata").0;
         vec![(self.weth.address(), 0.into(), Bytes(calldata))]
-    }
-
-    fn executed_amount(&self) -> Option<(H160, U256)> {
-        Some((self.weth.address(), self.amount))
     }
 }
 

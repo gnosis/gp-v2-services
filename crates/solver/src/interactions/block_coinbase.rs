@@ -22,8 +22,4 @@ impl Interaction for PayBlockCoinbase {
             ethcontract::Bytes(METHOD_ID.to_vec()),
         )]
     }
-
-    fn executed_amount(&self) -> Option<(H160, U256)> {
-        Some((MAINNET_ADDRESS, self.amount))
-    }
 }

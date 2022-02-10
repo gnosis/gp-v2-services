@@ -86,10 +86,6 @@ impl Interaction for InteractionData {
     fn encode(&self) -> Vec<EncodedInteraction> {
         vec![(self.target, self.value, Bytes(self.call_data.clone()))]
     }
-
-    fn executed_amount(&self) -> Option<(H160, U256)> {
-        todo!();
-    }
 }
 
 impl IntermediateSettlement {

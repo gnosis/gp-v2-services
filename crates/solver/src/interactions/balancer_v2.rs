@@ -51,10 +51,6 @@ impl Interaction for BalancerSwapGivenOutInteraction {
         let calldata = method.tx.data.expect("no calldata").0;
         vec![(self.vault.address(), 0.into(), Bytes(calldata))]
     }
-
-    fn executed_amount(&self) -> Option<(H160, U256)> {
-        Some((self.asset_out, self.amount_out))
-    }
 }
 
 #[cfg(test)]

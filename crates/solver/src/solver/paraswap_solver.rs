@@ -191,10 +191,6 @@ impl Interaction for TransactionBuilderResponse {
     fn encode(&self) -> Vec<EncodedInteraction> {
         vec![(self.to, self.value, Bytes(self.data.0.clone()))]
     }
-
-    fn executed_amount(&self) -> Option<(H160, U256)> {
-        todo!();
-    }
 }
 
 fn satisfies_limit_price(order: &LimitOrder, response: &PriceResponse) -> bool {

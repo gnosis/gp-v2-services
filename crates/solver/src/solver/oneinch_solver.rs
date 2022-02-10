@@ -16,7 +16,7 @@ use crate::{
 use anyhow::{anyhow, Result};
 use contracts::GPv2Settlement;
 use derivative::Derivative;
-use ethcontract::{Account, Bytes, H160, U256};
+use ethcontract::{Account, Bytes};
 use maplit::hashmap;
 use model::order::OrderKind;
 use reqwest::Client;
@@ -135,10 +135,6 @@ fn satisfies_limit_price(swap: &Swap, order: &LimitOrder) -> bool {
 impl Interaction for Swap {
     fn encode(&self) -> Vec<EncodedInteraction> {
         vec![(self.tx.to, self.tx.value, Bytes(self.tx.data.clone()))]
-    }
-
-    fn executed_amount(&self) -> Option<(H160, U256)> {
-        todo!();
     }
 }
 
