@@ -23,6 +23,7 @@ pub struct Metrics {
     /// Gas estimate metrics
     gas_price: Gauge,
     price_estimates: IntCounterVec,
+    native_price_cache: IntCounterVec,
 }
 
 impl Metrics {
@@ -70,6 +71,12 @@ impl Metrics {
         )?;
         registry.register(Box::new(price_estimates.clone()))?;
 
+        let native_price_cache = IntCounterVec::new(
+            Opts::new("native_price_cache", "Native price cache hit/miss counter."),
+            &["result"],
+        )?;
+        registry.register(Box::new(native_price_cache.clone()))?;
+
         Ok(Self {
             db_table_row_count,
             rpc_requests,
@@ -78,6 +85,7 @@ impl Metrics {
             database_queries,
             gas_price,
             price_estimates,
+            native_price_cache,
         })
     }
 
@@ -138,5 +146,16 @@ impl BalancerPoolCacheMetrics for Metrics {
         // liquidity sources in the future, for now just use the same counters.
         self.pool_cache_hits.inc_by(cache_hits as u64);
         self.pool_cache_misses.inc_by(cache_misses as u64);
+    }
+}
+
+impl shared::price_estimation::native_price_cache::Metrics for Metrics {
+    fn native_price_cache(&self, misses: usize, hits: usize) {
+        self.native_price_cache
+            .with_label_values(&["misses"])
+            .inc_by(misses as u64);
+        self.native_price_cache
+            .with_label_values(&["hits"])
+            .inc_by(hits as u64);
     }
 }
