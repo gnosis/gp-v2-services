@@ -126,7 +126,7 @@ impl TransactionSubmitting for CustomNodesApi {
         // disable strategy if there is a slighest posibility to be reverted (check done only for mainnet)
         if shared::gas_price_estimation::is_mainnet(network_id) {
             if let Revertable::HighRisk = settlement.revertable() {
-                return SubmissionLoopStatus::Disabled(DisabledReason::MevExtractable)
+                return SubmissionLoopStatus::Disabled(DisabledReason::MevExtractable);
             }
         }
 
