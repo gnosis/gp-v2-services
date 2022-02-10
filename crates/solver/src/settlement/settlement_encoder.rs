@@ -87,7 +87,7 @@ impl SettlementEncoder {
         &self.trades
     }
 
-    pub fn interactions(&self) -> &Vec<Arc<dyn Interaction>> {
+    pub fn execution_plan(&self) -> &Vec<Arc<dyn Interaction>> {
         &self.execution_plan
     }
 

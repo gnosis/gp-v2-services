@@ -58,7 +58,7 @@ impl TransactionSubmitting for EdenApi {
     }
 
     fn submission_status(&self, settlement: &Settlement, network_id: &str) -> SubmissionLoopStatus {
-        // disable strategy if there is a high posibility to be reverted (check done only for mainnet)
+        // disable strategy if there is a high possibility for a transaction to be reverted (check done only for mainnet)
         if shared::gas_price_estimation::is_mainnet(network_id) {
             if let Revertable::NoRisk = settlement.revertable() {
                 return SubmissionLoopStatus::Enabled(AdditionalTip::Off);
