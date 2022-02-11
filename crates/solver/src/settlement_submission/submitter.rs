@@ -499,10 +499,10 @@ fn status(receipt: TransactionReceipt) -> Result<TransactionReceipt, SubmissionE
     if let Some(status) = receipt.status {
         if status == U64::zero() {
             // failing transaction
-            return Err(SubmissionError::Revert);
+            return Err(SubmissionError::Revert(receipt.transaction_hash));
         } else if status == U64::one() && receipt.from == receipt.to.unwrap_or_default() {
             // noop transaction
-            return Err(SubmissionError::Canceled);
+            return Err(SubmissionError::Canceled(receipt.transaction_hash));
         }
     }
     // successfull transaction
