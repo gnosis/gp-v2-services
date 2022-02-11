@@ -367,8 +367,7 @@ impl<'a> Submitter<'a> {
                         name,
                         reason
                     );
-                    tokio::time::sleep(params.retry_interval).await;
-                    continue;
+                    return SubmissionError::from(anyhow!("strategy temporarily disabled"));
                 }
                 SubmissionLoopStatus::Enabled(AdditionalTip::Off) => {
                     self.gas_price_estimator.with_no_additional_tip()
