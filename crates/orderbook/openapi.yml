@@ -667,7 +667,7 @@ components:
         - $ref: "#/components/schemas/OrderMetaData"
     Auction:
       description: |
-        A batched auction for solving.
+        A batch auction for solving.
       type: object
       properties:
         block:
