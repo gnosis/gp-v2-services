@@ -295,7 +295,7 @@ async fn get_orders_with_native_prices(
         .into_iter()
         .zip(traded_tokens)
         .filter_map(|(price, token)| match price {
-            Ok(price) => Some((token, to_normalized_price(price))),
+            Ok(price) => Some((token, to_normalized_price(price)?)),
             Err(err) => {
                 tracing::warn!(?token, ?err, "error estimating native token price");
                 None
@@ -311,11 +311,18 @@ async fn get_orders_with_native_prices(
     (orders, prices)
 }
 
-fn to_normalized_price(price: f64) -> U256 {
+fn to_normalized_price(price: f64) -> Option<U256> {
+    let uint_max = 2.0_f64.powi(256);
+
     // NOTE: The `NativePriceEstimating` component returns prices denominated
     // in the token that it is estimating and not in ETH. This means that we
     // need to invert the price in order for it to be correct.
-    U256::from_f64_lossy(1e18 / price)
+    let price_in_eth = 1e18 / price;
+    if price_in_eth < 1. || price_in_eth >= uint_max {
+        return None;
+    }
+
+    Some(U256::from_f64_lossy(price_in_eth))
 }
 
 #[cfg(test)]
@@ -360,9 +367,26 @@ mod tests {
     #[test]
     fn computes_u256_prices_normalized_to_1e18() {
         assert_eq!(
-            to_normalized_price(0.5),                   // means 0.5 token buys 1 ETH
+            to_normalized_price(0.5).unwrap(), // means 0.5 token buys 1 ETH
             U256::from(2_000_000_000_000_000_000_u128)  // Means that the price of token is 2 ETH
         );
+    }
+
+    #[test]
+    fn normalize_prices_fail_when_outside_valid_input_range() {
+        assert!(to_normalized_price(0.).is_none());
+        assert!(to_normalized_price(-1.).is_none());
+        assert!(to_normalized_price(f64::INFINITY).is_none());
+
+        let uint_max = 2.0_f64.powi(256);
+
+        let min_price = 1e18 / uint_max;
+        assert!(to_normalized_price(min_price).is_none());
+        assert!(to_normalized_price(min_price * (1. + f64::EPSILON)).is_some());
+
+        let max_price = 1e18;
+        assert!(to_normalized_price(max_price).is_some());
+        assert!(to_normalized_price(max_price * (1. + f64::EPSILON)).is_none());
     }
 
     #[tokio::test]
@@ -393,6 +417,7 @@ mod tests {
         let prices = btreemap! {
             token1 => 0.5,
             token3 => 4.0,
+            token4 => 0.0, // invalid price!
         };
 
         let mut native_price_estimator = MockNativePriceEstimating::new();
