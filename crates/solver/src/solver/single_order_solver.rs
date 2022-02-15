@@ -125,6 +125,7 @@ mod tests {
     use crate::liquidity::tests::CapturingSettlementHandler;
     use crate::metrics::NoopMetrics;
     use anyhow::anyhow;
+    use model::order::OrderKind;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -227,5 +228,33 @@ mod tests {
             })
             .await
             .unwrap();
+    }
+
+    #[test]
+    fn execution_respects_order_() {
+        let order = LimitOrder {
+            kind: OrderKind::Sell,
+            sell_amount: 10.into(),
+            buy_amount: 10.into(),
+            ..Default::default()
+        };
+        assert!(execution_respects_order(&order, 10.into(), 11.into(),));
+        assert!(!execution_respects_order(&order, 10.into(), 9.into(),));
+        // Unexpectedly the executed sell amount is less than the real sell order for a fill kill
+        // order but we still get enough buy token.
+        assert!(execution_respects_order(&order, 9.into(), 10.into(),));
+        // Price is respected but order is partially filled.
+        assert!(!execution_respects_order(&order, 9.into(), 9.into(),));
+
+        let order = LimitOrder {
+            kind: OrderKind::Buy,
+            ..order
+        };
+        assert!(execution_respects_order(&order, 9.into(), 10.into(),));
+        assert!(!execution_respects_order(&order, 11.into(), 10.into(),));
+        // Unexpectedly get more buy amount but sell amount is still respected.
+        assert!(execution_respects_order(&order, 10.into(), 11.into(),));
+        // Price is respected but order is partially filled.
+        assert!(!execution_respects_order(&order, 9.into(), 9.into(),));
     }
 }
