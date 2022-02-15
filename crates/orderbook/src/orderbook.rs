@@ -214,11 +214,9 @@ impl Orderbook {
         let solvable_orders = self.get_solvable_orders().await?;
 
         let block = last_handled_block.unwrap_or(solvable_orders.latest_settlement_block);
-        let (orders, prices) = filter_tokens_without_native_prices(
-            solvable_orders.orders,
-            &*self.native_price_estimator,
-        )
-        .await;
+        let (orders, prices) =
+            get_orders_with_native_prices(solvable_orders.orders, &*self.native_price_estimator)
+                .await;
 
         Ok(Auction {
             block,
@@ -276,7 +274,7 @@ fn set_available_balances(orders: &mut [Order], cache: &SolvableOrdersCache) {
     }
 }
 
-async fn filter_tokens_without_native_prices(
+async fn get_orders_with_native_prices(
     mut orders: Vec<Order>,
     native_price_estimator: &dyn NativePriceEstimating,
 ) -> (Vec<Order>, BTreeMap<H160, U256>) {
@@ -418,7 +416,7 @@ mod tests {
             });
 
         let (filtered_orders, prices) =
-            filter_tokens_without_native_prices(orders.clone(), &native_price_estimator).await;
+            get_orders_with_native_prices(orders.clone(), &native_price_estimator).await;
 
         assert_eq!(filtered_orders, [orders[2].clone()]);
         assert_eq!(
