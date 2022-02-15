@@ -20,12 +20,12 @@ use ethcontract::errors::ExecutionError;
 use futures::future::join_all;
 use gas_estimation::{EstimatedGasPrice, GasPriceEstimating};
 use itertools::{Either, Itertools};
-use num::{BigRational, ToPrimitive};
-use primitive_types::{H160, U256};
+use num::{BigInt, BigRational, ToPrimitive};
+use primitive_types::H160;
 use rand::prelude::SliceRandom;
 use shared::{
+    conversions::U256Ext as _,
     current_block::{self, CurrentBlockStream},
-    price_estimation::PriceEstimating,
     recent_block_cache::Block,
     token_list::TokenList,
     Web3,
@@ -40,7 +40,6 @@ use web3::types::TransactionReceipt;
 pub struct Driver {
     settlement_contract: GPv2Settlement,
     liquidity_collector: LiquidityCollector,
-    price_estimator: Arc<dyn PriceEstimating>,
     solvers: Solvers,
     gas_price_estimator: Arc<dyn GasPriceEstimating>,
     settle_interval: Duration,
@@ -55,7 +54,6 @@ pub struct Driver {
     block_stream: CurrentBlockStream,
     solution_submitter: SolutionSubmitter,
     solve_id: u64,
-    native_token_amount_to_estimate_prices_with: U256,
     max_settlements_per_solver: usize,
     api: OrderBookApi,
     order_converter: OrderConverter,
@@ -69,7 +67,6 @@ impl Driver {
     pub fn new(
         settlement_contract: GPv2Settlement,
         liquidity_collector: LiquidityCollector,
-        price_estimator: Arc<dyn PriceEstimating>,
         solvers: Solvers,
         gas_price_estimator: Arc<dyn GasPriceEstimating>,
         settle_interval: Duration,
@@ -83,7 +80,6 @@ impl Driver {
         market_makable_token_list: Option<TokenList>,
         block_stream: CurrentBlockStream,
         solution_submitter: SolutionSubmitter,
-        native_token_amount_to_estimate_prices_with: U256,
         max_settlements_per_solver: usize,
         api: OrderBookApi,
         order_converter: OrderConverter,
@@ -101,7 +97,6 @@ impl Driver {
         Self {
             settlement_contract,
             liquidity_collector,
-            price_estimator,
             solvers,
             gas_price_estimator,
             settle_interval,
@@ -116,7 +111,6 @@ impl Driver {
             block_stream,
             solution_submitter,
             solve_id: 0,
-            native_token_amount_to_estimate_prices_with,
             max_settlements_per_solver,
             api,
             order_converter,
@@ -374,35 +368,41 @@ impl Driver {
         let current_block_during_liquidity_fetch =
             current_block::block_number(&self.block_stream.borrow())?;
 
-        let orders = self.api.get_orders().await.context("get_orders")?;
-        let (before_count, block) = (orders.orders.len(), orders.latest_settlement_block);
-        let orders = self.in_flight_orders.update_and_filter(orders);
-        if before_count != orders.len() {
+        let mut auction = self.api.get_auction().await.context("get_auction")?;
+        let before_count = auction.orders.len();
+        self.in_flight_orders.update_and_filter(&mut auction);
+        if before_count != auction.orders.len() {
             tracing::debug!(
                 "reduced {} orders to {} because in flight at last seen block {}",
                 before_count,
-                orders.len(),
-                block
+                auction.orders.len(),
+                auction.block
             );
         }
-        let orders = orders
+
+        let orders = auction
+            .orders
             .into_iter()
             .map(|order| self.order_converter.normalize_limit_order(order))
             .collect::<Vec<_>>();
         tracing::info!("got {} orders: {:?}", orders.len(), orders);
+
+        let estimated_prices = auction
+            .prices
+            .into_iter()
+            .map(|(token, price)| {
+                (
+                    token,
+                    price.to_big_rational() / BigInt::from(1_000_000_000_000_000_000_u128),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        tracing::debug!("estimated prices: {:?}", estimated_prices);
+
         let liquidity = self
             .liquidity_collector
             .get_liquidity_for_orders(&orders, Block::Number(current_block_during_liquidity_fetch))
             .await?;
-        let estimated_prices = auction_preprocessing::collect_estimated_prices(
-            self.price_estimator.as_ref(),
-            self.native_token_amount_to_estimate_prices_with,
-            self.native_token,
-            &orders,
-        )
-        .await;
-        tracing::debug!("estimated prices: {:?}", estimated_prices);
-        let orders = auction_preprocessing::orders_with_price_estimates(orders, &estimated_prices);
 
         self.metrics.orders_fetched(&orders);
         self.metrics.liquidity_fetched(&liquidity);
