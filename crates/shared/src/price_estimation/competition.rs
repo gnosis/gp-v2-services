@@ -247,6 +247,8 @@ mod tests {
     use anyhow::anyhow;
     use model::order::OrderKind;
     use primitive_types::H160;
+    use std::time::Duration;
+    use tokio::time::sleep;
 
     #[tokio::test]
     async fn works() {
@@ -338,5 +340,81 @@ mod tests {
             result[4].as_ref().unwrap_err(),
             PriceEstimationError::UnsupportedToken(_),
         ));
+    }
+
+    #[tokio::test]
+    async fn racing_estimator_returns_early() {
+        let queries = [
+            Query {
+                sell_token: H160::from_low_u64_le(0),
+                buy_token: H160::from_low_u64_le(1),
+                in_amount: 1.into(),
+                kind: OrderKind::Buy,
+            },
+            Query {
+                sell_token: H160::from_low_u64_le(2),
+                buy_token: H160::from_low_u64_le(3),
+                in_amount: 1.into(),
+                kind: OrderKind::Sell,
+            },
+        ];
+        let estimates = [
+            Estimate {
+                out_amount: 1.into(),
+                ..Default::default()
+            },
+            Estimate {
+                out_amount: 2.into(),
+                ..Default::default()
+            },
+        ];
+
+        let mut first = MockPriceEstimating::new();
+        first.expect_estimates().times(1).returning(move |queries| {
+            assert_eq!(queries.len(), 2);
+            Box::pin(future::ready(vec![
+                Ok(estimates[0]),
+                Err(PriceEstimationError::NoLiquidity),
+            ]))
+        });
+
+        let mut second = MockPriceEstimating::new();
+        second
+            .expect_estimates()
+            .times(1)
+            .returning(move |queries| {
+                assert_eq!(queries.len(), 2);
+                let result = vec![Err(PriceEstimationError::NoLiquidity), Ok(estimates[1])];
+                Box::pin(async move {
+                    sleep(Duration::from_millis(10)).await;
+                    result
+                })
+            });
+
+        let mut third = MockPriceEstimating::new();
+        third.expect_estimates().times(1).returning(move |queries| {
+            assert_eq!(queries.len(), 2);
+            Box::pin(async {
+                sleep(Duration::from_millis(20)).await;
+                unreachable!(
+                    "This estimation gets canceled because the racing estimator\
+                    already go enough estimates to return early."
+                );
+            })
+        });
+
+        let racing = RacingCompetitionPriceEstimator::new(
+            vec![
+                ("first".to_owned(), Box::new(first)),
+                ("second".to_owned(), Box::new(second)),
+                ("third".to_owned(), Box::new(third)),
+            ],
+            NonZeroUsize::new(1).unwrap(),
+        );
+
+        let result = racing.estimates(&queries).await;
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].as_ref().unwrap(), &estimates[0]);
+        assert_eq!(result[1].as_ref().unwrap(), &estimates[1]); // buy 2 is better than buy 1
     }
 }
