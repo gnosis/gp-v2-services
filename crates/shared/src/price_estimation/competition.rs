@@ -2,9 +2,81 @@ use super::{Estimate, PriceEstimating, PriceEstimationError, Query};
 use crate::metrics;
 use anyhow::{anyhow, Result};
 use futures::future;
+use futures::FutureExt;
 use model::order::OrderKind;
 use num::BigRational;
 use std::cmp;
+use std::num::NonZeroUsize;
+
+/// Price estimator that pulls estimates from various sources
+/// and competes on the best price. Returns a price estimation
+/// early if there is a configurable number of successful estimates
+/// for every query or if all price sources returned an estimate.
+pub struct RacingCompetitionPriceEstimator {
+    inner: Vec<(String, Box<dyn PriceEstimating>)>,
+    successful_results_for_early_return: NonZeroUsize,
+}
+
+impl RacingCompetitionPriceEstimator {
+    pub fn new(
+        inner: Vec<(String, Box<dyn PriceEstimating>)>,
+        successful_results_for_early_return: NonZeroUsize,
+    ) -> Self {
+        assert!(!inner.is_empty());
+        Self {
+            inner,
+            successful_results_for_early_return,
+        }
+    }
+
+    fn enough_successful_estimates_for_each_query(
+        &self,
+        queries: &[Query],
+        results: &[(&String, Vec<Result<Estimate, PriceEstimationError>>)],
+    ) -> bool {
+        for i in 0..queries.len() {
+            if results.iter().filter(|result| result.1[i].is_ok()).count()
+                < self.successful_results_for_early_return.into()
+            {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+#[async_trait::async_trait]
+impl PriceEstimating for RacingCompetitionPriceEstimator {
+    async fn estimates(&self, queries: &[Query]) -> Vec<Result<Estimate, PriceEstimationError>> {
+        debug_assert!(queries.iter().all(|query| {
+            query.buy_token != model::order::BUY_ETH_ADDRESS
+                && query.sell_token != model::order::BUY_ETH_ADDRESS
+                && query.sell_token != query.buy_token
+        }));
+
+        let mut remaining_estimates: Vec<_> = self
+            .inner
+            .iter()
+            .map(|(name, estimator)| {
+                async move { (name, estimator.estimates(queries).await) }.boxed()
+            })
+            .collect();
+
+        let mut computed_estimates = Vec::with_capacity(queries.len());
+
+        while !remaining_estimates.is_empty() {
+            let (estimate, _, rest) = future::select_all(remaining_estimates).await;
+            computed_estimates.push(estimate);
+            if self.enough_successful_estimates_for_each_query(queries, &computed_estimates) {
+                break;
+            }
+            remaining_estimates = rest;
+        }
+
+        merge_estimates_from_multiple_estimators(queries, computed_estimates)
+    }
+}
 
 /// Price estimator that pulls estimates from various sources
 /// and competes on the best price.
