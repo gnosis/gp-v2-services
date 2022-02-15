@@ -69,7 +69,7 @@ impl NativePriceEstimating for NativePriceEstimator {
             .into_iter()
             .zip(native_token_queries.iter())
             .map(|(estimate, query)| {
-                estimate.map(|estimate| estimate.price_in_sell_token_f64(query))
+                estimate.map(|estimate| estimate.price_in_buy_token_f64(query))
             })
             .collect()
     }
@@ -106,7 +106,7 @@ mod tests {
             .now_or_never()
             .unwrap()
             .unwrap();
-        assert_eq!(price, 0.123456789);
+        assert_eq!(price, 1. / 0.123456789);
     }
 
     #[test]
