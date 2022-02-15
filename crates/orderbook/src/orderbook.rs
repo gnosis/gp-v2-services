@@ -312,7 +312,10 @@ async fn get_orders_with_native_prices(
 }
 
 fn to_normalized_price(price: f64) -> U256 {
-    U256::from_f64_lossy(price * 1e18)
+    // NOTE: The `NativePriceEstimating` component returns prices denominated
+    // in the token that it is estimating and not in ETH. This means that we
+    // need to invert the price in order for it to be correct.
+    U256::from_f64_lossy(1e18 / price)
 }
 
 #[cfg(test)]
@@ -357,8 +360,8 @@ mod tests {
     #[test]
     fn computes_u256_prices_normalized_to_1e18() {
         assert_eq!(
-            to_normalized_price(0.5),
-            U256::from(500_000_000_000_000_000_u128)
+            to_normalized_price(0.5),                   // means 0.5 token buys 1 ETH
+            U256::from(2_000_000_000_000_000_000_u128)  // Means that the price of token is 2 ETH
         );
     }
 
@@ -389,7 +392,7 @@ mod tests {
         ];
         let prices = btreemap! {
             token1 => 0.5,
-            token3 => 2.0,
+            token3 => 4.0,
         };
 
         let mut native_price_estimator = MockNativePriceEstimating::new();
@@ -422,8 +425,8 @@ mod tests {
         assert_eq!(
             prices,
             btreemap! {
-                token1 => U256::from(500_000_000_000_000_000_u128),
-                token3 => U256::from(2_000_000_000_000_000_000_u128),
+                token1 => U256::from(2_000_000_000_000_000_000_u128),
+                token3 => U256::from(250_000_000_000_000_000_u128),
             }
         );
     }
