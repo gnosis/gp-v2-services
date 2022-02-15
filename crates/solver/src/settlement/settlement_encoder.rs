@@ -152,19 +152,27 @@ impl SettlementEncoder {
         executed_amount: U256,
         scaled_fee_amount: U256,
     ) -> Result<TradeExecution> {
-        let sell_price = self
-            .clearing_prices
-            .get(&order.order_creation.sell_token)
-            .context("settlement missing sell token")?;
-
-        // Note, for the encoding strategy of liquidity orders, there
-        // needs to be the sell_token_index present. Hence, we ask
-        // solvers to provide it in their solution. But actually, we could
-        // also set the sell token index in this function and not require the solvers
-        // to provide it.
-        let sell_token_index = self
-            .token_index(order.order_creation.sell_token)
-            .expect("missing sell token with price");
+        // For the encoding strategy of liquidity orders, the sell prices are taken from
+        // the uniform clearing price vector. Therefore, either there needs to be an existing price
+        // for the sell token in the uniform clearing prices or we have to create a new price entry,
+        // if the sell token price is not yet available
+        let (sell_token_index, sell_price) = match self.token_index(order.order_creation.sell_token)
+        {
+            Some(index) => {
+                let sell_price = self
+                    .clearing_prices
+                    .get(&order.order_creation.sell_token)
+                    .context("settlement missing sell token")?;
+                (index, *sell_price)
+            }
+            None => {
+                let sell_token = order.order_creation.sell_token;
+                let sell_price = order.order_creation.buy_amount;
+                self.tokens.push(sell_token);
+                self.clearing_prices.insert(sell_token, sell_price);
+                (self.tokens.len() - 1, sell_price)
+            }
+        };
 
         // Liquidity orders are settled at their limit price. We set:
         // buy_price = sell_price * order.sellAmount / order.buyAmount, where sell_price is given from uniform clearing prices
@@ -201,7 +209,7 @@ impl SettlementEncoder {
         };
         let execution = liquidity_order_trade
             .trade
-            .executed_amounts(*sell_price, buy_price)
+            .executed_amounts(sell_price, buy_price)
             .context("impossible trade execution")?;
 
         self.liquidity_order_trades.push(liquidity_order_trade);
@@ -349,7 +357,7 @@ impl SettlementEncoder {
             })
             .collect();
 
-        let liquidity_traded_tokens: HashSet<_> = self
+        let liquidity_traded_sell_tokens: HashSet<_> = self
             .liquidity_order_trades
             .iter()
             .map(|liquidity_order_trade| {
@@ -358,11 +366,12 @@ impl SettlementEncoder {
             .collect();
 
         self.tokens.retain(|token| {
-            traded_tokens.contains(token) || liquidity_traded_tokens.contains(token)
+            traded_tokens.contains(token) || liquidity_traded_sell_tokens.contains(token)
         });
         self.sort_tokens_and_update_indices();
-        self.clearing_prices
-            .retain(|token, _price| traded_tokens.contains(token));
+        self.clearing_prices.retain(|token, _price| {
+            traded_tokens.contains(token) || liquidity_traded_sell_tokens.contains(token)
+        });
     }
 
     pub fn finish(mut self) -> EncodedSettlement {
@@ -653,6 +662,43 @@ pub mod tests {
         );
         assert_eq!(
             finished_settlement.trades[0].1, // <-- is the buy token index of normal order
+            1.into()
+        );
+    }
+
+    #[test]
+    fn settlement_inserts_sell_price_for_new_liquidity_order_if_price_did_not_exist() {
+        let mut settlement = SettlementEncoder::new(maplit::hashmap! {
+            token(1) => 9.into(),
+        });
+        let order01 = OrderBuilder::default()
+            .with_sell_token(token(0))
+            .with_sell_amount(30.into())
+            .with_buy_token(token(1))
+            .with_buy_amount(10.into())
+            .build();
+        assert!(settlement
+            .add_liquidity_order_trade(order01.clone(), 20.into(), 0.into())
+            .is_ok());
+        let finished_settlement = settlement.finish();
+        // the initial price from:SettlementEncoder::new(maplit::hashmap! {
+        //     token(1) => 9.into(),
+        // });
+        // gets dropped and replaced by the liquidity price
+        assert_eq!(finished_settlement.tokens, vec![token(0), token(1)]);
+        assert_eq!(
+            finished_settlement.clearing_prices,
+            vec![
+                order01.order_creation.buy_amount,
+                order01.order_creation.sell_amount
+            ]
+        );
+        assert_eq!(
+            finished_settlement.trades[0].0, // <-- is the sell token index of liquidity order
+            0.into()
+        );
+        assert_eq!(
+            finished_settlement.trades[0].1, // <-- is the buy token index of liquidity order
             1.into()
         );
     }
