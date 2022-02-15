@@ -369,6 +369,7 @@ mod tests {
         let token1 = H160([1; 20]);
         let token2 = H160([2; 20]);
         let token3 = H160([3; 20]);
+        let token4 = H160([4; 20]);
 
         let orders = vec![
             OrderBuilder::default()
@@ -383,6 +384,10 @@ mod tests {
                 .with_sell_token(token1)
                 .with_buy_token(token3)
                 .build(),
+            OrderBuilder::default()
+                .with_sell_token(token2)
+                .with_buy_token(token4)
+                .build(),
         ];
         let prices = btreemap! {
             token1 => 0.5,
@@ -394,7 +399,8 @@ mod tests {
             .expect_estimate_native_prices()
             // deal with undeterministic ordering of `HashSet`.
             .withf(move |tokens| {
-                tokens.iter().cloned().collect::<HashSet<_>>() == hashset!(token1, token2, token3)
+                tokens.iter().cloned().collect::<HashSet<_>>()
+                    == hashset!(token1, token2, token3, token4)
             })
             .returning({
                 let prices = prices.clone();
