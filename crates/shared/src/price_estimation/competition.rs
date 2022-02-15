@@ -33,43 +33,49 @@ impl PriceEstimating for CompetitionPriceEstimator {
                 (name, estimator.estimates(queries).await)
             }))
             .await;
-
-        queries
-            .iter()
-            .enumerate()
-            .map(|(i, query)| {
-                all_estimates
-                    .iter()
-                    .fold(
-                        Err(PriceEstimationError::Other(anyhow!(
-                            "no successful price estimates"
-                        ))),
-                        |previous_result, (name, estimates)| {
-                            fold_price_estimation_result(
-                                query,
-                                name,
-                                previous_result,
-                                estimates[i].clone(),
-                            )
-                        },
-                    )
-                    .map(|winning_estimate| {
-                        // The `EstimateData::estimator_name` field is getting
-                        // flagged as dead code despited being used in the log
-                        // below. Just convince the linter that we use it.
-                        tracing::debug!(?query, ?winning_estimate, "winning price estimate");
-                        metrics()
-                            .queries_won
-                            .with_label_values(&[
-                                winning_estimate.estimator_name,
-                                winning_estimate.kind.label(),
-                            ])
-                            .inc();
-                        winning_estimate.estimate
-                    })
-            })
-            .collect()
+        merge_estimates_from_multiple_estimators(queries, all_estimates)
     }
+}
+
+fn merge_estimates_from_multiple_estimators(
+    queries: &[Query],
+    all_estimates: Vec<(&String, Vec<Result<Estimate, PriceEstimationError>>)>,
+) -> Vec<Result<Estimate, PriceEstimationError>> {
+    queries
+        .iter()
+        .enumerate()
+        .map(|(i, query)| {
+            all_estimates
+                .iter()
+                .fold(
+                    Err(PriceEstimationError::Other(anyhow!(
+                        "no successful price estimates"
+                    ))),
+                    |previous_result, (name, estimates)| {
+                        fold_price_estimation_result(
+                            query,
+                            name,
+                            previous_result,
+                            estimates[i].clone(),
+                        )
+                    },
+                )
+                .map(|winning_estimate| {
+                    // The `EstimateData::estimator_name` field is getting
+                    // flagged as dead code despited being used in the log
+                    // below. Just convince the linter that we use it.
+                    tracing::debug!(?query, ?winning_estimate, "winning price estimate");
+                    metrics()
+                        .queries_won
+                        .with_label_values(&[
+                            winning_estimate.estimator_name,
+                            winning_estimate.kind.label(),
+                        ])
+                        .inc();
+                    winning_estimate.estimate
+                })
+        })
+        .collect()
 }
 
 #[derive(Debug)]
