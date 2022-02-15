@@ -318,11 +318,11 @@ fn to_normalized_price(price: f64) -> Option<U256> {
     // in the token that it is estimating and not in ETH. This means that we
     // need to invert the price in order for it to be correct.
     let price_in_eth = 1e18 / price;
-    if price_in_eth < 1. || price_in_eth >= uint_max {
-        return None;
+    if price_in_eth.is_normal() && price_in_eth >= 1. && price_in_eth < uint_max {
+        Some(U256::from_f64_lossy(price_in_eth))
+    } else {
+        None
     }
-
-    Some(U256::from_f64_lossy(price_in_eth))
 }
 
 #[cfg(test)]
