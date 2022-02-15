@@ -4,7 +4,7 @@ use crate::{
         order_validation::{OrderValidating, PreOrderData, ValidationError},
         IntoWarpReply,
     },
-    fee::{FeeData, MinFeeCalculating},
+    fee::{FeeData, MinFeeCalculating, PriceQuality},
 };
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -37,6 +37,8 @@ pub struct OrderQuoteRequest {
     sell_token_balance: SellTokenSource,
     #[serde(default)]
     buy_token_balance: BuyTokenDestination,
+    #[serde(default)]
+    price_quality: PriceQuality,
 }
 
 impl From<&OrderQuoteRequest> for PreOrderData {
@@ -426,6 +428,7 @@ mod tests {
                 "appData": "0x9090909090909090909090909090909090909090909090909090909090909090",
                 "partiallyFillable": false,
                 "buyTokenBalance": "internal",
+                "priceQuality": "optimal"
             }))
             .unwrap(),
             OrderQuoteRequest {
@@ -441,6 +444,7 @@ mod tests {
                 partially_fillable: false,
                 sell_token_balance: SellTokenSource::Erc20,
                 buy_token_balance: BuyTokenDestination::Internal,
+                price_quality: PriceQuality::Optimal
             }
         );
     }
@@ -458,6 +462,7 @@ mod tests {
                 "appData": "0x9090909090909090909090909090909090909090909090909090909090909090",
                 "partiallyFillable": false,
                 "sellTokenBalance": "external",
+                "priceQuality": "fast"
             }))
             .unwrap(),
             OrderQuoteRequest {
@@ -473,6 +478,7 @@ mod tests {
                 partially_fillable: false,
                 sell_token_balance: SellTokenSource::External,
                 buy_token_balance: BuyTokenDestination::Erc20,
+                price_quality: PriceQuality::Fast
             }
         );
     }
@@ -505,6 +511,7 @@ mod tests {
                 partially_fillable: false,
                 sell_token_balance: SellTokenSource::Erc20,
                 buy_token_balance: BuyTokenDestination::Erc20,
+                price_quality: Default::default()
             }
         );
     }
