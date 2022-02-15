@@ -1,14 +1,14 @@
-use crate::metrics::SolverMetrics;
 use crate::{
     liquidity::LimitOrder,
+    metrics::SolverMetrics,
     settlement::Settlement,
     solver::{Auction, Solver},
 };
 use anyhow::{Error, Result};
 use ethcontract::Account;
+use primitive_types::U256;
 use rand::prelude::SliceRandom;
-use std::sync::Arc;
-use std::{collections::VecDeque, time::Duration};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 
 #[cfg_attr(test, mockall::automock)]
 #[async_trait::async_trait]
@@ -103,6 +103,20 @@ impl From<anyhow::Error> for SettlementError {
             retryable: false,
         }
     }
+}
+
+// Used by the single order solvers to verify that the response respects the order price.
+// We have also observed that a 0x buy order did not respect the queried buy amount so verifying
+// just the price or verifying just one component of the price (sell amount for buy orders, buy
+// amount for sell orders) is not enough.
+pub fn execution_respects_order(
+    order: &LimitOrder,
+    executed_sell_amount: U256,
+    executed_buy_amount: U256,
+) -> bool {
+    // note: This would be different for partially fillable orders but LimitOrder does currently not
+    // contain the remaining fill amount.
+    executed_sell_amount <= order.sell_amount && executed_buy_amount >= order.buy_amount
 }
 
 #[cfg(test)]
