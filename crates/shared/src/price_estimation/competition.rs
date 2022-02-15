@@ -296,13 +296,13 @@ mod tests {
         let mut first = MockPriceEstimating::new();
         first.expect_estimates().times(1).returning(move |queries| {
             assert_eq!(queries.len(), 5);
-            vec![
+            Box::pin(future::ready(vec![
                 Ok(estimates[0]),
                 Ok(estimates[0]),
                 Ok(estimates[0]),
                 Err(PriceEstimationError::Other(anyhow!(""))),
                 Err(PriceEstimationError::NoLiquidity),
-            ]
+            ]))
         });
         let mut second = MockPriceEstimating::new();
         second
@@ -310,13 +310,13 @@ mod tests {
             .times(1)
             .returning(move |queries| {
                 assert_eq!(queries.len(), 5);
-                vec![
+                Box::pin(future::ready(vec![
                     Err(PriceEstimationError::Other(anyhow!(""))),
                     Ok(estimates[1]),
                     Ok(estimates[1]),
                     Err(PriceEstimationError::Other(anyhow!(""))),
                     Err(PriceEstimationError::UnsupportedToken(H160([0; 20]))),
-                ]
+                ]))
             });
 
         let priority = CompetitionPriceEstimator::new(vec![
