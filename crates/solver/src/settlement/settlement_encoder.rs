@@ -45,6 +45,12 @@ pub struct SettlementEncoder {
     unwraps: Vec<UnwrapWethInteraction>,
 }
 
+impl Default for SettlementEncoder {
+    fn default() -> Self {
+        Self::new(Default::default())
+    }
+}
+
 impl SettlementEncoder {
     /// Creates a new settlement encoder with the specified prices.
     ///
@@ -104,12 +110,16 @@ impl SettlementEncoder {
         &self.order_trades
     }
 
+    pub fn execution_plan(&self) -> &Vec<Arc<dyn Interaction>> {
+        &self.execution_plan
+    }
+
     // Fails if any used token doesn't have a price.
     pub fn add_trade(
         &mut self,
         order: Order,
         executed_amount: U256,
-        scaled_fee_amount: U256,
+        scaled_unsubsidized_fee: U256,
     ) -> Result<TradeExecution> {
         let sell_price = self
             .clearing_prices
@@ -132,7 +142,7 @@ impl SettlementEncoder {
                 order,
                 sell_token_index,
                 executed_amount,
-                scaled_fee_amount,
+                scaled_unsubsidized_fee,
             },
             buy_token_index,
         };
@@ -150,7 +160,7 @@ impl SettlementEncoder {
         &mut self,
         order: Order,
         executed_amount: U256,
-        scaled_fee_amount: U256,
+        scaled_unsubsidized_fee: U256,
     ) -> Result<TradeExecution> {
         // For the encoding strategy of liquidity orders, the sell prices are taken from
         // the uniform clearing price vector. Therefore, either there needs to be an existing price
@@ -200,7 +210,7 @@ impl SettlementEncoder {
             order,
             sell_token_index,
             executed_amount,
-            scaled_fee_amount,
+            scaled_unsubsidized_fee,
         };
         let liquidity_order_trade = LiquidityOrderTrade {
             trade,
@@ -877,7 +887,7 @@ pub mod tests {
                         order: order12,
                         sell_token_index: 0,
                         executed_amount: 13.into(),
-                        scaled_fee_amount: 0.into()
+                        scaled_unsubsidized_fee: 0.into()
                     },
                     buy_token_offset_index: 0,
                     buy_token_price: 2.into(),
@@ -887,7 +897,7 @@ pub mod tests {
                         order: order23,
                         sell_token_index: 1,
                         executed_amount: 19.into(),
-                        scaled_fee_amount: 0.into()
+                        scaled_unsubsidized_fee: 0.into()
                     },
                     buy_token_offset_index: 1,
                     buy_token_price: 3.into(),

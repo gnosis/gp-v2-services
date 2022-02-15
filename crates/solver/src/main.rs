@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use clap::{ArgEnum, Parser};
 use contracts::{BalancerV2Vault, IUniswapLikeRouter, WETH9};
-use ethcontract::{Account, PrivateKey, H160, U256};
+use ethcontract::{Account, PrivateKey, H160};
 use reqwest::Url;
 use shared::{
     baseline_solver::BaseTokens,
@@ -148,22 +148,6 @@ struct Arguments {
     )]
     solver_time_limit: Duration,
 
-    /// The minimum amount of sell volume (in ETH) that needs to be
-    /// traded in order to use the 1Inch solver.
-    #[clap(
-        long,
-        env,
-        default_value = "5",
-        parse(try_from_str = shared::arguments::wei_from_base_unit)
-    )]
-    min_order_size_one_inch: U256,
-
-    /// The list of disabled 1Inch protocols. By default, the `PMM1` protocol
-    /// (representing a private market maker) is disabled as it seems to
-    /// produce invalid swaps.
-    #[clap(long, env, default_value = "PMM1", use_delimiter = true)]
-    disabled_one_inch_protocols: Vec<String>,
-
     /// The list of tokens our settlement contract is willing to buy when settling trades
     /// without external liquidity
     #[clap(
@@ -212,14 +196,14 @@ struct Arguments {
     #[clap(long, env, default_value = "https://rpc.flashbots.net")]
     flashbots_api_url: Url,
 
-    /// Additional tip in gwei that we are willing to give to eden above regular gas price estimation
+    /// Maximum additional tip in gwei that we are willing to give to eden above regular gas price estimation
     #[clap(
         long,
         env,
         default_value = "3",
         parse(try_from_str = shared::arguments::wei_from_gwei)
     )]
-    additional_eden_tip: f64,
+    max_additional_eden_tip: f64,
 
     /// The maximum time in seconds we spend trying to settle a transaction through the ethereum
     /// network before going to back to solving.
@@ -230,14 +214,14 @@ struct Arguments {
     )]
     max_submission_seconds: Duration,
 
-    /// Additional tip in gwei that we are willing to give to flashbots above regular gas price estimation
+    /// Maximum additional tip in gwei that we are willing to give to flashbots above regular gas price estimation
     #[clap(
         long,
         env,
         default_value = "3",
         parse(try_from_str = shared::arguments::wei_from_gwei)
     )]
-    additional_flashbot_tip: f64,
+    max_additional_flashbot_tip: f64,
 
     /// Amount of time to wait before retrying to submit the tx to the ethereum network
     #[clap(
@@ -246,6 +230,15 @@ struct Arguments {
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
     submission_retry_interval_seconds: Duration,
+
+    /// Additional tip in percentage of max_fee_per_gas we are willing to give to miners above regular gas price estimation
+    #[clap(
+        long,
+        env,
+        default_value = "0.05",
+        parse(try_from_str = shared::arguments::parse_percentage_factor)
+    )]
+    additional_tip_percentage: f64,
 
     /// The RPC endpoints to use for submitting transaction to a custom set of nodes.
     #[clap(long, env, use_delimiter = true)]
@@ -280,10 +273,6 @@ struct Arguments {
     /// but at the same time we don't restrict solutions sizes too much
     #[clap(long, env, default_value = "15000000")]
     simulation_gas_limit: u128,
-
-    /// The 1Inch REST API URL to use.
-    #[structopt(long, env, default_value = "https://api.1inch.exchange/")]
-    one_inch_url: Url,
 }
 
 #[derive(Copy, Clone, Debug, clap::ArgEnum)]
@@ -536,8 +525,7 @@ async fn main() {
         token_info_fetcher,
         network_name.to_string(),
         chain_id,
-        args.min_order_size_one_inch,
-        args.disabled_one_inch_protocols,
+        args.shared.disabled_one_inch_protocols,
         args.paraswap_slippage_bps,
         args.shared.disabled_paraswap_dexs,
         args.shared.paraswap_partner,
@@ -547,7 +535,7 @@ async fn main() {
         args.zeroex_slippage_bps,
         args.shared.quasimodo_uses_internal_buffers,
         args.shared.mip_uses_internal_buffers,
-        args.one_inch_url,
+        args.shared.one_inch_url,
     )
     .expect("failure creating solvers");
     let liquidity_collector = LiquidityCollector {
@@ -585,20 +573,23 @@ async fn main() {
             TransactionStrategyArg::PublicMempool => {
                 TransactionStrategy::CustomNodes(StrategyArgs {
                     submit_api: Box::new(CustomNodesApi::new(vec![web3.clone()])),
-                    additional_tip: 0.0,
+                    max_additional_tip: 0.,
+                    additional_tip_percentage_of_max_fee: 0.,
                 })
             }
             TransactionStrategyArg::Eden => TransactionStrategy::Eden(StrategyArgs {
                 submit_api: Box::new(
                     EdenApi::new(client.clone(), args.eden_api_url.clone()).unwrap(),
                 ),
-                additional_tip: args.additional_eden_tip,
+                max_additional_tip: args.max_additional_eden_tip,
+                additional_tip_percentage_of_max_fee: args.additional_tip_percentage,
             }),
             TransactionStrategyArg::Flashbots => TransactionStrategy::Flashbots(StrategyArgs {
                 submit_api: Box::new(
                     FlashbotsApi::new(client.clone(), args.flashbots_api_url.clone()).unwrap(),
                 ),
-                additional_tip: args.additional_flashbot_tip,
+                max_additional_tip: args.max_additional_flashbot_tip,
+                additional_tip_percentage_of_max_fee: args.additional_tip_percentage,
             }),
             TransactionStrategyArg::CustomNodes => {
                 assert!(
@@ -607,7 +598,8 @@ async fn main() {
                 );
                 TransactionStrategy::CustomNodes(StrategyArgs {
                     submit_api: Box::new(CustomNodesApi::new(submission_nodes.clone())),
-                    additional_tip: 0.0,
+                    max_additional_tip: 0.,
+                    additional_tip_percentage_of_max_fee: 0.,
                 })
             }
             TransactionStrategyArg::DryRun => TransactionStrategy::DryRun,
@@ -652,6 +644,7 @@ async fn main() {
         order_converter,
         args.weth_unwrap_factor,
         args.simulation_gas_limit,
+        args.fee_objective_scaling_factor,
     );
 
     let maintainer = ServiceMaintenance {

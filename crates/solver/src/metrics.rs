@@ -1,4 +1,7 @@
-use crate::liquidity::{LimitOrder, Liquidity};
+use crate::{
+    liquidity::{LimitOrder, Liquidity},
+    settlement::Revertable,
+};
 use anyhow::Result;
 use ethcontract::U256;
 use model::order::Order;
@@ -49,6 +52,10 @@ pub enum SettlementSubmissionOutcome {
     Timeout,
     /// Transaction sucessfully cancelled after simulation revert or timeout
     Cancel,
+    /// Submission disabled
+    Disabled,
+    /// General message for failures (for example, failing to connect to client node)
+    Failed,
 }
 
 pub trait SolverMetrics: Send + Sync {
@@ -63,6 +70,7 @@ pub trait SolverMetrics: Send + Sync {
     fn single_order_solver_failed(&self, solver: &'static str);
     fn settlement_simulation_failed(&self, solver: &'static str);
     fn settlement_submitted(&self, outcome: SettlementSubmissionOutcome, solver: &'static str);
+    fn settlement_revertable_status(&self, status: Revertable, solver: &'static str);
     fn orders_matched_but_not_settled(&self, count: usize);
     fn report_order_surplus(&self, surplus_diff: f64);
     fn runloop_completed(&self);
@@ -79,6 +87,7 @@ pub struct Metrics {
     liquidity: IntGaugeVec,
     settlement_simulations: IntCounterVec,
     settlement_submissions: IntCounterVec,
+    settlement_revertable_status: IntCounterVec,
     solver_runs: IntCounterVec,
     single_order_solver_runs: IntCounterVec,
     matched_but_unsettled_orders: IntCounter,
@@ -137,6 +146,15 @@ impl Metrics {
             &["result", "solver_type"],
         )?;
         registry.register(Box::new(settlement_submissions.clone()))?;
+
+        let settlement_revertable_status = IntCounterVec::new(
+            Opts::new(
+                "settlement_revertable_status",
+                "Settlement revertable status counts",
+            ),
+            &["result", "solver_type"],
+        )?;
+        registry.register(Box::new(settlement_revertable_status.clone()))?;
 
         let solver_runs = IntCounterVec::new(
             Opts::new("solver_run", "Success/Failure counts"),
@@ -218,6 +236,7 @@ impl Metrics {
             liquidity,
             settlement_simulations,
             settlement_submissions,
+            settlement_revertable_status,
             solver_runs,
             single_order_solver_runs,
             matched_but_unsettled_orders,
@@ -322,6 +341,8 @@ impl SolverMetrics for Metrics {
             SettlementSubmissionOutcome::Timeout => "timeout",
             SettlementSubmissionOutcome::Cancel => "cancel",
             SettlementSubmissionOutcome::SimulationRevert => "simulationrevert",
+            SettlementSubmissionOutcome::Disabled => "disabled",
+            SettlementSubmissionOutcome::Failed => "failed",
         };
         self.settlement_submissions
             .with_label_values(&[result, solver])
@@ -355,6 +376,16 @@ impl SolverMetrics for Metrics {
     fn transaction_gas_price(&self, gas_price: U256) {
         self.transaction_gas_price_gwei
             .set(gas_price.to_f64_lossy() / 1e9)
+    }
+
+    fn settlement_revertable_status(&self, status: Revertable, solver: &'static str) {
+        let result = match status {
+            Revertable::NoRisk => "no_risk",
+            Revertable::HighRisk => "high_risk",
+        };
+        self.settlement_revertable_status
+            .with_label_values(&[result, solver])
+            .inc()
     }
 }
 
@@ -409,6 +440,7 @@ impl SolverMetrics for NoopMetrics {
     fn single_order_solver_failed(&self, _: &'static str) {}
     fn settlement_simulation_failed(&self, _: &'static str) {}
     fn settlement_submitted(&self, _: SettlementSubmissionOutcome, _: &'static str) {}
+    fn settlement_revertable_status(&self, _: Revertable, _: &'static str) {}
     fn orders_matched_but_not_settled(&self, _: usize) {}
     fn report_order_surplus(&self, _: f64) {}
     fn runloop_completed(&self) {}

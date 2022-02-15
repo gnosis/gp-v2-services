@@ -1,8 +1,11 @@
-use crate::pending_transactions::Fee;
+use crate::{
+    pending_transactions::Fee,
+    settlement::{Revertable, Settlement},
+};
 
 use super::{
     super::submitter::{SubmitApiError, TransactionHandle, TransactionSubmitting},
-    CancelHandle,
+    AdditionalTip, CancelHandle, DisabledReason, SubmissionLoopStatus,
 };
 use anyhow::{Context, Result};
 use ethcontract::{
@@ -31,7 +34,6 @@ impl TransactionSubmitting for CustomNodesApi {
         &self,
         tx: TransactionBuilder<DynTransport>,
     ) -> Result<TransactionHandle, SubmitApiError> {
-        tracing::info!("sending transaction to custom nodes...");
         let transaction_request = tx.build().now_or_never().unwrap().unwrap();
         let mut futures = self
             .nodes
@@ -53,7 +55,7 @@ impl TransactionSubmitting for CustomNodesApi {
             let (result, _index, rest) = futures::future::select_all(futures).await;
             match result {
                 Ok(tx_hash) => {
-                    tracing::info!("created transaction with hash: {}", tx_hash);
+                    tracing::info!("created transaction with hash: {:?}", tx_hash);
                     return Ok(TransactionHandle {
                         tx_hash,
                         handle: tx_hash,
@@ -117,5 +119,20 @@ impl TransactionSubmitting for CustomNodesApi {
                 ..Default::default()
             })),
         }
+    }
+
+    fn submission_status(&self, settlement: &Settlement, network_id: &str) -> SubmissionLoopStatus {
+        // disable strategy if there is a slightest possibility for a transaction to be reverted (check done only for mainnet)
+        if shared::gas_price_estimation::is_mainnet(network_id) {
+            if let Revertable::HighRisk = settlement.revertable() {
+                return SubmissionLoopStatus::Disabled(DisabledReason::MevExtractable);
+            }
+        }
+
+        SubmissionLoopStatus::Enabled(AdditionalTip::Off)
+    }
+
+    fn name(&self) -> &'static str {
+        "CustomNodes"
     }
 }
