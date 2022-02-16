@@ -164,25 +164,22 @@ impl SettlementEncoder {
     ) -> Result<TradeExecution> {
         // For the encoding strategy of liquidity orders, the sell prices are taken from
         // the uniform clearing price vector. Therefore, either there needs to be an existing price
-        // for the sell token in the uniform clearing prices or we have to create a new price entry,
+        // for the sell token in the uniform clearing prices or we have to create a new price entry beforehand,
         // if the sell token price is not yet available
-        let (sell_token_index, sell_price) = match self.token_index(order.order_creation.sell_token)
-        {
-            Some(index) => {
-                let sell_price = self
-                    .clearing_prices
-                    .get(&order.order_creation.sell_token)
-                    .context("settlement missing sell token")?;
-                (index, *sell_price)
-            }
-            None => {
-                let sell_token = order.order_creation.sell_token;
-                let sell_price = order.order_creation.buy_amount;
-                self.tokens.push(sell_token);
-                self.clearing_prices.insert(sell_token, sell_price);
-                (self.tokens.len() - 1, sell_price)
-            }
+        if self.token_index(order.order_creation.sell_token) == None {
+            let sell_token = order.order_creation.sell_token;
+            let sell_price = order.order_creation.buy_amount;
+            self.tokens.push(sell_token);
+            self.clearing_prices.insert(sell_token, sell_price);
+            self.sort_tokens_and_update_indices();
         };
+        let sell_price = self
+            .clearing_prices
+            .get(&order.order_creation.sell_token)
+            .context("settlement missing sell token")?;
+        let sell_token_index = self
+            .token_index(order.order_creation.sell_token)
+            .context("settlement missing sell token")?;
 
         // Liquidity orders are settled at their limit price. We set:
         // buy_price = sell_price * order.sellAmount / order.buyAmount, where sell_price is given from uniform clearing prices
@@ -219,7 +216,7 @@ impl SettlementEncoder {
         };
         let execution = liquidity_order_trade
             .trade
-            .executed_amounts(sell_price, buy_price)
+            .executed_amounts(*sell_price, buy_price)
             .context("impossible trade execution")?;
 
         self.liquidity_order_trades.push(liquidity_order_trade);
