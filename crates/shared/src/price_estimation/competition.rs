@@ -81,31 +81,23 @@ impl PriceEstimating for RacingCompetitionPriceEstimator {
 /// Price estimator that pulls estimates from various sources
 /// and competes on the best price.
 pub struct CompetitionPriceEstimator {
-    inner: Vec<(String, Box<dyn PriceEstimating>)>,
+    inner: RacingCompetitionPriceEstimator,
 }
 
 impl CompetitionPriceEstimator {
     pub fn new(inner: Vec<(String, Box<dyn PriceEstimating>)>) -> Self {
-        assert!(!inner.is_empty());
-        Self { inner }
+        let number_of_estimators =
+            NonZeroUsize::new(inner.len()).expect("Vec of estimators should not be empty.");
+        Self {
+            inner: RacingCompetitionPriceEstimator::new(inner, number_of_estimators),
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl PriceEstimating for CompetitionPriceEstimator {
     async fn estimates(&self, queries: &[Query]) -> Vec<Result<Estimate, PriceEstimationError>> {
-        debug_assert!(queries.iter().all(|query| {
-            query.buy_token != model::order::BUY_ETH_ADDRESS
-                && query.sell_token != model::order::BUY_ETH_ADDRESS
-                && query.sell_token != query.buy_token
-        }));
-
-        let all_estimates =
-            future::join_all(self.inner.iter().map(|(name, estimator)| async move {
-                (name, estimator.estimates(queries).await)
-            }))
-            .await;
-        merge_estimates_from_multiple_estimators(queries, all_estimates)
+        self.inner.estimates(queries).await
     }
 }
 
