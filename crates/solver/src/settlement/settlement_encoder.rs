@@ -689,6 +689,10 @@ pub mod tests {
             .is_ok());
         // ensures that the output of add_liquidity_order is sorted
         assert_eq!(settlement.tokens, vec![token(0), token(1)]);
+        assert_eq!(
+            settlement.liquidity_order_trades[0].trade.sell_token_index,
+            0
+        );
         let finished_settlement = settlement.finish();
         // the initial price from:SettlementEncoder::new(maplit::hashmap! {
         //     token(1) => 9.into(),
