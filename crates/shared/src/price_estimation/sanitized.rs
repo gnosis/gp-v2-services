@@ -303,7 +303,7 @@ mod tests {
             .times(1)
             .withf(move |arg: &[Query]| arg.iter().eq(expected_forwarded_queries.iter()))
             .returning(|_| {
-                vec![
+                Box::pin(futures::future::ready(vec![
                     Ok(Estimate {
                         out_amount: 1.into(),
                         gas: 100.into(),
@@ -316,7 +316,7 @@ mod tests {
                         out_amount: 1.into(),
                         gas: U256::MAX,
                     }),
-                ]
+                ]))
             });
 
         let sanitized_estimator = SanitizedPriceEstimator {
