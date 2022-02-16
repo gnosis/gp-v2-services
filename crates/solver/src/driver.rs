@@ -20,11 +20,10 @@ use ethcontract::errors::ExecutionError;
 use futures::future::join_all;
 use gas_estimation::{EstimatedGasPrice, GasPriceEstimating};
 use itertools::{Either, Itertools};
-use num::{BigInt, BigRational, ToPrimitive};
+use num::{BigRational, ToPrimitive};
 use primitive_types::H160;
 use rand::prelude::SliceRandom;
 use shared::{
-    conversions::U256Ext as _,
     current_block::{self, CurrentBlockStream},
     recent_block_cache::Block,
     token_list::TokenList,
@@ -390,12 +389,7 @@ impl Driver {
         let estimated_prices = auction
             .prices
             .into_iter()
-            .map(|(token, price)| {
-                (
-                    token,
-                    price.to_big_rational() / BigInt::from(1_000_000_000_000_000_000_u128),
-                )
-            })
+            .map(|(token, price)| (token, auction_preprocessing::to_native_xrate(price)))
             .collect::<HashMap<_, _>>();
         tracing::debug!("estimated prices: {:?}", estimated_prices);
 
