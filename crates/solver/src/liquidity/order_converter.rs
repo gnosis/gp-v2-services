@@ -77,6 +77,9 @@ impl SettlementHandling<LimitOrder> for OrderSettlementHandler {
         let is_native_token_buy_order = self.order.order_creation.buy_token == BUY_ETH_ADDRESS;
 
         if !self.is_liquidity_order && is_native_token_buy_order {
+            // liquidity orders don't need an additional token equivalency, as the buy tokens
+            // clearing prices are not stored in the clearing prices vector, but in the
+            // LiquidityOrderTrade
             encoder.add_token_equivalency(self.native_token.address(), BUY_ETH_ADDRESS)?;
         }
 
