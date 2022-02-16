@@ -125,9 +125,6 @@ fn merge_estimates_from_multiple_estimators(
                     },
                 )
                 .map(|winning_estimate| {
-                    // The `EstimateData::estimator_name` field is getting
-                    // flagged as dead code despited being used in the log
-                    // below. Just convince the linter that we use it.
                     tracing::debug!(?query, ?winning_estimate, "winning price estimate");
                     metrics()
                         .queries_won
