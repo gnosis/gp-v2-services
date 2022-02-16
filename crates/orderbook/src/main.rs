@@ -72,7 +72,7 @@ use shared::{
         BaselineSource,
     },
 };
-use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
+use std::{collections::HashMap, net::SocketAddr, num::NonZeroUsize, sync::Arc, time::Duration};
 use tokio::task;
 use url::Url;
 
@@ -207,6 +207,15 @@ struct Arguments {
 
     #[clap(long, env, default_value = "Baseline", arg_enum, use_delimiter = true)]
     price_estimators: Vec<PriceEstimatorType>,
+
+    /// How many successful price estimates for each order will cause a fast price estimation to
+    /// return its result early.
+    /// The bigger the value the more the fast price estimation performs like the optimal price
+    /// estimation.
+    /// It's possible to pass values greater than the total number of enabled estimators but that
+    /// will not have any further effect.
+    #[clap(long, default_value = "2")]
+    fast_price_estimation_results_required: NonZeroUsize,
 }
 
 pub async fn database_metrics(metrics: Arc<Metrics>, database: Postgres) -> ! {
@@ -528,7 +537,7 @@ async fn main() {
             .iter()
             .map(create_base_estimator)
             .collect(),
-        std::num::NonZeroUsize::new(2).unwrap(),
+        args.fast_price_estimation_results_required,
     ))));
 
     let native_price_estimator = Arc::new(CachingNativePriceEstimator::new(
