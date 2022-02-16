@@ -44,8 +44,10 @@ use shared::{
     metrics::{serve_metrics, setup_metrics_registry, DEFAULT_METRICS_PORT},
     paraswap_api::DefaultParaswapApi,
     price_estimation::{
-        baseline::BaselinePriceEstimator, competition::CompetitionPriceEstimator,
-        instrumented::InstrumentedPriceEstimator, paraswap::ParaswapPriceEstimator,
+        baseline::BaselinePriceEstimator,
+        competition::{CompetitionPriceEstimator, RacingCompetitionPriceEstimator},
+        instrumented::InstrumentedPriceEstimator,
+        paraswap::ParaswapPriceEstimator,
         PriceEstimating, PriceEstimatorType,
     },
     recent_block_cache::CacheConfig,
@@ -521,6 +523,14 @@ async fn main() {
             .collect(),
     ))));
 
+    let fast_price_estimator = Arc::new(sanitized(Box::new(RacingCompetitionPriceEstimator::new(
+        args.price_estimators
+            .iter()
+            .map(create_base_estimator)
+            .collect(),
+        std::num::NonZeroUsize::new(2).unwrap(),
+    ))));
+
     let native_price_estimator = Arc::new(CachingNativePriceEstimator::new(
         Box::new(NativePriceEstimator::new(
             Arc::new(sanitized(Box::new(CompetitionPriceEstimator::new(
@@ -540,19 +550,23 @@ async fn main() {
         Some(args.native_price_cache_max_update_size),
     );
 
-    let fee_calculator = Arc::new(MinFeeCalculator::new(
-        price_estimator.clone(),
-        gas_price_estimator,
-        database.clone(),
-        bad_token_detector.clone(),
-        FeeSubsidyConfiguration {
-            fee_discount: args.fee_discount,
-            min_discounted_fee: args.min_discounted_fee,
-            fee_factor: args.fee_factor,
-            partner_additional_fee_factors: args.partner_additional_fee_factors,
-        },
-        native_price_estimator.clone(),
-    ));
+    let create_fee_calculator = |price_estimator: Arc<dyn PriceEstimating>| {
+        Arc::new(MinFeeCalculator::new(
+            price_estimator.clone(),
+            gas_price_estimator.clone(),
+            database.clone(),
+            bad_token_detector.clone(),
+            FeeSubsidyConfiguration {
+                fee_discount: args.fee_discount,
+                min_discounted_fee: args.min_discounted_fee,
+                fee_factor: args.fee_factor,
+                partner_additional_fee_factors: args.partner_additional_fee_factors.clone(),
+            },
+            native_price_estimator.clone(),
+        ))
+    };
+    let fee_calculator = create_fee_calculator(price_estimator.clone());
+    let fast_fee_calculator = create_fee_calculator(fast_price_estimator.clone());
 
     let solvable_orders_cache = SolvableOrdersCache::new(
         args.min_order_validity_period,
@@ -594,11 +608,10 @@ async fn main() {
         service_maintainer.maintainers.push(balancer);
     }
     check_database_connection(orderbook.as_ref()).await;
-    let quoter = Arc::new(OrderQuoter::new(
-        fee_calculator,
-        price_estimator,
-        order_validator,
-    ));
+    let quoter = Arc::new(
+        OrderQuoter::new(fee_calculator, price_estimator, order_validator)
+            .with_fast_quotes(fast_fee_calculator, fast_price_estimator),
+    );
     let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel();
     let serve_api = serve_api(
         database.clone(),

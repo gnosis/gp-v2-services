@@ -181,6 +181,8 @@ pub struct OrderQuoter {
     pub fee_calculator: Arc<dyn MinFeeCalculating>,
     pub price_estimator: Arc<dyn PriceEstimating>,
     pub order_validator: Arc<dyn OrderValidating>,
+    pub fast_fee_calculator: Arc<dyn MinFeeCalculating>,
+    pub fast_price_estimator: Arc<dyn PriceEstimating>,
 }
 
 impl OrderQuoter {
@@ -190,10 +192,22 @@ impl OrderQuoter {
         order_validator: Arc<dyn OrderValidating>,
     ) -> Self {
         Self {
+            fast_fee_calculator: fee_calculator.clone(),
+            fast_price_estimator: price_estimator.clone(),
             fee_calculator,
             price_estimator,
             order_validator,
         }
+    }
+
+    pub fn with_fast_quotes(
+        mut self,
+        fee_calculator: Arc<dyn MinFeeCalculating>,
+        price_estimator: Arc<dyn PriceEstimating>,
+    ) -> Self {
+        self.fast_fee_calculator = fee_calculator;
+        self.fast_price_estimator = price_estimator;
+        self
     }
 
     pub async fn calculate_quote(
@@ -233,6 +247,11 @@ impl OrderQuoter {
         &self,
         quote_request: &OrderQuoteRequest,
     ) -> Result<FeeParameters, FeeError> {
+        let (fee_calculator, price_estimator) = match quote_request.price_quality {
+            PriceQuality::Fast => (&self.fast_fee_calculator, &self.fast_price_estimator),
+            PriceQuality::Optimal => (&self.fee_calculator, &self.price_estimator),
+        };
+
         Ok(match quote_request.side {
             OrderQuoteSide::Sell {
                 sell_amount:
@@ -252,7 +271,7 @@ impl OrderQuoter {
                     kind: OrderKind::Sell,
                 };
                 let ((fee, expiration), estimate) = try_join!(
-                    self.fee_calculator.compute_subsidized_min_fee(
+                    fee_calculator.compute_subsidized_min_fee(
                         FeeData {
                             sell_token: quote_request.sell_token,
                             buy_token: quote_request.buy_token,
@@ -261,7 +280,7 @@ impl OrderQuoter {
                         },
                         quote_request.app_data,
                     ),
-                    self.price_estimator.estimate(&query)
+                    price_estimator.estimate(&query)
                 )
                 .map_err(FeeError::PriceEstimate)?;
                 let sell_amount_after_fee = sell_amount_before_fee
@@ -306,7 +325,7 @@ impl OrderQuoter {
 
                 // Since both futures are long running and independent, run concurrently
                 let ((fee, expiration), estimate) = try_join!(
-                    self.fee_calculator.compute_subsidized_min_fee(
+                    fee_calculator.compute_subsidized_min_fee(
                         FeeData {
                             sell_token: quote_request.sell_token,
                             buy_token: quote_request.buy_token,
@@ -315,7 +334,7 @@ impl OrderQuoter {
                         },
                         quote_request.app_data,
                     ),
-                    self.price_estimator.estimate(&price_estimation_query)
+                    price_estimator.estimate(&price_estimation_query)
                 )
                 .map_err(FeeError::PriceEstimate)?;
                 FeeParameters {
@@ -342,7 +361,7 @@ impl OrderQuoter {
 
                 // Since both futures are long running and independent, run concurrently
                 let ((fee, expiration), estimate) = try_join!(
-                    self.fee_calculator.compute_subsidized_min_fee(
+                    fee_calculator.compute_subsidized_min_fee(
                         FeeData {
                             sell_token: quote_request.sell_token,
                             buy_token: quote_request.buy_token,
@@ -351,7 +370,7 @@ impl OrderQuoter {
                         },
                         quote_request.app_data,
                     ),
-                    self.price_estimator.estimate(&price_estimation_query)
+                    price_estimator.estimate(&price_estimation_query)
                 )
                 .map_err(FeeError::PriceEstimate)?;
                 let sell_amount_after_fee = estimate.out_amount;
