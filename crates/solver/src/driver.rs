@@ -386,11 +386,8 @@ impl Driver {
             .collect::<Vec<_>>();
         tracing::info!("got {} orders: {:?}", orders.len(), orders);
 
-        let estimated_prices = auction
-            .prices
-            .into_iter()
-            .map(|(token, price)| (token, auction_preprocessing::to_native_xrate(price)))
-            .collect::<HashMap<_, _>>();
+        let estimated_prices =
+            auction_preprocessing::to_external_prices(auction.prices, self.native_token);
         tracing::debug!("estimated prices: {:?}", estimated_prices);
 
         let liquidity = self

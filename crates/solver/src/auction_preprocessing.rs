@@ -1,10 +1,12 @@
 //! Submodule containing helper methods to pre-process auction data before passing it on to the solvers.
 
 use crate::liquidity::LimitOrder;
-use ethcontract::U256;
+use ethcontract::{H160, U256};
 use lazy_static::lazy_static;
-use num::{BigInt, BigRational};
+use model::order::BUY_ETH_ADDRESS;
+use num::{BigInt, BigRational, One as _};
 use shared::conversions::U256Ext as _;
+use std::collections::{BTreeMap, HashMap};
 
 lazy_static! {
     static ref UNIT: BigInt = BigInt::from(1_000_000_000_000_000_000_u128);
@@ -12,7 +14,7 @@ lazy_static! {
 
 /// Converts a token price from the orderbook API `/auction` endpoint to an
 /// native token exchange rate.
-pub fn to_native_xrate(price: U256) -> BigRational {
+fn to_native_xrate(price: U256) -> BigRational {
     // Prices returned by the API are already denominated in native token with
     // 18 decimals. This means, its value corresponds to how much native token
     // is needed in order to buy 1e18 of the priced token.
@@ -20,6 +22,36 @@ pub fn to_native_xrate(price: U256) -> BigRational {
     // native token we simply need to compute `price / 1e18`. This results in
     // an exchange rate such that `x TOKEN * xrate = y ETH`.
     price.to_big_rational() / &*UNIT
+}
+
+/// Converts an `Auction` model's price map into an external price map used by
+/// the driver for objective value computation.
+pub fn to_external_prices(
+    prices: BTreeMap<H160, U256>,
+    native_token: H160,
+) -> HashMap<H160, BigRational> {
+    let mut exchange_rates = prices
+        .into_iter()
+        .map(|(token, price)| (token, to_native_xrate(price)))
+        .collect::<HashMap<_, _>>();
+
+    // Ensure there is a price for the native asset and wrapped native token.
+    // While this is not strictly needed since we are returning a mapping of
+    // exchange rates to the native token, certain components in the driver
+    // expect their existence. The value is just 1.0.
+    for token in [native_token, BUY_ETH_ADDRESS] {
+        match exchange_rates.get(&token) {
+            Some(price) if !price.is_one() => {
+                tracing::error!(?price, "malformed native asset or wrapped token price");
+            }
+            Some(_) => {}
+            None => {
+                exchange_rates.insert(token, BigRational::one());
+            }
+        }
+    }
+
+    exchange_rates
 }
 
 // vk: I would like to extend this to also check that the order has minimum age but for this we need
@@ -31,7 +63,7 @@ pub fn has_at_least_one_user_order(orders: &[LimitOrder]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use num::One as _;
+    use maplit::{btreemap, hashmap};
 
     #[test]
     fn converts_prices_to_exchange_rates() {
@@ -54,6 +86,42 @@ mod tests {
         assert_eq!(
             eth_amount,
             BigRational::from_integer(BigInt::from(100) * &*UNIT)
+        );
+    }
+
+    #[test]
+    fn augments_price_map_with_native_token_prices() {
+        let native_token = H160([42; 20]);
+        assert_eq!(
+            to_external_prices(
+                btreemap! {
+                    H160([1; 20]) => U256::from(100_000_000_000_000_000_u128),
+                },
+                native_token
+            ),
+            hashmap! {
+                H160([1; 20]) => BigRational::new(1.into(), 10.into()),
+                native_token => BigRational::one(),
+                BUY_ETH_ADDRESS => BigRational::one(),
+            },
+        );
+    }
+
+    #[test]
+    fn leaves_malformed_native_token_prices() {
+        let native_token = H160([42; 20]);
+        assert_eq!(
+            to_external_prices(
+                btreemap! {
+                    native_token => U256::from(4_200_000_000_000_000_000_u128),
+                    BUY_ETH_ADDRESS => U256::from(13_370_000_000_000_000_000_u128),
+                },
+                native_token
+            ),
+            hashmap! {
+                native_token => BigRational::new(42.into(), 10.into()),
+                BUY_ETH_ADDRESS => BigRational::new(1337.into(), 100.into()),
+            },
         );
     }
 }
