@@ -1,10 +1,11 @@
 //! Submodule containing helper methods to pre-process auction data before passing it on to the solvers.
 
 use crate::liquidity::LimitOrder;
+use anyhow::{bail, Result};
 use ethcontract::{H160, U256};
 use lazy_static::lazy_static;
 use model::order::BUY_ETH_ADDRESS;
-use num::{BigInt, BigRational, One as _};
+use num::{BigInt, BigRational, One as _, ToPrimitive as _};
 use shared::conversions::U256Ext as _;
 use std::collections::{BTreeMap, HashMap};
 
@@ -29,20 +30,22 @@ fn to_native_xrate(price: U256) -> BigRational {
 pub fn to_external_prices(
     prices: BTreeMap<H160, U256>,
     native_token: H160,
-) -> HashMap<H160, BigRational> {
+) -> Result<HashMap<H160, BigRational>> {
     let mut exchange_rates = prices
         .into_iter()
         .map(|(token, price)| (token, to_native_xrate(price)))
         .collect::<HashMap<_, _>>();
 
-    // Ensure there is a price for the native asset and wrapped native token.
-    // While this is not strictly needed since we are returning a mapping of
-    // exchange rates to the native token, certain components in the driver
-    // expect their existence. The value is just 1.0.
+    // Ensure there is a price for the native asset and wrapped native token
+    // exist with a value of 1. This protects us from malformed input (in case
+    // there are issues with the prices from the `/auction` endpoint for
+    // example). Additionally, certain components (like the HTTP solver) expect
+    // this price to exist.
     for token in [native_token, BUY_ETH_ADDRESS] {
         match exchange_rates.get(&token) {
             Some(price) if !price.is_one() => {
-                tracing::error!(?price, "malformed native asset or wrapped token price");
+                let price = price.to_f64().unwrap_or(f64::NAN);
+                bail!("malformed native token {:?} price {:?}", token, price);
             }
             Some(_) => {}
             None => {
@@ -51,7 +54,7 @@ pub fn to_external_prices(
         }
     }
 
-    exchange_rates
+    Ok(exchange_rates)
 }
 
 // vk: I would like to extend this to also check that the order has minimum age but for this we need
@@ -98,7 +101,8 @@ mod tests {
                     H160([1; 20]) => U256::from(100_000_000_000_000_000_u128),
                 },
                 native_token
-            ),
+            )
+            .unwrap(),
             hashmap! {
                 H160([1; 20]) => BigRational::new(1.into(), 10.into()),
                 native_token => BigRational::one(),
@@ -110,18 +114,19 @@ mod tests {
     #[test]
     fn leaves_malformed_native_token_prices() {
         let native_token = H160([42; 20]);
-        assert_eq!(
-            to_external_prices(
-                btreemap! {
-                    native_token => U256::from(4_200_000_000_000_000_000_u128),
-                    BUY_ETH_ADDRESS => U256::from(13_370_000_000_000_000_000_u128),
-                },
-                native_token
-            ),
-            hashmap! {
-                native_token => BigRational::new(42.into(), 10.into()),
-                BUY_ETH_ADDRESS => BigRational::new(1337.into(), 100.into()),
+        assert!(to_external_prices(
+            btreemap! {
+                native_token => U256::from(4_200_000_000_000_000_000_u128),
             },
-        );
+            native_token
+        )
+        .is_err());
+        assert!(to_external_prices(
+            btreemap! {
+                BUY_ETH_ADDRESS => U256::from(13_370_000_000_000_000_000_u128),
+            },
+            native_token
+        )
+        .is_err());
     }
 }

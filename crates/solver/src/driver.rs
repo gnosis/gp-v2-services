@@ -387,7 +387,7 @@ impl Driver {
         tracing::info!("got {} orders: {:?}", orders.len(), orders);
 
         let estimated_prices =
-            auction_preprocessing::to_external_prices(auction.prices, self.native_token);
+            auction_preprocessing::to_external_prices(auction.prices, self.native_token)?;
         tracing::debug!("estimated prices: {:?}", estimated_prices);
 
         let liquidity = self
