@@ -91,7 +91,6 @@ impl SolvableOrdersCache {
         self.notify.notify_one();
     }
 
-    /// Returns the last handled block by the solvable order cache.
     /// Manually update solvable orders. Usually called by the background updating task.
     pub async fn update(&self, block: u64) -> Result<()> {
         let min_valid_to = now_in_epoch_seconds() + self.min_order_validity_period.as_secs() as u32;
