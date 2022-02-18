@@ -2,7 +2,7 @@ use crate::price_estimation::native::NativePriceEstimating;
 use crate::price_estimation::PriceEstimationError;
 use primitive_types::H160;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock, Weak};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 #[cfg_attr(test, mockall::automock)]
@@ -19,10 +19,11 @@ impl Metrics for NoopMetrics {
 struct CachedPrice {
     price: f64,
     updated_at: Instant,
+    requested_at: Instant,
 }
 
 struct Inner {
-    cache: RwLock<HashMap<H160, CachedPrice>>,
+    cache: Mutex<HashMap<H160, CachedPrice>>,
     estimator: Box<dyn NativePriceEstimating>,
     max_age: Duration,
     metrics: Arc<dyn Metrics>,
@@ -40,14 +41,16 @@ impl Inner {
         let now = Instant::now();
         let prices = self.estimator.estimate_native_prices(tokens).await;
         {
-            let mut cache = self.cache.write().unwrap();
+            let mut cache = self.cache.lock().unwrap();
             for (token, result) in tokens.iter().zip(prices.iter()) {
                 if let Ok(price) = result {
                     let mut entry = cache.entry(*token).or_insert_with(|| CachedPrice {
                         price: *price,
                         updated_at: now,
+                        requested_at: now,
                     });
                     entry.updated_at = now;
+                    entry.requested_at = now;
                     entry.price = *price;
                 }
             }
@@ -61,11 +64,12 @@ impl Inner {
         }
 
         let now = Instant::now();
-        let cache = self.cache.read().unwrap();
+        let mut cache = self.cache.lock().unwrap();
         tokens
             .iter()
-            .map(|token| match cache.get(token) {
+            .map(|token| match cache.get_mut(token) {
                 Some(entry) if now.saturating_duration_since(entry.updated_at) < self.max_age => {
+                    entry.requested_at = now;
                     Some(entry.price)
                 }
                 _ => None,
@@ -89,18 +93,18 @@ impl CachingNativePriceEstimator {
     ) -> Self {
         Self(Arc::new(Inner {
             estimator,
-            cache: RwLock::new(Default::default()),
+            cache: Mutex::new(Default::default()),
             max_age,
             metrics,
         }))
     }
 
     /// Spawns a background task maintaining the cache once per `update_interval`.
-    /// Only outdated prices get updated and older prices have a higher priority.
+    /// Only soon to be outdated prices get updated and recently used prices have a higher priority.
     /// If `update_size` is `Some(n)` at most `n` prices get updated per interval.
     /// If `update_size` is `None` no limit gets applied.
     pub fn spawn_maintenance_task(&self, update_interval: Duration, update_size: Option<usize>) {
-        tokio::spawn(update_most_outdated_prices(
+        tokio::spawn(update_recently_used_outdated_prices(
             Arc::downgrade(&self.0),
             update_interval,
             update_size,
@@ -147,7 +151,10 @@ impl NativePriceEstimating for CachingNativePriceEstimator {
     }
 }
 
-async fn update_most_outdated_prices(
+// Update prices early by this amount to increase the number of cache hits.
+const PREFETCH_TIME: Duration = Duration::from_millis(2_000);
+
+async fn update_recently_used_outdated_prices(
     inner: Weak<Inner>,
     update_interval: Duration,
     update_size: Option<usize>,
@@ -157,13 +164,17 @@ async fn update_most_outdated_prices(
 
         let mut outdated_entries: Vec<_> = inner
             .cache
-            .read()
+            .lock()
             .unwrap()
             .iter()
-            .filter(|(_, cached)| now.saturating_duration_since(cached.updated_at) > inner.max_age)
-            .map(|(token, cached)| (*token, cached.updated_at))
+            .filter(|(_, cached)| {
+                now.saturating_duration_since(cached.updated_at)
+                    .saturating_add(PREFETCH_TIME)
+                    > inner.max_age
+            })
+            .map(|(token, cached)| (*token, cached.requested_at))
             .collect();
-        outdated_entries.sort_by_key(|entry| entry.1);
+        outdated_entries.sort_by_key(|entry| std::cmp::Reverse(entry.1));
 
         let tokens_to_update: Vec<_> = outdated_entries
             .iter()
