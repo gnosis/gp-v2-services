@@ -108,6 +108,7 @@ impl CachingNativePriceEstimator {
             Arc::downgrade(&self.0),
             update_interval,
             update_size,
+            PREFETCH_TIME,
         ));
     }
 }
@@ -158,6 +159,7 @@ async fn update_recently_used_outdated_prices(
     inner: Weak<Inner>,
     update_interval: Duration,
     update_size: Option<usize>,
+    prefetch_time: Duration,
 ) {
     while let Some(inner) = inner.upgrade() {
         let now = Instant::now();
@@ -169,7 +171,7 @@ async fn update_recently_used_outdated_prices(
             .iter()
             .filter(|(_, cached)| {
                 now.saturating_duration_since(cached.updated_at)
-                    .saturating_add(PREFETCH_TIME)
+                    .saturating_add(prefetch_time)
                     > inner.max_age
             })
             .map(|(token, cached)| (*token, cached.requested_at))
@@ -277,8 +279,8 @@ mod tests {
             .times(1)
             .returning(move |tokens| {
                 assert!(tokens.len() == 1);
-                assert!(tokens[0] == token(0));
-                vec![Ok(3.0)]
+                assert!(tokens[0] == token(1));
+                vec![Ok(4.0)]
             });
         // user requested something which has been skipped by the maintenance task
         inner
@@ -286,8 +288,8 @@ mod tests {
             .times(1)
             .returning(move |tokens| {
                 assert!(tokens.len() == 1);
-                assert!(tokens[0] == token(1));
-                vec![Ok(4.0)]
+                assert!(tokens[0] == token(0));
+                vec![Ok(3.0)]
             });
 
         let estimator = CachingNativePriceEstimator::new(
@@ -295,7 +297,12 @@ mod tests {
             Duration::from_millis(30),
             Arc::new(NoopMetrics),
         );
-        estimator.spawn_maintenance_task(Duration::from_millis(50), Some(1));
+        let _join_handle = tokio::spawn(update_recently_used_outdated_prices(
+            Arc::downgrade(&estimator.0),
+            Duration::from_millis(50),
+            Some(1),
+            Duration::ZERO,
+        ));
 
         // fill cache with 2 different queries
         let results = estimator.estimate_native_prices(&[token(0)]).await;
@@ -310,10 +317,10 @@ mod tests {
             .estimate_native_prices(&[token(0), token(1)])
             .await;
 
-        // this result has been updated in the background and therefore comes from the cache
-        assert!(results[0].as_ref().unwrap().to_i64().unwrap() == 3);
         // this result has been skipped during maintenance and therefore needs to be estimated by the
         // wrapped native price estimator
+        assert!(results[0].as_ref().unwrap().to_i64().unwrap() == 3);
+        // this result has been updated in the background and therefore comes from the cache
         assert!(results[1].as_ref().unwrap().to_i64().unwrap() == 4);
     }
 
@@ -341,7 +348,13 @@ mod tests {
             Duration::from_millis(30),
             Arc::new(NoopMetrics),
         );
-        estimator.spawn_maintenance_task(Duration::from_millis(50), None);
+
+        let _join_handle = tokio::spawn(update_recently_used_outdated_prices(
+            Arc::downgrade(&estimator.0),
+            Duration::from_millis(50),
+            None,
+            Duration::ZERO,
+        ));
 
         let tokens: Vec<_> = (0..10).map(H160::from_low_u64_be).collect();
         let results = estimator.estimate_native_prices(&tokens).await;
