@@ -74,6 +74,10 @@ mod tests {
 
         auction.block = 1;
         let filtered = update_and_get_filtered_orders(&auction);
+        assert_eq!(filtered.len(), 1);
+
+        auction.latest_settlement_block = 1;
+        let filtered = update_and_get_filtered_orders(&auction);
         assert_eq!(filtered.len(), 2);
     }
 }
