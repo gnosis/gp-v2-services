@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use clap::{ArgEnum, Parser};
-use contracts::{BalancerV2Vault, GPv2Settlement, WETH9};
+use contracts::{BalancerV2Vault, GPv2Settlement, IUniswapV3Factory, WETH9};
 use ethcontract::errors::DeployError;
 use model::{
     app_id::AppId,
@@ -21,56 +21,50 @@ use orderbook::{
     verify_deployed_contract_constants,
 };
 use primitive_types::{H160, U256};
-use shared::oneinch_api::OneInchClientImpl;
-use shared::price_estimation::native::NativePriceEstimator;
-use shared::price_estimation::native_price_cache::CachingNativePriceEstimator;
-use shared::price_estimation::oneinch::OneInchPriceEstimator;
-use shared::price_estimation::quasimodo::QuasimodoPriceEstimator;
-use shared::price_estimation::sanitized::SanitizedPriceEstimator;
-use shared::price_estimation::zeroex::ZeroExPriceEstimator;
-use shared::zeroex_api::DefaultZeroExApi;
 use shared::{
     bad_token::{
         cache::CachingDetector,
         list_based::{ListBasedDetector, UnknownTokenStrategy},
         trace_call::{
             BalancerVaultFinder, TokenOwnerFinding, TraceCallDetector,
-            UniswapLikePairProviderFinder,
+            UniswapLikePairProviderFinder, UniswapV3Finder,
         },
     },
     baseline_solver::BaseTokens,
     current_block::current_block_stream,
+    http_solver::{DefaultHttpSolverApi, SolverConfig},
     maintenance::ServiceMaintenance,
     metrics::{serve_metrics, setup_metrics_registry, DEFAULT_METRICS_PORT},
+    network::network_name,
+    oneinch_api::OneInchClientImpl,
     paraswap_api::DefaultParaswapApi,
     price_estimation::{
         baseline::BaselinePriceEstimator,
         competition::{CompetitionPriceEstimator, RacingCompetitionPriceEstimator},
         instrumented::InstrumentedPriceEstimator,
+        native::NativePriceEstimator,
+        native_price_cache::CachingNativePriceEstimator,
+        oneinch::OneInchPriceEstimator,
         paraswap::ParaswapPriceEstimator,
+        quasimodo::QuasimodoPriceEstimator,
+        sanitized::SanitizedPriceEstimator,
+        zeroex::ZeroExPriceEstimator,
         PriceEstimating, PriceEstimatorType,
     },
     recent_block_cache::CacheConfig,
+    sources::balancer_v2::BalancerFactoryKind,
     sources::{
         self,
+        balancer_v2::{pool_fetching::BalancerContracts, BalancerPoolFetcher},
         uniswap_v2::{
             pool_cache::PoolCache,
             pool_fetching::{PoolFetcher, PoolFetching},
         },
-        PoolAggregator,
+        BaselineSource, PoolAggregator,
     },
     token_info::{CachedTokenInfoFetcher, TokenInfoFetcher},
-    transport::create_instrumented_transport,
-    transport::http::HttpTransport,
-};
-use shared::{
-    http_solver::{DefaultHttpSolverApi, SolverConfig},
-    network::network_name,
-    sources::balancer_v2::BalancerFactoryKind,
-    sources::{
-        balancer_v2::{pool_fetching::BalancerContracts, BalancerPoolFetcher},
-        BaselineSource,
-    },
+    transport::{create_instrumented_transport, http::HttpTransport},
+    zeroex_api::DefaultZeroExApi,
 };
 use std::{collections::HashMap, net::SocketAddr, num::NonZeroUsize, sync::Arc, time::Duration};
 use tokio::task;
@@ -192,13 +186,14 @@ struct Arguments {
     /// How long cached native prices stay valid.
     #[clap(
         long,
+        env,
         default_value = "30",
         parse(try_from_str = shared::arguments::duration_from_seconds),
     )]
     native_price_cache_max_age_secs: Duration,
 
     /// How many cached native token prices can be updated at most in one maintenance cycle.
-    #[clap(long, default_value = "3")]
+    #[clap(long, env, default_value = "3")]
     native_price_cache_max_update_size: usize,
 
     /// Which estimators to use to estimate token prices in terms of the chain's native token.
@@ -236,7 +231,7 @@ struct Arguments {
     /// estimation.
     /// It's possible to pass values greater than the total number of enabled estimators but that
     /// will not have any further effect.
-    #[clap(long, default_value = "2")]
+    #[clap(long, env, default_value = "2")]
     fast_price_estimation_results_required: NonZeroUsize,
 }
 
@@ -387,10 +382,19 @@ async fn main() {
     if let Some(contract) = &vault {
         finders.push(Arc::new(BalancerVaultFinder(contract.clone())));
     }
+    let uniswapv3_factory = match IUniswapV3Factory::deployed(&web3).await {
+        Err(DeployError::NotFound(_)) => None,
+        other => Some(other.unwrap()),
+    };
+    if let Some(contract) = uniswapv3_factory {
+        finders.push(Arc::new(UniswapV3Finder {
+            factory: contract,
+            base_tokens: base_tokens.tokens().iter().copied().collect(),
+        }));
+    }
     let trace_call_detector = TraceCallDetector {
         web3: web3.clone(),
         finders,
-        base_tokens: base_tokens.tokens().clone(),
         settlement_contract: settlement_contract.address(),
     };
     let caching_detector = CachingDetector::new(
@@ -626,14 +630,18 @@ async fn main() {
         bad_token_detector,
         native_price_estimator,
         args.enable_presign_orders,
-        solvable_orders_cache,
+        solvable_orders_cache.clone(),
         args.solvable_orders_max_update_age,
         order_validator.clone(),
-        event_updater.clone(),
         metrics.clone(),
     ));
     let mut service_maintainer = ServiceMaintenance {
-        maintainers: vec![database.clone(), event_updater, pool_fetcher],
+        maintainers: vec![
+            database.clone(),
+            event_updater,
+            pool_fetcher,
+            solvable_orders_cache,
+        ],
     };
     if let Some(balancer) = balancer_pool_fetcher {
         service_maintainer.maintainers.push(balancer);
