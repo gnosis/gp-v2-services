@@ -52,7 +52,7 @@ fn convert_web3_to_submission_error(err: web3::Error) -> SubmitApiError {
         } else if message.starts_with("replacement transaction underpriced") {
             return SubmitApiError::ReplacementTransactionUnderpriced;
         } else if message.contains("tx fee") && message.contains("exceeds the configured cap") {
-            return SubmitApiError::TransactionTooExpensive;
+            return SubmitApiError::EdenTransactionTooExpensive;
         }
     }
 

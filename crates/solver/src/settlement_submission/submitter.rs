@@ -55,7 +55,7 @@ pub enum SubmitApiError {
     OpenEthereumTooCheapToReplace, // todo ds safe to remove after dropping OE support
     /// EDEN network will reject transactions where the maximum gas cost in ETH
     /// is over 1.0.
-    TransactionTooExpensive,
+    EdenTransactionTooExpensive,
     Other(anyhow::Error),
 }
 
@@ -437,7 +437,13 @@ impl<'a> Submitter<'a> {
             // execute transaction
 
             match self.submit_api.submit_transaction(method.tx).await {
-                Ok(handle) => transactions.push((handle, gas_price)),
+                Ok(handle) => {
+                    tracing::info!(
+                        submitter = %self.submit_api.name(), ?handle,
+                        "submitted transaction",
+                    );
+                    transactions.push((handle, gas_price));
+                }
                 Err(err) => match err {
                     SubmitApiError::InvalidNonce => {
                         tracing::warn!("submission failed: invalid nonce")
@@ -448,8 +454,8 @@ impl<'a> Submitter<'a> {
                     SubmitApiError::OpenEthereumTooCheapToReplace => {
                         tracing::debug!("submission failed: OE has different replacement rules than our algorithm")
                     }
-                    SubmitApiError::TransactionTooExpensive => {
-                        tracing::warn!("submission failed: transaction too expensive")
+                    SubmitApiError::EdenTransactionTooExpensive => {
+                        tracing::warn!("submission failed: eden transaction too expensive")
                     }
                     SubmitApiError::Other(err) => tracing::error!("submission failed: {}", err),
                 },
