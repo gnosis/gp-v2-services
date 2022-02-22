@@ -39,13 +39,19 @@ pub struct Order {
 
 impl Default for Order {
     fn default() -> Self {
+        let domain = &DomainSeparator::default();
+        let order = OrderCreation::default();
+        let owner = order
+            .signature
+            .validate(domain, &order.hash_struct())
+            .unwrap();
         Self::from_order_creation(
             OrderCreation::default(),
-            &DomainSeparator::default(),
+            domain,
             H160::default(),
             Default::default(),
+            owner,
         )
-        .unwrap()
     }
 }
 
@@ -65,11 +71,9 @@ impl Order {
         domain: &DomainSeparator,
         settlement_contract: H160,
         full_fee_amount: U256,
-    ) -> Option<Self> {
-        let owner = order_creation
-            .signature
-            .validate(domain, &order_creation.hash_struct())?;
-        Some(Self {
+        owner: H160,
+    ) -> Self {
+        Self {
             order_meta_data: OrderMetaData {
                 creation_date: chrono::offset::Utc::now(),
                 owner,
@@ -79,8 +83,9 @@ impl Order {
                 ..Default::default()
             },
             order_creation,
-        })
+        }
     }
+
     pub fn contains_token_from(&self, token_list: &HashSet<H160>) -> bool {
         token_list.contains(&self.order_creation.buy_token)
             || token_list.contains(&self.order_creation.sell_token)

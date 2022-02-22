@@ -59,6 +59,7 @@ pub fn get_fee_info(
                         kind: query.kind,
                     },
                     Default::default(),
+                    None,
                 )
                 .await;
             Result::<_, Infallible>::Ok(convert_json_response(result.map(
