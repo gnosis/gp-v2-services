@@ -156,12 +156,11 @@ impl From<u32> for FeeParameters {
     }
 }
 
+// The user address is mandatory. If some code does not know the user it can pass the 0 address
+// which is guaranteed to not have any balance for the cow token.
 #[cfg_attr(test, mockall::automock)]
 #[async_trait::async_trait]
 pub trait MinFeeCalculating: Send + Sync {
-    // TODO: User should be mandatory. It is not because some old routes like /api/v1/fee do not
-    // know the user. When we remove those apis we can remove the Optional.
-
     /// Returns the minimum amount of fee required to accept an order selling
     /// the specified order and an expiry date for the estimate. The returned
     /// amount applies configured "fee factors" for subsidizing user trades.
@@ -172,7 +171,7 @@ pub trait MinFeeCalculating: Send + Sync {
         &self,
         fee_data: FeeData,
         app_data: AppId,
-        user: Option<H160>,
+        user: H160,
     ) -> Result<Measurement, PriceEstimationError>;
 
     /// Validates that the given subsidized fee is enough to process an order for the given token.
@@ -183,7 +182,7 @@ pub trait MinFeeCalculating: Send + Sync {
         fee_data: FeeData,
         app_data: AppId,
         subsidized_fee: U256,
-        user: Option<H160>,
+        user: H160,
     ) -> Result<FeeParameters, ()>;
 }
 
@@ -288,7 +287,7 @@ impl MinFeeCalculating for MinFeeCalculator {
         &self,
         fee_data: FeeData,
         app_data: AppId,
-        user: Option<H160>,
+        user: H160,
     ) -> Result<Measurement, PriceEstimationError> {
         if fee_data.buy_token == fee_data.sell_token {
             return Ok((U256::zero(), MAX_DATETIME));
@@ -303,12 +302,7 @@ impl MinFeeCalculating for MinFeeCalculator {
 
         tracing::debug!(?fee_data, ?app_data, ?user, "computing subsidized fee",);
 
-        let cow_owner = async {
-            match user {
-                Some(user) => self.cow_subsidy.qualifies_for_subsidy(user).await,
-                None => Ok(false),
-            }
-        };
+        let cow_owner = self.cow_subsidy.qualifies_for_subsidy(user);
         let unsubsidized_min_fee = async {
             if let Some(past_fee) = self
                 .measurements
@@ -351,14 +345,9 @@ impl MinFeeCalculating for MinFeeCalculator {
         fee_data: FeeData,
         app_data: AppId,
         subsidized_fee: U256,
-        user: Option<H160>,
+        user: H160,
     ) -> Result<FeeParameters, ()> {
-        let cow_owner = async {
-            match user {
-                Some(user) => self.cow_subsidy.qualifies_for_subsidy(user).await,
-                None => Ok(false),
-            }
-        };
+        let cow_owner = self.cow_subsidy.qualifies_for_subsidy(user);
         let past_fee = self
             .measurements
             .find_measurement_including_larger_amount(fee_data, (self.now)());
@@ -720,8 +709,8 @@ mod tests {
         }));
         let native_price_estimator = create_default_native_token_estimator(price_estimator.clone());
         let app_data = AppId([1u8; 32]);
-        let user = Some(H160::zero());
-        let fee_estimator = MinFeeCalculator {
+        let user = H160::zero();
+        let mut fee_estimator = MinFeeCalculator {
             price_estimator,
             gas_estimator: gas_price_estimator,
             measurements: Arc::new(InMemoryFeeStore::default()),
@@ -758,8 +747,9 @@ mod tests {
             .is_err());
 
         // repeat without user so no extra cow subsidy
+        fee_estimator.cow_subsidy = Arc::new(NoopCowSubsidy(false));
         let (fee_2, _) = fee_estimator
-            .compute_subsidized_min_fee(fee_data, app_data, None)
+            .compute_subsidized_min_fee(fee_data, app_data, user)
             .await
             .unwrap();
         assert_eq!(fee_2, fee * 2);

@@ -339,7 +339,7 @@ impl OrderValidating for OrderValidator {
                 },
                 order_creation.app_data,
                 order_creation.fee_amount,
-                Some(owner),
+                owner,
             )
             .await
             .map_err(|()| ValidationError::InsufficientFee)?;

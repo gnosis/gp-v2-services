@@ -279,7 +279,7 @@ impl OrderQuoter {
                             kind: OrderKind::Sell,
                         },
                         quote_request.app_data,
-                        Some(quote_request.from),
+                        quote_request.from,
                     ),
                     price_estimator.estimate(&query)
                 )
@@ -334,7 +334,7 @@ impl OrderQuoter {
                             kind: OrderKind::Sell,
                         },
                         quote_request.app_data,
-                        Some(quote_request.from),
+                        quote_request.from,
                     ),
                     price_estimator.estimate(&price_estimation_query)
                 )
@@ -371,7 +371,7 @@ impl OrderQuoter {
                             kind: OrderKind::Buy,
                         },
                         quote_request.app_data,
-                        Some(quote_request.from),
+                        quote_request.from,
                     ),
                     price_estimator.estimate(&price_estimation_query)
                 )
