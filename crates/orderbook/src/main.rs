@@ -10,7 +10,7 @@ use model::{
 use orderbook::{
     account_balances::Web3BalanceFetcher,
     api::{order_validation::OrderValidator, post_quote::OrderQuoter},
-    cow_subsidy::{CowSubsidy, CowSubsidyImpl, NoopCowSubsidy},
+    cow_subsidy::{CowSubsidy, CowSubsidyImpl, FixedCowSubsidy},
     database::{self, orders::OrderFilter, Postgres},
     event_updater::EventUpdater,
     fee::{FeeSubsidyConfiguration, MinFeeCalculator},
@@ -603,7 +603,7 @@ async fn main() {
             U256::from_f64_lossy(args.cow_threshold),
             args.cow_fee_factor,
         )) as Arc<dyn CowSubsidy>,
-        None => Arc::new(NoopCowSubsidy(1.0)) as Arc<dyn CowSubsidy>,
+        None => Arc::new(FixedCowSubsidy(1.0)) as Arc<dyn CowSubsidy>,
     };
 
     let create_fee_calculator = |price_estimator: Arc<dyn PriceEstimating>| {

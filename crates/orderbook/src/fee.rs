@@ -466,7 +466,7 @@ mod tests {
     };
     use std::sync::Arc;
 
-    use crate::cow_subsidy::NoopCowSubsidy;
+    use crate::cow_subsidy::FixedCowSubsidy;
 
     use super::*;
 
@@ -494,7 +494,7 @@ mod tests {
                 bad_token_detector: Arc::new(ListBasedDetector::deny_list(Vec::new())),
                 fee_subsidy: Default::default(),
                 native_price_estimator: create_default_native_token_estimator(price_estimator),
-                cow_subsidy: Arc::new(NoopCowSubsidy::default()),
+                cow_subsidy: Arc::new(FixedCowSubsidy::default()),
             }
         }
     }
@@ -641,7 +641,7 @@ mod tests {
             bad_token_detector: Arc::new(ListBasedDetector::deny_list(vec![unsupported_token])),
             fee_subsidy: Default::default(),
             native_price_estimator,
-            cow_subsidy: Arc::new(NoopCowSubsidy::default()),
+            cow_subsidy: Arc::new(FixedCowSubsidy::default()),
         };
 
         // Selling unsupported token
@@ -718,7 +718,7 @@ mod tests {
                 ..Default::default()
             },
             native_price_estimator,
-            cow_subsidy: Arc::new(NoopCowSubsidy(0.5)),
+            cow_subsidy: Arc::new(FixedCowSubsidy(0.5)),
         };
         let (fee, _) = fee_estimator
             .compute_subsidized_min_fee(fee_data, app_data, user)
@@ -743,7 +743,7 @@ mod tests {
             .is_err());
 
         // repeat without user so no extra cow subsidy
-        fee_estimator.cow_subsidy = Arc::new(NoopCowSubsidy(1.0));
+        fee_estimator.cow_subsidy = Arc::new(FixedCowSubsidy(1.0));
         let (fee_2, _) = fee_estimator
             .compute_subsidized_min_fee(fee_data, app_data, user)
             .await
@@ -820,7 +820,7 @@ mod tests {
                 ..Default::default()
             },
             native_price_estimator,
-            cow_subsidy: Arc::new(NoopCowSubsidy::default()),
+            cow_subsidy: Arc::new(FixedCowSubsidy::default()),
         };
 
         let (fee, _) = fee_estimator
@@ -925,7 +925,7 @@ mod tests {
                 ..Default::default()
             },
             native_price_estimator,
-            cow_subsidy: Arc::new(NoopCowSubsidy::default()),
+            cow_subsidy: Arc::new(FixedCowSubsidy::default()),
         };
         let (fee, _) = fee_estimator
             .compute_subsidized_min_fee(fee_data, Default::default(), Default::default())

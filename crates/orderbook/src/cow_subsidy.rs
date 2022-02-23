@@ -14,16 +14,16 @@ pub trait CowSubsidy: Send + Sync + 'static {
     async fn cow_subsidy_factor(&self, user: H160) -> Result<f64>;
 }
 
-pub struct NoopCowSubsidy(pub f64);
+pub struct FixedCowSubsidy(pub f64);
 
-impl Default for NoopCowSubsidy {
+impl Default for FixedCowSubsidy {
     fn default() -> Self {
         Self(1.0)
     }
 }
 
 #[async_trait::async_trait]
-impl CowSubsidy for NoopCowSubsidy {
+impl CowSubsidy for FixedCowSubsidy {
     async fn cow_subsidy_factor(&self, _: H160) -> Result<f64> {
         Ok(self.0)
     }
