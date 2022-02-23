@@ -62,9 +62,6 @@ pub struct FeeSubsidyConfiguration {
     ///
     /// Fee factors are applied **after** flat fee discounts.
     pub partner_additional_fee_factors: HashMap<AppId, f64>,
-
-    /// Additional fee factor for cow token owners.
-    pub cow_factor: f64,
 }
 
 impl Default for FeeSubsidyConfiguration {
@@ -74,7 +71,6 @@ impl Default for FeeSubsidyConfiguration {
             fee_factor: 1.,
             min_discounted_fee: 0.,
             partner_additional_fee_factors: HashMap::new(),
-            cow_factor: 1.,
         }
     }
 }
@@ -120,7 +116,7 @@ impl FeeParameters {
         &self,
         config: &FeeSubsidyConfiguration,
         app_data: AppId,
-        cow_owner: bool,
+        cow_factor: f64,
     ) -> U256 {
         let fee_in_eth = self.gas_amount * self.gas_price;
         let mut discounted_fee_in_eth = fee_in_eth - config.fee_discount;
@@ -139,7 +135,7 @@ impl FeeParameters {
             .copied()
             .unwrap_or(1.0)
             * config.fee_factor
-            * if cow_owner { config.cow_factor } else { 1.0 };
+            * cow_factor;
         U256::from_f64_lossy((discounted_fee_in_eth * factor / self.sell_token_price).ceil())
     }
 }
@@ -302,7 +298,7 @@ impl MinFeeCalculating for MinFeeCalculator {
 
         tracing::debug!(?fee_data, ?app_data, ?user, "computing subsidized fee",);
 
-        let cow_owner = self.cow_subsidy.qualifies_for_subsidy(user);
+        let cow_factor = self.cow_subsidy.cow_subsidy_factor(user);
         let unsubsidized_min_fee = async {
             if let Some(past_fee) = self
                 .measurements
@@ -327,11 +323,11 @@ impl MinFeeCalculating for MinFeeCalculator {
             }
         };
 
-        let (cow_owner, unsubsidized_min_fee) =
-            futures::future::try_join(cow_owner, unsubsidized_min_fee).await?;
+        let (cow_factor, unsubsidized_min_fee) =
+            futures::future::try_join(cow_factor, unsubsidized_min_fee).await?;
 
         let subsidized_min_fee =
-            unsubsidized_min_fee.apply_fee_factor(&self.fee_subsidy, app_data, cow_owner);
+            unsubsidized_min_fee.apply_fee_factor(&self.fee_subsidy, app_data, cow_factor);
         tracing::debug!(
             "computed subsidized fee of {:?}",
             (subsidized_min_fee, fee_data.sell_token),
@@ -347,12 +343,12 @@ impl MinFeeCalculating for MinFeeCalculator {
         subsidized_fee: U256,
         user: H160,
     ) -> Result<FeeParameters, ()> {
-        let cow_owner = self.cow_subsidy.qualifies_for_subsidy(user);
+        let cow_factor = self.cow_subsidy.cow_subsidy_factor(user);
         let past_fee = self
             .measurements
             .find_measurement_including_larger_amount(fee_data, (self.now)());
         // TODO: make this function return a proper error distinguishing errors from fee too low;
-        let (cow_owner, past_fee) = futures::future::try_join(cow_owner, past_fee)
+        let (cow_factor, past_fee) = futures::future::try_join(cow_factor, past_fee)
             .await
             .map_err(|_| ())?;
         // When validating we allow fees taken for larger amounts because as the amount increases
@@ -367,7 +363,8 @@ impl MinFeeCalculating for MinFeeCalculator {
         // have been picked.
         if let Some(past_fee) = past_fee {
             tracing::debug!("found past fee {:?}", past_fee);
-            if subsidized_fee >= past_fee.apply_fee_factor(&self.fee_subsidy, app_data, cow_owner) {
+            if subsidized_fee >= past_fee.apply_fee_factor(&self.fee_subsidy, app_data, cow_factor)
+            {
                 tracing::debug!("given fee matches past fee");
                 return Ok(past_fee);
             } else {
@@ -378,7 +375,7 @@ impl MinFeeCalculating for MinFeeCalculator {
         if let Ok(current_fee) = self.compute_unsubsidized_min_fee(fee_data).await {
             tracing::debug!("estimated new fee {:?}", current_fee);
             if subsidized_fee
-                >= current_fee.apply_fee_factor(&self.fee_subsidy, app_data, cow_owner)
+                >= current_fee.apply_fee_factor(&self.fee_subsidy, app_data, cow_factor)
             {
                 tracing::debug!("given fee matches new fee");
                 return Ok(current_fee);
@@ -718,11 +715,10 @@ mod tests {
             bad_token_detector: Arc::new(ListBasedDetector::deny_list(vec![])),
             fee_subsidy: FeeSubsidyConfiguration {
                 partner_additional_fee_factors: hashmap! { app_data => 0.5 },
-                cow_factor: 0.5,
                 ..Default::default()
             },
             native_price_estimator,
-            cow_subsidy: Arc::new(NoopCowSubsidy(true)),
+            cow_subsidy: Arc::new(NoopCowSubsidy(0.5)),
         };
         let (fee, _) = fee_estimator
             .compute_subsidized_min_fee(fee_data, app_data, user)
@@ -747,7 +743,7 @@ mod tests {
             .is_err());
 
         // repeat without user so no extra cow subsidy
-        fee_estimator.cow_subsidy = Arc::new(NoopCowSubsidy(false));
+        fee_estimator.cow_subsidy = Arc::new(NoopCowSubsidy(1.0));
         let (fee_2, _) = fee_estimator
             .compute_subsidized_min_fee(fee_data, app_data, user)
             .await
@@ -864,7 +860,7 @@ mod tests {
         };
 
         assert_eq!(
-            unsubsidized.apply_fee_factor(&fee_configuration, Default::default(), false),
+            unsubsidized.apply_fee_factor(&fee_configuration, Default::default(), 1.0),
             // Note that the fee factor is applied to the minimum discounted fee!
             500_000.into(),
         );
@@ -886,17 +882,16 @@ mod tests {
             partner_additional_fee_factors: maplit::hashmap! {
                 app_id => 0.1,
             },
-            ..Default::default()
         };
 
         // (100G - 50G) * 0.5
         assert_eq!(
-            unsubsidized.apply_fee_factor(&fee_configuration, Default::default(), false),
+            unsubsidized.apply_fee_factor(&fee_configuration, Default::default(), 1.0),
             25_000_000_000_000u64.into()
         );
         // Additionally multiply with 0.1 if partner app id is used
         assert_eq!(
-            unsubsidized.apply_fee_factor(&fee_configuration, app_id, false),
+            unsubsidized.apply_fee_factor(&fee_configuration, app_id, 1.0),
             2_500_000_000_000u64.into()
         );
     }

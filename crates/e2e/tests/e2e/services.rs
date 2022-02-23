@@ -156,6 +156,7 @@ impl OrderbookServices {
             Arc::new(CowSubsidyImpl::new(
                 ERC20::at(web3, contracts.weth.address()),
                 0.into(),
+                1.0,
             )),
         ));
         let balance_fetcher = Arc::new(Web3BalanceFetcher::new(

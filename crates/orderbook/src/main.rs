@@ -601,8 +601,9 @@ async fn main() {
         Some(address) => Arc::new(CowSubsidyImpl::new(
             ERC20::at(&web3, address),
             U256::from_f64_lossy(args.cow_threshold),
+            args.cow_fee_factor,
         )) as Arc<dyn CowSubsidy>,
-        None => Arc::new(NoopCowSubsidy(false)) as Arc<dyn CowSubsidy>,
+        None => Arc::new(NoopCowSubsidy(1.0)) as Arc<dyn CowSubsidy>,
     };
 
     let create_fee_calculator = |price_estimator: Arc<dyn PriceEstimating>| {
@@ -616,7 +617,6 @@ async fn main() {
                 min_discounted_fee: args.min_discounted_fee,
                 fee_factor: args.fee_factor,
                 partner_additional_fee_factors: args.partner_additional_fee_factors.clone(),
-                cow_factor: args.cow_fee_factor,
             },
             native_price_estimator.clone(),
             cow_subsidy.clone(),
