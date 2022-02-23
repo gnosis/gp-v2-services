@@ -45,13 +45,7 @@ impl Default for Order {
             .signature
             .validate(domain, &order.hash_struct())
             .unwrap();
-        Self::from_order_creation(
-            OrderCreation::default(),
-            domain,
-            H160::default(),
-            Default::default(),
-            owner,
-        )
+        Self::from_order_creation(order, domain, H160::default(), Default::default(), owner)
     }
 }
 
