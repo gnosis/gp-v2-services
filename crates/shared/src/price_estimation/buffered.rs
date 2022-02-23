@@ -54,61 +54,47 @@ impl BufferingPriceEstimator {
     }
 
     async fn estimate_buffered(&self, queries: &[Query]) -> Vec<EstimationResult> {
-        // For each `Query` either get an in-flight request or keep the `Query` to forward it to the
-        // inner price estimator.
-        let (active_requests, remaining_queries): (Vec<_>, Vec<_>) = {
-            let requests = self.inner.in_flight_requests.lock().unwrap();
-            queries
+        let (active_requests, fetch_remaining_estimates) = {
+            let mut in_flight_requests = self.inner.in_flight_requests.lock().unwrap();
+
+            // For each `Query` either get an in-flight request or keep the `Query` to forward it to the
+            // inner price estimator.
+            let (active_requests, remaining_queries): (Vec<_>, Vec<_>) = queries
                 .iter()
-                .map(|query| match requests.get(query).cloned() {
+                .map(|query| match in_flight_requests.get(query).cloned() {
                     Some(active_request) => (Some(active_request), None),
                     None => (None, Some(*query)),
                 })
-                .unzip()
-        };
+                .unzip();
 
-        // Create future which estimates all `remaining_queries` in a single batch.
-        let fetch_remaining_estimates = {
-            let remaining_queries: Vec<_> = remaining_queries.iter().flatten().cloned().collect();
-            let inner = self.inner.clone();
-            async move { inner.estimator.estimates(&remaining_queries).await }
-                .boxed()
-                .shared()
-        };
+            // Create future which estimates all `remaining_queries` in a single batch.
+            let fetch_remaining_estimates = {
+                let remaining_queries: Vec<_> =
+                    remaining_queries.iter().flatten().cloned().collect();
+                let inner = self.inner.clone();
+                async move { inner.estimator.estimates(&remaining_queries).await }
+                    .boxed()
+                    .shared()
+            };
 
-        // Create a `SharedEstimationRequest` for each individual `Query` of the batch. This
-        // makes it possible for a `batch_2` to await the queries which it is interested in of the
-        // in-flight `batch_1`. Even if the estimator which requested `batch_1` stops polling it, the
-        // estimator of `batch_2` can still poll `batch_1` to completion by polling the
-        // `SharedEstimationRequest` it is actually interested in.
-        //
-        // Build those shared futures up front to keep the critical section short when inserting
-        // them into the `active_requests`.
-        #[allow(clippy::needless_collect)]
-        let individual_requests_for_batch: Vec<_> = remaining_queries
-            .iter()
-            .flatten()
-            .enumerate()
-            .map(|(index, query)| {
-                let fetch_remaining_estimates = fetch_remaining_estimates.clone();
-                (
-                    *query,
-                    async move { fetch_remaining_estimates.await[index].clone() }
-                        .boxed()
-                        .shared(),
-                )
-            })
-            .collect();
-        self.inner
-            .in_flight_requests
-            .lock()
-            .unwrap()
-            // It is possible that someone stored a `SharedEstimationRequest` in the meantime which
-            // could be overwritten now. In those rare cases 2 identical estimation requests would
-            // be in-flight at the same time but it wouldn't produce errors. No memory would leak
-            // and a calling estimator could still decide to stop polling a future while other
-            // estimators interested in the result are able poll the future to completion.
-            .extend(individual_requests_for_batch.into_iter());
+            // Create a `SharedEstimationRequest` for each individual `Query` of the batch. This
+            // makes it possible for a `batch_2` to await the queries which it is interested in of the
+            // in-flight `batch_1`. Even if the estimator which requested `batch_1` stops polling it, the
+            // estimator of `batch_2` can still poll `batch_1` to completion by polling the
+            // `SharedEstimationRequest` it is actually interested in.
+            in_flight_requests.extend(remaining_queries.iter().flatten().enumerate().map(
+                |(index, query)| {
+                    let fetch_remaining_estimates = fetch_remaining_estimates.clone();
+                    (
+                        *query,
+                        async move { fetch_remaining_estimates.await[index].clone() }
+                            .boxed()
+                            .shared(),
+                    )
+                },
+            ));
+            (active_requests, fetch_remaining_estimates)
+        };
 
         // Await all the estimates we need (in-flight and the new ones) in parallel.
         let results = futures::join!(
