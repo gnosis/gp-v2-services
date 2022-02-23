@@ -143,3 +143,106 @@ impl PriceEstimating for BufferingPriceEstimator {
         result
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::price_estimation::MockPriceEstimating;
+    use futures::poll;
+    use maplit::hashset;
+    use primitive_types::H160;
+    use std::collections::HashSet;
+    use std::time::Duration;
+    use tokio::time::sleep;
+
+    fn in_flight_requests(buffered: &BufferingPriceEstimator) -> HashSet<Query> {
+        HashSet::from_iter(
+            buffered
+                .inner
+                .in_flight_requests
+                .lock()
+                .unwrap()
+                .keys()
+                .cloned(),
+        )
+    }
+
+    #[tokio::test]
+    async fn request_can_be_completed_by_request_depending_on_it() {
+        let estimate = |amount: u64| Estimate {
+            out_amount: amount.into(),
+            ..Default::default()
+        };
+        let query = |address| Query {
+            sell_token: H160::from_low_u64_be(address),
+            ..Default::default()
+        };
+
+        let first_batch = [query(1), query(2)];
+        let second_batch = [query(2), query(3)];
+
+        let mut estimator = Box::new(MockPriceEstimating::new());
+        estimator
+            .expect_estimates()
+            .times(1)
+            .returning(move |queries| {
+                assert_eq!(queries, first_batch);
+                let result = vec![Ok(estimate(1)), Ok(estimate(2))];
+                async move {
+                    sleep(Duration::from_millis(10)).await;
+                    result
+                }
+                .boxed()
+            });
+
+        estimator
+            .expect_estimates()
+            .times(1)
+            .returning(move |queries| {
+                // only the missing query actually needs to be estimated
+                assert_eq!(queries, &vec![query(3)]);
+                let result = vec![Ok(estimate(3))];
+                async move {
+                    sleep(Duration::from_millis(10)).await;
+                    result
+                }
+                .boxed()
+            });
+
+        let buffered = BufferingPriceEstimator::new(estimator);
+        let first_batch_request = buffered.estimates(&first_batch).shared();
+        let second_batch_request = buffered.estimates(&second_batch).shared();
+
+        assert!(buffered.inner.in_flight_requests.lock().unwrap().is_empty());
+
+        // Poll first batch to store futures for its inidividual queries.
+        let _ = poll!(first_batch_request.clone());
+        assert_eq!(
+            in_flight_requests(&buffered),
+            hashset! { query(1), query(2) }
+        );
+
+        // Poll second batch to store futures for its NEW inidividual queries.
+        let _ = poll!(second_batch_request.clone());
+        assert_eq!(
+            in_flight_requests(&buffered),
+            hashset! { query(1), query(2), query(3) }
+        );
+
+        drop(first_batch_request);
+        // Drop all futures which nobody depends on anymore.
+        buffered.inner.collect_garbage();
+        assert_eq!(in_flight_requests(&buffered), hashset! { query(2) });
+
+        // Poll second future to completion.
+        let second_batch_result = second_batch_request.await;
+        assert_eq!(second_batch_result.len(), 2);
+        // Although the initiator of the request for `query(2)` dropped its future, other futures
+        // depending on the result can still drive the original future to completion.
+        assert_eq!(second_batch_result[0].as_ref().unwrap(), &estimate(2));
+        assert_eq!(second_batch_result[1].as_ref().unwrap(), &estimate(3));
+
+        // Polling the future to completion also collects garbage at the end.
+        assert!(buffered.inner.in_flight_requests.lock().unwrap().is_empty());
+    }
+}
