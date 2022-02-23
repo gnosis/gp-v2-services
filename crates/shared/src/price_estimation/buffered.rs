@@ -1,6 +1,6 @@
 use crate::price_estimation::{Estimate, PriceEstimating, PriceEstimationError, Query};
 use anyhow::Result;
-use futures::future::Shared;
+use futures::future::WeakShared;
 use futures::FutureExt;
 use std::collections::HashMap;
 use std::future::Future;
@@ -8,7 +8,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 type EstimationResult = Result<Estimate, PriceEstimationError>;
-type SharedEstimationRequest = Shared<Pin<Box<dyn Future<Output = EstimationResult> + Send>>>;
+type SharedEstimationRequest = WeakShared<Pin<Box<dyn Future<Output = EstimationResult> + Send>>>;
 
 struct Inner {
     estimator: Box<dyn PriceEstimating>,
@@ -22,13 +22,13 @@ impl Inner {
         let mut active_requests = self.in_flight_requests.lock().unwrap();
         let completed_and_ignored_requests: Vec<_> = active_requests
             .iter()
-            .filter_map(|(query, handle)| {
-                if matches!(handle.strong_count(), Some(1)) {
-                    // Only `Inner::active_requests` is still holding on to it.
-                    Some(*query)
-                } else {
-                    None
-                }
+            .filter_map(|(query, handle)| match handle.upgrade() {
+                // future terminated
+                Some(fut) if fut.peek().is_some() => Some(*query),
+                // no strong references left
+                None => Some(*query),
+                // something still depends on the future making progress
+                Some(_) => None,
             })
             .collect();
         for query in &completed_and_ignored_requests {
@@ -54,17 +54,19 @@ impl BufferingPriceEstimator {
     }
 
     async fn estimate_buffered(&self, queries: &[Query]) -> Vec<EstimationResult> {
-        let (active_requests, fetch_remaining_estimates) = {
+        let (active_requests, new_requests) = {
             let mut in_flight_requests = self.inner.in_flight_requests.lock().unwrap();
 
             // For each `Query` either get an in-flight request or keep the `Query` to forward it to the
             // inner price estimator.
             let (active_requests, remaining_queries): (Vec<_>, Vec<_>) = queries
                 .iter()
-                .map(|query| match in_flight_requests.get(query).cloned() {
-                    Some(active_request) => (Some(active_request), None),
-                    None => (None, Some(*query)),
-                })
+                .map(
+                    |query| match in_flight_requests.get(query).map(WeakShared::upgrade) {
+                        Some(Some(active_request)) => (Some(active_request), None),
+                        _ => (None, Some(*query)),
+                    },
+                )
                 .unzip();
 
             // Create future which estimates all `remaining_queries` in a single batch.
@@ -82,30 +84,33 @@ impl BufferingPriceEstimator {
             // in-flight `batch_1`. Even if the estimator which requested `batch_1` stops polling it, the
             // estimator of `batch_2` can still poll `batch_1` to completion by polling the
             // `SharedEstimationRequest` it is actually interested in.
-            in_flight_requests.extend(remaining_queries.iter().flatten().enumerate().map(
-                |(index, query)| {
+            let new_requests: Vec<_> = remaining_queries
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .map(|(index, query)| {
                     let fetch_remaining_estimates = fetch_remaining_estimates.clone();
                     (
-                        *query,
+                        query,
                         async move { fetch_remaining_estimates.await[index].clone() }
                             .boxed()
                             .shared(),
                     )
-                },
-            ));
-            (active_requests, fetch_remaining_estimates)
+                })
+                .collect();
+            in_flight_requests.extend(
+                new_requests
+                    .iter()
+                    .map(|(query, fut)| (*query, fut.downgrade().unwrap())),
+            );
+
+            (active_requests, new_requests)
         };
 
         // Await all the estimates we need (in-flight and the new ones) in parallel.
         let results = futures::join!(
-            futures::future::join_all(
-                active_requests
-                    .iter()
-                    .flatten()
-                    .cloned()
-                    .collect::<Vec<_>>(),
-            ),
-            fetch_remaining_estimates
+            futures::future::join_all(active_requests.iter().flatten().cloned()),
+            futures::future::join_all(new_requests.into_iter().map(|(_, query)| query)),
         );
         let (mut in_flight_results, mut new_results) =
             (results.0.into_iter(), results.1.into_iter());
@@ -218,7 +223,10 @@ mod tests {
         drop(first_batch_request);
         // Drop all futures which nobody depends on anymore.
         buffered.inner.collect_garbage();
-        assert_eq!(in_flight_requests(&buffered), hashset! { query(2) });
+        assert_eq!(
+            in_flight_requests(&buffered),
+            hashset! { query(2), query(3) }
+        );
 
         // Poll second future to completion.
         let second_batch_result = second_batch_request.await;
