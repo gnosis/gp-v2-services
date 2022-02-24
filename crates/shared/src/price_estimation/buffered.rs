@@ -63,6 +63,12 @@ impl BufferingPriceEstimator {
                 .iter()
                 .map(
                     |query| match in_flight_requests.get(query).map(WeakShared::upgrade) {
+                        // NOTE: Technically it's possible under very specific circumstances
+                        // that the `active_request` is sitting in the cache for a long time
+                        // without making progress. If somebody else picks it up and polls
+                        // it to completion a timeout error will most likely be the result.
+                        // See https://github.com/gnosis/gp-v2-services/pull/1677#discussion_r813673692
+                        // for more details.
                         Some(Some(active_request)) => (Some(active_request), None),
                         _ => (None, Some(*query)),
                     },
