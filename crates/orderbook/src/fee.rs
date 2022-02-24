@@ -360,7 +360,6 @@ impl MinFeeCalculating for MinFeeCalculator {
         let past_fee = self
             .measurements
             .find_measurement_including_larger_amount(fee_data, (self.now)());
-        // TODO: make this function return a proper error distinguishing errors from fee too low;
         let (cow_factor, past_fee) = futures::future::try_join(cow_factor, past_fee).await?;
         // When validating we allow fees taken for larger amounts because as the amount increases
         // the fee increases too because it is worth to trade off more gas use for a slightly better
