@@ -342,7 +342,7 @@ impl OrderValidating for OrderValidator {
                 owner,
             )
             .await
-            .map_err(|()| ValidationError::InsufficientFee)?;
+            .map_err(|_| ValidationError::InsufficientFee)?;
 
         let order = Order::from_order_creation(
             order_creation,
@@ -446,7 +446,10 @@ fn minimum_balance(order: &Order) -> Option<U256> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{account_balances::MockBalanceFetching, fee::MockMinFeeCalculating};
+    use crate::{
+        account_balances::MockBalanceFetching,
+        fee::{GetUnsubsidizedMinFeeError, MockMinFeeCalculating},
+    };
     use anyhow::anyhow;
     use ethcontract::web3::signing::SecretKeyRef;
     use model::{order::OrderBuilder, signature::EcdsaSigningScheme};
@@ -697,7 +700,7 @@ mod tests {
         fee_calculator
             .expect_get_unsubsidized_min_fee()
             .times(1)
-            .returning(|_, _, _, _| Err(()));
+            .returning(|_, _, _, _| Err(GetUnsubsidizedMinFeeError::InsufficientFee));
         fee_calculator
             .expect_get_unsubsidized_min_fee()
             .returning(|_, _, _, _| Ok(Default::default()));
