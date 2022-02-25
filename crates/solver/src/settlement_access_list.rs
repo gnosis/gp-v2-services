@@ -198,9 +198,8 @@ mod tests {
             .data(data);
 
         let access_list = tenderly_api
-            .estimate_access_list(&web3, "1".to_string(), &tx)
-            .await
-            .unwrap();
+            .estimate_access_lists(&web3, "1".to_string(), &[tx])
+            .await;
         dbg!(access_list);
     }
 
