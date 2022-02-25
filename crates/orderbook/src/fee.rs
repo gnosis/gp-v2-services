@@ -311,7 +311,12 @@ impl MinFeeCalculating for MinFeeCalculator {
 
         tracing::debug!(?fee_data, ?app_data, ?user, "computing subsidized fee",);
 
-        let cow_factor = self.cow_subsidy.cow_subsidy_factor(user);
+        let cow_factor = async {
+            self.cow_subsidy
+                .cow_subsidy_factor(user)
+                .await
+                .map_err(PriceEstimationError::Other)
+        };
         let unsubsidized_min_fee = async {
             if let Some(past_fee) = self
                 .measurements
@@ -557,7 +562,7 @@ mod tests {
 
         // fee is invalid for some uncached token
         let token = H160::from_low_u64_be(2);
-        assert!(!fee_estimator
+        assert!(fee_estimator
             .get_unsubsidized_min_fee(
                 FeeData {
                     sell_token: token,
@@ -568,7 +573,7 @@ mod tests {
                 Default::default()
             )
             .await
-            .is_ok());
+            .is_err());
     }
 
     #[tokio::test]
