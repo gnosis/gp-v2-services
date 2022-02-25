@@ -39,6 +39,7 @@ impl Inner {
 
 /// A price estimator which doesn't issue another estimation request while an identical one is
 /// already in-flight.
+#[derive(Clone)]
 pub struct BufferingPriceEstimator {
     inner: Arc<Inner>,
 }
