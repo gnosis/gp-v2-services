@@ -5,7 +5,7 @@ use futures::FutureExt;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 type EstimationResult = Result<Estimate, PriceEstimationError>;
 type SharedEstimationRequest = WeakShared<Pin<Box<dyn Future<Output = EstimationResult> + Send>>>;
@@ -16,10 +16,11 @@ struct Inner {
 }
 
 impl Inner {
-    fn collect_garbage(&self) {
+    fn collect_garbage_with_lock(
+        active_requests: &mut MutexGuard<HashMap<Query, SharedEstimationRequest>>,
+    ) {
         // TODO: Refactor this to use `HashMap::drain_filter` when it's stable:
         // https://github.com/rust-lang/rust/issues/59618
-        let mut active_requests = self.in_flight_requests.lock().unwrap();
         let completed_and_ignored_requests: Vec<_> = active_requests
             .iter()
             .filter_map(|(query, handle)| match handle.upgrade() {
@@ -34,6 +35,11 @@ impl Inner {
         for query in &completed_and_ignored_requests {
             active_requests.remove(query);
         }
+    }
+
+    #[cfg(test)]
+    fn collect_garbage(&self) {
+        Self::collect_garbage_with_lock(&mut self.in_flight_requests.lock().unwrap());
     }
 }
 
@@ -57,6 +63,8 @@ impl BufferingPriceEstimator {
     async fn estimate_buffered(&self, queries: &[Query]) -> Vec<EstimationResult> {
         let (active_requests, new_requests) = {
             let mut in_flight_requests = self.inner.in_flight_requests.lock().unwrap();
+
+            Inner::collect_garbage_with_lock(&mut in_flight_requests);
 
             // For each `Query` either get an in-flight request or keep the `Query` to forward it to the
             // inner price estimator.
@@ -136,9 +144,7 @@ impl BufferingPriceEstimator {
 #[async_trait::async_trait]
 impl PriceEstimating for BufferingPriceEstimator {
     async fn estimates(&self, queries: &[Query]) -> Vec<EstimationResult> {
-        let result = self.estimate_buffered(queries).await;
-        self.inner.collect_garbage();
-        result
+        self.estimate_buffered(queries).await
     }
 }
 
@@ -243,7 +249,7 @@ mod tests {
         assert_eq!(second_batch_result[0].as_ref().unwrap(), &estimate(2));
         assert_eq!(second_batch_result[1].as_ref().unwrap(), &estimate(3));
 
-        // Polling the future to completion also collects garbage at the end.
+        buffered.inner.collect_garbage();
         assert!(buffered.inner.in_flight_requests.lock().unwrap().is_empty());
     }
 }
