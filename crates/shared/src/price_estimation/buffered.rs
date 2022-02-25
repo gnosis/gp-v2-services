@@ -59,8 +59,11 @@ impl BufferingPriceEstimator {
             }),
         }
     }
+}
 
-    async fn estimate_buffered(&self, queries: &[Query]) -> Vec<EstimationResult> {
+#[async_trait::async_trait]
+impl PriceEstimating for BufferingPriceEstimator {
+    async fn estimates(&self, queries: &[Query]) -> Vec<EstimationResult> {
         let (active_requests, new_requests) = {
             let mut in_flight_requests = self.inner.in_flight_requests.lock().unwrap();
 
@@ -138,13 +141,6 @@ impl BufferingPriceEstimator {
                 None => new_results.next().unwrap(),
             })
             .collect()
-    }
-}
-
-#[async_trait::async_trait]
-impl PriceEstimating for BufferingPriceEstimator {
-    async fn estimates(&self, queries: &[Query]) -> Vec<EstimationResult> {
-        self.estimate_buffered(queries).await
     }
 }
 
