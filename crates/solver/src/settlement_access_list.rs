@@ -6,7 +6,7 @@ use reqwest::{
 use serde::{Deserialize, Serialize};
 use web3::types::Bytes;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TenderlyRequest {
     pub network_id: String,
     pub block_number: u64,
@@ -28,14 +28,15 @@ pub struct AccessListItem {
     /// Accessed address
     pub address: Address,
     /// Accessed storage keys
-    pub storage_keys: Option<Vec<H256>>,
+    #[serde(default)]
+    pub storage_keys: Vec<H256>,
 }
 
 impl From<AccessListItem> for web3::types::AccessListItem {
     fn from(item: AccessListItem) -> Self {
         Self {
             address: item.address,
-            storage_keys: item.storage_keys.unwrap_or_default(),
+            storage_keys: item.storage_keys,
         }
     }
 }
@@ -80,6 +81,7 @@ mod tests {
     use super::*;
     use ethcontract::H160;
     use hex_literal::hex;
+    use serde_json::json;
 
     #[tokio::test]
     #[ignore]
@@ -99,5 +101,32 @@ mod tests {
         };
         let access_list = tenderly_api.access_list(request).await.unwrap();
         dbg!(access_list);
+    }
+
+    #[test]
+    fn serialize_deserialize_request() {
+        let request = TenderlyRequest {
+            network_id: "1".to_string(),
+            block_number: 14122310,
+            from: H160::from_slice(&hex!("e92f359e6f05564849afa933ce8f62b8007a1d5d")),
+            input: hex!("13d79a0b00000000000000000000000000000000000000000000").into(),
+            to: H160::from_slice(&hex!("9008d19f58aabd9ed0d60971565aa8510560ab41")),
+            generate_access_list: true,
+        };
+
+        let json = json!({
+            "network_id": "1",
+            "block_number": 14122310,
+            "from": "0xe92f359e6f05564849afa933ce8f62b8007a1d5d",
+            "input": "0x13d79a0b00000000000000000000000000000000000000000000",
+            "to": "0x9008d19f58aabd9ed0d60971565aa8510560ab41",
+            "generate_access_list": true
+        });
+
+        assert_eq!(serde_json::to_value(&request).unwrap(), json);
+        assert_eq!(
+            serde_json::from_value::<TenderlyRequest>(json).unwrap(),
+            request
+        );
     }
 }
