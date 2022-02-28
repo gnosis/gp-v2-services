@@ -5,18 +5,15 @@ use reqwest::{
     Client, Url,
 };
 use serde::{Deserialize, Serialize};
-use shared::Web3;
 use web3::types::{AccessList, Bytes};
 
 #[async_trait::async_trait]
 pub trait AccessListEstimating: Send + Sync {
     async fn estimate_access_list(
         &self,
-        web3: &Web3,
-        network_id: String,
         tx: &TransactionBuilder<DynTransport>,
     ) -> Result<AccessList> {
-        self.estimate_access_lists(web3, network_id, std::slice::from_ref(tx))
+        self.estimate_access_lists(std::slice::from_ref(tx))
             .await
             .into_iter()
             .next()
@@ -24,8 +21,6 @@ pub trait AccessListEstimating: Send + Sync {
     }
     async fn estimate_access_lists(
         &self,
-        web3: &Web3,
-        network_id: String,
         txs: &[TransactionBuilder<DynTransport>],
     ) -> Vec<Result<AccessList>>;
 }
@@ -65,16 +60,22 @@ impl From<AccessListItem> for web3::types::AccessListItem {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct BlockNumber {
+    block_number: u64,
+}
+
 #[derive(Debug)]
 pub struct TenderlyApi {
     url: Url,
     client: Client,
     header: HeaderMap,
+    network_id: String,
 }
 
 impl TenderlyApi {
     #[allow(dead_code)]
-    pub fn new(url: Url, api_key: &str) -> Self {
+    pub fn new(url: Url, api_key: &str, network_id: String) -> Self {
         Self {
             url,
             client: Client::new(),
@@ -83,6 +84,7 @@ impl TenderlyApi {
                 header.insert("x-access-key", HeaderValue::from_str(api_key).unwrap());
                 header
             },
+            network_id,
         }
     }
 
@@ -98,14 +100,25 @@ impl TenderlyApi {
             .json()
             .await
     }
+
+    async fn block_number(&self, network_id: String) -> reqwest::Result<BlockNumber> {
+        self.client
+            .get(format!(
+                "https://api.tenderly.co/api/v1/network/{}/block-number",
+                network_id
+            ))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await
+    }
 }
 
 #[async_trait::async_trait]
 impl AccessListEstimating for TenderlyApi {
     async fn estimate_access_lists(
         &self,
-        web3: &Web3,
-        network_id: String,
         txs: &[TransactionBuilder<DynTransport>],
     ) -> Vec<Result<AccessList>> {
         futures::future::join_all(txs.iter().map(|tx| async {
@@ -119,11 +132,11 @@ impl AccessListEstimating for TenderlyApi {
                 .ok_or(anyhow!("transaction from does not exist"))?
                 .address();
             let to = tx.to.ok_or(anyhow!("transaction to does not exist"))?;
-            let block_number = web3.eth().block_number().await?.as_u64();
+            let block_number = self.block_number(self.network_id.clone()).await?;
 
             let tenderly_request = TenderlyRequest {
-                network_id: network_id.clone(),
-                block_number,
+                network_id: self.network_id.clone(),
+                block_number: block_number.block_number,
                 from,
                 input,
                 to,
@@ -152,7 +165,7 @@ mod tests {
     use ethcontract::{Account, H160};
     use hex_literal::hex;
     use serde_json::json;
-    use shared::transport::create_env_test_transport;
+    use shared::{transport::create_env_test_transport, Web3};
 
     #[tokio::test]
     #[ignore]
@@ -161,6 +174,7 @@ mod tests {
             // http://api.tenderly.co/api/v1/account/<USER_NAME>/project/<PROJECT_NAME>/simulate
             Url::parse(&std::env::var("TENDERLY_URL").unwrap()).unwrap(),
             &std::env::var("TENDERLY_API_KEY").unwrap(),
+            "1".to_string(),
         );
         let request = TenderlyRequest {
             network_id: "1".to_string(),
@@ -181,6 +195,7 @@ mod tests {
             // http://api.tenderly.co/api/v1/account/<USER_NAME>/project/<PROJECT_NAME>/simulate
             Url::parse(&std::env::var("TENDERLY_URL").unwrap()).unwrap(),
             &std::env::var("TENDERLY_API_KEY").unwrap(),
+            "1".to_string(),
         );
         let http = create_env_test_transport();
         let web3 = Web3::new(http);
@@ -197,9 +212,7 @@ mod tests {
             )))
             .data(data);
 
-        let access_list = tenderly_api
-            .estimate_access_lists(&web3, "1".to_string(), &[tx])
-            .await;
+        let access_list = tenderly_api.estimate_access_lists(&[tx]).await;
         dbg!(access_list);
     }
 
