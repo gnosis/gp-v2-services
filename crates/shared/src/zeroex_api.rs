@@ -7,17 +7,28 @@
 use crate::debug_bytes;
 use crate::solver_utils::{deserialize_decimal_f64, Slippage};
 use anyhow::{Context, Result};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use derivative::Derivative;
 use ethcontract::{H160, U256};
+use model::signature::{EcdsaSignature, Signature};
 use model::u256_decimal;
+use primitive_types::H256;
 use reqwest::{Client, IntoUrl, Url};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
+use std::collections::HashSet;
 use thiserror::Error;
 use web3::types::Bytes;
 
 // 0x requires an address as an affiliate.
 // Hence we hand over the settlement contract address
 const AFFILIATE_ADDRESS: &str = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41";
+
+// The `Display` implementation for `H160` unfortunately does not print
+// the full address ad instead uses ellipsis (e.g. "0xeeee…eeee"). This
+// helper just works around that.
+fn addr2str(addr: H160) -> String {
+    format!("{:#x}", addr)
+}
 
 /// A 0x API quote query parameters.
 ///
@@ -40,13 +51,6 @@ pub struct SwapQuery {
 impl SwapQuery {
     /// Encodes the swap query as a url with get parameters.
     fn format_url(&self, base_url: &Url, endpoint: &str) -> Url {
-        // The `Display` implementation for `H160` unfortunately does not print
-        // the full address and instead uses ellipsis (e.g. "0xeeee…eeee"). This
-        // helper just works around that.
-        fn addr2str(addr: H160) -> String {
-            format!("{:#x}", addr)
-        }
-
         let mut url = base_url
             .join("/swap/v1/")
             .expect("unexpectedly invalid URL segment")
@@ -73,6 +77,168 @@ impl SwapQuery {
             .append_pair("intentOnFilling", "false");
         url
     }
+}
+
+/// 0x API orders query parameters.
+///
+/// These parameters are currently incomplete, and missing parameters can be
+/// added incrementally as needed.
+/// https://0x.org/docs/api#signed-order
+#[derive(Clone, Debug)]
+pub struct OrdersQuery {
+    /// The address of the party that is allowed to fill the order.
+    /// If set to a specific party, the order cannot be filled by anyone else.
+    /// If left unspecified, anyone can fill the order.
+    pub taker: Option<H160>,
+    /// Allows the maker to enforce that the order flow through some
+    /// additional logic before it can be filled (e.g., a KYC whitelist).
+    pub sender: Option<H160>,
+    /// Address of the contract where the transaction should be sent,
+    /// usually this is the 0x exchange proxy contract.
+    pub verifying_contract: Option<H160>,
+}
+
+impl OrdersQuery {
+    /// Encodes the orders query as a url with parameters.
+    fn format_url(&self, base_url: &Url) -> Url {
+        let mut url = base_url
+            .join("/orderbook/v1/orders")
+            .expect("unexpectedly invalid URL segment");
+
+        if let Some(taker) = self.taker {
+            url.query_pairs_mut().append_pair("taker", &addr2str(taker));
+        }
+        if let Some(sender) = self.sender {
+            url.query_pairs_mut()
+                .append_pair("sender", &addr2str(sender));
+        }
+        if let Some(verifying_contract) = self.verifying_contract {
+            url.query_pairs_mut()
+                .append_pair("verifyingContract", &addr2str(verifying_contract));
+        }
+
+        url
+    }
+}
+
+impl Default for OrdersQuery {
+    fn default() -> Self {
+        Self {
+            taker: Some(H160::zero()),
+            sender: Some(H160::zero()),
+            verifying_contract: Some(DefaultZeroExApi::DEFAULT_VERIFICATION_CONTRACT),
+        }
+    }
+}
+
+#[derive(Clone, Derivative, Deserialize, PartialEq)]
+#[derivative(Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderMetaData {
+    pub created_at: DateTime<Utc>,
+    pub order_hash: Bytes,
+    pub remaining_fillable_taker_amount: U256,
+}
+
+fn deserialize_epoch_timestamp<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let epoch: &str = Deserialize::deserialize(deserializer)?;
+    let naive = NaiveDateTime::from_timestamp(epoch.parse().map_err(serde::de::Error::custom)?, 0);
+    Ok(DateTime::from_utc(naive, Utc))
+}
+
+#[derive(Clone, Derivative, Deserialize, PartialEq)]
+#[derivative(Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ZeroExSignature {
+    r: H256,
+    s: H256,
+    v: u8,
+    signature_type: u8,
+}
+
+impl TryFrom<ZeroExSignature> for Signature {
+    type Error = anyhow::Error;
+
+    fn try_from(signature: ZeroExSignature) -> Result<Self, Self::Error> {
+        let ecdsa = EcdsaSignature {
+            r: signature.r,
+            s: signature.s,
+            v: signature.v,
+        };
+
+        match signature.signature_type {
+            2 => Ok(Signature::Eip712(ecdsa)),
+            3 => Ok(Signature::EthSign(ecdsa)),
+            _ => Err(anyhow::anyhow!("unsupported signature type")),
+        }
+    }
+}
+
+#[derive(Clone, Derivative, Deserialize, PartialEq)]
+#[derivative(Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Order {
+    ///The ID of the Ethereum chain where the `verifying_contract` is located.
+    pub chain_id: u64,
+    /// Timestamp in seconds of when the order expires. Expired orders cannot be filled.
+    #[serde(deserialize_with = "deserialize_epoch_timestamp")]
+    pub expiry: DateTime<Utc>,
+    /// The address of the entity that will receive any fees stipulated by the order.
+    /// This is typically used to incentivize off-chain order relay.
+    pub fee_recipient: H160,
+    /// The address of the party that creates the order. The maker is also one of the
+    /// two parties that will be involved in the trade if the order gets filled.
+    pub maker: H160,
+    /// The amount of `maker_token` being sold by the maker.
+    pub maker_amount: U256,
+    /// The address of the ERC20 token the maker is selling to the taker.
+    pub maker_token: H160,
+    /// The staking pool to attribute the 0x protocol fee from this order. Set to zero
+    /// to attribute to the default pool, not owned by anyone.
+    pub pool: Bytes,
+    /// A value that can be used to guarantee order uniqueness. Typically it is set
+    /// to a random number.
+    pub salt: String,
+    /// It allows the maker to enforce that the order flow through some additional
+    /// logic before it can be filled (e.g., a KYC whitelist).
+    pub sender: H160,
+    /// The signature of the signed order.
+    pub signature: ZeroExSignature,
+    /// The address of the party that is allowed to fill the order. If set to a
+    /// specific party, the order cannot be filled by anyone else. If left unspecified,
+    /// anyone can fill the order.
+    pub taker: H160,
+    /// The amount of `taker_token` being sold by the taker.
+    pub taker_amount: U256,
+    /// The address of the ERC20 token the taker is selling to the maker.
+    pub taker_token: H160,
+    /// Amount of takerToken paid by the taker to the feeRecipient.
+    pub taker_token_fee_amount: U256,
+    /// Address of the contract where the transaction should be sent, usually this is
+    /// the 0x exchange proxy contract.
+    pub verifying_contract: H160,
+}
+
+#[derive(Clone, Derivative, Deserialize, PartialEq)]
+#[derivative(Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderRecord {
+    pub meta_data: OrderMetaData,
+    pub order: Order,
+}
+
+/// A Ox API `orders` response.
+#[derive(Clone, Default, Derivative, Deserialize, PartialEq)]
+#[derivative(Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct OrdersResponse {
+    pub total: u64,
+    pub page: u64,
+    pub per_page: u64,
+    pub records: Vec<OrderRecord>,
 }
 
 /// A Ox API `price` response.
@@ -118,6 +284,20 @@ pub trait ZeroExApi: Send + Sync {
     /// - https://0x.org/docs/guides/rfqt-in-the-0x-api
     /// - https://0x.org/docs/api#get-swapv1price
     async fn get_price(&self, query: SwapQuery) -> Result<PriceResponse, ZeroExResponseError>;
+
+    /// Retrieves specific page of current limit orders.
+    async fn get_orders_with_pagination(
+        &self,
+        query: &OrdersQuery,
+        results_per_page: usize,
+        page: usize,
+    ) -> Result<OrdersResponse, ZeroExResponseError>;
+
+    /// Retrieves all current limit orders.
+    async fn get_orders(
+        &self,
+        query: &OrdersQuery,
+    ) -> Result<Vec<OrderRecord>, ZeroExResponseError>;
 }
 
 /// 0x API Client implementation.
@@ -131,6 +311,12 @@ pub struct DefaultZeroExApi {
 impl DefaultZeroExApi {
     /// Default 0x API URL.
     pub const DEFAULT_URL: &'static str = "https://api.0x.org/";
+
+    /// Default 0x verifying contract.
+    /// The currently latest 0x v4 contract.
+    pub const DEFAULT_VERIFICATION_CONTRACT: H160 = H160(hex_literal::hex!(
+        "Def1C0ded9bec7F1a1670819833240f027b25EfF"
+    ));
 
     /// Create a new 0x HTTP API client with the specified base URL.
     pub fn new(base_url: impl IntoUrl, api_key: Option<String>, client: Client) -> Result<Self> {
@@ -183,24 +369,66 @@ pub enum ZeroExResponseError {
 #[async_trait::async_trait]
 impl ZeroExApi for DefaultZeroExApi {
     async fn get_swap(&self, query: SwapQuery) -> Result<SwapResponse, ZeroExResponseError> {
-        self.swap_like_request_impl("quote", query).await
+        self.request(query.format_url(&self.base_url, "quote"))
+            .await
     }
 
     async fn get_price(&self, query: SwapQuery) -> Result<PriceResponse, ZeroExResponseError> {
-        self.swap_like_request_impl("price", query).await
+        self.request(query.format_url(&self.base_url, "price"))
+            .await
+    }
+
+    async fn get_orders_with_pagination(
+        &self,
+        query: &OrdersQuery,
+        results_per_page: usize,
+        page: usize,
+    ) -> Result<OrdersResponse, ZeroExResponseError> {
+        let mut url = query.format_url(&self.base_url);
+        url.query_pairs_mut()
+            .append_pair("page", &page.to_string())
+            .append_pair("perPage", &results_per_page.to_string());
+        self.request(url).await
+    }
+
+    async fn get_orders(
+        &self,
+        query: &OrdersQuery,
+    ) -> Result<Vec<OrderRecord>, ZeroExResponseError> {
+        let mut results = Vec::default();
+        let mut page = 1;
+        loop {
+            let mut response = self.get_orders_with_pagination(query, 100, page).await?;
+            let results_in_response = response.records.len();
+            results.append(&mut response.records);
+            if response.per_page != results_in_response as u64 {
+                // page could not be filled so there is no next page
+                break;
+            }
+            page += 1;
+        }
+        let mut included_orders = HashSet::new();
+        let now = chrono::offset::Utc::now();
+        results.retain(|result| {
+            // only keep orders which are still valid
+            result.order.expiry > now
+                // properly signed
+                && Signature::try_from(result.order.signature.clone()).is_ok()
+                // not a duplicate
+                && included_orders.insert(result.order.salt.clone())
+        });
+        Ok(results)
     }
 }
 
 impl DefaultZeroExApi {
-    async fn swap_like_request_impl<T: for<'a> serde::Deserialize<'a>>(
+    async fn request<T: for<'a> serde::Deserialize<'a>>(
         &self,
-        endpoint: &str,
-        query: SwapQuery,
+        url: Url,
     ) -> Result<T, ZeroExResponseError> {
-        let url = query.format_url(&self.base_url, endpoint);
         tracing::debug!("Querying 0x API: {}", url);
 
-        let mut request = self.client.get(url);
+        let mut request = self.client.get(url.clone());
         if let Some(key) = &self.api_key {
             request = request.header("0x-api-key", key);
         }
@@ -216,7 +444,7 @@ impl DefaultZeroExApi {
         match serde_json::from_str::<RawResponse<T>>(&response_text) {
             Ok(RawResponse::ResponseOk(response)) => Ok(response),
             Ok(RawResponse::ResponseErr { reason: message }) => match &message[..] {
-                "Server Error" => Err(ZeroExResponseError::ServerError(format!("{:?}", query))),
+                "Server Error" => Err(ZeroExResponseError::ServerError(format!("{:?}", url))),
                 _ => Err(ZeroExResponseError::UnknownZeroExError(message)),
             },
             Err(err) => Err(ZeroExResponseError::DeserializeError(
@@ -268,6 +496,16 @@ mod tests {
         let swap_response = zeroex_client.get_swap(swap_query).await;
         dbg!(&swap_response);
         assert!(swap_response.is_ok());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_get_orders() {
+        let api =
+            DefaultZeroExApi::new(DefaultZeroExApi::DEFAULT_URL, None, Client::new()).unwrap();
+        let result = api.get_orders(&OrdersQuery::default()).await;
+        dbg!(&result);
+        assert!(result.is_ok());
     }
 
     #[test]
