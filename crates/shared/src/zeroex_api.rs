@@ -288,9 +288,8 @@ impl DefaultZeroExApi {
 
     /// Default 0x verifying contract.
     /// The currently latest 0x v4 contract.
-    pub const DEFAULT_VERIFICATION_CONTRACT: H160 = H160(hex_literal::hex!(
-        "Def1C0ded9bec7F1a1670819833240f027b25EfF"
-    ));
+    pub const DEFAULT_VERIFICATION_CONTRACT: H160 =
+        addr!("Def1C0ded9bec7F1a1670819833240f027b25EfF");
 
     /// Create a new 0x HTTP API client with the specified base URL.
     pub fn new(base_url: impl IntoUrl, api_key: Option<String>, client: Client) -> Result<Self> {
