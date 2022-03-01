@@ -131,9 +131,11 @@ impl Default for OrdersQuery {
     }
 }
 
-#[derive(Debug, Clone, Derivative, Deserialize, PartialEq)]
+#[derive(Debug, Derivative, Clone, Deserialize, PartialEq)]
+#[derivative(Default)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderMetaData {
+    #[derivative(Default(value = "chrono::MIN_DATETIME"))]
     pub created_at: DateTime<Utc>,
     pub order_hash: Bytes,
     pub remaining_fillable_taker_amount: U256,
@@ -148,7 +150,7 @@ where
     Ok(DateTime::from_utc(naive, Utc))
 }
 
-#[derive(Debug, Clone, Derivative, Deserialize, PartialEq)]
+#[derive(Debug, Default, Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ZeroExSignature {
     r: H256,
@@ -175,13 +177,15 @@ impl TryFrom<ZeroExSignature> for Signature {
     }
 }
 
-#[derive(Debug, Clone, Derivative, Deserialize, PartialEq)]
+#[derive(Debug, Derivative, Clone, Deserialize, PartialEq)]
+#[derivative(Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Order {
     /// The ID of the Ethereum chain where the `verifying_contract` is located.
     pub chain_id: u64,
     /// Timestamp in seconds of when the order expires. Expired orders cannot be filled.
     #[serde(deserialize_with = "deserialize_epoch_timestamp")]
+    #[derivative(Default(value = "chrono::MAX_DATETIME"))]
     pub expiry: DateTime<Utc>,
     /// The address of the entity that will receive any fees stipulated by the order.
     /// This is typically used to incentivize off-chain order relay.
@@ -219,7 +223,7 @@ pub struct Order {
     pub verifying_contract: H160,
 }
 
-#[derive(Debug, Clone, Derivative, Deserialize, PartialEq)]
+#[derive(Debug, Default, Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderRecord {
     pub meta_data: OrderMetaData,
@@ -227,7 +231,7 @@ pub struct OrderRecord {
 }
 
 /// A Ox API `orders` response.
-#[derive(Debug, Clone, Default, Derivative, Deserialize, PartialEq)]
+#[derive(Debug, Default, Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct OrdersResponse {
     pub total: u64,
@@ -393,11 +397,8 @@ impl ZeroExApi for DefaultZeroExApi {
         let mut results = Vec::default();
         let mut page = 1;
         loop {
-            let mut response = self.get_orders_with_pagination(query, 100, page).await?;
-            let results_in_response = response.records.len();
-            results.append(&mut response.records);
-            if response.per_page != results_in_response as u64 {
-                // page could not be filled so there is no next page
+            let response = self.get_orders_with_pagination(query, 100, page).await?;
+            if !expect_more_results_after_handling_response(&mut results, response) {
                 break;
             }
             page += 1;
@@ -414,6 +415,17 @@ impl ZeroExApi for DefaultZeroExApi {
         });
         Ok(results)
     }
+}
+
+/// Append data of response to results and return whether another page should be fetched.
+fn expect_more_results_after_handling_response(
+    results: &mut Vec<OrderRecord>,
+    mut response: OrdersResponse,
+) -> bool {
+    // only expect another page if this one was full
+    let expect_more_results = response.records.len() as u64 == response.per_page;
+    results.append(&mut response.records);
+    expect_more_results
 }
 
 impl DefaultZeroExApi {
@@ -516,6 +528,31 @@ mod tests {
             .await;
         dbg!(&result);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_determining_end_of_paginated_results() {
+        let mut results = Vec::default();
+        let response = OrdersResponse {
+            total: 1000,
+            per_page: 1,
+            page: 1,
+            records: vec![OrderRecord::default()],
+        };
+        assert!(expect_more_results_after_handling_response(
+            &mut results,
+            response
+        ));
+        let response = OrdersResponse {
+            total: 2,
+            per_page: 2,
+            page: 1,
+            records: vec![OrderRecord::default()],
+        };
+        assert!(!expect_more_results_after_handling_response(
+            &mut results,
+            response
+        ));
     }
 
     #[test]
