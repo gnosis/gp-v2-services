@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{ensure, Context, Result};
 use ethcontract::{dyns::DynTransport, transaction::TransactionBuilder, Address, H256};
 use reqwest::{
     header::{HeaderMap, HeaderValue},
@@ -122,16 +122,13 @@ impl AccessListEstimating for TenderlyApi {
         txs: &[TransactionBuilder<DynTransport>],
     ) -> Vec<Result<AccessList>> {
         futures::future::join_all(txs.iter().map(|tx| async {
-            let input = tx
-                .data
-                .clone()
-                .ok_or(anyhow!("transaction data does not exist"))?;
+            let input = tx.data.clone().context("transaction data does not exist")?;
             let from = tx
                 .from
                 .clone()
-                .ok_or(anyhow!("transaction from does not exist"))?
+                .context("transaction from does not exist")?
                 .address();
-            let to = tx.to.ok_or(anyhow!("transaction to does not exist"))?;
+            let to = tx.to.context("transaction to does not exist")?;
             let block_number = self.block_number(self.network_id.clone()).await?;
 
             let tenderly_request = TenderlyRequest {
@@ -143,17 +140,16 @@ impl AccessListEstimating for TenderlyApi {
                 generate_access_list: true,
             };
 
-            match self.access_list(tenderly_request).await {
-                Ok(response) if response.generated_access_list.is_empty() => {
-                    Err(anyhow!("empty access list"))
-                }
-                Ok(response) => Ok(response
-                    .generated_access_list
-                    .into_iter()
-                    .map(Into::into)
-                    .collect()),
-                Err(err) => Err(err.into()),
-            }
+            let response = self.access_list(tenderly_request).await?;
+            ensure!(
+                !response.generated_access_list.is_empty(),
+                "empty access list"
+            );
+            Ok(response
+                .generated_access_list
+                .into_iter()
+                .map(Into::into)
+                .collect())
         }))
         .await
     }
