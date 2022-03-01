@@ -10,7 +10,6 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use derivative::Derivative;
 use ethcontract::{H160, U256};
-use model::signature::{EcdsaSignature, Signature};
 use model::u256_decimal;
 use primitive_types::H256;
 use reqwest::{Client, IntoUrl, Url};
@@ -152,34 +151,13 @@ where
     Ok(DateTime::from_utc(naive, Utc))
 }
 
-#[derive(Debug, Derivative, Clone, Deserialize, PartialEq)]
-#[derivative(Default)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ZeroExSignature {
     r: H256,
     s: H256,
     v: u8,
-    // for testing purposes default initialized as valid
-    #[derivative(Default(value = "2"))]
     signature_type: u8,
-}
-
-impl TryFrom<ZeroExSignature> for Signature {
-    type Error = anyhow::Error;
-
-    fn try_from(signature: ZeroExSignature) -> Result<Self, Self::Error> {
-        let ecdsa = EcdsaSignature {
-            r: signature.r,
-            s: signature.s,
-            v: signature.v,
-        };
-
-        match signature.signature_type {
-            2 => Ok(Signature::Eip712(ecdsa)),
-            3 => Ok(Signature::EthSign(ecdsa)),
-            _ => Err(anyhow::anyhow!("unsupported signature type")),
-        }
-    }
 }
 
 #[derive(Debug, Derivative, Clone, Deserialize, PartialEq)]
@@ -430,12 +408,8 @@ fn retain_valid_orders(orders: &mut Vec<OrderRecord>) {
     let mut included_orders = HashSet::new();
     let now = chrono::offset::Utc::now();
     orders.retain(|order| {
-        // only keep orders which are still valid
-        order.order.expiry > now
-            // properly signed
-            && Signature::try_from(order.order.signature.clone()).is_ok()
-            // not a duplicate
-            && included_orders.insert(order.order.salt.clone())
+        // only keep orders which are still valid and unique
+        order.order.expiry > now && included_orders.insert(order.order.salt.clone())
     });
 }
 
