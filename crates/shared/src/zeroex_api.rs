@@ -150,12 +150,15 @@ where
     Ok(DateTime::from_utc(naive, Utc))
 }
 
-#[derive(Debug, Default, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Derivative, Clone, Deserialize, PartialEq)]
+#[derivative(Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ZeroExSignature {
     r: H256,
     s: H256,
     v: u8,
+    // for testing purposes default initialized as valid
+    #[derivative(Default(value = "2"))]
     signature_type: u8,
 }
 
@@ -403,16 +406,7 @@ impl ZeroExApi for DefaultZeroExApi {
             }
             page += 1;
         }
-        let mut included_orders = HashSet::new();
-        let now = chrono::offset::Utc::now();
-        results.retain(|result| {
-            // only keep orders which are still valid
-            result.order.expiry > now
-                // properly signed
-                && Signature::try_from(result.order.signature.clone()).is_ok()
-                // not a duplicate
-                && included_orders.insert(result.order.salt.clone())
-        });
+        retain_valid_orders(&mut results);
         Ok(results)
     }
 }
@@ -426,6 +420,19 @@ fn expect_more_results_after_handling_response(
     let expect_more_results = response.records.len() as u64 == response.per_page;
     results.append(&mut response.records);
     expect_more_results
+}
+
+fn retain_valid_orders(orders: &mut Vec<OrderRecord>) {
+    let mut included_orders = HashSet::new();
+    let now = chrono::offset::Utc::now();
+    orders.retain(|order| {
+        // only keep orders which are still valid
+        order.order.expiry > now
+            // properly signed
+            && Signature::try_from(order.order.signature.clone()).is_ok()
+            // not a duplicate
+            && included_orders.insert(order.order.salt.clone())
+    });
 }
 
 impl DefaultZeroExApi {
@@ -553,6 +560,41 @@ mod tests {
             &mut results,
             response
         ));
+    }
+
+    #[test]
+    fn test_retaining_valid_orders() {
+        let valid_order = OrderRecord::default();
+        let mut orders = vec![
+            valid_order.clone(),
+            // valid but duplicate
+            valid_order.clone(),
+            OrderRecord {
+                order: Order {
+                    signature: ZeroExSignature {
+                        // invalid signature
+                        signature_type: 0,
+                        ..Default::default()
+                    },
+                    // uniquely identifying salt
+                    salt: "0".into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            OrderRecord {
+                order: Order {
+                    // already expired
+                    expiry: chrono::MIN_DATETIME,
+                    // uniquely identifying salt
+                    salt: "1".into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        ];
+        retain_valid_orders(&mut orders);
+        assert_eq!(vec![valid_order], orders);
     }
 
     #[test]
