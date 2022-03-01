@@ -503,6 +503,21 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[tokio::test]
+    #[ignore]
+    async fn test_get_orders_paginated_with_empty_result() {
+        let api =
+            DefaultZeroExApi::new(DefaultZeroExApi::DEFAULT_URL, None, Client::new()).unwrap();
+        // `get_orders()` relies on `get_orders_with_pagination()` not producing and error instead
+        // of an response with 0 records. To test that we request a page which should never have a
+        // any records and check that it doesn't throw an error.
+        let result = api
+            .get_orders_with_pagination(&OrdersQuery::default(), 100, 1000000)
+            .await;
+        dbg!(&result);
+        assert!(result.is_ok());
+    }
+
     #[test]
     fn deserialize_swap_response() {
         let swap = serde_json::from_str::<SwapResponse>(
