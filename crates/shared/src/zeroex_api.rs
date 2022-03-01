@@ -131,8 +131,7 @@ impl Default for OrdersQuery {
     }
 }
 
-#[derive(Clone, Derivative, Deserialize, PartialEq)]
-#[derivative(Debug)]
+#[derive(Debug, Clone, Derivative, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderMetaData {
     pub created_at: DateTime<Utc>,
@@ -149,8 +148,7 @@ where
     Ok(DateTime::from_utc(naive, Utc))
 }
 
-#[derive(Clone, Derivative, Deserialize, PartialEq)]
-#[derivative(Debug)]
+#[derive(Debug, Clone, Derivative, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ZeroExSignature {
     r: H256,
@@ -177,8 +175,7 @@ impl TryFrom<ZeroExSignature> for Signature {
     }
 }
 
-#[derive(Clone, Derivative, Deserialize, PartialEq)]
-#[derivative(Debug)]
+#[derive(Debug, Clone, Derivative, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Order {
     ///The ID of the Ethereum chain where the `verifying_contract` is located.
@@ -222,8 +219,7 @@ pub struct Order {
     pub verifying_contract: H160,
 }
 
-#[derive(Clone, Derivative, Deserialize, PartialEq)]
-#[derivative(Debug)]
+#[derive(Debug, Clone, Derivative, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderRecord {
     pub meta_data: OrderMetaData,
@@ -231,8 +227,7 @@ pub struct OrderRecord {
 }
 
 /// A Ox API `orders` response.
-#[derive(Clone, Default, Derivative, Deserialize, PartialEq)]
-#[derivative(Debug)]
+#[derive(Debug, Clone, Default, Derivative, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct OrdersResponse {
     pub total: u64,
