@@ -19,6 +19,8 @@ use std::collections::HashSet;
 use thiserror::Error;
 use web3::types::Bytes;
 
+const ORDERS_MAX_PAGE_SIZE: usize = 1_000;
+
 // 0x requires an address as an affiliate.
 // Hence we hand over the settlement contract address
 const AFFILIATE_ADDRESS: &str = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41";
@@ -400,7 +402,9 @@ impl ZeroExApi for DefaultZeroExApi {
         let mut results = Vec::default();
         let mut page = 1;
         loop {
-            let response = self.get_orders_with_pagination(query, 100, page).await?;
+            let response = self
+                .get_orders_with_pagination(query, ORDERS_MAX_PAGE_SIZE, page)
+                .await?;
             if !expect_more_results_after_handling_response(&mut results, response) {
                 break;
             }
