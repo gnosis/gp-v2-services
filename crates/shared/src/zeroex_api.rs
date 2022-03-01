@@ -178,7 +178,7 @@ impl TryFrom<ZeroExSignature> for Signature {
 #[derive(Debug, Clone, Derivative, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Order {
-    ///The ID of the Ethereum chain where the `verifying_contract` is located.
+    /// The ID of the Ethereum chain where the `verifying_contract` is located.
     pub chain_id: u64,
     /// Timestamp in seconds of when the order expires. Expired orders cannot be filled.
     #[serde(deserialize_with = "deserialize_epoch_timestamp")]
