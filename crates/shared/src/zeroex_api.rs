@@ -549,19 +549,6 @@ mod tests {
             valid_order.clone(),
             OrderRecord {
                 order: Order {
-                    signature: ZeroExSignature {
-                        // invalid signature
-                        signature_type: 0,
-                        ..Default::default()
-                    },
-                    // uniquely identifying salt
-                    salt: "0".into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            OrderRecord {
-                order: Order {
                     // already expired
                     expiry: chrono::MIN_DATETIME,
                     // uniquely identifying salt
