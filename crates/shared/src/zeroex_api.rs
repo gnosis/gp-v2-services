@@ -267,14 +267,6 @@ pub trait ZeroExApi: Send + Sync {
     /// - https://0x.org/docs/api#get-swapv1price
     async fn get_price(&self, query: SwapQuery) -> Result<PriceResponse, ZeroExResponseError>;
 
-    /// Retrieves specific page of current limit orders.
-    async fn get_orders_with_pagination(
-        &self,
-        query: &OrdersQuery,
-        results_per_page: usize,
-        page: usize,
-    ) -> Result<OrdersResponse, ZeroExResponseError>;
-
     /// Retrieves all current limit orders.
     async fn get_orders(
         &self,
@@ -312,6 +304,20 @@ impl DefaultZeroExApi {
     /// Create a new 0x HTTP API client using the default URL.
     pub fn with_default_url(client: Client) -> Self {
         Self::new(Self::DEFAULT_URL, None, client).unwrap()
+    }
+
+    /// Retrieves specific page of current limit orders.
+    async fn get_orders_with_pagination(
+        &self,
+        query: &OrdersQuery,
+        results_per_page: usize,
+        page: usize,
+    ) -> Result<OrdersResponse, ZeroExResponseError> {
+        let mut url = query.format_url(&self.base_url);
+        url.query_pairs_mut()
+            .append_pair("page", &page.to_string())
+            .append_pair("perPage", &results_per_page.to_string());
+        self.request(url).await
     }
 }
 
@@ -358,19 +364,6 @@ impl ZeroExApi for DefaultZeroExApi {
     async fn get_price(&self, query: SwapQuery) -> Result<PriceResponse, ZeroExResponseError> {
         self.request(query.format_url(&self.base_url, "price"))
             .await
-    }
-
-    async fn get_orders_with_pagination(
-        &self,
-        query: &OrdersQuery,
-        results_per_page: usize,
-        page: usize,
-    ) -> Result<OrdersResponse, ZeroExResponseError> {
-        let mut url = query.format_url(&self.base_url);
-        url.query_pairs_mut()
-            .append_pair("page", &page.to_string())
-            .append_pair("perPage", &results_per_page.to_string());
-        self.request(url).await
     }
 
     async fn get_orders(
