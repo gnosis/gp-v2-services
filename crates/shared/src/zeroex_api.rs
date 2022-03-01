@@ -409,7 +409,7 @@ fn retain_valid_orders(orders: &mut Vec<OrderRecord>) {
     let now = chrono::offset::Utc::now();
     orders.retain(|order| {
         // only keep orders which are still valid and unique
-        order.order.expiry > now && included_orders.insert(order.order.salt.clone())
+        order.order.expiry > now && included_orders.insert(order.meta_data.order_hash.clone())
     });
 }
 
@@ -551,11 +551,13 @@ mod tests {
                 order: Order {
                     // already expired
                     expiry: chrono::MIN_DATETIME,
-                    // uniquely identifying salt
-                    salt: "1".into(),
                     ..Default::default()
                 },
-                ..Default::default()
+                meta_data: OrderMetaData {
+                    // unique order_hash
+                    order_hash: [2].into(),
+                    ..Default::default()
+                },
             },
         ];
         retain_valid_orders(&mut orders);
