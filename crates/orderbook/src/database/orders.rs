@@ -1215,7 +1215,9 @@ mod tests {
     // number. Summing over multiple events could overflow this because the smart contract only
     // guarantees that the filled amount (which amount that is depends on order type) does not
     // overflow a U256. This test shows that postgres does not error if this happens because
-    // inside the SUM the number can have more digits.
+    // inside the SUM the number can have more digits. In particular:
+    // - `executed_buy_amount` may overflow after repeated buys (since there is no upper bound)
+    // - `executed_sell_amount` (with fees) may overflow since the total fits into a `U512`.
     #[tokio::test]
     #[ignore]
     async fn postgres_summed_executed_amount_does_not_overflow() {
@@ -1231,7 +1233,9 @@ mod tests {
         };
         db.insert_order(&order, Default::default()).await.unwrap();
 
-        for i in 0..10 {
+        let sell_amount_before_fees = U256::MAX / 16;
+        let fee_amount = U256::MAX / 16;
+        for i in 0..16 {
             db.append_events_(vec![(
                 EventIndex {
                     block_number: i,
@@ -1239,8 +1243,9 @@ mod tests {
                 },
                 Event::Trade(Trade {
                     order_uid: order.metadata.uid,
-                    sell_amount_including_fee: U256::MAX,
-                    ..Default::default()
+                    sell_amount_including_fee: sell_amount_before_fees + fee_amount,
+                    buy_amount: U256::MAX,
+                    fee_amount,
                 }),
             )])
             .await
@@ -1255,9 +1260,24 @@ mod tests {
             .next()
             .unwrap();
 
-        let expected = u256_to_big_uint(&U256::MAX) * BigUint::from(10u8);
-        assert!(expected.to_string().len() > 78);
-        assert_eq!(order.metadata.executed_sell_amount, expected);
+        let expected_sell_amount_including_fees =
+            u256_to_big_uint(&(sell_amount_before_fees + fee_amount)) * BigUint::from(16_u8);
+        let expected_sell_amount_before_fees = sell_amount_before_fees * 16;
+        let expected_buy_amount = u256_to_big_uint(&U256::MAX) * BigUint::from(16_u8);
+        let expected_fee_amount = fee_amount * 16;
+
+        assert!(order.metadata.executed_sell_amount > u256_to_big_uint(&U256::MAX));
+        assert_eq!(
+            order.metadata.executed_sell_amount,
+            expected_sell_amount_including_fees
+        );
+        assert_eq!(
+            order.metadata.executed_sell_amount_before_fees,
+            expected_sell_amount_before_fees
+        );
+        assert!(expected_buy_amount.to_string().len() > 78);
+        assert_eq!(order.metadata.executed_buy_amount, expected_buy_amount);
+        assert_eq!(order.metadata.executed_fee_amount, expected_fee_amount);
     }
 
     #[tokio::test]
