@@ -1,6 +1,6 @@
 use super::*;
 use crate::{conversions::*, fee::FeeParameters};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Context as _, Result};
 use chrono::{DateTime, Utc};
 use const_format::concatcp;
 use ethcontract::H256;
@@ -556,13 +556,6 @@ impl OrdersQueryRow {
 
     fn into_order(self) -> Result<Order> {
         let status = self.calculate_status();
-
-        let executed_sell_amount = big_decimal_to_big_uint(&self.sum_sell)
-            .ok_or_else(|| anyhow!("sum_sell is not an unsigned integer"))?;
-        let executed_fee_amount = big_decimal_to_big_uint(&self.sum_fee)
-            .ok_or_else(|| anyhow!("sum_fee is not an unsigned integer"))?;
-        let executed_sell_amount_before_fees = &executed_sell_amount - &executed_fee_amount;
-
         let order_metadata = OrderMetadata {
             creation_date: self.creation_timestamp,
             owner: h160_from_vec(self.owner)?,
@@ -573,10 +566,16 @@ impl OrdersQueryRow {
             ),
             available_balance: Default::default(),
             executed_buy_amount: big_decimal_to_big_uint(&self.sum_buy)
-                .ok_or_else(|| anyhow!("sum_buy is not an unsigned integer"))?,
-            executed_sell_amount,
-            executed_sell_amount_before_fees,
-            executed_fee_amount,
+                .context("executed buy amount is not an unsigned integer")?,
+            executed_sell_amount: big_decimal_to_big_uint(&self.sum_sell)
+                .context("executed sell amount is not an unsigned integer")?,
+            // Executed fee amounts and sell amounts before fees are capped by
+            // order's fee and sell amounts, and thus can always fit in a `U256`
+            // - as it is limited by the order format.
+            executed_sell_amount_before_fees: big_decimal_to_u256(&(self.sum_sell - &self.sum_fee))
+                .context("executed sell amount before fees does not fit in a u256")?,
+            executed_fee_amount: big_decimal_to_u256(&self.sum_fee)
+                .context("executed fee amount is not a valid u256")?,
             invalidated: self.invalidated,
             status,
             settlement_contract: h160_from_vec(self.settlement_contract)?,
