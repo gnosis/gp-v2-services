@@ -7,11 +7,17 @@ use super::{
     common::PrivateNetwork,
     AdditionalTip, CancelHandle, SubmissionLoopStatus,
 };
-use anyhow::{Context, Result};
-use ethcontract::{transaction::TransactionBuilder, H160, U256};
+use anyhow::{anyhow, Context, Result};
+use ethcontract::{
+    transaction::{Transaction, TransactionBuilder},
+    Bytes, H160, U256,
+};
+use futures::{FutureExt, TryFutureExt};
 use gas_estimation::EstimatedGasPrice;
+use jsonrpc_core::Output;
 use reqwest::{Client, IntoUrl};
 use shared::{transport::http::HttpTransport, Web3, Web3Transport};
+use web3::Transport;
 
 #[derive(Clone)]
 pub struct EdenApi {
@@ -29,6 +35,32 @@ impl EdenApi {
 
         Ok(Self { rpc })
     }
+
+    async fn submit_slot_transaction(
+        &self,
+        tx: TransactionBuilder<Web3Transport>,
+    ) -> Result<TransactionHandle, SubmitApiError> {
+        let (raw_signed_transaction, tx_hash) = match tx.build().now_or_never().unwrap().unwrap() {
+            Transaction::Request(_) => unreachable!("verified offline account was used"),
+            Transaction::Raw { bytes, hash } => (bytes.0, hash),
+        };
+        let params =
+            serde_json::to_value(Bytes(raw_signed_transaction)).context("failed to serialize")?;
+
+        let response = self
+            .rpc
+            .transport()
+            .execute("eth_sendSlotTx", vec![params])
+            .await
+            .context("transport failed")?;
+        match serde_json::from_value::<Output>(response).context("deserialize failed")? {
+            Output::Success(success) => {
+                let handle = serde_json::from_value(success.result).context("not a hash")?;
+                Ok(TransactionHandle { tx_hash, handle })
+            }
+            Output::Failure(err) => Err(anyhow!("failure response {:?}", err).into()),
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -37,9 +69,16 @@ impl TransactionSubmitting for EdenApi {
         &self,
         tx: TransactionBuilder<Web3Transport>,
     ) -> Result<TransactionHandle, SubmitApiError> {
-        self.rpc
-            .api::<PrivateNetwork>()
-            .submit_raw_transaction(tx)
+        // try to submit with slot method
+        self.submit_slot_transaction(tx.clone())
+            .or_else(|err| async move {
+                // fallback to standard eth_sendRawTransaction
+                tracing::debug!("fallback to eth_sendRawTransaction with error {:?}", err);
+                self.rpc
+                    .api::<PrivateNetwork>()
+                    .submit_raw_transaction(tx)
+                    .await
+            })
             .await
     }
 
