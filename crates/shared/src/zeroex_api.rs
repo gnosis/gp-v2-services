@@ -9,11 +9,10 @@ use crate::solver_utils::{deserialize_decimal_f64, Slippage};
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use derivative::Derivative;
-use ethcontract::{H160, U256};
+use ethcontract::{H160, H256, U256};
 use model::u256_decimal;
-use primitive_types::H256;
 use reqwest::{Client, IntoUrl, Url};
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use std::collections::HashSet;
 use thiserror::Error;
 use web3::types::Bytes;
@@ -139,25 +138,17 @@ pub struct OrderMetadata {
     #[derivative(Default(value = "chrono::MIN_DATETIME"))]
     pub created_at: DateTime<Utc>,
     pub order_hash: Bytes,
-    pub remaining_fillable_taker_amount: U256,
-}
-
-fn deserialize_epoch_timestamp<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let epoch: &str = Deserialize::deserialize(deserializer)?;
-    let naive = NaiveDateTime::from_timestamp(epoch.parse().map_err(serde::de::Error::custom)?, 0);
-    Ok(DateTime::from_utc(naive, Utc))
+    #[serde(with = "serde_with::rust::display_fromstr")]
+    pub remaining_fillable_taker_amount: u128,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ZeroExSignature {
-    r: H256,
-    s: H256,
-    v: u8,
-    signature_type: u8,
+    pub r: H256,
+    pub s: H256,
+    pub v: u8,
+    pub signature_type: u8,
 }
 
 #[derive(Debug, Derivative, Clone, Deserialize, PartialEq)]
@@ -167,9 +158,9 @@ pub struct Order {
     /// The ID of the Ethereum chain where the `verifying_contract` is located.
     pub chain_id: u64,
     /// Timestamp in seconds of when the order expires. Expired orders cannot be filled.
-    #[serde(deserialize_with = "deserialize_epoch_timestamp")]
-    #[derivative(Default(value = "chrono::MAX_DATETIME"))]
-    pub expiry: DateTime<Utc>,
+    #[derivative(Default(value = "chrono::naive::MAX_DATETIME.timestamp() as u64"))]
+    #[serde(with = "serde_with::rust::display_fromstr")]
+    pub expiry: u64,
     /// The address of the entity that will receive any fees stipulated by the order.
     /// This is typically used to incentivize off-chain order relay.
     pub fee_recipient: H160,
@@ -177,15 +168,17 @@ pub struct Order {
     /// two parties that will be involved in the trade if the order gets filled.
     pub maker: H160,
     /// The amount of `maker_token` being sold by the maker.
-    pub maker_amount: U256,
+    #[serde(with = "serde_with::rust::display_fromstr")]
+    pub maker_amount: u128,
     /// The address of the ERC20 token the maker is selling to the taker.
     pub maker_token: H160,
     /// The staking pool to attribute the 0x protocol fee from this order. Set to zero
     /// to attribute to the default pool, not owned by anyone.
-    pub pool: Bytes,
+    pub pool: H256,
     /// A value that can be used to guarantee order uniqueness. Typically it is set
     /// to a random number.
-    pub salt: String,
+    #[serde(with = "u256_decimal")]
+    pub salt: U256,
     /// It allows the maker to enforce that the order flow through some additional
     /// logic before it can be filled (e.g., a KYC whitelist).
     pub sender: H160,
@@ -196,11 +189,13 @@ pub struct Order {
     /// anyone can fill the order.
     pub taker: H160,
     /// The amount of `taker_token` being sold by the taker.
-    pub taker_amount: U256,
+    #[serde(with = "serde_with::rust::display_fromstr")]
+    pub taker_amount: u128,
     /// The address of the ERC20 token the taker is selling to the maker.
     pub taker_token: H160,
     /// Amount of takerToken paid by the taker to the feeRecipient.
-    pub taker_token_fee_amount: U256,
+    #[serde(with = "serde_with::rust::display_fromstr")]
+    pub taker_token_fee_amount: u128,
     /// Address of the contract where the transaction should be sent, usually this is
     /// the 0x exchange proxy contract.
     pub verifying_contract: H160,
@@ -400,8 +395,11 @@ fn retain_valid_orders(orders: &mut Vec<OrderRecord>) {
     let mut included_orders = HashSet::new();
     let now = chrono::offset::Utc::now();
     orders.retain(|order| {
+        let expiry = NaiveDateTime::from_timestamp(order.order.expiry as i64, 0);
+        let expiry: DateTime<Utc> = DateTime::from_utc(expiry, Utc);
+
         // only keep orders which are still valid and unique
-        order.order.expiry > now && included_orders.insert(order.metadata.order_hash.clone())
+        expiry > now && included_orders.insert(order.metadata.order_hash.clone())
     });
 }
 
@@ -542,7 +540,7 @@ mod tests {
             OrderRecord {
                 order: Order {
                     // already expired
-                    expiry: chrono::MIN_DATETIME,
+                    expiry: 0,
                     ..Default::default()
                 },
                 metadata: OrderMetadata {
