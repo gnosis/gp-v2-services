@@ -440,6 +440,8 @@ impl DefaultZeroExApi {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::addr;
+    use chrono::TimeZone;
 
     #[tokio::test]
     #[ignore]
@@ -552,6 +554,60 @@ mod tests {
         ];
         retain_valid_orders(&mut orders);
         assert_eq!(vec![valid_order], orders);
+    }
+
+    #[test]
+    fn deserialize_orders_response() {
+        let orders = serde_json::from_str::<OrdersResponse>(
+            r#"{"total":1015,"page":1,"perPage":1000,"records":[{"order":{"signature":{"signatureType":3,"r":"0xdb60e4fa2b4f2ee073d88eed3502149ba2231d699bc5d92d5627dcd21f915237","s":"0x4cb1e9c15788b86d5187b99c0d929ad61d2654c242095c26f9ace17e64aca0fd","v":28},"sender":"0x0000000000000000000000000000000000000000","maker":"0x683b2388d719e98874d1f9c16b42a7bb498efbeb","taker":"0x0000000000000000000000000000000000000000","takerTokenFeeAmount":"0","makerAmount":"500000000","takerAmount":"262467000000000000","makerToken":"0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48","takerToken":"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2","salt":"1645858724","verifyingContract":"0xdef1c0ded9bec7f1a1670819833240f027b25eff","feeRecipient":"0x86003b044f70dac0abc80ac8957305b6370893ed","expiry":"1646463524","chainId":1,"pool":"0x0000000000000000000000000000000000000000000000000000000000000000"},"metaData":{"orderHash":"0x003427369d4c2a6b0aceeb7b315bb9a6086bc6fc4c887aa51efc73b662c9d127","remainingFillableTakerAmount":"262467000000000000","createdAt":"2022-02-26T06:59:00.440Z"}}]}"#,
+        ).unwrap();
+        assert_eq!(
+            orders,
+            OrdersResponse {
+                total: 1015,
+                page: 1,
+                per_page: 1000,
+                records: vec![OrderRecord {
+                    metadata: OrderMetadata {
+                        order_hash: Bytes(
+                            hex::decode(
+                                "003427369d4c2a6b0aceeb7b315bb9a6086bc6fc4c887aa51efc73b662c9d127"
+                            ).unwrap()
+                        ),
+                        remaining_fillable_taker_amount: 262467000000000000u128,
+                        created_at: Utc.ymd(2022, 2, 26).and_hms_milli(6, 59, 0, 440)
+                    },
+                    order: Order {
+                        chain_id: 1u64,
+                        expiry: 1646463524u64,
+                        fee_recipient: addr!("86003b044f70dac0abc80ac8957305b6370893ed"),
+                        maker: addr!("683b2388d719e98874d1f9c16b42a7bb498efbeb"),
+                        maker_amount: 500000000u128,
+                        maker_token: addr!("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
+                        pool: H256::zero(),
+                        salt: 1645858724.into(),
+                        sender: H160::zero(),
+                        signature: ZeroExSignature {
+                            signature_type: 3,
+                            r: H256::from_slice(
+                                &hex::decode("db60e4fa2b4f2ee073d88eed3502149ba2231d699bc5d92d5627dcd21f915237")
+                                    .unwrap()
+                            ),
+                            s: H256::from_slice(
+                                &hex::decode("4cb1e9c15788b86d5187b99c0d929ad61d2654c242095c26f9ace17e64aca0fd")
+                                    .unwrap()
+                            ),
+                            v: 28u8,
+                        },
+                        taker: H160::zero(),
+                        taker_amount: 262467000000000000u128,
+                        taker_token: addr!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+                        taker_token_fee_amount: 0u128,
+                        verifying_contract: addr!("def1c0ded9bec7f1a1670819833240f027b25eff"),
+                    }
+                }],
+            }
+        );
     }
 
     #[test]
