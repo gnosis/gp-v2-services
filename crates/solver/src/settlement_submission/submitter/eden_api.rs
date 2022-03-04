@@ -44,6 +44,8 @@ impl EdenApi {
         Ok(Self { client, url, rpc })
     }
 
+    // When using `eth_sendSlotTx` method, we must use native Client because the response for this method
+    // is a non-standard json that can't be automatically deserialized when `Transport` is used.
     async fn submit_slot_transaction(
         &self,
         tx: TransactionBuilder<Web3Transport>,
@@ -55,6 +57,7 @@ impl EdenApi {
         let params =
             serde_json::to_value(Bytes(raw_signed_transaction)).context("failed to serialize")?;
         let request = helpers::build_request(1, "eth_sendSlotTx", vec![params]);
+        tracing::debug!(?request, "sending Eden API request");
 
         let response = self
             .client
@@ -66,7 +69,7 @@ impl EdenApi {
             .text()
             .await
             .context("failed converting to text")?;
-        tracing::debug!("response from eden: {}", response);
+        tracing::debug!(%response, "response from eden");
         let response = serde_json::from_str::<EdenSuccess>(&response).unwrap();
 
         Ok(TransactionHandle {
