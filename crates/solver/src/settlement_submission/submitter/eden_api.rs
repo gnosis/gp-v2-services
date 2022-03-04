@@ -70,7 +70,7 @@ impl EdenApi {
             .await
             .context("failed converting to text")?;
         tracing::debug!(%response, "response from eden");
-        let response = serde_json::from_str::<EdenSuccess>(&response).unwrap();
+        let response = serde_json::from_str::<EdenSuccess>(&response).context("failed to deserialize")?;
 
         Ok(TransactionHandle {
             tx_hash,
