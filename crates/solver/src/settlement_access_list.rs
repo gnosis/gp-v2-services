@@ -32,18 +32,18 @@ pub trait AccessListEstimating: Send + Sync {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct NodeAccessListResponse {
-    access_list: Vec<web3::types::AccessListItem>,
+struct NodeAccessList {
+    access_list: AccessList,
 }
 
 #[derive(Debug)]
-pub struct NodeAccessList {
+pub struct NodeApi {
     url: Url,
     client: Client,
     header: HeaderMap, //custom header requires direct usage of client instead of transport
 }
 
-impl NodeAccessList {
+impl NodeApi {
     pub fn new(url: impl IntoUrl, client: Client, api_key: &str) -> Result<Self> {
         Ok(Self {
             url: url.into_url()?,
@@ -70,7 +70,7 @@ impl NodeAccessList {
 }
 
 #[async_trait::async_trait]
-impl AccessListEstimating for NodeAccessList {
+impl AccessListEstimating for NodeApi {
     async fn estimate_access_lists(
         &self,
         txs: &[TransactionBuilder<DynTransport>],
@@ -101,7 +101,7 @@ impl AccessListEstimating for NodeAccessList {
             .into_iter()
             .map(|output| {
                 let value = helpers::to_result_from_output(output).unwrap_or_default();
-                serde_json::from_value::<NodeAccessListResponse>(value)
+                serde_json::from_value::<NodeAccessList>(value)
                     .context("context")
                     .map(|x| x.access_list)
             })
@@ -317,7 +317,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn node_estimate_access_lists() {
-        let node_api = NodeAccessList::new(
+        let node_api = NodeApi::new(
             Url::parse(&std::env::var("NODE_URL").unwrap()).unwrap(),
             Client::new(),
             &std::env::var("NODE_API_KEY").unwrap(),
