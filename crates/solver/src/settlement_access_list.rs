@@ -1,4 +1,4 @@
-use anyhow::{ensure, Context, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 use ethcontract::{dyns::DynTransport, transaction::TransactionBuilder, Address, H160, H256};
 use jsonrpc_core::{Call, Output};
 use reqwest::{
@@ -18,16 +18,16 @@ pub trait AccessListEstimating: Send + Sync {
         tx: &TransactionBuilder<DynTransport>,
     ) -> Result<AccessList> {
         self.estimate_access_lists(std::slice::from_ref(tx))
-            .await
+            .await?
             .into_iter()
             .next()
             .unwrap()
     }
-    /// The function does not guarantee the same size of input and output containers
+    /// The function guarantee the same size and order of input and output containers
     async fn estimate_access_lists(
         &self,
         txs: &[TransactionBuilder<DynTransport>],
-    ) -> Vec<Result<AccessList>>;
+    ) -> Result<Vec<Result<AccessList>>>;
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -74,7 +74,7 @@ impl AccessListEstimating for NodeApi {
     async fn estimate_access_lists(
         &self,
         txs: &[TransactionBuilder<DynTransport>],
-    ) -> Vec<Result<AccessList>> {
+    ) -> Result<Vec<Result<AccessList>>> {
         let batch_request = txs
             .iter()
             .map(|tx| {
@@ -90,14 +90,14 @@ impl AccessListEstimating for NodeApi {
             })
             .collect::<Vec<_>>();
 
-        let batch_response = self.send_batch(batch_request).await;
-        if let Err(err) = batch_response {
-            tracing::debug!(%err, "failed to receive response from node");
-            return Default::default();
-        }
+        let batch_response = self.send_batch(batch_request).await?;
+        // if we receive less results than txs, we cant figure out how to map them
+        ensure!(
+            batch_response.len() == txs.len(),
+            "bad batch response from estimator"
+        );
 
-        batch_response
-            .unwrap()
+        Ok(batch_response
             .into_iter()
             .map(|output| {
                 let value = helpers::to_result_from_output(output).unwrap_or_default();
@@ -105,7 +105,7 @@ impl AccessListEstimating for NodeApi {
                     .context("context")
                     .map(|x| x.access_list)
             })
-            .collect()
+            .collect())
     }
 }
 
@@ -209,8 +209,8 @@ impl AccessListEstimating for TenderlyApi {
     async fn estimate_access_lists(
         &self,
         txs: &[TransactionBuilder<DynTransport>],
-    ) -> Vec<Result<AccessList>> {
-        futures::future::join_all(txs.iter().map(|tx| async {
+    ) -> Result<Vec<Result<AccessList>>> {
+        Ok(futures::future::join_all(txs.iter().map(|tx| async {
             let (from, to, input) = resolve_call_request(tx)?;
             let block_number = self.block_number(self.network_id.clone()).await?;
 
@@ -234,7 +234,7 @@ impl AccessListEstimating for TenderlyApi {
                 .map(Into::into)
                 .collect())
         }))
-        .await
+        .await)
     }
 }
 
@@ -266,6 +266,34 @@ fn filter_access_list(access_list: AccessList) -> AccessList {
         .collect()
 }
 
+pub struct PriorityAccessListEstimating {
+    estimators: Vec<Box<dyn AccessListEstimating>>,
+}
+
+impl PriorityAccessListEstimating {
+    pub fn new(estimators: Vec<Box<dyn AccessListEstimating>>) -> Self {
+        Self { estimators }
+    }
+}
+
+#[async_trait::async_trait]
+impl AccessListEstimating for PriorityAccessListEstimating {
+    async fn estimate_access_lists(
+        &self,
+        txs: &[TransactionBuilder<DynTransport>],
+    ) -> Result<Vec<Result<AccessList>>> {
+        for (i, estimator) in self.estimators.iter().enumerate() {
+            match estimator.estimate_access_lists(txs).await {
+                Ok(result) => return Ok(result),
+                Err(err) => {
+                    tracing::warn!("access list estimator {} failed {:?}", i, err);
+                }
+            }
+        }
+        Err(anyhow! {"all estimators failed, no access list"})
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,7 +321,7 @@ mod tests {
 
     async fn estimate_access_list_with_estimator(
         estimator: impl AccessListEstimating,
-    ) -> Vec<Result<AccessList>> {
+    ) -> Result<Vec<Result<AccessList>>> {
         let tx = example_tx();
         estimator.estimate_access_lists(&[tx]).await
     }
@@ -310,7 +338,9 @@ mod tests {
         )
         .unwrap();
 
-        let access_lists = estimate_access_list_with_estimator(tenderly_api).await;
+        let access_lists = estimate_access_list_with_estimator(tenderly_api)
+            .await
+            .unwrap();
         dbg!(access_lists);
     }
 
@@ -324,7 +354,7 @@ mod tests {
         )
         .unwrap();
 
-        let access_lists = estimate_access_list_with_estimator(node_api).await;
+        let access_lists = estimate_access_list_with_estimator(node_api).await.unwrap();
         dbg!(access_lists);
     }
 
