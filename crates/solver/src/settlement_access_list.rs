@@ -102,7 +102,7 @@ impl AccessListEstimating for NodeApi {
             .map(|output| {
                 let value = helpers::to_result_from_output(output).unwrap_or_default();
                 serde_json::from_value::<NodeAccessList>(value)
-                    .context("context")
+                    .context("unexpected response format")
                     .map(|x| x.access_list)
             })
             .collect())
