@@ -1,14 +1,15 @@
 use anyhow::{anyhow, ensure, Context, Result};
 use ethcontract::{dyns::DynTransport, transaction::TransactionBuilder, Address, H160, H256};
-use jsonrpc_core::{Call, Output};
 use reqwest::{
     header::{HeaderMap, HeaderValue},
     Client, IntoUrl, Url,
 };
 use serde::{Deserialize, Serialize};
+use shared::Web3;
 use web3::{
     helpers,
     types::{AccessList, Bytes, CallRequest},
+    BatchTransport, Transport,
 };
 
 #[async_trait::async_trait]
@@ -38,34 +39,12 @@ struct NodeAccessList {
 
 #[derive(Debug)]
 pub struct NodeApi {
-    url: Url,
-    client: Client,
-    header: HeaderMap, //custom header requires direct usage of client instead of transport
+    web3: Web3,
 }
 
 impl NodeApi {
-    pub fn new(url: impl IntoUrl, client: Client, api_key: &str) -> Result<Self> {
-        Ok(Self {
-            url: url.into_url()?,
-            client,
-            header: {
-                let mut header = HeaderMap::new();
-                header.insert("AUTHORIZATION", HeaderValue::from_str(api_key).unwrap());
-                header
-            },
-        })
-    }
-
-    async fn send_batch(&self, body: Vec<Call>) -> reqwest::Result<Vec<Output>> {
-        self.client
-            .post(self.url.clone())
-            .headers(self.header.clone())
-            .json(&body)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await
+    pub fn new(web3: Web3) -> Result<Self> {
+        Ok(Self { web3 })
     }
 }
 
@@ -86,24 +65,24 @@ impl AccessListEstimating for NodeApi {
                     ..Default::default()
                 };
                 let params = helpers::serialize(&request);
-                helpers::build_request(1, "eth_createAccessList", vec![params])
+                let (id, request) = self
+                    .web3
+                    .transport()
+                    .prepare("eth_createAccessList", vec![params]);
+                (id, request)
             })
             .collect::<Vec<_>>();
 
-        let batch_response = self.send_batch(batch_request).await?;
-        // if we receive less results than txs, we cant figure out how to map them
-        ensure!(
-            batch_response.len() == txs.len(),
-            "bad batch response from estimator"
-        );
+        // send_batch guarantees the size and order of the responses to match the requests
+        let batch_response = self.web3.transport().send_batch(batch_request).await?;
 
         Ok(batch_response
             .into_iter()
-            .map(|output| {
-                let value = helpers::to_result_from_output(output).unwrap_or_default();
-                serde_json::from_value::<NodeAccessList>(value)
+            .map(|response| match response {
+                Ok(response) => serde_json::from_value::<NodeAccessList>(response)
                     .context("unexpected response format")
-                    .map(|x| x.access_list)
+                    .map(|response| response.access_list),
+                Err(err) => Err(anyhow!("web3 error: {}", err)),
             })
             .collect())
     }
@@ -347,12 +326,9 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn node_estimate_access_lists() {
-        let node_api = NodeApi::new(
-            Url::parse(&std::env::var("NODE_URL").unwrap()).unwrap(),
-            Client::new(),
-            &std::env::var("NODE_API_KEY").unwrap(),
-        )
-        .unwrap();
+        let http = create_env_test_transport();
+        let web3 = Web3::new(http);
+        let node_api = NodeApi::new(web3).unwrap();
 
         let access_lists = estimate_access_list_with_estimator(node_api).await.unwrap();
         dbg!(access_lists);
