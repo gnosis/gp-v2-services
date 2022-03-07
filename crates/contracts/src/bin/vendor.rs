@@ -128,7 +128,8 @@ fn run() -> Result<()> {
         )?
         .github(
             "IZeroEx",
-            "0xProject/protocol/development/packages/contract-artifacts/artifacts/IZeroEx.json",
+            "0xProject/protocol/c1177416f50c2465ee030dacc14ff996eebd4e74/\
+            packages/contract-artifacts/artifacts/IZeroEx.json",
         )?;
 
     Ok(())
