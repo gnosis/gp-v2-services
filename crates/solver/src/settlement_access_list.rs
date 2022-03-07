@@ -43,8 +43,8 @@ pub struct NodeApi {
 }
 
 impl NodeApi {
-    pub fn new(web3: Web3) -> Result<Self> {
-        Ok(Self { web3 })
+    pub fn new(web3: Web3) -> Self {
+        Self { web3 }
     }
 }
 
@@ -328,7 +328,7 @@ mod tests {
     async fn node_estimate_access_lists() {
         let http = create_env_test_transport();
         let web3 = Web3::new(http);
-        let node_api = NodeApi::new(web3).unwrap();
+        let node_api = NodeApi::new(web3);
 
         let access_lists = estimate_access_list_with_estimator(node_api).await.unwrap();
         dbg!(access_lists);
