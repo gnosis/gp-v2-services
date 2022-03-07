@@ -125,6 +125,10 @@ fn run() -> Result<()> {
         .npm(
             "IUniswapV3Factory",
             "@uniswap/v3-core@1.0.0/artifacts/contracts/interfaces/IUniswapV3Factory.sol/IUniswapV3Factory.json",
+        )?
+        .github(
+            "IZeroEx",
+            "0xProject/protocol/development/packages/contract-artifacts/artifacts/IZeroEx.json",
         )?;
 
     Ok(())
