@@ -167,6 +167,7 @@ fn map_tokens_for_solver(orders: &[LimitOrder], liquidity: &[Liquidity]) -> Vec<
             Liquidity::ConstantProduct(amm) => token_set.extend(amm.tokens),
             Liquidity::BalancerWeighted(amm) => token_set.extend(amm.reserves.keys()),
             Liquidity::BalancerStable(amm) => token_set.extend(amm.reserves.keys()),
+            Liquidity::LimitOrder(order) => token_set.extend([order.sell_token, order.buy_token]),
         }
     }
 
@@ -249,6 +250,7 @@ fn order_models(
 fn amm_models(liquidity: &[Liquidity], gas_model: &GasModel) -> BTreeMap<usize, AmmModel> {
     liquidity
         .iter()
+        .filter(|liquidity| !matches!(liquidity, Liquidity::LimitOrder(_)))
         .map(|liquidity| -> Result<_> {
             Ok(match liquidity {
                 Liquidity::ConstantProduct(amm) => AmmModel {
@@ -308,6 +310,7 @@ fn amm_models(liquidity: &[Liquidity], gas_model: &GasModel) -> BTreeMap<usize, 
                     cost: gas_model.balancer_cost(),
                     mandatory: false,
                 },
+                Liquidity::LimitOrder(_) => unreachable!("filtered out before"),
             })
         })
         .enumerate()
@@ -359,7 +362,7 @@ impl Solver for HttpSolver {
         &self,
         Auction {
             id,
-            orders,
+            mut orders,
             liquidity,
             gas_price,
             deadline,
@@ -369,6 +372,20 @@ impl Solver for HttpSolver {
         if orders.is_empty() {
             return Ok(Vec::new());
         };
+        let prices = external_prices.clone().into_http_solver_prices();
+        orders.extend(
+            liquidity
+                .iter()
+                .filter_map(|liquidity| match liquidity {
+                    Liquidity::LimitOrder(order) => Some(order.clone()),
+                    _ => None,
+                })
+                .filter(|order| {
+                    prices.get(&order.sell_token).is_some()
+                        && prices.get(&order.buy_token).is_some()
+                }),
+        );
+
         let (model, context) = {
             let mut guard = self.instance_cache.lock().await;
             match guard.as_mut() {

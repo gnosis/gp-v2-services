@@ -149,6 +149,8 @@ impl IntermediateSettlement {
                         Liquidity::BalancerStable(liquidity) => {
                             settlement.with_liquidity(liquidity, execution)?
                         }
+                        // This sort of liquidity gets used elsewhere
+                        Liquidity::LimitOrder(_) => {}
                     };
                 }
                 Execution::ExecutionCustomInteraction(interaction_data) => {
