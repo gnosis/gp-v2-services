@@ -203,8 +203,8 @@ pub struct Order {
 }
 
 #[derive(Debug, Default, Clone, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct OrderRecord {
+    #[serde(rename = "metaData")]
     pub metadata: OrderMetadata,
     pub order: Order,
 }
