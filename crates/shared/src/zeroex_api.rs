@@ -11,6 +11,7 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use derivative::Derivative;
 use ethcontract::{H160, H256, U256};
 use model::u256_decimal;
+use num::{BigInt, BigRational, FromPrimitive, ToPrimitive};
 use reqwest::{Client, IntoUrl, Url};
 use serde::Deserialize;
 use std::collections::HashSet;
@@ -206,6 +207,21 @@ pub struct Order {
 pub struct OrderRecord {
     pub metadata: OrderMetadata,
     pub order: Order,
+}
+
+impl OrderRecord {
+    /// Scales the `maker_amount` according to how much of the partially fillable
+    /// amount was already used.
+    pub fn remaining_maker_amount(&self) -> u128 {
+        let to_big_int = |num: u128| BigInt::from_u128(num).unwrap();
+        let percent_remaining = BigRational::new(
+            to_big_int(self.metadata.remaining_fillable_taker_amount),
+            to_big_int(self.order.taker_amount),
+        );
+        let scaled_amount = percent_remaining * to_big_int(self.order.maker_amount);
+        // This value can be at most as big as `taker_amount` which fits into an `u128`.
+        scaled_amount.to_integer().to_u128().unwrap()
+    }
 }
 
 /// A Ox API `orders` response.
