@@ -10,17 +10,19 @@ use super::{
 use anyhow::{Context, Result};
 use ethcontract::{
     transaction::{Transaction, TransactionBuilder},
-    Bytes, H160, H256, U256,
+    H160, H256, U256,
 };
 use futures::{FutureExt, TryFutureExt};
 use gas_estimation::EstimatedGasPrice;
-use reqwest::{Client, IntoUrl};
+use reqwest::{Client, IntoUrl, Url};
 use serde::Deserialize;
 use shared::{transport::http::HttpTransport, Web3, Web3Transport};
-use web3::Transport;
+use web3::{helpers, types::Bytes};
 
 #[derive(Clone)]
 pub struct EdenApi {
+    client: Client,
+    url: Url,
     rpc: Web3,
 }
 
@@ -31,16 +33,19 @@ struct EdenSuccess {
 
 impl EdenApi {
     pub fn new(client: Client, url: impl IntoUrl) -> Result<Self> {
+        let url = url.into_url().context("bad eden url")?;
         let transport = Web3Transport::new(HttpTransport::new(
-            client,
-            url.into_url().context("bad eden url")?,
+            client.clone(),
+            url.clone(),
             "eden".to_owned(),
         ));
         let rpc = Web3::new(transport);
 
-        Ok(Self { rpc })
+        Ok(Self { client, url, rpc })
     }
 
+    // When using `eth_sendSlotTx` method, we must use native Client because the response for this method
+    // is a non-standard json that can't be automatically deserialized when `Transport` is used.
     async fn submit_slot_transaction(
         &self,
         tx: TransactionBuilder<Web3Transport>,
@@ -51,20 +56,26 @@ impl EdenApi {
         };
         let params =
             serde_json::to_value(Bytes(raw_signed_transaction)).context("failed to serialize")?;
+        let request = helpers::build_request(1, "eth_sendSlotTx", vec![params]);
+        tracing::debug!(?request, "sending Eden API request");
 
         let response = self
-            .rpc
-            .transport()
-            .execute("eth_sendSlotTx", vec![params])
+            .client
+            .post(self.url.clone())
+            .json(&request)
+            .send()
             .await
-            .context("transport failed")?;
-        tracing::debug!("response from eden: {:?}", response);
+            .context("failed sending request")?
+            .text()
+            .await
+            .context("failed converting to text")?;
+        tracing::debug!(%response, "response from eden");
+        let response =
+            serde_json::from_str::<EdenSuccess>(&response).context("failed to deserialize")?;
 
-        let success =
-            serde_json::from_value::<EdenSuccess>(response).context("deserialize failed")?;
         Ok(TransactionHandle {
             tx_hash,
-            handle: success.result,
+            handle: response.result,
         })
     }
 }
