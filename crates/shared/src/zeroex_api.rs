@@ -212,15 +212,21 @@ pub struct OrderRecord {
 impl OrderRecord {
     /// Scales the `maker_amount` according to how much of the partially fillable
     /// amount was already used.
-    pub fn remaining_maker_amount(&self) -> u128 {
+    pub fn remaining_maker_amount(&self) -> Result<u128> {
         let to_big_int = |num: u128| BigInt::from_u128(num).unwrap();
+
         let percent_remaining = BigRational::new(
             to_big_int(self.metadata.remaining_fillable_taker_amount),
             to_big_int(self.order.taker_amount),
         );
         let scaled_amount = percent_remaining * to_big_int(self.order.maker_amount);
-        // This value can be at most as big as `taker_amount` which fits into an `u128`.
-        scaled_amount.to_integer().to_u128().unwrap()
+
+        scaled_amount
+            .to_integer()
+            .to_u128()
+            // Unless we received bogous data from the 0x API `scaled_amount` <= `maker_amount`
+            // is always true so converting `scaled_amount` to `u128` should not throw an error.
+            .ok_or_else(|| anyhow::anyhow!("u128 overflow"))
     }
 }
 
