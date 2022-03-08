@@ -24,7 +24,7 @@ pub trait AccessListEstimating: Send + Sync {
             .next()
             .unwrap()
     }
-    /// The function guarantee the same size and order of input and output containers
+    /// The function guarantees the same size and order of input and output containers
     async fn estimate_access_lists(
         &self,
         txs: &[TransactionBuilder<DynTransport>],
@@ -56,8 +56,8 @@ impl AccessListEstimating for NodeApi {
     ) -> Result<Vec<Result<AccessList>>> {
         let batch_request = txs
             .iter()
-            .map(|tx| {
-                let (from, to, data) = resolve_call_request(tx).unwrap_or_default();
+            .map(|tx| -> Result<_> {
+                let (from, to, data) = resolve_call_request(tx)?;
                 let request = CallRequest {
                     from: Some(from),
                     to: Some(to),
@@ -69,20 +69,32 @@ impl AccessListEstimating for NodeApi {
                     .web3
                     .transport()
                     .prepare("eth_createAccessList", vec![params]);
-                (id, request)
+                Ok((id, request))
             })
             .collect::<Vec<_>>();
 
         // send_batch guarantees the size and order of the responses to match the requests
-        let batch_response = self.web3.transport().send_batch(batch_request).await?;
+        let mut batch_response = self
+            .web3
+            .transport()
+            .send_batch(batch_request.iter().flatten().cloned())
+            .await?
+            .into_iter();
 
-        Ok(batch_response
+        Ok(batch_request
             .into_iter()
-            .map(|response| match response {
-                Ok(response) => serde_json::from_value::<NodeAccessList>(response)
-                    .context("unexpected response format")
-                    .map(|response| response.access_list),
-                Err(err) => Err(anyhow!("web3 error: {}", err)),
+            // merge results of unresolved call requests with responses of resolved requests
+            .map(|req| match req {
+                // error during `resolve_call_request()`
+                Err(e) => Err(e),
+                Ok(_req) => match batch_response.next().unwrap() {
+                    Ok(response) => serde_json::from_value::<NodeAccessList>(response)
+                        // error parsing the response
+                        .context("unexpected response format")
+                        .map(|response| response.access_list),
+                    // error during transport
+                    Err(err) => Err(anyhow!("web3 error: {}", err)),
+                },
             })
             .collect())
     }
@@ -149,7 +161,7 @@ impl TenderlyApi {
             client,
             header: {
                 let mut header = HeaderMap::new();
-                header.insert("x-access-key", HeaderValue::from_str(api_key).unwrap());
+                header.insert("x-access-key", HeaderValue::from_str(api_key)?);
                 header
             },
             network_id,
@@ -298,13 +310,6 @@ mod tests {
             .data(data)
     }
 
-    async fn estimate_access_list_with_estimator(
-        estimator: impl AccessListEstimating,
-    ) -> Result<Vec<Result<AccessList>>> {
-        let tx = example_tx();
-        estimator.estimate_access_lists(&[tx]).await
-    }
-
     #[tokio::test]
     #[ignore]
     async fn tenderly_estimate_access_lists() {
@@ -317,9 +322,8 @@ mod tests {
         )
         .unwrap();
 
-        let access_lists = estimate_access_list_with_estimator(tenderly_api)
-            .await
-            .unwrap();
+        let tx = example_tx();
+        let access_lists = tenderly_api.estimate_access_lists(&[tx]).await.unwrap();
         dbg!(access_lists);
     }
 
@@ -330,7 +334,27 @@ mod tests {
         let web3 = Web3::new(http);
         let node_api = NodeApi::new(web3);
 
-        let access_lists = estimate_access_list_with_estimator(node_api).await.unwrap();
+        let tx = example_tx();
+
+        let access_lists = node_api.estimate_access_lists(&[tx]).await.unwrap();
+        dbg!(access_lists);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn node_estimate_multiple_access_lists() {
+        let http = create_env_test_transport();
+        let web3 = Web3::new(http);
+        let node_api = NodeApi::new(web3.clone());
+
+        let tx = example_tx();
+        let tx2 = TransactionBuilder::new(web3); //empty transaction
+        let tx3 = example_tx();
+
+        let access_lists = node_api
+            .estimate_access_lists(&[tx, tx2, tx3])
+            .await
+            .unwrap();
         dbg!(access_lists);
     }
 
