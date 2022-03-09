@@ -11,7 +11,6 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use derivative::Derivative;
 use ethcontract::{H160, H256, U256};
 use model::u256_decimal;
-use num::{BigInt, BigRational, FromPrimitive, ToPrimitive};
 use reqwest::{Client, IntoUrl, Url};
 use serde::Deserialize;
 use std::collections::HashSet;
@@ -213,20 +212,17 @@ impl OrderRecord {
     /// Scales the `maker_amount` according to how much of the partially fillable
     /// amount was already used.
     pub fn remaining_maker_amount(&self) -> Result<u128> {
-        let to_big_int = |num: u128| BigInt::from_u128(num).unwrap();
+        if self.metadata.remaining_fillable_taker_amount > self.order.taker_amount {
+            anyhow::bail!("remaining taker amount bigger than total taker amount");
+        }
 
-        let percent_remaining = BigRational::new(
-            to_big_int(self.metadata.remaining_fillable_taker_amount),
-            to_big_int(self.order.taker_amount),
-        );
-        let scaled_amount = percent_remaining * to_big_int(self.order.maker_amount);
+        // all numbers are at most u128::MAX so none of these operations can overflow
+        let scaled_maker_amount = U256::from(self.order.maker_amount)
+            * U256::from(self.metadata.remaining_fillable_taker_amount)
+            / U256::from(self.order.taker_amount);
 
-        scaled_amount
-            .to_integer()
-            .to_u128()
-            // Unless we received bogous data from the 0x API `scaled_amount` <= `maker_amount`
-            // is always true so converting `scaled_amount` to `u128` should not throw an error.
-            .ok_or_else(|| anyhow::anyhow!("u128 overflow"))
+        // `scaled_maker_amount` is at most as big as `maker_amount` which already fits in an u128
+        Ok(scaled_maker_amount.as_u128())
     }
 }
 
@@ -656,5 +652,57 @@ mod tests {
                     value: U256::from_dec_str("0").unwrap(),
                 }
             );
+    }
+
+    #[test]
+    fn compute_remaining_maker_amount() {
+        let bogous_order = OrderRecord {
+            order: Order {
+                taker_amount: u128::MAX - 1,
+                maker_amount: u128::MAX,
+                ..Default::default()
+            },
+            metadata: OrderMetadata {
+                // remaining amount bigger than total amount
+                remaining_fillable_taker_amount: u128::MAX,
+                ..Default::default()
+            },
+        };
+        assert!(bogous_order.remaining_maker_amount().is_err());
+
+        let biggest_unfilled_order = OrderRecord {
+            order: Order {
+                taker_amount: u128::MAX,
+                maker_amount: u128::MAX,
+                ..Default::default()
+            },
+            metadata: OrderMetadata {
+                remaining_fillable_taker_amount: u128::MAX,
+                ..Default::default()
+            },
+        };
+        assert_eq!(
+            u128::MAX,
+            // none of the operations overflow with u128::MAX for all values
+            biggest_unfilled_order.remaining_maker_amount().unwrap()
+        );
+
+        let biggest_partially_filled_order = OrderRecord {
+            order: Order {
+                taker_amount: u128::MAX,
+                maker_amount: u128::MAX,
+                ..Default::default()
+            },
+            metadata: OrderMetadata {
+                remaining_fillable_taker_amount: u128::MAX / 2,
+                ..Default::default()
+            },
+        };
+        assert_eq!(
+            u128::MAX / 2,
+            biggest_partially_filled_order
+                .remaining_maker_amount()
+                .unwrap()
+        );
     }
 }
