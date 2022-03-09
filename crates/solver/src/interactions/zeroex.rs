@@ -12,7 +12,7 @@ pub struct ZeroExInteraction {
 
 impl Interaction for ZeroExInteraction {
     fn encode(&self) -> Vec<EncodedInteraction> {
-        let method = self.zeroex.fill_limit_order(
+        let method = self.zeroex.fill_or_kill_limit_order(
             (
                 self.order.maker_token,
                 self.order.taker_token,
