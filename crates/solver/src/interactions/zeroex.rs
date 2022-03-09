@@ -6,7 +6,7 @@ use shared::zeroex_api::Order;
 #[derive(Clone, Debug)]
 pub struct ZeroExInteraction {
     pub order: Order,
-    pub executed_amount: u128,
+    pub taker_token_fill_amount: u128,
     pub zeroex: IZeroEx,
 }
 
@@ -33,7 +33,7 @@ impl Interaction for ZeroExInteraction {
                 Bytes(self.order.signature.r.0),
                 Bytes(self.order.signature.s.0),
             ),
-            self.executed_amount,
+            self.taker_token_fill_amount,
         );
         let calldata = method.tx.data.expect("no calldata").0;
         vec![(self.zeroex.address(), 0.into(), Bytes(calldata))]

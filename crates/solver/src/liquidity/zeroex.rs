@@ -64,7 +64,7 @@ impl SettlementHandling<LimitOrder> for OrderSettlementHandler {
             anyhow::bail!("0x only supports executed amounts of size u128");
         }
         encoder.append_to_execution_plan(ZeroExInteraction {
-            executed_amount: executed_amount.as_u128(),
+            taker_token_fill_amount: executed_amount.as_u128(),
             order: self.order.clone(),
             zeroex: self.zeroex.clone(),
         });
