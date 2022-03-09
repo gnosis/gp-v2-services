@@ -386,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    fn filter_access_list_test1() {
+    fn filter_access_list_node() {
         let access_list = json!(
             [
             {
@@ -432,7 +432,7 @@ mod tests {
     }
 
     #[test]
-    fn filter_access_list_test2() {
+    fn filter_access_list_tenderly() {
         let access_list = json!(
             [
             {
