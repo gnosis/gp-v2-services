@@ -30,11 +30,6 @@ impl RacingCompetitionPriceEstimator {
         }
     }
 
-    fn enough_successes<'a>(&self, results: impl Iterator<Item = &'a PriceEstimateResult>) -> bool {
-        results.filter(|result| result.is_ok()).count()
-            >= self.successful_results_for_early_return.get()
-    }
-
     async fn estimates_(
         &self,
         queries: &[Query],
@@ -47,39 +42,28 @@ impl RacingCompetitionPriceEstimator {
         // to produce a result of our own the corresponding element is set to None.
         let mut estimates: Vec<Option<Vec<(usize, PriceEstimateResult)>>> =
             vec![Some(Vec::with_capacity(self.inner.len())); queries.len()];
-        let best_result = |query_index: usize, results: Vec<(usize, PriceEstimateResult)>| {
-            let query = &queries[query_index];
-            let (best_index, _) =
-                best_result(query, results.iter().map(|(_, result)| result)).unwrap();
-            let (estimator_index, result) = results.into_iter().nth(best_index).unwrap();
-            let estimator = self.inner[estimator_index].0.as_str();
-            tracing::debug!(?query, ?result, estimator, "winning price estimate");
-            metrics()
-                .queries_won
-                .with_label_values(&[estimator, query.kind.label()])
-                .inc();
-            result
-        };
         while let Some((estimator, (query_index, result))) = estimators.next().await {
             let results = match &mut estimates[query_index] {
                 Some(results) => results,
                 None => continue,
             };
             results.push((estimator, result));
-            if !self.enough_successes(results.iter().map(|(_, result | result)| result)) {
-                continue;
+            let successes = results.iter().filter(|result| result.1.is_ok()).count();
+            let remaining = self.inner.len() - results.len();
+            if successes >= self.successful_results_for_early_return.get() || remaining == 0 {
+                let results = estimates[query_index].take().unwrap();
+                let query = &queries[query_index];
+                let (best_index, _) =
+                    best_result(query, results.iter().map(|(_, result)| result)).unwrap();
+                let (estimator_index, result) = results.into_iter().nth(best_index).unwrap();
+                let estimator = self.inner[estimator_index].0.as_str();
+                tracing::debug!(?query, ?result, estimator, "winning price estimate");
+                metrics()
+                    .queries_won
+                    .with_label_values(&[estimator, query.kind.label()])
+                    .inc();
+                sender.send((query_index, result)).await;
             }
-            let best = best_result(query_index, estimates[query_index].take().unwrap());
-            sender.send((query_index, best)).await;
-        }
-        for (query_index, results) in estimates.into_iter().enumerate() {
-            let results = match results {
-                Some(results) => results,
-                None => continue,
-            };
-            debug_assert!(!self.enough_successes(results.iter().map(|(_, result)| result)));
-            let best = best_result(query_index, results);
-            sender.send((query_index, best)).await;
         }
     }
 }
