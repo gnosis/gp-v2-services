@@ -13,7 +13,7 @@ use web3::{
 };
 
 #[async_trait::async_trait]
-pub trait AccessListEstimating: Send + Sync {
+pub trait AccessListEstimating: Send + Sync + 'static {
     async fn estimate_access_list(
         &self,
         tx: &TransactionBuilder<DynTransport>,

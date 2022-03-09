@@ -1,4 +1,9 @@
-use crate::{encoding::EncodedSettlement, settlement::Settlement};
+use std::sync::Arc;
+
+use crate::{
+    encoding::EncodedSettlement, settlement::Settlement,
+    settlement_access_list::AccessListEstimating,
+};
 use anyhow::{Error, Result};
 use contracts::GPv2Settlement;
 use ethcontract::{
@@ -13,7 +18,7 @@ use futures::FutureExt;
 use gas_estimation::EstimatedGasPrice;
 use primitive_types::U256;
 use shared::Web3;
-use web3::types::{BlockId, CallRequest};
+use web3::types::BlockId;
 
 const SIMULATE_BATCH_SIZE: usize = 10;
 
@@ -38,6 +43,7 @@ pub async fn simulate_and_estimate_gas_at_current_block(
     contract: &GPv2Settlement,
     web3: &Web3,
     gas_price: EstimatedGasPrice,
+    access_list_estimator: Arc<dyn AccessListEstimating>,
 ) -> Result<Vec<Result<U256, ExecutionError>>> {
     // Collect into Vec to not rely on Itertools::chunk which would make this future !Send.
     let settlements: Vec<_> = settlements.collect();
@@ -51,27 +57,27 @@ pub async fn simulate_and_estimate_gas_at_current_block(
     let web3 = web3::Web3::new(web3::transports::Batch::new(web3.transport().clone()));
     let mut results = Vec::new();
     for chunk in settlements.chunks(SIMULATE_BATCH_SIZE) {
-        let calls = chunk
+        let txs = chunk
             .iter()
             .map(|(account, settlement)| {
-                let tx = settle_method(gas_price, contract, settlement.clone(), account.clone()).tx;
-                let resolved_gas_price = tx
-                    .gas_price
-                    .map(|gas_price| gas_price.resolve_for_transaction())
-                    .unwrap_or_default();
-                let call_request = CallRequest {
-                    from: tx.from.map(|account| account.address()),
-                    to: tx.to,
-                    gas: None,
-                    gas_price: resolved_gas_price.gas_price,
-                    value: tx.value,
-                    data: tx.data,
-                    transaction_type: resolved_gas_price.transaction_type,
-                    access_list: None,
-                    max_fee_per_gas: resolved_gas_price.max_fee_per_gas,
-                    max_priority_fee_per_gas: resolved_gas_price.max_priority_fee_per_gas,
+                settle_method(gas_price, contract, settlement.clone(), account.clone()).tx
+            })
+            .collect::<Vec<_>>();
+
+        let mut access_lists = access_list_estimator
+            .estimate_access_lists(txs.as_slice())
+            .await
+            .unwrap_or_default()
+            .into_iter();
+
+        let calls = txs
+            .into_iter()
+            .map(|tx| {
+                let tx = match access_lists.next().unwrap() {
+                    Ok(access_list) => tx.access_list(access_list),
+                    Err(_) => tx,
                 };
-                web3.eth().estimate_gas(call_request, None)
+                tx.estimate_gas()
             })
             .collect::<Vec<_>>();
         web3.transport().submit_batch().await?;
@@ -83,6 +89,7 @@ pub async fn simulate_and_estimate_gas_at_current_block(
 }
 
 #[allow(clippy::needless_collect)]
+#[allow(clippy::too_many_arguments)]
 pub async fn simulate_and_error_with_tenderly_link(
     settlements: impl Iterator<Item = (Account, Settlement)>,
     contract: &GPv2Settlement,
@@ -91,12 +98,36 @@ pub async fn simulate_and_error_with_tenderly_link(
     network_id: &str,
     block: u64,
     simulation_gas_limit: u128,
+    access_list_estimator: Arc<dyn AccessListEstimating>,
 ) -> Vec<Result<()>> {
+    let settlements = settlements.collect::<Vec<_>>();
+
+    let methods = settlements
+        .into_iter()
+        .map(|(account, settlement)| settle_method(gas_price, contract, settlement, account))
+        .collect::<Vec<_>>();
+
+    let txs = methods.iter().map(|m| m.tx.clone()).collect::<Vec<_>>();
+    let mut access_lists = access_list_estimator
+        .estimate_access_lists(&txs)
+        .await
+        .unwrap_or_default()
+        .into_iter();
+
+    // append access lists to existing methods if access lists exist, otherwise ignore access lists
+    let methods = methods
+        .into_iter()
+        .map(|method| match access_lists.next().unwrap() {
+            Ok(access_list) => method.access_list(access_list),
+            Err(_) => method,
+        })
+        .collect::<Vec<_>>();
+
     let mut batch = CallBatch::new(web3.transport());
-    let futures = settlements
-        .map(|(account, settlement)| {
-            let method = settle_method(gas_price, contract, settlement, account);
-            let transaction_builder = method.tx.clone();
+    let futures = methods
+        .into_iter()
+        .map(|method| {
+            let tx = method.tx.clone();
             let view = method
                 .view()
                 .block(BlockId::Number(block.into()))
@@ -105,7 +136,7 @@ pub async fn simulate_and_error_with_tenderly_link(
                 // solver balance. The limit should be below the current block gas
                 // limit of 30M gas
                 .gas(simulation_gas_limit.into());
-            (view.batch_call(&mut batch), transaction_builder)
+            (view.batch_call(&mut batch), tx)
         })
         .collect::<Vec<_>>();
     batch.execute_all(SIMULATE_BATCH_SIZE).await;
@@ -180,6 +211,7 @@ mod tests {
         balancer_v2::SettlementHandler, order_converter::OrderConverter, uniswap_v2::Inner,
         ConstantProductOrder, Liquidity, StablePoolOrder,
     };
+    use crate::settlement_access_list::NodeApi;
     use crate::solver::http_solver::settlement::{convert_settlement, SettlementContext};
     use contracts::{BalancerV2Vault, IUniswapLikeRouter, UniswapV2Router02, WETH9};
     use ethcontract::{Account, PrivateKey};
@@ -204,6 +236,7 @@ mod tests {
         let network_id = web3.net().version().await.unwrap();
         let contract = GPv2Settlement::deployed(&web3).await.unwrap();
         let account = Account::Offline(PrivateKey::from_raw([1; 32]).unwrap(), None);
+        let access_list_estimator = Arc::new(NodeApi::new(web3.clone()));
 
         let settlements = vec![
             (
@@ -220,6 +253,7 @@ mod tests {
             network_id.as_str(),
             block,
             15000000u128,
+            access_list_estimator.clone(),
         )
         .await;
         let _ = dbg!(result);
@@ -229,6 +263,7 @@ mod tests {
             &contract,
             &web3,
             Default::default(),
+            access_list_estimator.clone(),
         )
         .await
         .unwrap();
@@ -239,6 +274,7 @@ mod tests {
             &contract,
             &web3,
             Default::default(),
+            access_list_estimator,
         )
         .await
         .unwrap();
@@ -601,6 +637,7 @@ mod tests {
         let web3 = Web3::new(transport);
         let contract = GPv2Settlement::deployed(&web3).await.unwrap();
         let account = Account::Offline(PrivateKey::from_raw([1; 32]).unwrap(), None);
+        let access_list_estimator = Arc::new(NodeApi::new(web3.clone()));
 
         // 12 so that we hit more than one chunk.
         let settlements =
@@ -613,6 +650,7 @@ mod tests {
                 legacy: 0.0,
                 eip1559: None,
             },
+            access_list_estimator,
         )
         .await
         .unwrap();

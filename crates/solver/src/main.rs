@@ -30,6 +30,7 @@ use solver::{
     liquidity_collector::LiquidityCollector,
     metrics::Metrics,
     orderbook::OrderBookApi,
+    settlement_access_list::{NodeApi, PriorityAccessListEstimating},
     settlement_submission::{
         submitter::{
             custom_nodes_api::CustomNodesApi, eden_api::EdenApi, flashbots_api::FlashbotsApi,
@@ -581,6 +582,9 @@ async fn main() {
             TransactionStrategyArg::DryRun => TransactionStrategy::DryRun,
         })
         .collect::<Vec<_>>();
+    let access_list_estimator = Arc::new(PriorityAccessListEstimating::new(vec![Box::new(
+        NodeApi::new(web3.clone()),
+    )]));
     let solution_submitter = SolutionSubmitter {
         web3: web3.clone(),
         contract: settlement_contract.clone(),
@@ -590,6 +594,7 @@ async fn main() {
         retry_interval: args.submission_retry_interval_seconds,
         gas_price_cap: args.gas_price_cap,
         transaction_strategies,
+        access_list_estimator,
     };
     let api = OrderBookApi::new(args.orderbook_url, client.clone());
     let order_converter = OrderConverter {

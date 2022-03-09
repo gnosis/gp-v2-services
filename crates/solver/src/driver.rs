@@ -230,6 +230,7 @@ impl Driver {
             &self.settlement_contract,
             &self.web3,
             gas_price,
+            self.solution_submitter.access_list_estimator.clone(),
         )
         .await
         .context("failed to simulate settlement")?;
@@ -252,6 +253,7 @@ impl Driver {
         let network_id = self.network_id.clone();
         let metrics = self.metrics.clone();
         let simulation_gas_limit = self.simulation_gas_limit;
+        let access_list_estimator = self.solution_submitter.access_list_estimator.clone();
         let task = async move {
             let simulations = settlement_simulation::simulate_and_error_with_tenderly_link(
                 errors
@@ -263,6 +265,7 @@ impl Driver {
                 &network_id,
                 current_block_during_liquidity_fetch,
                 simulation_gas_limit,
+                access_list_estimator,
             )
             .await;
 
@@ -322,6 +325,7 @@ impl Driver {
             &self.settlement_contract,
             &self.web3,
             gas_price,
+            self.solution_submitter.access_list_estimator.clone(),
         )
         .await
         .context("failed to simulate settlements")?;
@@ -516,6 +520,7 @@ impl Driver {
                     winning_settlement.settlement,
                     winning_solver.account().clone(),
                     gas_price,
+                    self.solution_submitter.access_list_estimator.clone(),
                 )
                 .await;
 

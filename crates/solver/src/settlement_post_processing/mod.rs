@@ -1,8 +1,10 @@
 pub mod optimize_unwrapping;
 
-use crate::settlement::Settlement;
+use std::sync::Arc;
+
 use crate::settlement_simulation::simulate_and_estimate_gas_at_current_block;
 use crate::solver::http_solver::buffers::BufferRetriever;
+use crate::{settlement::Settlement, settlement_access_list::AccessListEstimating};
 use contracts::{GPv2Settlement, WETH9};
 use ethcontract::Account;
 use gas_estimation::EstimatedGasPrice;
@@ -22,6 +24,7 @@ pub struct SettlementSimulator {
     settlement_contract: GPv2Settlement,
     gas_price: EstimatedGasPrice,
     solver_account: Account,
+    access_list_estimator: Arc<dyn AccessListEstimating>,
 }
 
 #[async_trait::async_trait]
@@ -32,6 +35,7 @@ impl SettlementSimulating for SettlementSimulator {
             &self.settlement_contract,
             &self.web3,
             self.gas_price,
+            self.access_list_estimator.clone(),
         )
         .await;
         matches!(result, Ok(results) if results[0].is_ok())
@@ -70,12 +74,14 @@ impl PostProcessingPipeline {
         settlement: Settlement,
         solver_account: Account,
         gas_price: EstimatedGasPrice,
+        access_list_estimator: Arc<dyn AccessListEstimating>,
     ) -> Settlement {
         let simulator = SettlementSimulator {
             web3: self.web3.clone(),
             settlement_contract: self.settlement_contract.clone(),
             gas_price,
             solver_account,
+            access_list_estimator,
         };
 
         // an error will leave the settlement unmodified
