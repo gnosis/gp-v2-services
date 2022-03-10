@@ -212,7 +212,7 @@ impl Driver {
         settlement: &RatedSettlement,
         gas_price: EstimatedGasPrice,
     ) -> Result<bool> {
-        // We want to buy and sell only tokens that we trust. If no list is set, we settle with external liquidity.
+        // We want to only buy and sell tokens that we trust. If no list is set, we settle with external liquidity.
         if !self
             .market_makable_token_list
             .as_ref()
