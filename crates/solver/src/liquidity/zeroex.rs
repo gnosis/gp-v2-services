@@ -48,6 +48,7 @@ impl ZeroExLiquidity {
                 order: record.order,
                 zeroex: self.zeroex.clone(),
             }),
+            has_atomic_execution: true,
         };
         Some(Liquidity::LimitOrder(limit_order))
     }

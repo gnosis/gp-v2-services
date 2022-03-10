@@ -58,6 +58,7 @@ impl OrderConverter {
                 scaled_unsubsidized_fee_amount: scaled_fee_amount,
                 is_liquidity_order,
             }),
+            has_atomic_execution: false,
         })
     }
 }
