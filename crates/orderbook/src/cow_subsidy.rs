@@ -5,7 +5,7 @@ use cached::{Cached, TimedSizedCache};
 use contracts::ERC20;
 use primitive_types::{H160, U256};
 
-const CACHE_SIZE: usize = 10000;
+const CACHE_SIZE: usize = 10_000;
 const CACHE_LIFESPAN: Duration = Duration::from_secs(60 * 60);
 
 /// Check whether a user qualifies for an extra fee subsidy because they own enough cow token.
@@ -24,66 +24,93 @@ impl Default for FixedCowSubsidy {
 
 #[async_trait::async_trait]
 impl CowSubsidy for FixedCowSubsidy {
+    /// On success returns a factor of how much of the usual fee an account has to pay based on the
+    /// amount of COW tokens it owns.
     async fn cow_subsidy_factor(&self, _: H160) -> Result<f64> {
         Ok(self.0)
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum SubsidyTier {
-    None,
-    Full,
+#[derive(Copy, Clone, Debug)]
+pub struct SubsidyTier {
+    /// How many base units of COW someone needs to own to qualify for this subsidy tier.
+    threshold: U256,
+    /// How much of the usual fee a user in this tier has to pay.
+    fee_factor: f64,
+}
+
+impl std::str::FromStr for SubsidyTier {
+    type Err = anyhow::Error;
+    fn from_str(tier: &str) -> Result<Self, Self::Err> {
+        let mut parts = tier.split(':');
+        let threshold = parts.next().ok_or(anyhow::anyhow!("missing threshold"))?;
+        let threshold: f64 = threshold
+            .parse()
+            .map_err(|_| anyhow::anyhow!("can not parse threshold {} as f64", threshold))?;
+
+        let fee_factor = parts.next().ok_or(anyhow::anyhow!("missing fee factor"))?;
+        let fee_factor: f64 = fee_factor
+            .parse()
+            .map_err(|_| anyhow::anyhow!("can not parse fee factor {} as f64", fee_factor))?;
+
+        if parts.next().is_some() {
+            anyhow::bail!("too many arguments for subsidy tier");
+        }
+
+        Ok(SubsidyTier {
+            threshold: U256::from_f64_lossy(1e18 * threshold),
+            fee_factor,
+        })
+    }
 }
 
 pub struct CowSubsidyImpl {
     cow_token: ERC20,
-    threshold: U256,
-    factor: f64,
-    cache: Mutex<TimedSizedCache<H160, SubsidyTier>>,
+    // sorted by threshold in increasing order, no duplicated thresholds
+    subsidy_tiers: Vec<SubsidyTier>,
+    cache: Mutex<TimedSizedCache<H160, f64>>,
 }
 
 #[async_trait::async_trait]
 impl CowSubsidy for CowSubsidyImpl {
     async fn cow_subsidy_factor(&self, user: H160) -> Result<f64> {
-        if let Some(tier) = self.cache.lock().unwrap().cache_get(&user).copied() {
-            return Ok(self.tier_to_factor(tier));
+        if let Some(subsidy_factor) = self.cache.lock().unwrap().cache_get(&user).copied() {
+            return Ok(subsidy_factor);
         }
-        let tier = self.subsidy_tier_uncached(user).await?;
-        self.cache.lock().unwrap().cache_set(user, tier);
-        Ok(self.tier_to_factor(tier))
+        let subsidy_factor = self.subsidy_factor_uncached(user).await?;
+        self.cache.lock().unwrap().cache_set(user, subsidy_factor);
+        Ok(subsidy_factor)
     }
 }
 
 impl CowSubsidyImpl {
-    pub fn new(cow_token: ERC20, threshold: U256, factor: f64) -> Self {
+    pub fn new(cow_token: ERC20, mut tiers: Vec<SubsidyTier>) -> Self {
+        // NOTE: A long caching time might bite us should we ever start advertising that people can
+        // buy COW to reduce their fees. `CACHE_LIFESPAN` would have to pass after buying COW to
+        // qualify for the subsidy.
         let cache = TimedSizedCache::with_size_and_lifespan_and_refresh(
             CACHE_SIZE,
             CACHE_LIFESPAN.as_secs(),
             false,
         );
+        tiers.sort_by_key(|tier| tier.threshold);
+        tiers.dedup_by_key(|tier| tier.threshold);
         Self {
             cow_token,
-            threshold,
-            factor,
+            subsidy_tiers: tiers,
             cache: Mutex::new(cache),
         }
     }
 
-    async fn subsidy_tier_uncached(&self, user: H160) -> Result<SubsidyTier> {
+    async fn subsidy_factor_uncached(&self, user: H160) -> Result<f64> {
         let balance = self.cow_token.balance_of(user).call().await?;
-        let factor = if balance < self.threshold {
-            SubsidyTier::None
-        } else {
-            SubsidyTier::Full
-        };
-        Ok(factor)
-    }
-
-    fn tier_to_factor(&self, tier: SubsidyTier) -> f64 {
-        match tier {
-            SubsidyTier::None => 1.0,
-            SubsidyTier::Full => self.factor,
-        }
+        Ok(self
+            .subsidy_tiers
+            .iter()
+            .filter(|tier| tier.threshold <= balance)
+            .map(|tier| tier.fee_factor)
+            .last()
+            .unwrap_or(1.0))
     }
 }
 
@@ -100,7 +127,13 @@ mod tests {
         let web3 = Web3::new(transport);
         let token = H160(hex!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"));
         let token = ERC20::at(&web3, token);
-        let subsidy = CowSubsidyImpl::new(token, U256::from_f64_lossy(1e18), 0.5);
+        let subsidy = CowSubsidyImpl::new(
+            token,
+            vec![SubsidyTier {
+                threshold: U256::from_f64_lossy(1e18),
+                fee_factor: 0.5,
+            }],
+        );
         for i in 0..2 {
             let user = H160::from_low_u64_be(i);
             let result = subsidy.cow_subsidy_factor(user).await;
