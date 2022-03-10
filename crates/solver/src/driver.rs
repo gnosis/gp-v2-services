@@ -212,11 +212,11 @@ impl Driver {
         settlement: &RatedSettlement,
         gas_price: EstimatedGasPrice,
     ) -> Result<bool> {
-        // We don't want to buy tokens that we don't trust. If no list is set, we settle with external liquidity.
+        // We want to buy and sell only tokens that we trust. If no list is set, we settle with external liquidity.
         if !self
             .market_makable_token_list
             .as_ref()
-            .map(|list| is_only_selling_trusted_tokens(&settlement.settlement, list))
+            .map(|list| is_only_selling_and_buying_trusted_tokens(&settlement.settlement, list))
             .unwrap_or(false)
         {
             return Ok(false);
@@ -563,10 +563,14 @@ impl Driver {
     }
 }
 
-fn is_only_selling_trusted_tokens(settlement: &Settlement, token_list: &TokenList) -> bool {
-    !settlement
-        .traded_orders()
-        .any(|order| token_list.get(&order.creation.sell_token).is_none())
+fn is_only_selling_and_buying_trusted_tokens(
+    settlement: &Settlement,
+    token_list: &TokenList,
+) -> bool {
+    !settlement.traded_orders().any(|order| {
+        token_list.get(&order.creation.sell_token).is_none()
+            || token_list.get(&order.creation.buy_token).is_none()
+    })
 }
 
 fn print_settlements(
@@ -610,14 +614,14 @@ enum SolverRunError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settlement::{OrderTrade, Trade};
+    use crate::settlement::{LiquidityOrderTrade, OrderTrade, Trade};
     use maplit::hashmap;
     use model::order::{Order, OrderCreation};
     use shared::token_list::Token;
     use std::collections::HashMap;
 
     #[test]
-    fn test_is_only_selling_trusted_tokens() {
+    fn test_is_only_selling_or_buying_trusted_tokens() {
         let good_token = H160::from_low_u64_be(1);
         let another_good_token = H160::from_low_u64_be(2);
         let bad_token = H160::from_low_u64_be(3);
@@ -637,11 +641,12 @@ mod tests {
             }
         });
 
-        let trade = |token| OrderTrade {
+        let trade = |sell_token, buy_token| OrderTrade {
             trade: Trade {
                 order: Order {
                     creation: OrderCreation {
-                        sell_token: token,
+                        sell_token,
+                        buy_token,
                         ..Default::default()
                     },
                     ..Default::default()
@@ -653,21 +658,57 @@ mod tests {
 
         let settlement = Settlement::with_trades(
             HashMap::new(),
-            vec![trade(good_token), trade(another_good_token)],
-            vec![],
-        );
-        assert!(is_only_selling_trusted_tokens(&settlement, &token_list));
-
-        let settlement = Settlement::with_trades(
-            HashMap::new(),
             vec![
-                trade(good_token),
-                trade(another_good_token),
-                trade(bad_token),
+                trade(good_token, another_good_token),
+                trade(another_good_token, good_token),
             ],
             vec![],
         );
-        assert!(!is_only_selling_trusted_tokens(&settlement, &token_list));
+        assert!(is_only_selling_and_buying_trusted_tokens(
+            &settlement,
+            &token_list
+        ));
+
+        let settlement =
+            Settlement::with_trades(HashMap::new(), vec![trade(good_token, bad_token)], vec![]);
+        assert!(!is_only_selling_and_buying_trusted_tokens(
+            &settlement,
+            &token_list
+        ));
+        let settlement =
+            Settlement::with_trades(HashMap::new(), vec![trade(bad_token, good_token)], vec![]);
+        assert!(!is_only_selling_and_buying_trusted_tokens(
+            &settlement,
+            &token_list
+        ));
+        let settlement = Settlement::with_trades(
+            HashMap::new(),
+            vec![],
+            vec![LiquidityOrderTrade {
+                trade: Trade {
+                    order: Order {
+                        creation: OrderCreation {
+                            sell_token: bad_token,
+                            buy_token: good_token,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                ..Default::default()
+            }],
+        );
+        assert!(!is_only_selling_and_buying_trusted_tokens(
+            &settlement,
+            &token_list
+        ));
+        let settlement =
+            Settlement::with_trades(HashMap::new(), vec![trade(bad_token, bad_token)], vec![]);
+        assert!(!is_only_selling_and_buying_trusted_tokens(
+            &settlement,
+            &token_list
+        ));
     }
 
     #[test]
