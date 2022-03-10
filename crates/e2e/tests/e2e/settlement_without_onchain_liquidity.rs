@@ -194,6 +194,12 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
             name: "Test Coin".into(),
             symbol: "TC".into(),
             decimals: 18,
+        },
+        token_b.address() => Token {
+            address: token_b.address(),
+            name: "Test Coin 2".into(),
+            symbol: "TC 2".into(),
+            decimals: 18,
         }
     });
     let mut driver = solver::driver::Driver::new(
