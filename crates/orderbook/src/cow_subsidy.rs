@@ -4,6 +4,7 @@ use anyhow::Result;
 use cached::{Cached, TimedSizedCache};
 use contracts::ERC20;
 use primitive_types::{H160, U256};
+use std::collections::BTreeMap;
 
 const CACHE_SIZE: usize = 10_000;
 const CACHE_LIFESPAN: Duration = Duration::from_secs(60 * 60);
@@ -31,54 +32,49 @@ impl CowSubsidy for FixedCowSubsidy {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
-pub struct SubsidyTier {
-    /// How many base units of COW someone needs to own to qualify for this subsidy tier.
-    threshold: U256,
-    /// How much of the usual fee a user in this tier has to pay.
-    fee_factor: f64,
-}
+/// Maps how many base units of COW someone must own at least in order to qualify for a given
+/// fee subsidy factor.
+#[derive(Clone, Debug, Default)]
+pub struct SubsidyTiers(BTreeMap<U256, f64>);
 
-impl std::str::FromStr for SubsidyTier {
+impl std::str::FromStr for SubsidyTiers {
     type Err = anyhow::Error;
-    fn from_str(tier: &str) -> Result<Self, Self::Err> {
-        let mut parts = tier.split(':');
-        let threshold = parts.next().ok_or(anyhow::anyhow!("missing threshold"))?;
-        let threshold: f64 = threshold
-            .parse()
-            .map_err(|_| anyhow::anyhow!("can not parse threshold {} as f64", threshold))?;
+    fn from_str(serialized: &str) -> Result<Self, Self::Err> {
+        let mut tiers = BTreeMap::default();
 
-        let fee_factor = parts.next().ok_or(anyhow::anyhow!("missing fee factor"))?;
-        let fee_factor: f64 = fee_factor
-            .parse()
-            .map_err(|_| anyhow::anyhow!("can not parse fee factor {} as f64", fee_factor))?;
+        for tier in serialized.split(',') {
+            let mut parts = tier.split(':');
+            let threshold = parts.next().ok_or(anyhow::anyhow!("missing threshold"))?;
+            let threshold: f64 = threshold
+                .parse()
+                .map_err(|_| anyhow::anyhow!("can not parse threshold {} as f64", threshold))?;
 
-        if parts.next().is_some() {
-            anyhow::bail!("too many arguments for subsidy tier");
+            let fee_factor = parts.next().ok_or(anyhow::anyhow!("missing fee factor"))?;
+            let fee_factor: f64 = fee_factor
+                .parse()
+                .map_err(|_| anyhow::anyhow!("can not parse fee factor {} as f64", fee_factor))?;
+
+            if !(0.0..=1.0).contains(&fee_factor) {
+                anyhow::bail!("fee factor must be in the range of [0.0, 1.0]");
+            }
+
+            if parts.next().is_some() {
+                anyhow::bail!("too many arguments for subsidy tier");
+            }
+
+            let threshold = U256::from_f64_lossy(threshold * 1e18);
+            if let Some(_existing) = tiers.insert(threshold, fee_factor) {
+                anyhow::bail!("defined same subsidy threshold multiple times");
+            }
         }
 
-        Ok(SubsidyTier::new(
-            U256::from_f64_lossy(1e18 * threshold),
-            fee_factor,
-        ))
-    }
-}
-
-impl SubsidyTier {
-    pub fn new(threshold: U256, fee_factor: f64) -> Self {
-        assert!(fee_factor <= 1.0);
-        assert!(fee_factor >= 0.0);
-        Self {
-            threshold,
-            fee_factor,
-        }
+        Ok(SubsidyTiers(tiers))
     }
 }
 
 pub struct CowSubsidyImpl {
     cow_token: ERC20,
-    // sorted by threshold in increasing order, no duplicated thresholds
-    subsidy_tiers: Vec<SubsidyTier>,
+    subsidy_tiers: SubsidyTiers,
     cache: Mutex<TimedSizedCache<H160, f64>>,
 }
 
@@ -95,7 +91,7 @@ impl CowSubsidy for CowSubsidyImpl {
 }
 
 impl CowSubsidyImpl {
-    pub fn new(cow_token: ERC20, mut tiers: Vec<SubsidyTier>) -> Self {
+    pub fn new(cow_token: ERC20, subsidy_tiers: SubsidyTiers) -> Self {
         // NOTE: A long caching time might bite us should we ever start advertising that people can
         // buy COW to reduce their fees. `CACHE_LIFESPAN` would have to pass after buying COW to
         // qualify for the subsidy.
@@ -104,34 +100,19 @@ impl CowSubsidyImpl {
             CACHE_LIFESPAN.as_secs(),
             false,
         );
-        tiers.sort_by_key(|tier| tier.threshold);
-        tiers.dedup_by_key(|tier| tier.threshold);
+
         Self {
             cow_token,
-            subsidy_tiers: tiers,
+            subsidy_tiers,
             cache: Mutex::new(cache),
         }
     }
 
     async fn subsidy_factor_uncached(&self, user: H160) -> Result<f64> {
         let balance = self.cow_token.balance_of(user).call().await?;
-        Ok(lookup_subsidy_factor(balance, &self.subsidy_tiers))
+        let tier = self.subsidy_tiers.0.range(..=balance).rev().next();
+        Ok(tier.map(|tier| *tier.1).unwrap_or(1.0))
     }
-}
-
-/// Looks up a subdidy factor in a list of `SubsidyTier`s sorted by their threshold.
-/// In case there are multiple factors associated to the same threshold the last one will be taken.
-/// If the given balance would not qualify for a `SubsidyTier` a fee factor of 1.0 will be returned
-/// which is equivalent to no subsidy.
-fn lookup_subsidy_factor(balance: U256, tiers: &[SubsidyTier]) -> f64 {
-    // TODO: assert that tiers are sorted when `is_sorted_by_key` gets stabilized:
-    // https://doc.rust-lang.org/std/primitive.slice.html#method.is_sorted_by_key
-    tiers
-        .iter()
-        .filter(|tier| tier.threshold <= balance)
-        .map(|tier| tier.fee_factor)
-        .last()
-        .unwrap_or(1.0)
 }
 
 #[cfg(test)]
@@ -149,45 +130,12 @@ mod tests {
         let token = ERC20::at(&web3, token);
         let subsidy = CowSubsidyImpl::new(
             token,
-            vec![SubsidyTier::new(U256::from_f64_lossy(1e18), 0.5)],
+            SubsidyTiers([(U256::from_f64_lossy(1e18), 0.5)].into_iter().collect()),
         );
         for i in 0..2 {
             let user = H160::from_low_u64_be(i);
             let result = subsidy.cow_subsidy_factor(user).await;
             println!("{:?} {:?}", user, result);
         }
-    }
-
-    #[test]
-    fn subsidy_factors() {
-        let tiers = Vec::default();
-        assert_eq!(
-            lookup_subsidy_factor(U256::MAX, &tiers).to_bits(),
-            1.0f64.to_bits()
-        );
-
-        let tiers = vec![
-            SubsidyTier::new(1.into(), 0.9),
-            SubsidyTier::new(1.into(), 0.8),
-            SubsidyTier::new(2.into(), 0.7),
-            SubsidyTier::new(U256::MAX, 0.0),
-        ];
-        assert_eq!(
-            lookup_subsidy_factor(0.into(), &tiers).to_bits(),
-            1.0f64.to_bits()
-        );
-        // the last factor of duplicated thresholds will be taken
-        assert_eq!(
-            lookup_subsidy_factor(1.into(), &tiers).to_bits(),
-            0.8f64.to_bits()
-        );
-        assert_eq!(
-            lookup_subsidy_factor(2.into(), &tiers).to_bits(),
-            0.7f64.to_bits()
-        );
-        assert_eq!(
-            lookup_subsidy_factor(U256::MAX, &tiers).to_bits(),
-            0.0f64.to_bits()
-        );
     }
 }

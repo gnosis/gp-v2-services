@@ -10,7 +10,7 @@ use model::{
 use orderbook::{
     account_balances::Web3BalanceFetcher,
     api::{order_validation::OrderValidator, post_quote::OrderQuoter},
-    cow_subsidy::{CowSubsidy, CowSubsidyImpl, FixedCowSubsidy, SubsidyTier},
+    cow_subsidy::{CowSubsidy, CowSubsidyImpl, FixedCowSubsidy, SubsidyTiers},
     database::{self, orders::OrderFilter, Postgres},
     event_updater::EventUpdater,
     fee::{FeeSubsidyConfiguration, MinFeeCalculator},
@@ -186,10 +186,8 @@ struct Arguments {
     /// The expected format is "10.2:0.75,150:0.5" for 2 subsidy tiers.
     /// A balance of [10.2,150) COW will cause you to pay 75% of the regular fee and a balance of
     /// [150, inf) COW will cause you to pay 50% of the regular fee.
-    ///
-    /// If multiple tiers get configured for the same threshold the first will be used.
-    #[clap(long, env, use_value_delimiter = true)]
-    cow_fee_factors: Vec<SubsidyTier>,
+    #[clap(long, env)]
+    cow_fee_factors: SubsidyTiers,
 
     /// Address of the cow token used for extra subsidy.
     #[clap(long, env)]
