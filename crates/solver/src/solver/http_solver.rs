@@ -373,19 +373,10 @@ impl Solver for HttpSolver {
         if orders.is_empty() {
             return Ok(Vec::new());
         };
-        let prices = external_prices.clone().into_http_solver_prices();
-        orders.extend(
-            liquidity
-                .iter()
-                .filter_map(|liquidity| match liquidity {
-                    Liquidity::LimitOrder(order) => Some(order.clone()),
-                    _ => None,
-                })
-                .filter(|order| {
-                    prices.get(&order.sell_token).is_some()
-                        && prices.get(&order.buy_token).is_some()
-                }),
-        );
+        orders.extend(liquidity.iter().filter_map(|liquidity| match liquidity {
+            Liquidity::LimitOrder(order) => Some(order.clone()),
+            _ => None,
+        }));
 
         let (model, context) = {
             let mut guard = self.instance_cache.lock().await;
