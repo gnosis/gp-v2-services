@@ -46,8 +46,8 @@ pub static GAS_PER_ORDER: u64 = 66_315;
 pub static GAS_PER_UNISWAP: u64 = 94_696;
 
 /// lower bound for execution of one trade on zeroex
-// TODO this is currently a placeholder and needs to be replaced with the real value
-pub static GAS_PER_ZEROEX_ORDER: u64 = 94_696;
+// estimated with https://dune.xyz/queries/492900/933779
+pub static GAS_PER_ZEROEX_ORDER: u64 = 134_563;
 
 /// lower bound for executing one trade on balancer
 ///
