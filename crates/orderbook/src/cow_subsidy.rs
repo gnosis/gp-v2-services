@@ -57,10 +57,21 @@ impl std::str::FromStr for SubsidyTier {
             anyhow::bail!("too many arguments for subsidy tier");
         }
 
-        Ok(SubsidyTier {
-            threshold: U256::from_f64_lossy(1e18 * threshold),
+        Ok(SubsidyTier::new(
+            U256::from_f64_lossy(1e18 * threshold),
             fee_factor,
-        })
+        ))
+    }
+}
+
+impl SubsidyTier {
+    pub fn new(threshold: U256, fee_factor: f64) -> Self {
+        assert!(fee_factor <= 1.0);
+        assert!(fee_factor >= 0.0);
+        Self {
+            threshold,
+            fee_factor,
+        }
     }
 }
 
@@ -138,10 +149,7 @@ mod tests {
         let token = ERC20::at(&web3, token);
         let subsidy = CowSubsidyImpl::new(
             token,
-            vec![SubsidyTier {
-                threshold: U256::from_f64_lossy(1e18),
-                fee_factor: 0.5,
-            }],
+            vec![SubsidyTier::new(U256::from_f64_lossy(1e18), 0.5)],
         );
         for i in 0..2 {
             let user = H160::from_low_u64_be(i);
@@ -152,11 +160,6 @@ mod tests {
 
     #[test]
     fn subsidy_factors() {
-        let tier = |threshold, fee_factor| SubsidyTier {
-            threshold,
-            fee_factor,
-        };
-
         let tiers = Vec::default();
         assert_eq!(
             lookup_subsidy_factor(U256::MAX, &tiers).to_bits(),
@@ -164,10 +167,10 @@ mod tests {
         );
 
         let tiers = vec![
-            tier(1.into(), 0.9),
-            tier(1.into(), 0.8),
-            tier(2.into(), 0.7),
-            tier(U256::MAX, 0.0),
+            SubsidyTier::new(1.into(), 0.9),
+            SubsidyTier::new(1.into(), 0.8),
+            SubsidyTier::new(2.into(), 0.7),
+            SubsidyTier::new(U256::MAX, 0.0),
         ];
         assert_eq!(
             lookup_subsidy_factor(0.into(), &tiers).to_bits(),
