@@ -241,6 +241,7 @@ fn order_models(
                     cost: gas_model.order_cost(),
                     is_liquidity_order: order.is_liquidity_order,
                     mandatory: false,
+                    has_atomic_execution: order.has_atomic_execution,
                 },
             ))
         })
