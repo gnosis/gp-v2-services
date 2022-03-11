@@ -104,14 +104,23 @@ impl CowSubsidyImpl {
 
     async fn subsidy_factor_uncached(&self, user: H160) -> Result<f64> {
         let balance = self.cow_token.balance_of(user).call().await?;
-        Ok(self
-            .subsidy_tiers
-            .iter()
-            .filter(|tier| tier.threshold <= balance)
-            .map(|tier| tier.fee_factor)
-            .last()
-            .unwrap_or(1.0))
+        Ok(lookup_subsidy_factor(balance, &self.subsidy_tiers))
     }
+}
+
+/// Looks up a subdidy factor in a list of `SubsidyTier`s sorted by their threshold.
+/// In case there are multiple factors associated to the same threshold the last one will be taken.
+/// If the given balance would not qualify for a `SubsidyTier` a fee factor of 1.0 will be returned
+/// which is equivalent to no subsidy.
+fn lookup_subsidy_factor(balance: U256, tiers: &[SubsidyTier]) -> f64 {
+    // TODO: assert that tiers are sorted when `is_sorted_by_key` gets stabilized:
+    // https://doc.rust-lang.org/std/primitive.slice.html#method.is_sorted_by_key
+    tiers
+        .iter()
+        .filter(|tier| tier.threshold <= balance)
+        .map(|tier| tier.fee_factor)
+        .last()
+        .unwrap_or(1.0)
 }
 
 #[cfg(test)]
@@ -139,5 +148,43 @@ mod tests {
             let result = subsidy.cow_subsidy_factor(user).await;
             println!("{:?} {:?}", user, result);
         }
+    }
+
+    #[test]
+    fn subsidy_factors() {
+        let tier = |threshold, fee_factor| SubsidyTier {
+            threshold,
+            fee_factor,
+        };
+
+        let tiers = Vec::default();
+        assert_eq!(
+            lookup_subsidy_factor(U256::MAX, &tiers).to_bits(),
+            1.0f64.to_bits()
+        );
+
+        let tiers = vec![
+            tier(1.into(), 0.9),
+            tier(1.into(), 0.8),
+            tier(2.into(), 0.7),
+            tier(U256::MAX, 0.0),
+        ];
+        assert_eq!(
+            lookup_subsidy_factor(0.into(), &tiers).to_bits(),
+            1.0f64.to_bits()
+        );
+        // the last factor of duplicated thresholds will be taken
+        assert_eq!(
+            lookup_subsidy_factor(1.into(), &tiers).to_bits(),
+            0.8f64.to_bits()
+        );
+        assert_eq!(
+            lookup_subsidy_factor(2.into(), &tiers).to_bits(),
+            0.7f64.to_bits()
+        );
+        assert_eq!(
+            lookup_subsidy_factor(U256::MAX, &tiers).to_bits(),
+            0.0f64.to_bits()
+        );
     }
 }
