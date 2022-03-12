@@ -53,8 +53,18 @@ fn handle_results(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ethcontract_error;
+    use crate::{
+        ethcontract_error,
+        recent_block_cache::Block,
+        sources::{
+            swapr,
+            uniswap_v2::pool_fetching::{PoolFetcher, PoolFetching as _},
+        },
+        transport::create_env_test_transport,
+        Web3,
+    };
     use ethcontract::H160;
+    use maplit::hashset;
 
     #[test]
     fn sets_fee() {
@@ -87,5 +97,38 @@ mod tests {
         )
         .unwrap()
         .is_none());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn fetch_swapr_pool() {
+        let transport = create_env_test_transport();
+        let web3 = Web3::new(transport);
+
+        let pair_provider = swapr::get_pair_provider(&web3).await.unwrap();
+        let pool_reader = SwaprPoolReader(DefaultPoolReader {
+            pair_provider,
+            web3: web3.clone(),
+        });
+        let fetcher = PoolFetcher { pool_reader, web3 };
+
+        let pool = fetcher
+            .fetch(
+                hashset! {
+                    TokenPair::new(
+                        addr!("6A023CCd1ff6F2045C3309768eAd9E68F978f6e1"),
+                        addr!("e91D153E0b41518A2Ce8Dd3D7944Fa863463a97d"),
+                    )
+                    .unwrap(),
+                },
+                Block::Recent,
+            )
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+
+        println!("WETH <> wxDAI pool: {:#?}", pool);
     }
 }
