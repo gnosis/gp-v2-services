@@ -381,6 +381,8 @@ impl Driver {
                 |order| match self.order_converter.normalize_limit_order(order) {
                     Ok(order) => Some(order),
                     Err(err) => {
+                        // This should never happen unless we are getting malformed
+                        // orders from the API - so raise an alert if this happens.
                         tracing::error!(?err, "error normalizing limit order");
                         None
                     }

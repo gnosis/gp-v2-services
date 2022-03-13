@@ -45,8 +45,6 @@ impl OrderConverter {
             id: order.metadata.uid.to_string(),
             sell_token: order.creation.sell_token,
             buy_token,
-            // TODO discount previously executed sell amount
-            // https://github.com/gnosis/gp-v2-services/issues/673
             sell_amount: remaining.sell_amount,
             buy_amount: remaining.buy_amount,
             kind: order.creation.kind,
