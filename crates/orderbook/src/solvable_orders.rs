@@ -1,10 +1,14 @@
 use crate::{
     account_balances::{BalanceFetching, Query},
+    conversions::bigint_to_u256,
     database::orders::OrderStoring,
     orderbook::filter_unsupported_tokens,
 };
-use anyhow::Result;
-use model::{auction::Auction, order::Order};
+use anyhow::{ensure, Context as _, Result};
+use model::{
+    auction::Auction,
+    order::{Order, OrderKind},
+};
 use primitive_types::{H160, U256};
 use shared::{
     bad_token::BadTokenDetecting, current_block::CurrentBlockStream, maintenance::Maintaining,
@@ -228,13 +232,19 @@ fn solvable_orders(mut orders: Vec<Order>, balances: &Balances) -> Vec<Order> {
             // balance we could also give them as much balance as possible instead of skipping. For
             // that we first need a way to communicate this to the solver. We could repurpose
             // availableBalance for this.
-            let needed_balance = match order
-                .creation
-                .sell_amount
-                .checked_add(order.creation.fee_amount)
-            {
-                Some(balance) => balance,
-                None => continue,
+            let needed_balance = match max_transfer_out_amount(&order) {
+                Ok(Some(balance)) => balance,
+                Ok(None) => continue,
+                Err(err) => {
+                    // This should never happen unless we read bogus order data from the database,
+                    // so raise the alarm!
+                    tracing::error!(
+                        ?err,
+                        ?order,
+                        "error computing order max transfer out amount"
+                    );
+                    continue;
+                }
             };
             if let Some(balance) = remaining_balance.checked_sub(needed_balance) {
                 remaining_balance = balance;
@@ -243,6 +253,50 @@ fn solvable_orders(mut orders: Vec<Order>, balances: &Balances) -> Vec<Order> {
         }
     }
     result
+}
+
+/// Computes the maximum amount that can be transferred out for a given order.
+///
+/// While this is trivial for fill or kill orders (`sell_amount + fee_amount`),
+/// partially fillable orders need to account for the already filled amount (so
+/// a half-filled order would be `(sell_amount + fee_amount) / 2`).
+///
+/// Returns `None` on overflow.
+fn max_transfer_out_amount(order: &Order) -> Result<Option<U256>> {
+    let max_amounts = if order.creation.partially_fillable {
+        let (max_executable_amount, executed_amount) = match order.creation.kind {
+            OrderKind::Buy => (
+                order.creation.buy_amount,
+                bigint_to_u256(&order.metadata.executed_buy_amount.clone().into())
+                    .context("buy order executed amount overflows a u256")?,
+            ),
+            OrderKind::Sell => (
+                order.creation.sell_amount,
+                order.metadata.executed_sell_amount_before_fees,
+            ),
+        };
+        ensure!(!max_executable_amount.is_zero(), "order with 0 amount");
+        let remaining_executable_amount = max_executable_amount
+            .checked_sub(executed_amount)
+            .context("order executed more than its maximum amount")?;
+        let scale = |amount: U256| -> Option<U256> {
+            amount
+                .checked_mul(remaining_executable_amount)?
+                .checked_div(max_executable_amount)
+        };
+
+        scale(order.creation.sell_amount).zip(scale(order.creation.fee_amount))
+    } else {
+        // Note that we skip the "fill-ratio" computation for fill-or-kill
+        // orders despite yielding the same results in most cases. This is
+        // because this computation only happens for partially fillable orders
+        // in the settlement contract, and therefore overflows that may happen
+        // would incorrectly return `None`.
+        Some((order.creation.sell_amount, order.creation.fee_amount))
+    };
+
+    Ok(max_amounts
+        .and_then(|(max_sell_amount, max_fee_amount)| max_sell_amount.checked_add(max_fee_amount)))
 }
 
 /// Keep updating the cache every N seconds or when an update notification happens.
@@ -361,6 +415,7 @@ mod tests {
     use chrono::{DateTime, NaiveDateTime, Utc};
     use maplit::{btreemap, hashmap, hashset};
     use model::order::{OrderBuilder, OrderCreation, OrderMetadata, SellTokenSource};
+    use num::BigUint;
     use primitive_types::H160;
     use shared::price_estimation::{native::MockNativePriceEstimating, PriceEstimationError};
 
@@ -624,5 +679,163 @@ mod tests {
                 token3 => U256::from(250_000_000_000_000_000_u128),
             }
         );
+    }
+
+    #[test]
+    fn computes_max_transfer_out_amount_for_order() {
+        // For fill-or-kill orders, we don't overflow even for very large buy
+        // orders (where `{sell,fee}_amount * buy_amount` would overflow).
+        assert_eq!(
+            max_transfer_out_amount(&Order {
+                creation: OrderCreation {
+                    sell_amount: 1000.into(),
+                    fee_amount: 337.into(),
+                    buy_amount: U256::MAX,
+                    kind: OrderKind::Buy,
+                    partially_fillable: false,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .unwrap(),
+            Some(U256::from(1337)),
+        );
+
+        // For fill-or-kill orders, overflow if the total sell and fee amount
+        // overflows a uint. This kind of order cannot be filled by the
+        // settlement contract anyway.
+        assert_eq!(
+            max_transfer_out_amount(&Order {
+                creation: OrderCreation {
+                    sell_amount: U256::MAX,
+                    fee_amount: 1.into(),
+                    partially_fillable: false,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .unwrap(),
+            None,
+        );
+
+        // For partially fillable orders that are untouched, returns the sum of
+        // the sell and fee amounts.
+        assert_eq!(
+            max_transfer_out_amount(&Order {
+                creation: OrderCreation {
+                    sell_amount: 25.into(),
+                    fee_amount: 17.into(),
+                    kind: OrderKind::Sell,
+                    partially_fillable: true,
+                    ..Default::default()
+                },
+                metadata: OrderMetadata {
+                    executed_sell_amount_before_fees: 0.into(),
+                    ..Default::default()
+                },
+            })
+            .unwrap(),
+            Some(U256::from(42)),
+        );
+
+        // Scales sell and fee amount by how much has been executed. Rounds down
+        // like the settlement contract.
+        assert_eq!(
+            max_transfer_out_amount(&Order {
+                creation: OrderCreation {
+                    sell_amount: 100.into(),
+                    fee_amount: 101.into(),
+                    kind: OrderKind::Sell,
+                    partially_fillable: true,
+                    ..Default::default()
+                },
+                metadata: OrderMetadata {
+                    executed_sell_amount_before_fees: 90.into(),
+                    ..Default::default()
+                },
+            })
+            .unwrap(),
+            Some(U256::from(20)),
+        );
+        assert_eq!(
+            max_transfer_out_amount(&Order {
+                creation: OrderCreation {
+                    sell_amount: 100.into(),
+                    buy_amount: 10.into(),
+                    fee_amount: 101.into(),
+                    kind: OrderKind::Buy,
+                    partially_fillable: true,
+                    ..Default::default()
+                },
+                metadata: OrderMetadata {
+                    executed_buy_amount: 9_u32.into(),
+                    ..Default::default()
+                },
+            })
+            .unwrap(),
+            Some(U256::from(20)),
+        );
+
+        // Handles overflow when computing fill ratio.
+        assert_eq!(
+            max_transfer_out_amount(&Order {
+                creation: OrderCreation {
+                    sell_amount: 1000.into(),
+                    fee_amount: 337.into(),
+                    buy_amount: U256::MAX,
+                    kind: OrderKind::Buy,
+                    partially_fillable: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .unwrap(),
+            None,
+        );
+    }
+
+    #[test]
+    fn max_transfer_out_amount_errors() {
+        // Partially filled order overflowing executed amount.
+        assert!(max_transfer_out_amount(&Order {
+            creation: OrderCreation {
+                buy_amount: U256::MAX,
+                kind: OrderKind::Sell,
+                partially_fillable: true,
+                ..Default::default()
+            },
+            metadata: OrderMetadata {
+                executed_buy_amount: BigUint::from(1_u8) << 256,
+                ..Default::default()
+            },
+        })
+        .is_err());
+
+        // Partially filled order that has executed more than its maximum.
+        assert!(max_transfer_out_amount(&Order {
+            creation: OrderCreation {
+                sell_amount: 1.into(),
+                kind: OrderKind::Sell,
+                partially_fillable: true,
+                ..Default::default()
+            },
+            metadata: OrderMetadata {
+                executed_sell_amount_before_fees: 2.into(),
+                ..Default::default()
+            },
+        })
+        .is_err());
+
+        // Partially fillable order with zero amount.
+        assert!(max_transfer_out_amount(&Order {
+            creation: OrderCreation {
+                sell_amount: 0.into(),
+                kind: OrderKind::Sell,
+                partially_fillable: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .is_err());
     }
 }
