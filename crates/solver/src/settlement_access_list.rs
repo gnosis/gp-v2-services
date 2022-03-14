@@ -241,7 +241,10 @@ fn resolve_call_request(tx: &TransactionBuilder<DynTransport>) -> Result<(H160, 
 }
 
 // this function should remove duplicates and elements that are not useful
-// currently only eliminating addresses and storages with value '1'
+// currently only eliminating addresses and storages with value '1', that should probably represent the address of the
+// precompiled contract for signature recovery: https://github.com/ethereum/go-ethereum/blob/70da74e73a182620a09bb0cfbff173e6d65d0518/core/vm/contracts.go#L84
+// for some reason it happens that access list estimators return this address, but when this address is used as part of the transaction, it does not lower
+// the overall gas usage of the transaction, it increases it (might be a bug in node clients that became a consensys).
 // should be updated continually as we learn more about the imperfections of 3rd party access_list calculators
 #[allow(dead_code)]
 fn filter_access_list(access_list: AccessList) -> AccessList {
