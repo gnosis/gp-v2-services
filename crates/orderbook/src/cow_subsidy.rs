@@ -45,7 +45,7 @@ impl std::str::FromStr for SubsidyTiers {
         for tier in serialized.split(',') {
             let (threshold, fee_factor) = tier
                 .split_once(':')
-                .context("not enough arguments for subsidy tier")?;
+                .with_context(|| format!("too few arguments for subsidy tier in \"{}\"", tier))?;
 
             let threshold: f64 = threshold
                 .parse()
