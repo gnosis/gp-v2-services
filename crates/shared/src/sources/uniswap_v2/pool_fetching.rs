@@ -31,6 +31,15 @@ pub trait PoolFetching: Send + Sync {
 
 /// Trait for abstracting the on-chain reading logic for pool state.
 pub trait PoolReading: Send + Sync {
+    /// Read the pool state for the specified token pair.
+    ///
+    /// The caller specifies a Web3 call back to queue RPC requests into as well
+    /// as a block number to fetch the data on.
+    ///
+    /// This method intentionally **does not** use `async_trait` because
+    /// implementations are expected to queue up Ethereum RPC calls into the
+    /// specified batch when the method is called and not when the resulting
+    /// future is first polled.
     fn read_state(
         &self,
         pair: TokenPair,
