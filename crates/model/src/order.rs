@@ -89,7 +89,7 @@ impl Order {
     /// Returns the remaining amounts for the order.
     ///
     /// For fill-or-kill orders, this trivially returns full buy, sell and fee
-    /// amounts for the order (since the order can only either not not executed
+    /// amounts for the order (since the order can only either be not executed
     /// at all or fully executed).
     ///
     /// For partially fillable orders, it considers the currently executed
