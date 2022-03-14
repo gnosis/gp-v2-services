@@ -11,7 +11,7 @@ use crate::{
     },
     price_estimation::{
         gas::{ERC20_TRANSFER, GAS_PER_ORDER, INITIALIZATION_COST, SETTLEMENT},
-        Estimate, PriceEstimating, PriceEstimationError, Query,
+        Estimate, PriceEstimateResult, PriceEstimating, PriceEstimationError, Query,
     },
     recent_block_cache::Block,
     sources::{
@@ -24,6 +24,7 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use ethcontract::{H160, U256};
+use futures::StreamExt;
 use gas_estimation::GasPriceEstimating;
 use model::{order::OrderKind, TokenPair};
 use num::{BigInt, BigRational};
@@ -145,7 +146,7 @@ impl QuasimodoPriceEstimator {
         for amm in settlement.amms.values() {
             cost += self.extract_cost(&amm.cost)? * amm.execution.len();
         }
-        let gas = (cost / gas_price)
+        let gas = (cost / gas_price).as_u64()
             + INITIALIZATION_COST // Call into contract
             + SETTLEMENT // overhead for entering the `settle()` function
             + ERC20_TRANSFER * 2; // transfer in and transfer out
@@ -269,25 +270,21 @@ impl QuasimodoPriceEstimator {
     }
 }
 
-#[async_trait::async_trait]
 impl PriceEstimating for QuasimodoPriceEstimator {
-    async fn estimates(
-        &self,
-        queries: &[Query],
-    ) -> Vec<anyhow::Result<Estimate, PriceEstimationError>> {
+    fn estimates<'a>(
+        &'a self,
+        queries: &'a [Query],
+    ) -> futures::stream::BoxStream<'_, (usize, PriceEstimateResult)> {
         debug_assert!(queries.iter().all(|query| {
             query.buy_token != model::order::BUY_ETH_ADDRESS
                 && query.sell_token != model::order::BUY_ETH_ADDRESS
                 && query.sell_token != query.buy_token
         }));
 
-        let mut results = Vec::with_capacity(queries.len());
-
-        for query in queries {
-            results.push(self.estimate(query).await);
-        }
-
-        results
+        futures::stream::iter(queries)
+            .then(|query| self.estimate(query))
+            .enumerate()
+            .boxed()
     }
 }
 
@@ -367,10 +364,10 @@ mod tests {
         let pools = Arc::new(
             PoolCache::new(
                 CacheConfig::default(),
-                Box::new(PoolFetcher {
-                    pair_provider: uniswap_v2::get_pair_provider(&web3).await.unwrap(),
-                    web3: web3.clone(),
-                }),
+                Box::new(PoolFetcher::uniswap(
+                    uniswap_v2::get_pair_provider(&web3).await.unwrap(),
+                    web3.clone(),
+                )),
                 current_block_stream(web3.clone(), Duration::from_secs(1))
                     .await
                     .unwrap(),

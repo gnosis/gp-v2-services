@@ -1,10 +1,11 @@
-use super::gas;
 use crate::{
-    price_estimation::{Estimate, PriceEstimating, PriceEstimationError, Query},
+    price_estimation::{
+        gas, Estimate, PriceEstimateResult, PriceEstimating, PriceEstimationError, Query,
+    },
     zeroex_api::{SwapQuery, ZeroExApi},
 };
+use futures::StreamExt;
 use model::order::OrderKind;
-use primitive_types::U256;
 use std::sync::Arc;
 
 pub struct ZeroExPriceEstimator {
@@ -35,29 +36,26 @@ impl ZeroExPriceEstimator {
                 OrderKind::Buy => swap.price.sell_amount,
                 OrderKind::Sell => swap.price.buy_amount,
             },
-            gas: U256::from(gas::SETTLEMENT_OVERHEAD) + swap.price.estimated_gas,
+            gas: gas::SETTLEMENT_OVERHEAD + swap.price.estimated_gas,
         })
     }
 }
 
-#[async_trait::async_trait]
 impl PriceEstimating for ZeroExPriceEstimator {
-    async fn estimates(
-        &self,
-        queries: &[Query],
-    ) -> Vec<anyhow::Result<Estimate, PriceEstimationError>> {
+    fn estimates<'a>(
+        &'a self,
+        queries: &'a [Query],
+    ) -> futures::stream::BoxStream<'_, (usize, PriceEstimateResult)> {
         debug_assert!(queries.iter().all(|query| {
             query.buy_token != model::order::BUY_ETH_ADDRESS
                 && query.sell_token != model::order::BUY_ETH_ADDRESS
                 && query.sell_token != query.buy_token
         }));
 
-        let mut results = Vec::with_capacity(queries.len());
-        for query in queries {
-            results.push(self.estimate(query).await);
-        }
-
-        results
+        futures::stream::iter(queries)
+            .then(|query| self.estimate(query))
+            .enumerate()
+            .boxed()
     }
 }
 
@@ -86,7 +84,7 @@ mod tests {
                     buy_amount: 1110165823572443613u64.into(),
                     allowance_target: addr!("def1c0ded9bec7f1a1670819833240f027b25eff"),
                     price: 11.101_658_235_724_436,
-                    estimated_gas: 111000.into(),
+                    estimated_gas: 111000,
                 },
                 ..Default::default()
             })
@@ -110,7 +108,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(est.out_amount, 1110165823572443613u64.into());
-        assert!(est.gas > 111000.into());
+        assert!(est.gas > 111000);
     }
 
     #[tokio::test]
@@ -131,7 +129,7 @@ mod tests {
                     buy_amount: 100000000000000000u64.into(),
                     allowance_target: addr!("def1c0ded9bec7f1a1670819833240f027b25eff"),
                     price: 0.089_861_863_531_374_87,
-                    estimated_gas: 111000.into(),
+                    estimated_gas: 111000,
                 },
                 ..Default::default()
             })
@@ -155,7 +153,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(est.out_amount, 8986186353137488u64.into());
-        assert!(est.gas > 111000.into());
+        assert!(est.gas > 111000);
     }
 
     #[tokio::test]

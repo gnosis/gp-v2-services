@@ -16,7 +16,7 @@ use model::{
     u256_decimal,
 };
 use serde::{Deserialize, Serialize};
-use shared::price_estimation::{self, PriceEstimating, PriceEstimationError};
+use shared::price_estimation::{self, single_estimate, PriceEstimating, PriceEstimationError};
 use std::{convert::Infallible, sync::Arc};
 use warp::{hyper::StatusCode, Filter, Rejection};
 
@@ -281,7 +281,7 @@ impl OrderQuoter {
                         quote_request.app_data,
                         quote_request.from,
                     ),
-                    price_estimator.estimate(&query)
+                    single_estimate(price_estimator.as_ref(), &query)
                 )
                 .map_err(FeeError::PriceEstimate)?;
                 let sell_amount_after_fee = sell_amount_before_fee
@@ -336,7 +336,7 @@ impl OrderQuoter {
                         quote_request.app_data,
                         quote_request.from,
                     ),
-                    price_estimator.estimate(&price_estimation_query)
+                    single_estimate(price_estimator.as_ref(), &price_estimation_query)
                 )
                 .map_err(FeeError::PriceEstimate)?;
                 FeeParameters {
@@ -373,7 +373,7 @@ impl OrderQuoter {
                         quote_request.app_data,
                         quote_request.from,
                     ),
-                    price_estimator.estimate(&price_estimation_query)
+                    single_estimate(price_estimator.as_ref(), &price_estimation_query)
                 )
                 .map_err(FeeError::PriceEstimate)?;
                 let sell_amount_after_fee = estimate.out_amount;
@@ -622,7 +622,7 @@ mod tests {
         let fee_calculator = Arc::new(fee_calculator);
         let price_estimator = FakePriceEstimator(price_estimation::Estimate {
             out_amount: 14.into(),
-            gas: 1000.into(),
+            gas: 1000,
         });
         let sell_query = OrderQuoteRequest::new(
             H160::from_low_u64_ne(0),
@@ -666,7 +666,7 @@ mod tests {
         let fee_calculator = Arc::new(fee_calculator);
         let price_estimator = FakePriceEstimator(price_estimation::Estimate {
             out_amount: 14.into(),
-            gas: 1000.into(),
+            gas: 1000,
         });
         let sell_query = OrderQuoteRequest::new(
             H160::from_low_u64_ne(0),
@@ -709,7 +709,7 @@ mod tests {
         let fee_calculator = Arc::new(fee_calculator);
         let price_estimator = FakePriceEstimator(price_estimation::Estimate {
             out_amount: 20.into(),
-            gas: 1000.into(),
+            gas: 1000,
         });
         let buy_query = OrderQuoteRequest::new(
             H160::from_low_u64_ne(0),
@@ -767,7 +767,7 @@ mod tests {
             .returning(move |_, _, _| Ok((3.into(), Utc::now())));
         let price_estimator = FakePriceEstimator(price_estimation::Estimate {
             out_amount: 14.into(),
-            gas: 1000.into(),
+            gas: 1000,
         });
         let mut order_validator = MockOrderValidating::new();
         order_validator
