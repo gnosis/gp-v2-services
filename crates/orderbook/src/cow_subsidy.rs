@@ -1,6 +1,6 @@
 use std::{sync::Mutex, time::Duration};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use cached::{Cached, TimedSizedCache};
 use contracts::ERC20;
 use primitive_types::{H160, U256};
@@ -45,19 +45,21 @@ impl std::str::FromStr for SubsidyTiers {
         for tier in serialized.split(',') {
             let (threshold, fee_factor) = tier
                 .split_once(':')
-                .ok_or(anyhow::anyhow!("not enough arguments for subsidy tier"))?;
+                .context("not enough arguments for subsidy tier")?;
 
             let threshold: f64 = threshold
                 .parse()
-                .map_err(|_| anyhow::anyhow!("can not parse threshold \"{}\" as f64", threshold))?;
+                .with_context(|| format!("can not parse threshold \"{}\" as f64", threshold))?;
             let threshold = U256::from_f64_lossy(threshold * 1e18);
 
-            let fee_factor: f64 = fee_factor.parse().map_err(|_| {
-                anyhow::anyhow!("can not parse fee factor \"{}\" as f64", fee_factor)
-            })?;
-            if !(0.0..=1.0).contains(&fee_factor) {
-                anyhow::bail!("fee factor must be in the range of [0.0, 1.0]");
-            }
+            let fee_factor: f64 = fee_factor
+                .parse()
+                .with_context(|| format!("can not parse fee factor \"{}\" as f64", fee_factor))?;
+
+            anyhow::ensure!(
+                (0.0..=1.0).contains(&fee_factor),
+                "fee factor must be in the range of [0.0, 1.0]"
+            );
 
             if let Some(_existing) = tiers.insert(threshold, fee_factor) {
                 anyhow::bail!("defined same subsidy threshold multiple times");
