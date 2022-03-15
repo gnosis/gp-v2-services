@@ -118,7 +118,7 @@ impl OrderbookServices {
                 maximum_recent_block_age: 4,
                 ..Default::default()
             },
-            Box::new(PoolFetcher::uniswap(pair_provider, web3.clone())),
+            Arc::new(PoolFetcher::uniswap(pair_provider, web3.clone())),
             current_block_stream.clone(),
             Arc::new(NoopPoolCacheMetrics),
         )
@@ -154,8 +154,7 @@ impl OrderbookServices {
             native_price_estimator.clone(),
             Arc::new(CowSubsidyImpl::new(
                 ERC20::at(web3, contracts.weth.address()),
-                0.into(),
-                1.0,
+                Default::default(),
             )),
         ));
         let balance_fetcher = Arc::new(Web3BalanceFetcher::new(
