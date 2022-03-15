@@ -3,7 +3,7 @@ use crate::{
     database::orders::OrderStoring,
     orderbook::filter_unsupported_tokens,
 };
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use model::{auction::Auction, order::Order};
 use primitive_types::{H160, U256};
 use shared::{
@@ -229,11 +229,12 @@ fn solvable_orders(mut orders: Vec<Order>, balances: &Balances) -> Vec<Order> {
             // that we first need a way to communicate this to the solver. We could repurpose
             // availableBalance for this.
             let needed_balance = match max_transfer_out_amount(&order) {
-                Ok(Some(balance)) => balance,
-                Ok(None) => continue,
+                Ok(balance) => balance,
                 Err(err) => {
-                    // This should never happen unless we read bogus order data from the database,
-                    // so raise the alarm!
+                    // This should only happen if we read bogus order data from
+                    // the database (either we allowed a bogus order to be
+                    // created or we updated a good order incorrectly), so raise
+                    // the alarm!
                     tracing::error!(
                         ?err,
                         ?order,
@@ -257,11 +258,13 @@ fn solvable_orders(mut orders: Vec<Order>, balances: &Balances) -> Vec<Order> {
 /// partially fillable orders need to account for the already filled amount (so
 /// a half-filled order would be `(sell_amount + fee_amount) / 2`).
 ///
-/// Returns `None` on overflow.
-fn max_transfer_out_amount(order: &Order) -> Result<Option<U256>> {
-    Ok(order
-        .remaining_amounts()?
-        .and_then(|amounts| amounts.sell_amount.checked_add(amounts.fee_amount)))
+/// Returns `Err` on overflow.
+fn max_transfer_out_amount(order: &Order) -> Result<U256> {
+    let amounts = order.remaining_amounts()?;
+    amounts
+        .sell_amount
+        .checked_add(amounts.fee_amount)
+        .context("overflow computing maximum transfer out amount")
 }
 
 /// Keep updating the cache every N seconds or when an update notification happens.
@@ -662,7 +665,7 @@ mod tests {
                 ..Default::default()
             })
             .unwrap(),
-            Some(U256::from(1337)),
+            U256::from(1337),
         );
 
         // Partially filled order scales amount.
@@ -682,7 +685,7 @@ mod tests {
                 },
             })
             .unwrap(),
-            Some(U256::from(20)),
+            U256::from(20),
         );
     }
 
@@ -691,35 +694,29 @@ mod tests {
         // For fill-or-kill orders, overflow if the total sell and fee amount
         // overflows a uint. This kind of order cannot be filled by the
         // settlement contract anyway.
-        assert_eq!(
-            max_transfer_out_amount(&Order {
-                creation: OrderCreation {
-                    sell_amount: U256::MAX,
-                    fee_amount: 1.into(),
-                    partially_fillable: false,
-                    ..Default::default()
-                },
+        assert!(max_transfer_out_amount(&Order {
+            creation: OrderCreation {
+                sell_amount: U256::MAX,
+                fee_amount: 1.into(),
+                partially_fillable: false,
                 ..Default::default()
-            })
-            .unwrap(),
-            None,
-        );
+            },
+            ..Default::default()
+        })
+        .is_err());
 
         // Handles overflow when computing fill ratio.
-        assert_eq!(
-            max_transfer_out_amount(&Order {
-                creation: OrderCreation {
-                    sell_amount: 1000.into(),
-                    fee_amount: 337.into(),
-                    buy_amount: U256::MAX,
-                    kind: OrderKind::Buy,
-                    partially_fillable: true,
-                    ..Default::default()
-                },
+        assert!(max_transfer_out_amount(&Order {
+            creation: OrderCreation {
+                sell_amount: 1000.into(),
+                fee_amount: 337.into(),
+                buy_amount: U256::MAX,
+                kind: OrderKind::Buy,
+                partially_fillable: true,
                 ..Default::default()
-            })
-            .unwrap(),
-            None,
-        );
+            },
+            ..Default::default()
+        })
+        .is_err());
     }
 }
