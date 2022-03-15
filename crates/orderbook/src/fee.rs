@@ -109,6 +109,12 @@ impl Default for FeeParameters {
         Self {
             gas_amount: 0.,
             gas_price: 0.,
+            // We can't use `derive(Default)` because then this field would have
+            // a value of `0.` and it is used in division. The actual value we
+            // use here doesn't really matter as long as its non-zero (since the
+            // resulting amount in native token or sell token will be 0
+            // regardless), but the multiplicative identity seemed like a
+            // natural default value to use.
             sell_token_price: 1.,
         }
     }
