@@ -681,7 +681,7 @@ mod tests {
 
     #[tokio::test]
     async fn pre_validate_ok() {
-        let liquidity_order_owner = H160::from_low_u64_be(1);
+        let liquidity_order_owner = H160::from_low_u64_be(0x42);
         let min_order_validity_period = Duration::from_secs(1);
         let validator = OrderValidator::new(
             Box::new(MockCodeFetching::new()),
