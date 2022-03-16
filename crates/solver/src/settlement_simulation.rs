@@ -18,7 +18,7 @@ use futures::FutureExt;
 use gas_estimation::EstimatedGasPrice;
 use primitive_types::U256;
 use shared::Web3;
-use web3::types::BlockId;
+use web3::types::{BlockId, CallRequest};
 
 const SIMULATE_BATCH_SIZE: usize = 10;
 
@@ -77,7 +77,23 @@ pub async fn simulate_and_estimate_gas_at_current_block(
                     Ok(access_list) => tx.access_list(access_list),
                     Err(_) => tx,
                 };
-                tx.estimate_gas()
+                let resolved_gas_price = tx
+                    .gas_price
+                    .map(|gas_price| gas_price.resolve_for_transaction())
+                    .unwrap_or_default();
+                let call_request = CallRequest {
+                    from: tx.from.map(|account| account.address()),
+                    to: tx.to,
+                    gas: None,
+                    gas_price: resolved_gas_price.gas_price,
+                    value: tx.value,
+                    data: tx.data,
+                    transaction_type: resolved_gas_price.transaction_type,
+                    access_list: tx.access_list,
+                    max_fee_per_gas: resolved_gas_price.max_fee_per_gas,
+                    max_priority_fee_per_gas: resolved_gas_price.max_priority_fee_per_gas,
+                };
+                web3.eth().estimate_gas(call_request, None)
             })
             .collect::<Vec<_>>();
         web3.transport().submit_batch().await?;
