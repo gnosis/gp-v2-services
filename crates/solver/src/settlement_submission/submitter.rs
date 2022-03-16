@@ -477,7 +477,7 @@ impl<'a> Submitter<'a> {
                         )
                     }
                     SubmitApiError::Other(err) => {
-                        tracing::error!("{} submission failed: {}", submitter_name, err)
+                        tracing::error!("{} submission failed: {:?}", submitter_name, err)
                     }
                 },
             }

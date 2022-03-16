@@ -10,7 +10,7 @@ use model::{
 use orderbook::{
     account_balances::Web3BalanceFetcher,
     api::{order_validation::OrderValidator, post_quote::OrderQuoter},
-    cow_subsidy::{CowSubsidy, CowSubsidyImpl, FixedCowSubsidy},
+    cow_subsidy::{CowSubsidy, CowSubsidyImpl, FixedCowSubsidy, SubsidyTiers},
     database::{self, orders::OrderFilter, Postgres},
     event_updater::EventUpdater,
     fee::{FeeSubsidyConfiguration, MinFeeCalculator},
@@ -58,10 +58,7 @@ use shared::{
     sources::{
         self,
         balancer_v2::{pool_fetching::BalancerContracts, BalancerPoolFetcher},
-        uniswap_v2::{
-            pool_cache::PoolCache,
-            pool_fetching::{PoolFetcher, PoolFetching},
-        },
+        uniswap_v2::pool_cache::PoolCache,
         BaselineSource, PoolAggregator,
     },
     token_info::{CachedTokenInfoFetcher, TokenInfoFetcher},
@@ -181,17 +178,17 @@ struct Arguments {
     )]
     partner_additional_fee_factors: HashMap<AppId, f64>,
 
-    /// Fee factor as extra subsidy for cow token owners.
-    #[clap(long, env, default_value = "1", parse(try_from_str = shared::arguments::parse_unbounded_factor))]
-    cow_fee_factor: f64,
+    /// Used to configure how much of the regular fee a user should pay based on their COW balance.
+    ///
+    /// The expected format is "10.2:0.75,150:0.5" for 2 subsidy tiers.
+    /// A balance of [10.2,150) COW will cause you to pay 75% of the regular fee and a balance of
+    /// [150, inf) COW will cause you to pay 50% of the regular fee.
+    #[clap(long, env)]
+    cow_fee_factors: Option<SubsidyTiers>,
 
     /// Address of the cow token used for extra subsidy.
     #[clap(long, env)]
     cow_token_address: Option<H160>,
-
-    /// Minimum cow token threshold to get the extra subsidy.
-    #[clap(long, env, default_value = "0")]
-    cow_threshold: f64,
 
     /// The API endpoint to call the mip v2 solver for price estimation
     #[clap(long, env)]
@@ -368,12 +365,13 @@ async fn main() {
         sources::defaults_for_chain(chain_id).expect("failed to get default baseline sources")
     });
     tracing::info!(?baseline_sources, "using baseline sources");
-    let pair_providers = sources::pair_providers(&web3, &baseline_sources)
-        .await
-        .expect("failed to load baseline source pair providers")
-        .values()
-        .cloned()
-        .collect::<Vec<_>>();
+    let (pair_providers, pool_fetchers): (Vec<_>, Vec<_>) =
+        sources::uniswap_like_liquidity_sources(&web3, &baseline_sources)
+            .await
+            .expect("failed to load baseline source pair providers")
+            .values()
+            .cloned()
+            .unzip();
 
     let base_tokens = Arc::new(BaseTokens::new(
         native_token.address(),
@@ -385,10 +383,10 @@ async fn main() {
     let unsupported_tokens = args.unsupported_tokens.clone();
 
     let mut finders: Vec<Arc<dyn TokenOwnerFinding>> = pair_providers
-        .iter()
+        .into_iter()
         .map(|provider| -> Arc<dyn TokenOwnerFinding> {
             Arc::new(UniswapLikePairProviderFinder {
-                inner: provider.clone(),
+                inner: provider,
                 base_tokens: base_tokens.tokens().iter().copied().collect(),
             })
         })
@@ -430,14 +428,7 @@ async fn main() {
             .await
             .unwrap();
 
-    let pool_aggregator = PoolAggregator {
-        pool_fetchers: pair_providers
-            .into_iter()
-            .map(|pair_provider| {
-                Arc::new(PoolFetcher::uniswap(pair_provider, web3.clone())) as Arc<dyn PoolFetching>
-            })
-            .collect(),
-    };
+    let pool_aggregator = PoolAggregator { pool_fetchers };
 
     let cache_config = CacheConfig {
         number_of_blocks_to_cache: args.shared.pool_cache_blocks,
@@ -449,7 +440,7 @@ async fn main() {
     let pool_fetcher = Arc::new(
         PoolCache::new(
             cache_config,
-            Box::new(pool_aggregator),
+            Arc::new(pool_aggregator),
             current_block_stream.clone(),
             metrics.clone(),
         )
@@ -609,8 +600,7 @@ async fn main() {
     let cow_subsidy = match args.cow_token_address {
         Some(address) => Arc::new(CowSubsidyImpl::new(
             ERC20::at(&web3, address),
-            U256::from_f64_lossy(args.cow_threshold),
-            args.cow_fee_factor,
+            args.cow_fee_factors.unwrap_or_default(),
         )) as Arc<dyn CowSubsidy>,
         None => Arc::new(FixedCowSubsidy(1.0)) as Arc<dyn CowSubsidy>,
     };
@@ -629,6 +619,7 @@ async fn main() {
             },
             native_price_estimator.clone(),
             cow_subsidy.clone(),
+            args.shared.liquidity_order_owners.iter().copied().collect(),
         ))
     };
     let fee_calculator = create_fee_calculator(price_estimator.clone());
@@ -651,7 +642,8 @@ async fn main() {
     let order_validator = Arc::new(OrderValidator::new(
         Box::new(web3.clone()),
         native_token.clone(),
-        args.banned_users,
+        args.banned_users.into_iter().collect(),
+        args.shared.liquidity_order_owners.into_iter().collect(),
         args.min_order_validity_period,
         fee_calculator.clone(),
         bad_token_detector.clone(),
