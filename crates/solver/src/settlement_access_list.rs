@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use anyhow::{anyhow, ensure, Context, Result};
 use ethcontract::{dyns::DynTransport, transaction::TransactionBuilder, Address, H160, H256};
 use reqwest::{
@@ -54,6 +56,9 @@ impl AccessListEstimating for NodeApi {
         &self,
         txs: &[TransactionBuilder<DynTransport>],
     ) -> Result<Vec<Result<AccessList>>> {
+        if txs.is_empty() {
+            return Ok(Default::default());
+        }
         let batch_request = txs
             .iter()
             .map(|tx| -> Result<_> {
@@ -91,7 +96,7 @@ impl AccessListEstimating for NodeApi {
                     Ok(response) => serde_json::from_value::<NodeAccessList>(response)
                         // error parsing the response
                         .context("unexpected response format")
-                        .map(|response| response.access_list),
+                        .map(|response| filter_access_list(response.access_list)),
                     // error during transport
                     Err(err) => Err(anyhow!("web3 error: {}", err)),
                 },
@@ -219,11 +224,13 @@ impl AccessListEstimating for TenderlyApi {
                 !response.generated_access_list.is_empty(),
                 "empty access list"
             );
-            Ok(response
-                .generated_access_list
-                .into_iter()
-                .map(Into::into)
-                .collect())
+            Ok(filter_access_list(
+                response
+                    .generated_access_list
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
+            ))
         }))
         .await)
     }
@@ -252,6 +259,11 @@ fn filter_access_list(access_list: AccessList) -> AccessList {
         .into_iter()
         .filter(|item| {
             item.address != H160::from_low_u64_be(1)
+                // `to` address is always warm, should not be put into access list
+                // this should be fixed with the latest Erigon release version
+                // https://github.com/ledgerwatch/erigon/pull/3453
+                && item.address
+                    != H160::from_str("0x9008d19f58aabd9ed0d60971565aa8510560ab41").unwrap()
                 && item
                     .storage_keys
                     .iter()
@@ -328,6 +340,8 @@ mod tests {
         let tx = example_tx();
         let access_lists = tenderly_api.estimate_access_lists(&[tx]).await.unwrap();
         dbg!(access_lists);
+        let access_lists = tenderly_api.estimate_access_lists(&[]).await.unwrap();
+        dbg!(access_lists);
     }
 
     #[tokio::test]
@@ -340,6 +354,8 @@ mod tests {
         let tx = example_tx();
 
         let access_lists = node_api.estimate_access_lists(&[tx]).await.unwrap();
+        dbg!(access_lists);
+        let access_lists = node_api.estimate_access_lists(&[]).await.unwrap();
         dbg!(access_lists);
     }
 
