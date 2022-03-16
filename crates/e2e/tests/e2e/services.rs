@@ -32,7 +32,9 @@ use shared::{
     Web3,
 };
 use solver::{liquidity::order_converter::OrderConverter, orderbook::OrderBookApi};
-use std::{future::pending, num::NonZeroU64, str::FromStr, sync::Arc, time::Duration};
+use std::{
+    collections::HashSet, future::pending, num::NonZeroU64, str::FromStr, sync::Arc, time::Duration,
+};
 
 pub const API_HOST: &str = "http://127.0.0.1:8080";
 
@@ -116,10 +118,7 @@ impl OrderbookServices {
                 maximum_recent_block_age: 4,
                 ..Default::default()
             },
-            Box::new(PoolFetcher {
-                pair_provider,
-                web3: web3.clone(),
-            }),
+            Arc::new(PoolFetcher::uniswap(pair_provider, web3.clone())),
             current_block_stream.clone(),
             Arc::new(NoopPoolCacheMetrics),
         )
@@ -155,9 +154,9 @@ impl OrderbookServices {
             native_price_estimator.clone(),
             Arc::new(CowSubsidyImpl::new(
                 ERC20::at(web3, contracts.weth.address()),
-                0.into(),
-                1.0,
+                Default::default(),
             )),
+            Default::default(),
         ));
         let balance_fetcher = Arc::new(Web3BalanceFetcher::new(
             web3.clone(),
@@ -177,7 +176,8 @@ impl OrderbookServices {
         let order_validator = Arc::new(OrderValidator::new(
             Box::new(web3.clone()),
             contracts.weth.clone(),
-            vec![],
+            HashSet::default(),
+            HashSet::default(),
             Duration::from_secs(120),
             fee_calculator.clone(),
             bad_token_detector.clone(),
