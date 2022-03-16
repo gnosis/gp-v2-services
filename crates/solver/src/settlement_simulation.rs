@@ -18,7 +18,7 @@ use futures::FutureExt;
 use gas_estimation::EstimatedGasPrice;
 use primitive_types::U256;
 use shared::Web3;
-use web3::types::{BlockId, CallRequest};
+use web3::types::BlockId;
 
 const SIMULATE_BATCH_SIZE: usize = 10;
 
@@ -54,22 +54,29 @@ pub async fn simulate_and_estimate_gas_at_current_block(
         return Ok(Vec::new());
     }
 
-    let web3 = web3::Web3::new(web3::transports::Batch::new(web3.transport().clone()));
+    let web3 = web3::Web3::new(shared::transport::buffered::Buffered::new(
+        web3.transport().clone(),
+    ));
+    let contract_with_buffered_transport = GPv2Settlement::at(&web3, contract.address());
     let mut results = Vec::new();
     for chunk in settlements.chunks(SIMULATE_BATCH_SIZE) {
         let txs = chunk
             .iter()
             .map(|(account, settlement)| {
-                settle_method(gas_price, contract, settlement.clone(), account.clone()).tx
+                settle_method(
+                    gas_price,
+                    &contract_with_buffered_transport,
+                    settlement.clone(),
+                    account.clone(),
+                )
+                .tx
             })
             .collect::<Vec<_>>();
-
         let mut access_lists = access_list_estimator
             .estimate_access_lists(txs.as_slice())
             .await
             .unwrap_or_default()
             .into_iter();
-
         let calls = txs
             .into_iter()
             .map(|tx| {
@@ -77,29 +84,11 @@ pub async fn simulate_and_estimate_gas_at_current_block(
                     Ok(access_list) => tx.access_list(access_list),
                     Err(_) => tx,
                 };
-                let resolved_gas_price = tx
-                    .gas_price
-                    .map(|gas_price| gas_price.resolve_for_transaction())
-                    .unwrap_or_default();
-                let call_request = CallRequest {
-                    from: tx.from.map(|account| account.address()),
-                    to: tx.to,
-                    gas: None,
-                    gas_price: resolved_gas_price.gas_price,
-                    value: tx.value,
-                    data: tx.data,
-                    transaction_type: resolved_gas_price.transaction_type,
-                    access_list: tx.access_list,
-                    max_fee_per_gas: resolved_gas_price.max_fee_per_gas,
-                    max_priority_fee_per_gas: resolved_gas_price.max_priority_fee_per_gas,
-                };
-                web3.eth().estimate_gas(call_request, None)
+                tx.estimate_gas()
             })
             .collect::<Vec<_>>();
-        web3.transport().submit_batch().await?;
-        for call in calls {
-            results.push(call.await.map_err(ExecutionError::from));
-        }
+        let chuck_results = futures::future::join_all(calls).await;
+        results.extend(chuck_results);
     }
     Ok(results)
 }
