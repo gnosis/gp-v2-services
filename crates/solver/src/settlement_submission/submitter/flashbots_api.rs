@@ -41,6 +41,7 @@ impl TransactionSubmitting for FlashbotsApi {
             .await
     }
 
+    // https://docs.flashbots.net/flashbots-protect/rpc/cancellations
     async fn cancel_transaction(
         &self,
         id: &CancelHandle,
