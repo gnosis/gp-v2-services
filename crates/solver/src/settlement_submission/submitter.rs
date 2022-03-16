@@ -555,6 +555,24 @@ async fn find_mined_transaction(web3: &Web3, hashes: &[H256]) -> Option<Transact
     None
 }
 
+#[derive(prometheus_metric_storage::MetricStorage, Clone, Debug)]
+#[metric(subsystem = "transaction_submissions")]
+struct Metrics {
+    /// Tracks how many transactions get successfully submitted with the different submission
+    /// strategies.
+    #[metric(labels("submitter", "successful"))]
+    submissions: prometheus::CounterVec,
+}
+
+pub(crate) fn track_submission_success(submitter: &str, success: bool) {
+    let label = if success { "successes" } else { "failures" };
+    Metrics::instance(shared::metrics::get_metric_storage_registry())
+        .expect("unexpected error getting metrics instance")
+        .submissions
+        .with_label_values(&[submitter, label])
+        .inc();
+}
+
 #[cfg(test)]
 mod tests {
 

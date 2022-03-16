@@ -87,7 +87,8 @@ impl TransactionSubmitting for EdenApi {
         tx: TransactionBuilder<Web3Transport>,
     ) -> anyhow::Result<TransactionHandle> {
         // try to submit with slot method
-        self.submit_slot_transaction(tx.clone())
+        let result = self
+            .submit_slot_transaction(tx.clone())
             .or_else(|err| async move {
                 // fallback to standard eth_sendRawTransaction
                 // want to keep this call as a safety measure until we are confident in `submit_slot_transaction`
@@ -97,7 +98,18 @@ impl TransactionSubmitting for EdenApi {
                     .submit_raw_transaction(tx)
                     .await
             })
-            .await
+            .await;
+
+        let successful = match &result {
+            Ok(_) => true,
+            // Sometimes `submit_slot_transaction()` times out and the fallback submission
+            // strategy reveals that the network is already aware of the transaction by returning
+            // the error message "already known".
+            Err(err) => err.to_string().contains("already known"),
+        };
+        super::track_submission_success("eden", successful);
+
+        result
     }
 
     async fn cancel_transaction(&self, id: &CancelHandle) -> anyhow::Result<TransactionHandle> {

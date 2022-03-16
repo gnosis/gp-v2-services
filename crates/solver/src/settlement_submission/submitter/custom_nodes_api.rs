@@ -52,9 +52,11 @@ impl TransactionSubmitting for CustomNodesApi {
             .collect::<Vec<_>>();
 
         loop {
-            let (result, _index, rest) = futures::future::select_all(futures).await;
+            let (result, index, rest) = futures::future::select_all(futures).await;
+            let lable = "custom_nodes_".to_string() + &index.to_string();
             match result {
                 Ok(tx_hash) => {
+                    super::track_submission_success(lable.as_str(), true);
                     tracing::info!("created transaction with hash: {:?}", tx_hash);
                     return Ok(TransactionHandle {
                         tx_hash,
@@ -63,10 +65,12 @@ impl TransactionSubmitting for CustomNodesApi {
                 }
                 Err(err) if rest.is_empty() => {
                     tracing::debug!("error {}", err);
+                    super::track_submission_success(lable.as_str(), false);
                     return Err(anyhow::Error::from(err).context("all nodes tx failed"));
                 }
                 Err(err) => {
                     tracing::warn!(?err, "single node tx failed");
+                    super::track_submission_success(lable.as_str(), false);
                     futures = rest;
                 }
             }

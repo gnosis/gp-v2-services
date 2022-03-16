@@ -35,10 +35,15 @@ impl TransactionSubmitting for FlashbotsApi {
         &self,
         tx: TransactionBuilder<Web3Transport>,
     ) -> anyhow::Result<TransactionHandle> {
-        self.rpc
+        let result = self
+            .rpc
             .api::<PrivateNetwork>()
             .submit_raw_transaction(tx)
-            .await
+            .await;
+
+        super::track_submission_success("flashbots", result.is_ok());
+
+        result
     }
 
     // https://docs.flashbots.net/flashbots-protect/rpc/cancellations
