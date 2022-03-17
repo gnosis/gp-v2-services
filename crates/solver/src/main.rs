@@ -30,7 +30,7 @@ use solver::{
     liquidity_collector::LiquidityCollector,
     metrics::Metrics,
     orderbook::OrderBookApi,
-    settlement_access_list::{NodeApi, PriorityAccessListEstimating},
+    settlement_access_list::AccessListEstimatorType,
     settlement_submission::{
         submitter::{
             custom_nodes_api::CustomNodesApi, eden_api::EdenApi, flashbots_api::FlashbotsApi,
@@ -184,6 +184,32 @@ struct Arguments {
         use_value_delimiter = true
     )]
     transaction_strategy: Vec<TransactionStrategyArg>,
+
+    /// Which access list estimators to use. Multiple estimators are used in sequence if a previous one
+    /// fails. Individual estimators might support different networks.
+    /// `Tenderly`: supports every network.
+    /// `Web3`: supports every network.
+    #[clap(
+        long,
+        env,
+        default_values = &["Web3", "Tenderly"],
+        arg_enum,
+        ignore_case = true,
+        use_value_delimiter = true
+    )]
+    pub access_list_estimators: Vec<AccessListEstimatorType>,
+
+    /// The URL for tenderly transaction simulation.
+    #[clap(
+        long,
+        env,
+        default_value = "http://api.tenderly.co/api/v1/account/sunce86/project/project/simulate"
+    )]
+    pub tenderly_url: Url,
+
+    /// Tenderly requires api key to work. Optional since Tenderly could be skipped in access lists estimators.
+    #[clap(long, env)]
+    pub tenderly_api_key: Option<String>,
 
     /// The API endpoint of the Eden network for transaction submission.
     #[clap(long, env, default_value = "https://api.edennetwork.io/v1/rpc")]
@@ -573,9 +599,17 @@ async fn main() {
             TransactionStrategyArg::DryRun => TransactionStrategy::DryRun,
         })
         .collect::<Vec<_>>();
-    let access_list_estimator = Arc::new(PriorityAccessListEstimating::new(vec![Box::new(
-        NodeApi::new(web3.clone()),
-    )]));
+    let access_list_estimator = Arc::new(
+        solver::settlement_access_list::create_priority_estimator(
+            &client,
+            &web3,
+            args.access_list_estimators.as_slice(),
+            args.tenderly_url,
+            args.tenderly_api_key,
+        )
+        .await
+        .expect("failed to create access list estimator"),
+    );
     let solution_submitter = SolutionSubmitter {
         web3: web3.clone(),
         contract: settlement_contract.clone(),

@@ -300,6 +300,47 @@ impl AccessListEstimating for PriorityAccessListEstimating {
     }
 }
 
+#[derive(Copy, Clone, Debug, clap::ArgEnum)]
+#[clap(rename_all = "verbatim")]
+pub enum AccessListEstimatorType {
+    Web3,
+    Tenderly,
+}
+
+pub async fn create_priority_estimator(
+    client: &Client,
+    web3: &Web3,
+    estimator_types: &[AccessListEstimatorType],
+    tenderly_url: Url,
+    tenderly_api_key: Option<String>,
+) -> Result<impl AccessListEstimating> {
+    let network_id = web3.net().version().await?;
+    let mut estimators = Vec::<Box<dyn AccessListEstimating>>::new();
+
+    for estimator_type in estimator_types {
+        match estimator_type {
+            AccessListEstimatorType::Web3 => {
+                estimators.push(Box::new(NodeApi::new(web3.clone())));
+            }
+            AccessListEstimatorType::Tenderly => {
+                estimators.push(Box::new(TenderlyApi::new(
+                    tenderly_url.clone(),
+                    client.clone(),
+                    &tenderly_api_key
+                        .clone()
+                        .ok_or_else(|| anyhow!("Tenderly api key is empty"))?,
+                    network_id.clone(),
+                )?));
+            }
+        }
+    }
+    anyhow::ensure!(
+        !estimators.is_empty(),
+        "all access list estimators failed to initialize"
+    );
+    Ok(PriorityAccessListEstimating::new(estimators))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
