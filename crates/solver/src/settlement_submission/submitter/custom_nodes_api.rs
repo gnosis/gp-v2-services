@@ -63,14 +63,12 @@ impl TransactionSubmitting for CustomNodesApi {
                         handle: tx_hash,
                     });
                 }
-                Err(err) if rest.is_empty() => {
-                    tracing::debug!("error {}", err);
-                    super::track_submission_success(lable.as_str(), false);
-                    return Err(anyhow::Error::from(err).context("all nodes tx failed"));
-                }
                 Err(err) => {
-                    tracing::warn!(?err, "single node tx failed");
+                    tracing::warn!(?err, ?lable, "single custom node tx failed");
                     super::track_submission_success(lable.as_str(), false);
+                    if rest.is_empty() {
+                        return Err(anyhow::Error::from(err).context("all custom nodes tx failed"));
+                    }
                     futures = rest;
                 }
             }
