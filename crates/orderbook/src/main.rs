@@ -41,7 +41,6 @@ use shared::{
     paraswap_api::DefaultParaswapApi,
     price_estimation::{
         baseline::BaselinePriceEstimator,
-        buffered::BufferingPriceEstimator,
         competition::{CompetitionPriceEstimator, RacingCompetitionPriceEstimator},
         instrumented::InstrumentedPriceEstimator,
         native::NativePriceEstimator,
@@ -540,10 +539,7 @@ async fn main() {
 
         (
             estimator.name(),
-            Arc::new(BufferingPriceEstimator::new(Box::new(instrumented(
-                instance,
-                estimator.name(),
-            )))),
+            Arc::new(instrumented(instance, estimator.name())),
         )
     };
 
