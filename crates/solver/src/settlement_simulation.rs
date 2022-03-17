@@ -80,9 +80,10 @@ pub async fn simulate_and_estimate_gas_at_current_block(
         let calls = txs
             .into_iter()
             .map(|tx| {
-                let tx = match access_lists.next().unwrap() {
-                    Ok(access_list) => tx.access_list(access_list),
-                    Err(_) => tx,
+                let access_list = access_lists.next().and_then(|access_list| access_list.ok());
+                let tx = match access_list {
+                    Some(access_list) => tx.access_list(access_list),
+                    None => tx,
                 };
                 tx.estimate_gas()
             })
@@ -105,10 +106,7 @@ pub async fn simulate_and_error_with_tenderly_link(
     simulation_gas_limit: u128,
     access_list_estimator: Arc<dyn AccessListEstimating>,
 ) -> Vec<Result<()>> {
-    let settlements = settlements.collect::<Vec<_>>();
-
     let methods = settlements
-        .into_iter()
         .map(|(account, settlement)| settle_method(gas_price, contract, settlement, account))
         .collect::<Vec<_>>();
 
@@ -122,15 +120,15 @@ pub async fn simulate_and_error_with_tenderly_link(
     // append access lists to existing methods if access lists exist, otherwise ignore access lists
     let methods = methods
         .into_iter()
-        .map(|method| match access_lists.next().unwrap() {
-            Ok(access_list) => method.access_list(access_list),
-            Err(_) => method,
-        })
-        .collect::<Vec<_>>();
+        .map(
+            |method| match access_lists.next().and_then(|access_list| access_list.ok()) {
+                Some(access_list) => method.access_list(access_list),
+                None => method,
+            },
+        );
 
     let mut batch = CallBatch::new(web3.transport());
     let futures = methods
-        .into_iter()
         .map(|method| {
             let tx = method.tx.clone();
             let view = method
