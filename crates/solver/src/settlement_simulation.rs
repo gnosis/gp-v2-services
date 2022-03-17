@@ -118,14 +118,12 @@ pub async fn simulate_and_error_with_tenderly_link(
         .into_iter();
 
     // append access lists to existing methods if access lists exist, otherwise ignore access lists
-    let methods = methods
-        .into_iter()
-        .map(
-            |method| match access_lists.next().and_then(|access_list| access_list.ok()) {
-                Some(access_list) => method.access_list(access_list),
-                None => method,
-            },
-        );
+    let methods = methods.into_iter().map(|method| {
+        match access_lists.next().and_then(|access_list| access_list.ok()) {
+            Some(access_list) => method.access_list(access_list),
+            None => method,
+        }
+    });
 
     let mut batch = CallBatch::new(web3.transport());
     let futures = methods
