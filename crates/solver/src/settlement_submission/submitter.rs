@@ -662,11 +662,10 @@ mod tests {
         let settlement = Settlement::new(Default::default());
         let gas_estimate =
             crate::settlement_simulation::simulate_and_estimate_gas_at_current_block(
-                std::iter::once((account.clone(), settlement.clone())),
+                std::iter::once((account.clone(), settlement.clone(), None)),
                 &contract,
                 &web3,
                 Default::default(),
-                access_list_estimator.clone(),
             )
             .await
             .unwrap()
