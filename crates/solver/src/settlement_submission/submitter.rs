@@ -512,9 +512,11 @@ impl<'a> Submitter<'a> {
         tx: &TransactionBuilder<DynTransport>,
     ) -> Result<AccessList> {
         let access_list = self.access_list_estimator.estimate_access_list(tx).await?;
-        let gas_before_access_list = tx.clone().estimate_gas().await?;
-        let tx = tx.clone().access_list(access_list.clone());
-        let gas_after_access_list = tx.clone().estimate_gas().await?;
+        let (gas_before_access_list, gas_after_access_list) = futures::try_join!(
+            tx.clone().estimate_gas(),
+            tx.clone().access_list(access_list.clone()).estimate_gas()
+        )?;
+
         tracing::debug!(
             "gas before/after access list: {}/{}, access_list: {:?}",
             gas_before_access_list,
@@ -601,7 +603,7 @@ mod tests {
 
     use std::sync::Arc;
 
-    use crate::settlement_access_list::NodeApi;
+    use crate::settlement_access_list::{create_priority_estimator, AccessListEstimatorType};
 
     use super::super::submitter::flashbots_api::FlashbotsApi;
     use super::*;
@@ -645,7 +647,17 @@ mod tests {
             gas_price_cap: 100e9,
             additional_tip_percentage_of_max_fee: Some(0.05),
         };
-        let access_list_estimator = Arc::new(NodeApi::new(web3.clone()));
+        let access_list_estimator = Arc::new(
+            create_priority_estimator(
+                &Client::new(),
+                &web3,
+                &[AccessListEstimatorType::Web3],
+                "",
+                None,
+            )
+            .await
+            .unwrap(),
+        );
 
         let settlement = Settlement::new(Default::default());
         let gas_estimate =

@@ -197,7 +197,7 @@ struct Arguments {
         ignore_case = true,
         use_value_delimiter = true
     )]
-    pub access_list_estimators: Vec<AccessListEstimatorType>,
+    access_list_estimators: Vec<AccessListEstimatorType>,
 
     /// The URL for tenderly transaction simulation.
     #[clap(
@@ -205,11 +205,11 @@ struct Arguments {
         env,
         default_value = "http://api.tenderly.co/api/v1/account/sunce86/project/project/simulate"
     )]
-    pub tenderly_url: Url,
+    tenderly_url: Url,
 
     /// Tenderly requires api key to work. Optional since Tenderly could be skipped in access lists estimators.
     #[clap(long, env)]
-    pub tenderly_api_key: Option<String>,
+    tenderly_api_key: Option<String>,
 
     /// The API endpoint of the Eden network for transaction submission.
     #[clap(long, env, default_value = "https://api.edennetwork.io/v1/rpc")]

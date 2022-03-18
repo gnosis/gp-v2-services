@@ -40,7 +40,7 @@ struct NodeAccessList {
 }
 
 #[derive(Debug)]
-pub struct NodeApi {
+struct NodeApi {
     web3: Web3,
 }
 
@@ -96,7 +96,7 @@ impl AccessListEstimating for NodeApi {
                     Ok(response) => serde_json::from_value::<NodeAccessList>(response)
                         // error parsing the response
                         .context("unexpected response format")
-                        .map(|response| filter_access_list(response.access_list)),
+                        .map(|response| response.access_list),
                     // error during transport
                     Err(err) => Err(anyhow!("web3 error: {}", err)),
                 },
@@ -146,7 +146,7 @@ struct BlockNumber {
 }
 
 #[derive(Debug)]
-pub struct TenderlyApi {
+struct TenderlyApi {
     url: Url,
     client: Client,
     header: HeaderMap,
@@ -224,13 +224,11 @@ impl AccessListEstimating for TenderlyApi {
                 !response.generated_access_list.is_empty(),
                 "empty access list"
             );
-            Ok(filter_access_list(
-                response
-                    .generated_access_list
-                    .into_iter()
-                    .map(Into::into)
-                    .collect(),
-            ))
+            Ok(response
+                .generated_access_list
+                .into_iter()
+                .map(Into::into)
+                .collect())
         }))
         .await)
     }
@@ -272,6 +270,8 @@ fn filter_access_list(access_list: AccessList) -> AccessList {
         .collect()
 }
 
+/// Contains multiple estimators, and uses them one by one until the first of them returns successfull result.
+/// Also does the filtering of the access list
 pub struct PriorityAccessListEstimating {
     estimators: Vec<Box<dyn AccessListEstimating>>,
 }
@@ -290,7 +290,12 @@ impl AccessListEstimating for PriorityAccessListEstimating {
     ) -> Result<Vec<Result<AccessList>>> {
         for (i, estimator) in self.estimators.iter().enumerate() {
             match estimator.estimate_access_lists(txs).await {
-                Ok(result) => return Ok(result),
+                Ok(result) => {
+                    return Ok(result
+                        .into_iter()
+                        .map(|access_list| access_list.map(filter_access_list))
+                        .collect())
+                }
                 Err(err) => {
                     tracing::warn!("access list estimator {} failed {:?}", i, err);
                 }
@@ -311,7 +316,7 @@ pub async fn create_priority_estimator(
     client: &Client,
     web3: &Web3,
     estimator_types: &[AccessListEstimatorType],
-    tenderly_url: Url,
+    tenderly_url: impl IntoUrl + Clone,
     tenderly_api_key: Option<String>,
 ) -> Result<impl AccessListEstimating> {
     let network_id = web3.net().version().await?;

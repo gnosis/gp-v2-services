@@ -212,13 +212,14 @@ mod tests {
         balancer_v2::SettlementHandler, order_converter::OrderConverter, uniswap_v2::Inner,
         ConstantProductOrder, Liquidity, StablePoolOrder,
     };
-    use crate::settlement_access_list::NodeApi;
+    use crate::settlement_access_list::{create_priority_estimator, AccessListEstimatorType};
     use crate::solver::http_solver::settlement::{convert_settlement, SettlementContext};
     use contracts::{BalancerV2Vault, IUniswapLikeRouter, UniswapV2Router02, WETH9};
     use ethcontract::{Account, PrivateKey};
     use maplit::hashmap;
     use model::{order::Order, TokenPair};
     use num::{rational::Ratio, BigRational};
+    use reqwest::Client;
     use serde_json::json;
     use shared::http_solver::model::SettledBatchAuctionModel;
     use shared::sources::balancer_v2::pools::{common::TokenState, stable::AmplificationParameter};
@@ -231,13 +232,18 @@ mod tests {
     async fn mainnet() {
         // Create some bogus settlements to see that the simulation returns an error.
         shared::tracing::initialize("solver=debug,shared=debug", tracing::Level::ERROR.into());
+        let client = Client::new();
         let transport = create_env_test_transport();
         let web3 = Web3::new(transport);
         let block = web3.eth().block_number().await.unwrap().as_u64();
         let network_id = web3.net().version().await.unwrap();
         let contract = GPv2Settlement::deployed(&web3).await.unwrap();
         let account = Account::Offline(PrivateKey::from_raw([1; 32]).unwrap(), None);
-        let access_list_estimator = Arc::new(NodeApi::new(web3.clone()));
+        let access_list_estimator = Arc::new(
+            create_priority_estimator(&client, &web3, &[AccessListEstimatorType::Web3], "", None)
+                .await
+                .unwrap(),
+        );
 
         let settlements = vec![
             (
@@ -634,11 +640,16 @@ mod tests {
     #[ignore]
     async fn mainnet_chunked() {
         shared::tracing::initialize("solver=debug,shared=debug", tracing::Level::ERROR.into());
+        let client = Client::new();
         let transport = create_env_test_transport();
         let web3 = Web3::new(transport);
         let contract = GPv2Settlement::deployed(&web3).await.unwrap();
         let account = Account::Offline(PrivateKey::from_raw([1; 32]).unwrap(), None);
-        let access_list_estimator = Arc::new(NodeApi::new(web3.clone()));
+        let access_list_estimator = Arc::new(
+            create_priority_estimator(&client, &web3, &[AccessListEstimatorType::Web3], "", None)
+                .await
+                .unwrap(),
+        );
 
         // 12 so that we hit more than one chunk.
         let settlements =
