@@ -98,7 +98,7 @@ struct Arguments {
     #[clap(
         long,
         env,
-        default_value = "Naive,Baseline",
+        default_values = &["Naive", "Baseline"],
         arg_enum,
         ignore_case = true,
         use_value_delimiter = true
@@ -239,11 +239,6 @@ struct Arguments {
     /// The RPC endpoints to use for submitting transaction to a custom set of nodes.
     #[clap(long, env, use_value_delimiter = true)]
     transaction_submission_nodes: Vec<Url>,
-
-    /// The configured addresses whose orders should be considered liquidity
-    /// and not to be included in the objective function by the HTTP solver.
-    #[clap(long, env, use_value_delimiter = true)]
-    liquidity_order_owners: Vec<H160>,
 
     /// Fee scaling factor for objective value. This controls the constant
     /// factor by which order fees are multiplied with. Setting this to a value
@@ -590,7 +585,7 @@ async fn main() {
     let api = OrderBookApi::new(args.orderbook_url, client.clone());
     let order_converter = OrderConverter {
         native_token: native_token_contract.clone(),
-        liquidity_order_owners: args.liquidity_order_owners.into_iter().collect(),
+        liquidity_order_owners: args.shared.liquidity_order_owners.into_iter().collect(),
         fee_objective_scaling_factor: args.fee_objective_scaling_factor,
     };
     let mut driver = Driver::new(

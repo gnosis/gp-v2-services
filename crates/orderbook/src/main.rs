@@ -619,6 +619,7 @@ async fn main() {
             },
             native_price_estimator.clone(),
             cow_subsidy.clone(),
+            args.shared.liquidity_order_owners.iter().copied().collect(),
         ))
     };
     let fee_calculator = create_fee_calculator(price_estimator.clone());
@@ -641,7 +642,8 @@ async fn main() {
     let order_validator = Arc::new(OrderValidator::new(
         Box::new(web3.clone()),
         native_token.clone(),
-        args.banned_users,
+        args.banned_users.into_iter().collect(),
+        args.shared.liquidity_order_owners.into_iter().collect(),
         args.min_order_validity_period,
         fee_calculator.clone(),
         bad_token_detector.clone(),
