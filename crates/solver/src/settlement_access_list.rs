@@ -301,7 +301,7 @@ impl AccessListEstimating for PriorityAccessListEstimating {
                 }
             }
         }
-        Err(anyhow! {"all estimators failed, no access list"})
+        Err(anyhow! {"no access list. no estimators defined or all estimators failed"})
     }
 }
 
@@ -339,10 +339,6 @@ pub async fn create_priority_estimator(
             }
         }
     }
-    anyhow::ensure!(
-        !estimators.is_empty(),
-        "all access list estimators failed to initialize"
-    );
     Ok(PriorityAccessListEstimating::new(estimators))
 }
 

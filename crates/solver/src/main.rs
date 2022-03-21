@@ -189,14 +189,7 @@ struct Arguments {
     /// fails. Individual estimators might support different networks.
     /// `Tenderly`: supports every network.
     /// `Web3`: supports every network.
-    #[clap(
-        long,
-        env,
-        default_values = &["Web3", "Tenderly"],
-        arg_enum,
-        ignore_case = true,
-        use_value_delimiter = true
-    )]
+    #[clap(long, env, arg_enum, ignore_case = true, use_value_delimiter = true)]
     access_list_estimators: Vec<AccessListEstimatorType>,
 
     /// The URL for tenderly transaction simulation.
