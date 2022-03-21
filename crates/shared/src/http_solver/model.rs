@@ -175,6 +175,8 @@ pub struct ExecutedOrderModel {
     pub exec_buy_amount: U256,
     pub cost: Option<CostModel>,
     pub fee: Option<FeeModel>,
+    // Orders which need to be executed in a specific order have an `exec_plan` (e.g. 0x limit orders)
+    pub exec_plan: Option<ExecutionPlanCoordinatesModel>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
