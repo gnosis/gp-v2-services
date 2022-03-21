@@ -652,7 +652,7 @@ mod tests {
                 &Client::new(),
                 &web3,
                 &[AccessListEstimatorType::Web3],
-                "",
+                None,
                 None,
             )
             .await

@@ -179,7 +179,7 @@ async fn vault_balances(web3: Web3) {
                     &client,
                     &web3,
                     &[AccessListEstimatorType::Web3],
-                    "",
+                    None,
                     None,
                 )
                 .await

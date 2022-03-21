@@ -240,7 +240,7 @@ async fn onchain_settlement(web3: Web3) {
                     &client,
                     &web3,
                     &[AccessListEstimatorType::Web3],
-                    "",
+                    None,
                     None,
                 )
                 .await

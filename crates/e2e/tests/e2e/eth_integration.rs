@@ -235,7 +235,7 @@ async fn eth_integration(web3: Web3) {
                     client_ref,
                     &web3,
                     &[AccessListEstimatorType::Web3],
-                    "",
+                    None,
                     None,
                 )
                 .await

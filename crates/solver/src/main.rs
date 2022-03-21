@@ -193,12 +193,8 @@ struct Arguments {
     access_list_estimators: Vec<AccessListEstimatorType>,
 
     /// The URL for tenderly transaction simulation.
-    #[clap(
-        long,
-        env,
-        default_value = "http://api.tenderly.co/api/v1/account/sunce86/project/project/simulate"
-    )]
-    tenderly_url: Url,
+    #[clap(long, env)]
+    tenderly_url: Option<Url>,
 
     /// Tenderly requires api key to work. Optional since Tenderly could be skipped in access lists estimators.
     #[clap(long, env)]

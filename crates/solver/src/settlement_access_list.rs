@@ -316,7 +316,7 @@ pub async fn create_priority_estimator(
     client: &Client,
     web3: &Web3,
     estimator_types: &[AccessListEstimatorType],
-    tenderly_url: impl IntoUrl + Clone,
+    tenderly_url: Option<Url>,
     tenderly_api_key: Option<String>,
 ) -> Result<impl AccessListEstimating> {
     let network_id = web3.net().version().await?;
@@ -329,7 +329,9 @@ pub async fn create_priority_estimator(
             }
             AccessListEstimatorType::Tenderly => {
                 estimators.push(Box::new(TenderlyApi::new(
-                    tenderly_url.clone(),
+                    tenderly_url
+                        .clone()
+                        .ok_or_else(|| anyhow!("Tenderly url is empty"))?,
                     client.clone(),
                     &tenderly_api_key
                         .clone()

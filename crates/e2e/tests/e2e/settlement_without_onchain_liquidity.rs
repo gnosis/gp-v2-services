@@ -229,7 +229,7 @@ async fn onchain_settlement_without_liquidity(web3: Web3) {
                     &client,
                     &web3,
                     &[AccessListEstimatorType::Web3],
-                    "",
+                    None,
                     None,
                 )
                 .await
