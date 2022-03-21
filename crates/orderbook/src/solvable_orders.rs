@@ -3,7 +3,8 @@ use crate::{
     database::orders::OrderStoring,
     orderbook::filter_unsupported_tokens,
 };
-use anyhow::Result;
+use anyhow::{Context as _, Result};
+use futures::StreamExt;
 use model::{auction::Auction, order::Order};
 use primitive_types::{H160, U256};
 use shared::{
@@ -14,12 +15,17 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     iter::FromIterator,
     sync::{Arc, Mutex, Weak},
-    time::{Duration, Instant},
+    time::Duration,
 };
-use tokio::sync::Notify;
+use tokio::{sync::Notify, time::Instant};
+
+// When creating the auction after solvable orders change we need to fetch native prices for a
+// potentially large amount of tokens. This is the maximum amount of time we allot for this
+// operation.
+const MAX_AUCTION_CREATION_TIME: Duration = Duration::from_secs(10);
 
 pub trait AuctionMetrics: Send + Sync + 'static {
-    fn filtered_solvable_orders(&self, count: usize);
+    fn auction_updated(&self, filtered_orders: u64, errored_estimates: u64, timeout: bool);
 }
 
 /// Keeps track and updates the set of currently solvable orders.
@@ -158,12 +164,13 @@ impl SolvableOrdersCache {
         }
 
         // create auction
-        let order_count = orders.len();
-        let (orders, prices) =
-            get_orders_with_native_prices(orders.clone(), &*self.native_price_estimator).await;
-        let filtered_orders = order_count - orders.len();
-        self.auction_metrics
-            .filtered_solvable_orders(filtered_orders);
+        let (orders, prices) = get_orders_with_native_prices(
+            orders.clone(),
+            &*self.native_price_estimator,
+            Instant::now() + MAX_AUCTION_CREATION_TIME,
+            self.auction_metrics.as_ref(),
+        )
+        .await;
         let auction = Auction {
             block,
             latest_settlement_block: db_solvable_orders.latest_settlement_block,
@@ -228,13 +235,20 @@ fn solvable_orders(mut orders: Vec<Order>, balances: &Balances) -> Vec<Order> {
             // balance we could also give them as much balance as possible instead of skipping. For
             // that we first need a way to communicate this to the solver. We could repurpose
             // availableBalance for this.
-            let needed_balance = match order
-                .creation
-                .sell_amount
-                .checked_add(order.creation.fee_amount)
-            {
-                Some(balance) => balance,
-                None => continue,
+            let needed_balance = match max_transfer_out_amount(&order) {
+                Ok(balance) => balance,
+                Err(err) => {
+                    // This should only happen if we read bogus order data from
+                    // the database (either we allowed a bogus order to be
+                    // created or we updated a good order incorrectly), so raise
+                    // the alarm!
+                    tracing::error!(
+                        ?err,
+                        ?order,
+                        "error computing order max transfer out amount"
+                    );
+                    continue;
+                }
             };
             if let Some(balance) = remaining_balance.checked_sub(needed_balance) {
                 remaining_balance = balance;
@@ -243,6 +257,21 @@ fn solvable_orders(mut orders: Vec<Order>, balances: &Balances) -> Vec<Order> {
         }
     }
     result
+}
+
+/// Computes the maximum amount that can be transferred out for a given order.
+///
+/// While this is trivial for fill or kill orders (`sell_amount + fee_amount`),
+/// partially fillable orders need to account for the already filled amount (so
+/// a half-filled order would be `(sell_amount + fee_amount) / 2`).
+///
+/// Returns `Err` on overflow.
+fn max_transfer_out_amount(order: &Order) -> Result<U256> {
+    let amounts = order.remaining_amounts()?;
+    amounts
+        .sell_amount
+        .checked_add(amounts.fee_amount)
+        .context("overflow computing maximum transfer out amount")
 }
 
 /// Keep updating the cache every N seconds or when an update notification happens.
@@ -302,6 +331,8 @@ impl Maintaining for SolvableOrdersCache {
 async fn get_orders_with_native_prices(
     mut orders: Vec<Order>,
     native_price_estimator: &dyn NativePriceEstimating,
+    deadline: Instant,
+    metrics: &dyn AuctionMetrics,
 ) -> (Vec<Order>, BTreeMap<H160, U256>) {
     let traded_tokens = orders
         .iter()
@@ -309,35 +340,65 @@ async fn get_orders_with_native_prices(
         .collect::<HashSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-    let prices = native_price_estimator
-        .estimate_native_prices(&traded_tokens)
-        .await
-        .into_iter()
-        .zip(traded_tokens)
-        .filter_map(|(price, token)| match price {
-            Ok(price) => Some((token, to_normalized_price(price)?)),
-            Err(err) => {
-                tracing::warn!(?token, ?err, "error estimating native token price");
-                None
-            }
-        })
-        .collect::<BTreeMap<_, _>>();
-
-    orders.retain(|order| {
-        let has_native_prices = prices.contains_key(&order.creation.sell_token)
-            && prices.contains_key(&order.creation.buy_token);
-
-        if !has_native_prices {
-            tracing::warn!(
-                order_uid = ?order.metadata.uid,
-                "filtered order because of missing native token price",
-            );
+    let mut prices = HashMap::new();
+    let mut price_stream = native_price_estimator.estimate_native_prices(&traded_tokens);
+    let mut errored_estimates: u64 = 0;
+    let collect_prices = async {
+        while let Some((index, result)) = price_stream.next().await {
+            let token = &traded_tokens[index];
+            let price = match result {
+                Ok(price) => price,
+                Err(err) => {
+                    errored_estimates += 1;
+                    tracing::warn!(?token, ?err, "error estimating native token price");
+                    continue;
+                }
+            };
+            let price = match to_normalized_price(price) {
+                Some(price) => price,
+                None => continue,
+            };
+            prices.insert(*token, price);
         }
+    };
+    let timeout = match tokio::time::timeout_at(deadline, collect_prices).await {
+        Ok(()) => false,
+        Err(_) => {
+            tracing::warn!(
+                "auction native price collection took too long, got {} out of {}",
+                prices.len(),
+                traded_tokens.len()
+            );
+            true
+        }
+    };
 
-        has_native_prices
+    let original_order_count = orders.len();
+    // Filter both orders and prices so that we only return orders that have prices and prices that
+    // have orders.
+    let mut used_prices = BTreeMap::new();
+    orders.retain(|order| {
+        let (t0, t1) = (&order.creation.sell_token, &order.creation.buy_token);
+        match (prices.get(t0), prices.get(t1)) {
+            (Some(p0), Some(p1)) => {
+                used_prices.insert(*t0, *p0);
+                used_prices.insert(*t1, *p1);
+                true
+            }
+            _ => {
+                tracing::debug!(
+                    order_uid = ?order.metadata.uid,
+                    "filtered order because of missing native token price",
+                );
+                false
+            }
+        }
     });
 
-    (orders, prices)
+    let filtered_orders = (original_order_count - orders.len()) as u64;
+    metrics.auction_updated(filtered_orders, errored_estimates, timeout);
+
+    (orders, used_prices)
 }
 
 fn to_normalized_price(price: f64) -> Option<U256> {
@@ -359,8 +420,9 @@ mod tests {
         database::orders::SolvableOrders as DbOrders, metrics::NoopMetrics,
     };
     use chrono::{DateTime, NaiveDateTime, Utc};
+    use futures::StreamExt;
     use maplit::{btreemap, hashmap, hashset};
-    use model::order::{OrderBuilder, OrderCreation, OrderMetadata, SellTokenSource};
+    use model::order::{OrderBuilder, OrderCreation, OrderKind, OrderMetadata, SellTokenSource};
     use primitive_types::H160;
     use shared::price_estimation::{native::MockNativePriceEstimating, PriceEstimationError};
 
@@ -486,9 +548,9 @@ mod tests {
             .return_once(|_| Vec::new());
 
         let mut native = MockNativePriceEstimating::new();
-        native
-            .expect_estimate_native_prices()
-            .returning(|a| vec![Ok(1.0); a.len()]);
+        native.expect_estimate_native_prices().returning(|a| {
+            futures::stream::iter(std::iter::repeat(Ok(1.0)).take(a.len()).enumerate()).boxed()
+        });
 
         let cache = SolvableOrdersCache::new(
             Duration::from_secs(0),
@@ -601,7 +663,7 @@ mod tests {
             .returning({
                 let prices = prices.clone();
                 move |tokens| {
-                    tokens
+                    let results = tokens
                         .iter()
                         .map(|token| {
                             prices
@@ -609,12 +671,19 @@ mod tests {
                                 .copied()
                                 .ok_or(PriceEstimationError::NoLiquidity)
                         })
-                        .collect()
+                        .enumerate()
+                        .collect::<Vec<_>>();
+                    futures::stream::iter(results).boxed()
                 }
             });
 
-        let (filtered_orders, prices) =
-            get_orders_with_native_prices(orders.clone(), &native_price_estimator).await;
+        let (filtered_orders, prices) = get_orders_with_native_prices(
+            orders.clone(),
+            &native_price_estimator,
+            Instant::now() + MAX_AUCTION_CREATION_TIME,
+            &NoopMetrics,
+        )
+        .await;
 
         assert_eq!(filtered_orders, [orders[2].clone()]);
         assert_eq!(
@@ -624,5 +693,125 @@ mod tests {
                 token3 => U256::from(250_000_000_000_000_000_u128),
             }
         );
+    }
+
+    #[test]
+    fn computes_max_transfer_out_amount_for_order() {
+        // For fill-or-kill orders, we don't overflow even for very large buy
+        // orders (where `{sell,fee}_amount * buy_amount` would overflow).
+        assert_eq!(
+            max_transfer_out_amount(&Order {
+                creation: OrderCreation {
+                    sell_amount: 1000.into(),
+                    fee_amount: 337.into(),
+                    buy_amount: U256::MAX,
+                    kind: OrderKind::Buy,
+                    partially_fillable: false,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .unwrap(),
+            U256::from(1337),
+        );
+
+        // Partially filled order scales amount.
+        assert_eq!(
+            max_transfer_out_amount(&Order {
+                creation: OrderCreation {
+                    sell_amount: 100.into(),
+                    buy_amount: 10.into(),
+                    fee_amount: 101.into(),
+                    kind: OrderKind::Buy,
+                    partially_fillable: true,
+                    ..Default::default()
+                },
+                metadata: OrderMetadata {
+                    executed_buy_amount: 9_u32.into(),
+                    ..Default::default()
+                },
+            })
+            .unwrap(),
+            U256::from(20),
+        );
+    }
+
+    #[test]
+    fn max_transfer_out_amount_overflow() {
+        // For fill-or-kill orders, overflow if the total sell and fee amount
+        // overflows a uint. This kind of order cannot be filled by the
+        // settlement contract anyway.
+        assert!(max_transfer_out_amount(&Order {
+            creation: OrderCreation {
+                sell_amount: U256::MAX,
+                fee_amount: 1.into(),
+                partially_fillable: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .is_err());
+
+        // Handles overflow when computing fill ratio.
+        assert!(max_transfer_out_amount(&Order {
+            creation: OrderCreation {
+                sell_amount: 1000.into(),
+                fee_amount: 337.into(),
+                buy_amount: U256::MAX,
+                kind: OrderKind::Buy,
+                partially_fillable: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn native_prices_uses_timeout() {
+        shared::tracing::initialize_for_tests("debug");
+        let mut native_price_estimator = MockNativePriceEstimating::new();
+        native_price_estimator
+            .expect_estimate_native_prices()
+            .returning(move |tokens| {
+                #[allow(clippy::unnecessary_to_owned)]
+                let results = tokens
+                    .to_vec()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, _)| (i, Ok(1.0)));
+                futures::stream::iter(results)
+                    .then(|price| async {
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        price
+                    })
+                    .boxed()
+            });
+        let orders = vec![
+            OrderBuilder::default()
+                .with_sell_token(H160::from_low_u64_be(0))
+                .with_buy_token(H160::from_low_u64_be(1))
+                .build(),
+            OrderBuilder::default()
+                .with_sell_token(H160::from_low_u64_be(2))
+                .with_buy_token(H160::from_low_u64_be(3))
+                .build(),
+        ];
+        // last token price won't be available
+        let deadline = Instant::now() + Duration::from_secs_f32(3.5);
+        let (orders_, prices) = get_orders_with_native_prices(
+            orders.clone(),
+            &native_price_estimator,
+            deadline,
+            &NoopMetrics,
+        )
+        .await;
+        assert_eq!(orders_.len(), 1);
+        // It is not guaranteed which order is the included one because the function uses a hashset
+        // for the tokens.
+        assert!(orders_[0] == orders[0] || orders_[0] == orders[1]);
+        assert_eq!(prices.len(), 2);
+        assert!(prices.contains_key(&orders_[0].creation.sell_token));
+        assert!(prices.contains_key(&orders_[0].creation.buy_token));
     }
 }
