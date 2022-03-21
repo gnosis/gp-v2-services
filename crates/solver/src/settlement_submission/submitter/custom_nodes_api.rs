@@ -53,7 +53,7 @@ impl TransactionSubmitting for CustomNodesApi {
 
         loop {
             let (result, index, rest) = futures::future::select_all(futures).await;
-            let lable = "custom_nodes_".to_string() + &index.to_string();
+            let lable = format!("custom_nodes_{}", index);
             match result {
                 Ok(tx_hash) => {
                     super::track_submission_success(lable.as_str(), true);
