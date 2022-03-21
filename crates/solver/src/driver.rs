@@ -480,30 +480,39 @@ impl Driver {
 
             solver_settlements.reserve(mature_settlements.len());
 
-            let txs = mature_settlements
-                .iter()
-                .map(|settlement| {
-                    settle_method(
-                        gas_price,
-                        &self.settlement_contract,
-                        settlement.clone(),
-                        solver.account().clone(),
-                    )
-                    .tx
-                })
-                .collect::<Vec<_>>();
-            let mut access_lists = self
-                .solution_submitter
-                .access_list_estimator
-                .estimate_access_lists(&txs)
-                .await
-                .unwrap_or_default()
-                .into_iter();
             for settlement in mature_settlements {
-                let access_list = access_lists.next().and_then(|access_list| access_list.ok());
-                solver_settlements.push((solver.clone(), settlement, access_list))
+                solver_settlements.push((solver.clone(), settlement))
             }
         }
+
+        // append access lists
+        let txs = solver_settlements
+            .iter()
+            .map(|(solver, settlement)| {
+                settle_method(
+                    gas_price,
+                    &self.settlement_contract,
+                    settlement.clone(),
+                    solver.account().clone(),
+                )
+                .tx
+            })
+            .collect::<Vec<_>>();
+        let mut access_lists = self
+            .solution_submitter
+            .access_list_estimator
+            .estimate_access_lists(&txs)
+            .await
+            .unwrap_or_default()
+            .into_iter();
+
+        let solver_settlements = solver_settlements
+            .into_iter()
+            .map(|(solver, settlement)| {
+                let access_list = access_lists.next().and_then(|access_list| access_list.ok());
+                (solver, settlement, access_list)
+            })
+            .collect();
 
         let (mut rated_settlements, errors) = self
             .rate_settlements(solver_settlements, &external_prices, gas_price)
