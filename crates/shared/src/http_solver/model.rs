@@ -480,6 +480,25 @@ mod tests {
     }
 
     #[test]
+    fn deserialize_approval_model() {
+        let approval = r#"
+            {
+                "token": "0x7777777777777777777777777777777777777777",
+                "spender": "0x5555555555555555555555555555555555555555",
+                "amount": "1337"
+            }
+        "#;
+        assert_eq!(
+            serde_json::from_str::<ApprovalModel>(approval).unwrap(),
+            ApprovalModel {
+                token: addr!("7777777777777777777777777777777777777777"),
+                spender: addr!("5555555555555555555555555555555555555555"),
+                amount: 1337.into(),
+            }
+        );
+    }
+
+    #[test]
     fn decode_empty_solution() {
         let empty_solution = r#"
             {
