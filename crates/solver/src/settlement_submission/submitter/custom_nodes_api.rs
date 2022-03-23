@@ -33,7 +33,7 @@ impl TransactionSubmitting for CustomNodesApi {
     async fn submit_transaction(
         &self,
         tx: TransactionBuilder<DynTransport>,
-    ) -> anyhow::Result<TransactionHandle> {
+    ) -> Result<TransactionHandle> {
         let transaction_request = tx.build().now_or_never().unwrap().unwrap();
         let mut futures = self
             .nodes
@@ -75,7 +75,7 @@ impl TransactionSubmitting for CustomNodesApi {
         }
     }
 
-    async fn cancel_transaction(&self, id: &CancelHandle) -> anyhow::Result<TransactionHandle> {
+    async fn cancel_transaction(&self, id: &CancelHandle) -> Result<TransactionHandle> {
         self.submit_transaction(id.noop_transaction.clone()).await
     }
 

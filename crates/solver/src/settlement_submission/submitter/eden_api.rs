@@ -49,7 +49,7 @@ impl EdenApi {
     async fn submit_slot_transaction(
         &self,
         tx: TransactionBuilder<Web3Transport>,
-    ) -> anyhow::Result<TransactionHandle> {
+    ) -> Result<TransactionHandle> {
         let (raw_signed_transaction, tx_hash) = match tx.build().now_or_never().unwrap().unwrap() {
             Transaction::Request(_) => unreachable!("verified offline account was used"),
             Transaction::Raw { bytes, hash } => (bytes.0, hash),
@@ -85,7 +85,7 @@ impl TransactionSubmitting for EdenApi {
     async fn submit_transaction(
         &self,
         tx: TransactionBuilder<Web3Transport>,
-    ) -> anyhow::Result<TransactionHandle> {
+    ) -> Result<TransactionHandle> {
         // try to submit with slot method
         let result = self
             .submit_slot_transaction(tx.clone())
@@ -112,7 +112,7 @@ impl TransactionSubmitting for EdenApi {
         result
     }
 
-    async fn cancel_transaction(&self, id: &CancelHandle) -> anyhow::Result<TransactionHandle> {
+    async fn cancel_transaction(&self, id: &CancelHandle) -> Result<TransactionHandle> {
         self.rpc
             .api::<PrivateNetwork>()
             .submit_raw_transaction(id.noop_transaction.clone())

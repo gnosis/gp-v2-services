@@ -34,7 +34,7 @@ impl TransactionSubmitting for FlashbotsApi {
     async fn submit_transaction(
         &self,
         tx: TransactionBuilder<Web3Transport>,
-    ) -> anyhow::Result<TransactionHandle> {
+    ) -> Result<TransactionHandle> {
         let result = self
             .rpc
             .api::<PrivateNetwork>()
@@ -47,7 +47,7 @@ impl TransactionSubmitting for FlashbotsApi {
     }
 
     // https://docs.flashbots.net/flashbots-protect/rpc/cancellations
-    async fn cancel_transaction(&self, id: &CancelHandle) -> anyhow::Result<TransactionHandle> {
+    async fn cancel_transaction(&self, id: &CancelHandle) -> Result<TransactionHandle> {
         self.rpc
             .api::<PrivateNetwork>()
             .submit_raw_transaction(id.noop_transaction.clone())

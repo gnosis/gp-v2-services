@@ -89,9 +89,9 @@ pub trait TransactionSubmitting: Send + Sync {
     async fn submit_transaction(
         &self,
         tx: TransactionBuilder<DynTransport>,
-    ) -> anyhow::Result<TransactionHandle>;
+    ) -> Result<TransactionHandle>;
     /// Cancels already submitted transaction using the cancel handle
-    async fn cancel_transaction(&self, id: &CancelHandle) -> anyhow::Result<TransactionHandle>;
+    async fn cancel_transaction(&self, id: &CancelHandle) -> Result<TransactionHandle>;
     /// Try to find submitted transaction from previous submission loop (in this case we don't have a TransactionHandle)
     async fn recover_pending_transaction(
         &self,
@@ -507,7 +507,7 @@ impl<'a> Submitter<'a> {
         transaction: &TransactionHandle,
         gas_price: &EstimatedGasPrice,
         nonce: U256,
-    ) -> anyhow::Result<TransactionHandle> {
+    ) -> Result<TransactionHandle> {
         let cancel_handle = CancelHandle {
             submitted_transaction: *transaction,
             noop_transaction: self.build_noop_transaction(&gas_price.bump(3.), nonce),
