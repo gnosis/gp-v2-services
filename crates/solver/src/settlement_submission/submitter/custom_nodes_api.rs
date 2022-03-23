@@ -4,7 +4,7 @@ use crate::{
 };
 
 use super::{
-    super::submitter::{SubmitApiError, TransactionHandle, TransactionSubmitting},
+    super::submitter::{TransactionHandle, TransactionSubmitting},
     AdditionalTip, CancelHandle, DisabledReason, SubmissionLoopStatus,
 };
 use anyhow::{Context, Result};
@@ -33,7 +33,7 @@ impl TransactionSubmitting for CustomNodesApi {
     async fn submit_transaction(
         &self,
         tx: TransactionBuilder<DynTransport>,
-    ) -> Result<TransactionHandle, SubmitApiError> {
+    ) -> anyhow::Result<TransactionHandle> {
         let transaction_request = tx.build().now_or_never().unwrap().unwrap();
         let mut futures = self
             .nodes
@@ -63,9 +63,7 @@ impl TransactionSubmitting for CustomNodesApi {
                 }
                 Err(err) if rest.is_empty() => {
                     tracing::debug!("error {}", err);
-                    return Err(anyhow::Error::from(err)
-                        .context("all nodes tx failed")
-                        .into());
+                    return Err(anyhow::Error::from(err).context("all nodes tx failed"));
                 }
                 Err(err) => {
                     tracing::warn!(?err, "single node tx failed");
@@ -75,10 +73,7 @@ impl TransactionSubmitting for CustomNodesApi {
         }
     }
 
-    async fn cancel_transaction(
-        &self,
-        id: &CancelHandle,
-    ) -> Result<TransactionHandle, SubmitApiError> {
+    async fn cancel_transaction(&self, id: &CancelHandle) -> anyhow::Result<TransactionHandle> {
         self.submit_transaction(id.noop_transaction.clone()).await
     }
 

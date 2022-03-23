@@ -1,7 +1,7 @@
 use crate::settlement::{Revertable, Settlement};
 
 use super::{
-    super::submitter::{SubmitApiError, TransactionHandle, TransactionSubmitting},
+    super::submitter::{TransactionHandle, TransactionSubmitting},
     common::PrivateNetwork,
     AdditionalTip, CancelHandle, SubmissionLoopStatus,
 };
@@ -34,7 +34,7 @@ impl TransactionSubmitting for FlashbotsApi {
     async fn submit_transaction(
         &self,
         tx: TransactionBuilder<Web3Transport>,
-    ) -> Result<TransactionHandle, SubmitApiError> {
+    ) -> anyhow::Result<TransactionHandle> {
         self.rpc
             .api::<PrivateNetwork>()
             .submit_raw_transaction(tx)
@@ -42,10 +42,7 @@ impl TransactionSubmitting for FlashbotsApi {
     }
 
     // https://docs.flashbots.net/flashbots-protect/rpc/cancellations
-    async fn cancel_transaction(
-        &self,
-        id: &CancelHandle,
-    ) -> Result<TransactionHandle, SubmitApiError> {
+    async fn cancel_transaction(&self, id: &CancelHandle) -> anyhow::Result<TransactionHandle> {
         self.rpc
             .api::<PrivateNetwork>()
             .submit_raw_transaction(id.noop_transaction.clone())

@@ -3,7 +3,7 @@
 use crate::settlement::{Revertable, Settlement};
 
 use super::{
-    super::submitter::{SubmitApiError, TransactionHandle, TransactionSubmitting},
+    super::submitter::{TransactionHandle, TransactionSubmitting},
     common::PrivateNetwork,
     AdditionalTip, CancelHandle, SubmissionLoopStatus,
 };
@@ -49,7 +49,7 @@ impl EdenApi {
     async fn submit_slot_transaction(
         &self,
         tx: TransactionBuilder<Web3Transport>,
-    ) -> Result<TransactionHandle, SubmitApiError> {
+    ) -> anyhow::Result<TransactionHandle> {
         let (raw_signed_transaction, tx_hash) = match tx.build().now_or_never().unwrap().unwrap() {
             Transaction::Request(_) => unreachable!("verified offline account was used"),
             Transaction::Raw { bytes, hash } => (bytes.0, hash),
@@ -85,7 +85,7 @@ impl TransactionSubmitting for EdenApi {
     async fn submit_transaction(
         &self,
         tx: TransactionBuilder<Web3Transport>,
-    ) -> Result<TransactionHandle, SubmitApiError> {
+    ) -> anyhow::Result<TransactionHandle> {
         // try to submit with slot method
         self.submit_slot_transaction(tx.clone())
             .or_else(|err| async move {
@@ -100,10 +100,7 @@ impl TransactionSubmitting for EdenApi {
             .await
     }
 
-    async fn cancel_transaction(
-        &self,
-        id: &CancelHandle,
-    ) -> Result<TransactionHandle, SubmitApiError> {
+    async fn cancel_transaction(&self, id: &CancelHandle) -> anyhow::Result<TransactionHandle> {
         self.rpc
             .api::<PrivateNetwork>()
             .submit_raw_transaction(id.noop_transaction.clone())
