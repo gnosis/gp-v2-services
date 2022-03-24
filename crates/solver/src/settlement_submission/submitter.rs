@@ -578,10 +578,6 @@ struct Metrics {
     /// Tracks how many transactions get successfully submitted with the different submission strategies.
     #[metric(labels("submitter", "result"))]
     submissions: prometheus::CounterVec,
-
-    /// Tracks how much gas in percent is saved by using access list.
-    #[metric(labels("access_list_gas_percent_saved"))]
-    access_list_gas_percent: prometheus::Histogram,
 }
 
 pub(crate) fn track_submission_success(submitter: &str, was_successful: bool) {
@@ -593,8 +589,16 @@ pub(crate) fn track_submission_success(submitter: &str, was_successful: bool) {
         .inc();
 }
 
+#[derive(prometheus_metric_storage::MetricStorage, Clone, Debug)]
+#[metric(subsystem = "submission_strategies")]
+struct AccessListMetrics {
+    /// Tracks how much gas in percent is saved by using access list.
+    #[metric(labels("access_list_gas_percent_saved"))]
+    access_list_gas_percent: prometheus::Histogram,
+}
+
 fn track_access_list_gas_saved(gas_percent_saved: f64) {
-    Metrics::instance(shared::metrics::get_metric_storage_registry())
+    AccessListMetrics::instance(shared::metrics::get_metric_storage_registry())
         .expect("unexpected error getting metrics instance")
         .access_list_gas_percent
         .observe(gas_percent_saved);
