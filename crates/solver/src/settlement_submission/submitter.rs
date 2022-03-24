@@ -558,8 +558,7 @@ async fn find_mined_transaction(web3: &Web3, hashes: &[H256]) -> Option<Transact
 #[derive(prometheus_metric_storage::MetricStorage, Clone, Debug)]
 #[metric(subsystem = "submission_strategies")]
 struct Metrics {
-    /// Tracks how many transactions get successfully submitted with the different submission
-    /// strategies.
+    /// Tracks how many transactions get successfully submitted with the different submission strategies.
     #[metric(labels("submitter", "result"))]
     submissions: prometheus::CounterVec,
 }
