@@ -13,7 +13,7 @@ use shared::{
     sources::{
         self,
         balancer_v2::{pool_fetching::BalancerContracts, BalancerFactoryKind, BalancerPoolFetcher},
-        uniswap_v2::{pool_cache::PoolCache, pool_fetching::PoolFetcher},
+        uniswap_v2::pool_cache::PoolCache,
         BaselineSource,
     },
     token_info::{CachedTokenInfoFetcher, TokenInfoFetcher},
@@ -30,6 +30,7 @@ use solver::{
     liquidity_collector::LiquidityCollector,
     metrics::Metrics,
     orderbook::OrderBookApi,
+    settlement_access_list::AccessListEstimatorType,
     settlement_submission::{
         submitter::{
             custom_nodes_api::CustomNodesApi, eden_api::EdenApi, flashbots_api::FlashbotsApi,
@@ -98,7 +99,7 @@ struct Arguments {
     #[clap(
         long,
         env,
-        default_value = "Naive,Baseline",
+        default_values = &["Naive", "Baseline"],
         arg_enum,
         ignore_case = true,
         use_value_delimiter = true
@@ -184,6 +185,21 @@ struct Arguments {
     )]
     transaction_strategy: Vec<TransactionStrategyArg>,
 
+    /// Which access list estimators to use. Multiple estimators are used in sequence if a previous one
+    /// fails. Individual estimators might support different networks.
+    /// `Tenderly`: supports every network.
+    /// `Web3`: supports every network.
+    #[clap(long, env, arg_enum, ignore_case = true, use_value_delimiter = true)]
+    access_list_estimators: Vec<AccessListEstimatorType>,
+
+    /// The URL for tenderly transaction simulation.
+    #[clap(long, env)]
+    tenderly_url: Option<Url>,
+
+    /// Tenderly requires api key to work. Optional since Tenderly could be skipped in access lists estimators.
+    #[clap(long, env)]
+    tenderly_api_key: Option<String>,
+
     /// The API endpoint of the Eden network for transaction submission.
     #[clap(long, env, default_value = "https://api.edennetwork.io/v1/rpc")]
     eden_api_url: Url,
@@ -239,11 +255,6 @@ struct Arguments {
     /// The RPC endpoints to use for submitting transaction to a custom set of nodes.
     #[clap(long, env, use_value_delimiter = true)]
     transaction_submission_nodes: Vec<Url>,
-
-    /// The configured addresses whose orders should be considered liquidity
-    /// and not to be included in the objective function by the HTTP solver.
-    #[clap(long, env, use_value_delimiter = true)]
-    liquidity_order_owners: Vec<H160>,
 
     /// Fee scaling factor for objective value. This controls the constant
     /// factor by which order fees are multiplied with. Setting this to a value
@@ -390,15 +401,14 @@ async fn main() {
     });
     tracing::info!(?baseline_sources, "using baseline sources");
     let pool_caches: HashMap<BaselineSource, Arc<PoolCache>> =
-        sources::pair_providers(&web3, &baseline_sources)
+        sources::uniswap_like_liquidity_sources(&web3, &baseline_sources)
             .await
-            .expect("failed to load baseline source pair providers")
+            .expect("failed to load baseline source uniswap liquidity")
             .into_iter()
-            .map(|(source, pair_provider)| {
-                let fetcher = Box::new(PoolFetcher::uniswap(pair_provider, web3.clone()));
+            .map(|(source, (_, pool_fetcher))| {
                 let pool_cache = PoolCache::new(
                     cache_config,
-                    fetcher,
+                    pool_fetcher,
                     current_block_stream.clone(),
                     metrics.clone(),
                 )
@@ -578,6 +588,17 @@ async fn main() {
             TransactionStrategyArg::DryRun => TransactionStrategy::DryRun,
         })
         .collect::<Vec<_>>();
+    let access_list_estimator = Arc::new(
+        solver::settlement_access_list::create_priority_estimator(
+            &client,
+            &web3,
+            args.access_list_estimators.as_slice(),
+            args.tenderly_url,
+            args.tenderly_api_key,
+        )
+        .await
+        .expect("failed to create access list estimator"),
+    );
     let solution_submitter = SolutionSubmitter {
         web3: web3.clone(),
         contract: settlement_contract.clone(),
@@ -587,11 +608,12 @@ async fn main() {
         retry_interval: args.submission_retry_interval_seconds,
         gas_price_cap: args.gas_price_cap,
         transaction_strategies,
+        access_list_estimator,
     };
     let api = OrderBookApi::new(args.orderbook_url, client.clone());
     let order_converter = OrderConverter {
         native_token: native_token_contract.clone(),
-        liquidity_order_owners: args.liquidity_order_owners.into_iter().collect(),
+        liquidity_order_owners: args.shared.liquidity_order_owners.into_iter().collect(),
         fee_objective_scaling_factor: args.fee_objective_scaling_factor,
     };
     let mut driver = Driver::new(

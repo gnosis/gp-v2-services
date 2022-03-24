@@ -1,6 +1,9 @@
 use anyhow::{anyhow, Context, Result};
 use clap::{ArgEnum, Parser};
-use contracts::{BalancerV2Vault, GPv2Settlement, IUniswapV3Factory, ERC20, WETH9};
+use contracts::{
+    BalancerV2Vault, CowProtocolToken, CowProtocolVirtualToken, GPv2Settlement, IUniswapV3Factory,
+    WETH9,
+};
 use ethcontract::errors::DeployError;
 use model::{
     app_id::AppId,
@@ -10,7 +13,7 @@ use model::{
 use orderbook::{
     account_balances::Web3BalanceFetcher,
     api::{order_validation::OrderValidator, post_quote::OrderQuoter},
-    cow_subsidy::{CowSubsidy, CowSubsidyImpl, FixedCowSubsidy},
+    cow_subsidy::{CowSubsidy, CowSubsidyImpl, FixedCowSubsidy, SubsidyTiers},
     database::{self, orders::OrderFilter, Postgres},
     event_updater::EventUpdater,
     fee::{FeeSubsidyConfiguration, MinFeeCalculator},
@@ -41,7 +44,6 @@ use shared::{
     paraswap_api::DefaultParaswapApi,
     price_estimation::{
         baseline::BaselinePriceEstimator,
-        buffered::BufferingPriceEstimator,
         competition::{CompetitionPriceEstimator, RacingCompetitionPriceEstimator},
         instrumented::InstrumentedPriceEstimator,
         native::NativePriceEstimator,
@@ -58,10 +60,7 @@ use shared::{
     sources::{
         self,
         balancer_v2::{pool_fetching::BalancerContracts, BalancerPoolFetcher},
-        uniswap_v2::{
-            pool_cache::PoolCache,
-            pool_fetching::{PoolFetcher, PoolFetching},
-        },
+        uniswap_v2::pool_cache::PoolCache,
         BaselineSource, PoolAggregator,
     },
     token_info::{CachedTokenInfoFetcher, TokenInfoFetcher},
@@ -181,17 +180,14 @@ struct Arguments {
     )]
     partner_additional_fee_factors: HashMap<AppId, f64>,
 
-    /// Fee factor as extra subsidy for cow token owners.
-    #[clap(long, env, default_value = "1", parse(try_from_str = shared::arguments::parse_unbounded_factor))]
-    cow_fee_factor: f64,
-
-    /// Address of the cow token used for extra subsidy.
+    /// Used to configure how much of the regular fee a user should pay based on their
+    /// COW + VCOW balance in base units on the current network.
+    ///
+    /// The expected format is "10:0.75,150:0.5" for 2 subsidy tiers.
+    /// A balance of [10,150) COW will cause you to pay 75% of the regular fee and a balance of
+    /// [150, inf) COW will cause you to pay 50% of the regular fee.
     #[clap(long, env)]
-    cow_token_address: Option<H160>,
-
-    /// Minimum cow token threshold to get the extra subsidy.
-    #[clap(long, env, default_value = "0")]
-    cow_threshold: f64,
+    cow_fee_factors: Option<SubsidyTiers>,
 
     /// The API endpoint to call the mip v2 solver for price estimation
     #[clap(long, env)]
@@ -282,6 +278,12 @@ async fn main() {
         metrics.clone(),
     );
     let web3 = web3::Web3::new(transport);
+    let current_block = web3
+        .eth()
+        .block_number()
+        .await
+        .expect("block_number")
+        .as_u64();
     let settlement_contract = GPv2Settlement::deployed(&web3)
         .await
         .expect("Couldn't load deployed settlement");
@@ -368,12 +370,13 @@ async fn main() {
         sources::defaults_for_chain(chain_id).expect("failed to get default baseline sources")
     });
     tracing::info!(?baseline_sources, "using baseline sources");
-    let pair_providers = sources::pair_providers(&web3, &baseline_sources)
-        .await
-        .expect("failed to load baseline source pair providers")
-        .values()
-        .cloned()
-        .collect::<Vec<_>>();
+    let (pair_providers, pool_fetchers): (Vec<_>, Vec<_>) =
+        sources::uniswap_like_liquidity_sources(&web3, &baseline_sources)
+            .await
+            .expect("failed to load baseline source pair providers")
+            .values()
+            .cloned()
+            .unzip();
 
     let base_tokens = Arc::new(BaseTokens::new(
         native_token.address(),
@@ -385,10 +388,10 @@ async fn main() {
     let unsupported_tokens = args.unsupported_tokens.clone();
 
     let mut finders: Vec<Arc<dyn TokenOwnerFinding>> = pair_providers
-        .iter()
+        .into_iter()
         .map(|provider| -> Arc<dyn TokenOwnerFinding> {
             Arc::new(UniswapLikePairProviderFinder {
-                inner: provider.clone(),
+                inner: provider,
                 base_tokens: base_tokens.tokens().iter().copied().collect(),
             })
         })
@@ -401,10 +404,15 @@ async fn main() {
         other => Some(other.unwrap()),
     };
     if let Some(contract) = uniswapv3_factory {
-        finders.push(Arc::new(UniswapV3Finder {
-            factory: contract,
-            base_tokens: base_tokens.tokens().iter().copied().collect(),
-        }));
+        finders.push(Arc::new(
+            UniswapV3Finder::new(
+                contract,
+                base_tokens.tokens().iter().copied().collect(),
+                current_block,
+            )
+            .await
+            .expect("create uniswapv3 finder"),
+        ));
     }
     let trace_call_detector = TraceCallDetector {
         web3: web3.clone(),
@@ -430,14 +438,7 @@ async fn main() {
             .await
             .unwrap();
 
-    let pool_aggregator = PoolAggregator {
-        pool_fetchers: pair_providers
-            .into_iter()
-            .map(|pair_provider| {
-                Arc::new(PoolFetcher::uniswap(pair_provider, web3.clone())) as Arc<dyn PoolFetching>
-            })
-            .collect(),
-    };
+    let pool_aggregator = PoolAggregator { pool_fetchers };
 
     let cache_config = CacheConfig {
         number_of_blocks_to_cache: args.shared.pool_cache_blocks,
@@ -449,7 +450,7 @@ async fn main() {
     let pool_fetcher = Arc::new(
         PoolCache::new(
             cache_config,
-            Box::new(pool_aggregator),
+            Arc::new(pool_aggregator),
             current_block_stream.clone(),
             metrics.clone(),
         )
@@ -507,19 +508,17 @@ async fn main() {
                 native_token.address(),
                 native_token_price_estimation_amount,
             )),
-            PriceEstimatorType::Paraswap => Box::new(ParaswapPriceEstimator {
-                paraswap: Arc::new(DefaultParaswapApi {
+            PriceEstimatorType::Paraswap => Box::new(ParaswapPriceEstimator::new(
+                Arc::new(DefaultParaswapApi {
                     client: client.clone(),
                     partner: args.shared.paraswap_partner.clone().unwrap_or_default(),
                 }),
-                token_info: token_info_fetcher.clone(),
-                disabled_paraswap_dexs: args.shared.disabled_paraswap_dexs.clone(),
-            }),
-            PriceEstimatorType::ZeroEx => Box::new(ZeroExPriceEstimator {
-                api: zeroex_api.clone(),
-            }),
-            PriceEstimatorType::Quasimodo => Box::new(QuasimodoPriceEstimator {
-                api: Arc::new(DefaultHttpSolverApi {
+                token_info_fetcher.clone(),
+                args.shared.disabled_paraswap_dexs.clone(),
+            )),
+            PriceEstimatorType::ZeroEx => Box::new(ZeroExPriceEstimator::new(zeroex_api.clone())),
+            PriceEstimatorType::Quasimodo => Box::new(QuasimodoPriceEstimator::new(
+                Arc::new(DefaultHttpSolverApi {
                     name: "quasimodo-price-estimator",
                     network_name: network_name.to_string(),
                     chain_id,
@@ -534,13 +533,13 @@ async fn main() {
                         use_internal_buffers: args.shared.quasimodo_uses_internal_buffers.into(),
                     },
                 }),
-                pools: pool_fetcher.clone(),
-                balancer_pools: balancer_pool_fetcher.clone(),
-                token_info: token_info_fetcher.clone(),
-                gas_info: gas_price_estimator.clone(),
-                native_token: native_token.address(),
-                base_tokens: base_tokens.clone(),
-            }),
+                pool_fetcher.clone(),
+                balancer_pool_fetcher.clone(),
+                token_info_fetcher.clone(),
+                gas_price_estimator.clone(),
+                native_token.address(),
+                base_tokens.clone(),
+            )),
             PriceEstimatorType::OneInch => Box::new(OneInchPriceEstimator::new(
                 one_inch_api.as_ref().unwrap().clone(),
                 args.shared.disabled_one_inch_protocols.clone(),
@@ -549,10 +548,7 @@ async fn main() {
 
         (
             estimator.name(),
-            Arc::new(BufferingPriceEstimator::new(Box::new(instrumented(
-                instance,
-                estimator.name(),
-            )))),
+            Arc::new(instrumented(instance, estimator.name())),
         )
     };
 
@@ -606,13 +602,32 @@ async fn main() {
         Some(args.native_price_cache_max_update_size),
     );
 
-    let cow_subsidy = match args.cow_token_address {
-        Some(address) => Arc::new(CowSubsidyImpl::new(
-            ERC20::at(&web3, address),
-            U256::from_f64_lossy(args.cow_threshold),
-            args.cow_fee_factor,
-        )) as Arc<dyn CowSubsidy>,
-        None => Arc::new(FixedCowSubsidy(1.0)) as Arc<dyn CowSubsidy>,
+    let cow_token = match CowProtocolToken::deployed(&web3).await {
+        Err(DeployError::NotFound(_)) => None,
+        other => Some(other.unwrap()),
+    };
+    let cow_vtoken = match CowProtocolVirtualToken::deployed(&web3).await {
+        Err(DeployError::NotFound(_)) => None,
+        other => Some(other.unwrap()),
+    };
+    let cow_tokens = match (cow_token, cow_vtoken) {
+        (None, None) => None,
+        (Some(token), Some(vtoken)) => Some((token, vtoken)),
+        _ => panic!("should either have both cow token contracts or none"),
+    };
+    let cow_subsidy = match cow_tokens {
+        Some((token, vtoken)) => {
+            tracing::debug!("using cow token contracts for subsidy");
+            Arc::new(CowSubsidyImpl::new(
+                token,
+                vtoken,
+                args.cow_fee_factors.unwrap_or_default(),
+            )) as Arc<dyn CowSubsidy>
+        }
+        None => {
+            tracing::debug!("disabling cow subsidy because contracts not found on network");
+            Arc::new(FixedCowSubsidy(1.0)) as Arc<dyn CowSubsidy>
+        }
     };
 
     let create_fee_calculator = |price_estimator: Arc<dyn PriceEstimating>| {
@@ -629,6 +644,7 @@ async fn main() {
             },
             native_price_estimator.clone(),
             cow_subsidy.clone(),
+            args.shared.liquidity_order_owners.iter().copied().collect(),
         ))
     };
     let fee_calculator = create_fee_calculator(price_estimator.clone());
@@ -651,7 +667,8 @@ async fn main() {
     let order_validator = Arc::new(OrderValidator::new(
         Box::new(web3.clone()),
         native_token.clone(),
-        args.banned_users,
+        args.banned_users.into_iter().collect(),
+        args.shared.liquidity_order_owners.into_iter().collect(),
         args.min_order_validity_period,
         fee_calculator.clone(),
         bad_token_detector.clone(),
