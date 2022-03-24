@@ -89,13 +89,14 @@ fn merge_at_most_settlements(
     }
 }
 
-/// Filters out all settlements without any orders which are mature by age or mature by association.
-/// Any order older than `min_order_age` is considered to be mature by age.
-/// Any younger order in a settlement containing an order mature by age or mature by association
+/// Filters out all settlements without any user order which is mature by age or mature by association.
+/// Any user order older than `min_order_age` is considered to be mature by age.
+/// Any younger user order in a settlement containing a user order mature by age or mature by association
 /// is considered to be mature by association.
+/// Old liquidity orders can not contribute to the maturity of a settlement.
 /// Because maturity by association is defined recursively it can "spread" across settlements,
 /// resulting in settlements being allowed where it's not immediately obvious by which association
-/// any order of a settlement has matured.
+/// any user order of a settlement has matured.
 pub fn retain_mature_settlements(
     min_order_age: Duration,
     settlements: Vec<Settlement>,
