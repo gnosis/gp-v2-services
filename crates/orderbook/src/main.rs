@@ -178,7 +178,7 @@ struct Arguments {
     partner_additional_fee_factors: HashMap<AppId, f64>,
 
     /// Used to configure how much of the regular fee a user should pay based on their
-    /// COW + VCOW balance of the current network.
+    /// COW + VCOW balance in base units on the current network.
     ///
     /// The expected format is "10:0.75,150:0.5" for 2 subsidy tiers.
     /// A balance of [10,150) COW will cause you to pay 75% of the regular fee and a balance of
