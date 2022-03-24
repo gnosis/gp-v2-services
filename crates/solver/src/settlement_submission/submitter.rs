@@ -489,7 +489,6 @@ impl<'a> Submitter<'a> {
             gas_before_access_list > gas_after_access_list,
             "access list exist but does not lower the gas usage"
         );
-        ensure!(gas_before_access_list > U256::zero(), "bad gas estimation");
         let gas_percent_saved = (gas_before_access_list.to_f64_lossy()
             - gas_after_access_list.to_f64_lossy())
             / gas_before_access_list.to_f64_lossy()
