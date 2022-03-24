@@ -344,6 +344,8 @@ impl<'a> Submitter<'a> {
             .await
             .unwrap_or(None);
 
+        let mut access_list: Option<AccessList> = None;
+
         loop {
             let submission_status = self
                 .submit_api
@@ -381,6 +383,22 @@ impl<'a> Submitter<'a> {
             let method = self
                 .build_method(settlement.clone(), &gas_price, nonce, gas_limit)
                 .await;
+
+            // append access list
+
+            let method = match access_list.as_ref() {
+                Some(access_list) => method.access_list(access_list.clone()),
+                None => match self.estimate_access_list(&method.tx).await {
+                    Ok(new_access_list) => {
+                        access_list = Some(new_access_list.clone());
+                        method.access_list(new_access_list)
+                    }
+                    Err(err) => {
+                        tracing::info!("access list not created, reason: {:?}", err);
+                        method
+                    }
+                },
+            };
 
             // simulate transaction
 
@@ -450,17 +468,10 @@ impl<'a> Submitter<'a> {
         nonce: U256,
         gas_limit: f64,
     ) -> MethodBuilder<DynTransport, ()> {
-        let method = settle_method_builder(self.contract, settlement.into(), self.account.clone())
+        settle_method_builder(self.contract, settlement.into(), self.account.clone())
             .nonce(nonce)
             .gas(U256::from_f64_lossy(gas_limit))
-            .gas_price(crate::into_gas_price(gas_price));
-        match self.estimate_access_list(&method.tx).await {
-            Ok(access_list) => method.access_list(access_list),
-            Err(err) => {
-                tracing::info!("access list not used, reason: {:?}", err);
-                method
-            }
-        }
+            .gas_price(crate::into_gas_price(gas_price))
     }
 
     /// Estimate access list and validate
@@ -474,16 +485,22 @@ impl<'a> Submitter<'a> {
             tx.clone().access_list(access_list.clone()).estimate_gas()
         )?;
 
+        ensure!(
+            gas_before_access_list > gas_after_access_list && gas_before_access_list > U256::zero(),
+            "access list exist but does not lower the gas usage or bad gas estimat"
+        );
+        let gas_percent_saved = (gas_before_access_list.to_f64_lossy()
+            - gas_after_access_list.to_f64_lossy())
+            / gas_before_access_list.to_f64_lossy()
+            * 100.;
         tracing::debug!(
-            "gas before/after access list: {}/{}, access_list: {:?}",
+            "gas before/after access list: {}/{}, access_list: {:?}, gas percent saved: {}",
             gas_before_access_list,
             gas_after_access_list,
             access_list,
+            gas_percent_saved
         );
-        ensure!(
-            gas_before_access_list > gas_after_access_list,
-            "access list exist but does not lower the gas usage"
-        );
+        track_access_list_gas_saved(gas_percent_saved);
         Ok(access_list)
     }
 
@@ -561,6 +578,10 @@ struct Metrics {
     /// Tracks how many transactions get successfully submitted with the different submission strategies.
     #[metric(labels("submitter", "result"))]
     submissions: prometheus::CounterVec,
+
+    /// Tracks how much gas in percent is saved by using access list.
+    #[metric(labels("access_list_gas_percent_saved"))]
+    access_list_gas_percent: prometheus::Histogram,
 }
 
 pub(crate) fn track_submission_success(submitter: &str, was_successful: bool) {
@@ -570,6 +591,13 @@ pub(crate) fn track_submission_success(submitter: &str, was_successful: bool) {
         .submissions
         .with_label_values(&[submitter, result])
         .inc();
+}
+
+fn track_access_list_gas_saved(gas_percent_saved: f64) {
+    Metrics::instance(shared::metrics::get_metric_storage_registry())
+        .expect("unexpected error getting metrics instance")
+        .access_list_gas_percent
+        .observe(gas_percent_saved);
 }
 
 #[cfg(test)]
