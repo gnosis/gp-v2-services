@@ -64,6 +64,12 @@ where
     fn encode(&self, execution: L::Execution, encoder: &mut SettlementEncoder) -> Result<()>;
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Exchange {
+    GnosisProtocol,
+    ZeroEx,
+}
+
 /// Basic limit sell and buy orders
 #[derive(Clone)]
 #[cfg_attr(test, derive(Derivative))]
@@ -88,11 +94,7 @@ pub struct LimitOrder {
     pub is_liquidity_order: bool,
     #[cfg_attr(test, derivative(PartialEq = "ignore"))]
     pub settlement_handling: Arc<dyn SettlementHandling<Self>>,
-    /// Signals if the order will be executed as an atomic unit. In that case the order's
-    /// preconditions have to be met for it to be executed successfully. This is different from the
-    /// usual user provided orders because those can be batched together and it's only relevant if
-    /// the pre- and post conditions are met after the complete batch got executed.
-    pub has_atomic_execution: bool,
+    pub exchange: Exchange,
 }
 
 impl std::fmt::Debug for LimitOrder {
@@ -143,7 +145,7 @@ impl Default for LimitOrder {
             settlement_handling: tests::CapturingSettlementHandler::arc(),
             is_liquidity_order: false,
             id: Default::default(),
-            has_atomic_execution: false,
+            exchange: Exchange::GnosisProtocol,
         }
     }
 }

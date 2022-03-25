@@ -4,7 +4,7 @@ pub mod settlement;
 use self::settlement::SettlementContext;
 use crate::{
     interactions::allowances::AllowanceManaging,
-    liquidity::{LimitOrder, Liquidity},
+    liquidity::{Exchange, LimitOrder, Liquidity},
     settlement::{external_prices::ExternalPrices, Settlement},
     solver::{Auction, Solver},
 };
@@ -228,6 +228,11 @@ fn order_models(
                 return None;
             }
 
+            let cost = match order.exchange {
+                Exchange::GnosisProtocol => gas_model.gp_order_cost(),
+                Exchange::ZeroEx => gas_model.zeroex_order_cost(),
+            };
+
             Some((
                 index,
                 OrderModel {
@@ -238,10 +243,10 @@ fn order_models(
                     allow_partial_fill: order.partially_fillable,
                     is_sell_order: matches!(order.kind, OrderKind::Sell),
                     fee: order_fee(order),
-                    cost: gas_model.order_cost(),
+                    cost,
                     is_liquidity_order: order.is_liquidity_order,
                     mandatory: false,
-                    has_atomic_execution: order.has_atomic_execution,
+                    has_atomic_execution: matches!(order.exchange, Exchange::ZeroEx),
                 },
             ))
         })

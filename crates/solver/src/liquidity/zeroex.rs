@@ -1,6 +1,6 @@
 use super::SettlementHandling;
 use crate::interactions::ZeroExInteraction;
-use crate::liquidity::{LimitOrder, Liquidity};
+use crate::liquidity::{Exchange, LimitOrder, Liquidity};
 use crate::settlement::SettlementEncoder;
 use anyhow::Result;
 use contracts::IZeroEx;
@@ -48,7 +48,7 @@ impl ZeroExLiquidity {
                 order: record.order,
                 zeroex: self.zeroex.clone(),
             }),
-            has_atomic_execution: true,
+            exchange: Exchange::ZeroEx,
         };
         Some(Liquidity::LimitOrder(limit_order))
     }
