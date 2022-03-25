@@ -221,13 +221,11 @@ impl Driver {
 
     async fn metric_access_list_gas_saved(&self, transaction_hash: H256) -> Result<()> {
         ensure!(self.tenderly.is_some(), "tenderly disabled");
-        let gas_saved = simulate_before_after_access_list(
-            &self.web3,
-            self.tenderly.as_ref().unwrap(),
-            self.network_id.clone(),
-            transaction_hash,
-        )
-        .await?;
+        let web3 = &self.web3;
+        let tenderly = self.tenderly.as_ref().unwrap();
+        let network_id = self.network_id.clone();
+        let gas_saved =
+            simulate_before_after_access_list(web3, tenderly, network_id, transaction_hash).await?;
         self.metrics.settlement_access_list_saved_gas(gas_saved);
         Ok(())
     }

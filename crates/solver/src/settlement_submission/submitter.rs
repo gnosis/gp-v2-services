@@ -500,7 +500,6 @@ impl<'a> Submitter<'a> {
             access_list,
             gas_percent_saved
         );
-        track_access_list_gas_saved(gas_percent_saved);
         Ok(access_list)
     }
 
@@ -589,21 +588,6 @@ pub(crate) fn track_submission_success(submitter: &str, was_successful: bool) {
         .inc();
 }
 
-#[derive(prometheus_metric_storage::MetricStorage, Clone, Debug)]
-#[metric(subsystem = "submission_strategies")]
-struct AccessListMetrics {
-    /// Tracks how much gas in percent is saved by using access list.
-    #[metric(labels("access_list_gas_percent_saved"))]
-    access_list_gas_percent: prometheus::Histogram,
-}
-
-fn track_access_list_gas_saved(gas_percent_saved: f64) {
-    AccessListMetrics::instance(shared::metrics::get_metric_storage_registry())
-        .expect("unexpected error getting metrics instance")
-        .access_list_gas_percent
-        .observe(gas_percent_saved);
-}
-
 #[cfg(test)]
 mod tests {
 
@@ -660,6 +644,7 @@ mod tests {
                 &[AccessListEstimatorType::Web3],
                 None,
                 None,
+                "1".to_string(),
             )
             .await
             .unwrap(),
