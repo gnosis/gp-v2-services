@@ -106,7 +106,7 @@ pub fn retain_mature_settlements(
 ) -> Vec<(Arc<dyn Solver>, Settlement)> {
     fn find_mature_settlements(
         min_order_age: Duration,
-        settlements: &[Settlement],
+        settlements: &[(Arc<dyn Solver>, Settlement)],
     ) -> HashSet<usize> {
         let settle_orders_older_than =
             chrono::offset::Utc::now() - chrono::Duration::from_std(min_order_age).unwrap();
@@ -117,7 +117,7 @@ pub fn retain_mature_settlements(
         loop {
             let mut new_order_added = false;
 
-            for (index, settlement) in settlements.iter().enumerate() {
+            for (index, (_, settlement)) in settlements.iter().enumerate() {
                 if valid_settlement_indices.contains(&index) {
                     break;
                 }
@@ -145,25 +145,13 @@ pub fn retain_mature_settlements(
         }
     }
 
-    let valid_settlement_indices = find_mature_settlements(
-        min_order_age,
-        &solver_settlements_into_settlements(&settlements),
-    );
+    let valid_settlement_indices = find_mature_settlements(min_order_age, &settlements);
 
     settlements
         .into_iter()
         .enumerate()
         .filter(|(index, _)| valid_settlement_indices.contains(index))
         .map(|(_, item)| item)
-        .collect()
-}
-
-fn solver_settlements_into_settlements(
-    solver_settlements: &[(Arc<dyn Solver>, Settlement)],
-) -> Vec<Settlement> {
-    solver_settlements
-        .iter()
-        .map(|(_, settlement)| settlement.clone())
         .collect()
 }
 
@@ -221,6 +209,15 @@ mod tests {
         settlements
             .into_iter()
             .map(|settlement| (dummy_arc_solver(), settlement))
+            .collect()
+    }
+
+    fn solver_settlements_into_settlements(
+        solver_settlements: &[(Arc<dyn Solver>, Settlement)],
+    ) -> Vec<Settlement> {
+        solver_settlements
+            .iter()
+            .map(|(_, settlement)| settlement.clone())
             .collect()
     }
 
