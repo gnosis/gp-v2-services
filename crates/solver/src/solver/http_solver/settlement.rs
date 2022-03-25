@@ -124,9 +124,14 @@ impl IntermediateSettlement {
         for order in self.executed_limit_orders {
             settlement.with_liquidity(&order.order, order.executed_amount())?;
         }
+
+        // Make sure to always add approval interactions **before** any
+        // interactions from the execution plan - the execution plan typically
+        // consists of AMM swaps that require these approvals to be in place.
         for approval in self.approvals {
             settlement.encoder.append_to_execution_plan(approval);
         }
+
         for execution in self.executions {
             match execution {
                 Execution::ExecutionAmm(executed_amm) => {
