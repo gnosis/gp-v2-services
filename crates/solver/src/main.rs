@@ -280,6 +280,10 @@ struct Arguments {
     /// but at the same time we don't restrict solutions sizes too much
     #[clap(long, env, default_value = "15000000")]
     simulation_gas_limit: u128,
+
+    /// Controls whether 0x limit orders will be used as additional liquidity.
+    #[clap(long, env)]
+    with_zeroex_liquidity: bool,
 }
 
 #[derive(Copy, Clone, Debug, clap::ArgEnum)]
@@ -522,7 +526,7 @@ async fn main() {
     )
     .expect("failure creating solvers");
 
-    let zeroex_liquidity = if chain_id == 1 {
+    let zeroex_liquidity = if args.with_zeroex_liquidity {
         Some(ZeroExLiquidity {
             api: zeroex_api,
             zeroex: contracts::IZeroEx::deployed(&web3).await.unwrap(),
