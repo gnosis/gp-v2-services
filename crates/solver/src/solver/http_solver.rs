@@ -246,7 +246,7 @@ fn order_models(
                     cost,
                     is_liquidity_order: order.is_liquidity_order,
                     mandatory: false,
-                    has_atomic_execution: matches!(order.exchange, Exchange::ZeroEx),
+                    has_atomic_execution: !matches!(order.exchange, Exchange::GnosisProtocol),
                 },
             ))
         })
