@@ -31,6 +31,7 @@ use solver::{
     metrics::Metrics,
     orderbook::OrderBookApi,
     settlement_access_list::AccessListEstimatorType,
+    settlement_simulation::TenderlyApi,
     settlement_submission::{
         submitter::{
             custom_nodes_api::CustomNodesApi, eden_api::EdenApi, flashbots_api::FlashbotsApi,
@@ -593,8 +594,9 @@ async fn main() {
             &client,
             &web3,
             args.access_list_estimators.as_slice(),
-            args.tenderly_url,
-            args.tenderly_api_key,
+            args.tenderly_url.clone(),
+            args.tenderly_api_key.clone(),
+            network_id.clone(),
         )
         .await
         .expect("failed to create access list estimator"),
@@ -616,6 +618,15 @@ async fn main() {
         liquidity_order_owners: args.shared.liquidity_order_owners.into_iter().collect(),
         fee_objective_scaling_factor: args.fee_objective_scaling_factor,
     };
+    let tenderly = {
+        if let Some(tenderly_url) = args.tenderly_url {
+            if let Some(tenderly_api_key) = args.tenderly_api_key.as_ref() {
+                TenderlyApi::new(tenderly_url, client.clone(), tenderly_api_key).ok();
+            }
+        }
+        None
+    };
+
     let mut driver = Driver::new(
         settlement_contract,
         liquidity_collector,
@@ -638,6 +649,7 @@ async fn main() {
         args.weth_unwrap_factor,
         args.simulation_gas_limit,
         args.fee_objective_scaling_factor,
+        tenderly,
     );
 
     let maintainer = ServiceMaintenance {
