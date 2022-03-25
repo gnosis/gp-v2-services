@@ -492,6 +492,7 @@ impl Driver {
             }
         }
 
+        // filters out all non-mature settlements
         let solver_settlements =
             solver_settlements::retain_mature_settlements(self.min_order_age, solver_settlements);
 
