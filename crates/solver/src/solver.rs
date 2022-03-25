@@ -184,6 +184,10 @@ pub fn create(
         web3.clone(),
         settlement_contract.address(),
     ));
+    let allowance_mananger = Arc::new(AllowanceManager::new(
+        web3.clone(),
+        settlement_contract.address(),
+    ));
     let http_solver_cache = http_solver::InstanceCache::default();
     // Helper function to create http solver instances.
     let create_http_solver =
@@ -201,6 +205,7 @@ pub fn create(
                 native_token,
                 token_info_fetcher.clone(),
                 buffer_retriever.clone(),
+                allowance_mananger.clone(),
                 http_solver_cache.clone(),
             )
         };
@@ -298,10 +303,7 @@ pub fn create(
                             balancer_sor_url.clone(),
                             chain_id,
                         )?),
-                        Arc::new(AllowanceManager::new(
-                            web3.clone(),
-                            settlement_contract.address(),
-                        )),
+                        allowance_mananger.clone(),
                     ),
                     solver_metrics.clone(),
                 )),
@@ -378,6 +380,26 @@ impl Solver for SellVolumeFilteringSolver {
     fn name(&self) -> &'static str {
         self.inner.name()
     }
+}
+
+#[cfg(test)]
+struct DummySolver;
+#[cfg(test)]
+#[async_trait::async_trait]
+impl Solver for DummySolver {
+    async fn solve(&self, _: Auction) -> Result<Vec<Settlement>> {
+        todo!()
+    }
+    fn account(&self) -> &ethcontract::Account {
+        todo!()
+    }
+    fn name(&self) -> &'static str {
+        "DummySolver"
+    }
+}
+#[cfg(test)]
+pub fn dummy_arc_solver() -> Arc<dyn Solver> {
+    Arc::new(DummySolver)
 }
 
 #[cfg(test)]
