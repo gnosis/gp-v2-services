@@ -1,6 +1,9 @@
 use anyhow::{anyhow, Context, Result};
 use clap::{ArgEnum, Parser};
-use contracts::{BalancerV2Vault, GPv2Settlement, IUniswapV3Factory, ERC20, WETH9};
+use contracts::{
+    BalancerV2Vault, CowProtocolToken, CowProtocolVirtualToken, GPv2Settlement, IUniswapV3Factory,
+    WETH9,
+};
 use ethcontract::errors::DeployError;
 use model::{
     app_id::AppId,
@@ -177,17 +180,14 @@ struct Arguments {
     )]
     partner_additional_fee_factors: HashMap<AppId, f64>,
 
-    /// Used to configure how much of the regular fee a user should pay based on their COW balance.
+    /// Used to configure how much of the regular fee a user should pay based on their
+    /// COW + VCOW balance in base units on the current network.
     ///
-    /// The expected format is "10.2:0.75,150:0.5" for 2 subsidy tiers.
-    /// A balance of [10.2,150) COW will cause you to pay 75% of the regular fee and a balance of
+    /// The expected format is "10:0.75,150:0.5" for 2 subsidy tiers.
+    /// A balance of [10,150) COW will cause you to pay 75% of the regular fee and a balance of
     /// [150, inf) COW will cause you to pay 50% of the regular fee.
     #[clap(long, env)]
     cow_fee_factors: Option<SubsidyTiers>,
-
-    /// Address of the cow token used for extra subsidy.
-    #[clap(long, env)]
-    cow_token_address: Option<H160>,
 
     /// The API endpoint to call the mip v2 solver for price estimation
     #[clap(long, env)]
@@ -278,6 +278,12 @@ async fn main() {
         metrics.clone(),
     );
     let web3 = web3::Web3::new(transport);
+    let current_block = web3
+        .eth()
+        .block_number()
+        .await
+        .expect("block_number")
+        .as_u64();
     let settlement_contract = GPv2Settlement::deployed(&web3)
         .await
         .expect("Couldn't load deployed settlement");
@@ -398,10 +404,15 @@ async fn main() {
         other => Some(other.unwrap()),
     };
     if let Some(contract) = uniswapv3_factory {
-        finders.push(Arc::new(UniswapV3Finder {
-            factory: contract,
-            base_tokens: base_tokens.tokens().iter().copied().collect(),
-        }));
+        finders.push(Arc::new(
+            UniswapV3Finder::new(
+                contract,
+                base_tokens.tokens().iter().copied().collect(),
+                current_block,
+            )
+            .await
+            .expect("create uniswapv3 finder"),
+        ));
     }
     let trace_call_detector = TraceCallDetector {
         web3: web3.clone(),
@@ -591,12 +602,32 @@ async fn main() {
         Some(args.native_price_cache_max_update_size),
     );
 
-    let cow_subsidy = match args.cow_token_address {
-        Some(address) => Arc::new(CowSubsidyImpl::new(
-            ERC20::at(&web3, address),
-            args.cow_fee_factors.unwrap_or_default(),
-        )) as Arc<dyn CowSubsidy>,
-        None => Arc::new(FixedCowSubsidy(1.0)) as Arc<dyn CowSubsidy>,
+    let cow_token = match CowProtocolToken::deployed(&web3).await {
+        Err(DeployError::NotFound(_)) => None,
+        other => Some(other.unwrap()),
+    };
+    let cow_vtoken = match CowProtocolVirtualToken::deployed(&web3).await {
+        Err(DeployError::NotFound(_)) => None,
+        other => Some(other.unwrap()),
+    };
+    let cow_tokens = match (cow_token, cow_vtoken) {
+        (None, None) => None,
+        (Some(token), Some(vtoken)) => Some((token, vtoken)),
+        _ => panic!("should either have both cow token contracts or none"),
+    };
+    let cow_subsidy = match cow_tokens {
+        Some((token, vtoken)) => {
+            tracing::debug!("using cow token contracts for subsidy");
+            Arc::new(CowSubsidyImpl::new(
+                token,
+                vtoken,
+                args.cow_fee_factors.unwrap_or_default(),
+            )) as Arc<dyn CowSubsidy>
+        }
+        None => {
+            tracing::debug!("disabling cow subsidy because contracts not found on network");
+            Arc::new(FixedCowSubsidy(1.0)) as Arc<dyn CowSubsidy>
+        }
     };
 
     let create_fee_calculator = |price_estimator: Arc<dyn PriceEstimating>| {

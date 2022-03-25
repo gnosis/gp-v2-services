@@ -2,8 +2,10 @@ use std::{sync::Mutex, time::Duration};
 
 use anyhow::{Context, Result};
 use cached::{Cached, TimedSizedCache};
-use contracts::ERC20;
+use contracts::{CowProtocolToken, CowProtocolVirtualToken};
+use ethcontract::Web3;
 use primitive_types::{H160, U256};
+use shared::transport::buffered::{Buffered, Configuration};
 use std::collections::BTreeMap;
 
 const CACHE_SIZE: usize = 10_000;
@@ -47,10 +49,12 @@ impl std::str::FromStr for SubsidyTiers {
                 .split_once(':')
                 .with_context(|| format!("too few arguments for subsidy tier in \"{}\"", tier))?;
 
-            let threshold: f64 = threshold
+            let threshold: u64 = threshold
                 .parse()
-                .with_context(|| format!("can not parse threshold \"{}\" as f64", threshold))?;
-            let threshold = U256::from_f64_lossy(threshold * 1e18);
+                .with_context(|| format!("can not parse threshold \"{}\" as u64", threshold))?;
+            let threshold = U256::from(threshold)
+                .checked_mul(U256::exp10(18))
+                .with_context(|| format!("threshold {threshold} would overflow U256"))?;
 
             let fee_factor: f64 = fee_factor
                 .parse()
@@ -71,7 +75,8 @@ impl std::str::FromStr for SubsidyTiers {
 }
 
 pub struct CowSubsidyImpl {
-    cow_token: ERC20,
+    token: CowProtocolToken,
+    vtoken: CowProtocolVirtualToken,
     subsidy_tiers: SubsidyTiers,
     cache: Mutex<TimedSizedCache<H160, f64>>,
 }
@@ -89,7 +94,11 @@ impl CowSubsidy for CowSubsidyImpl {
 }
 
 impl CowSubsidyImpl {
-    pub fn new(cow_token: ERC20, subsidy_tiers: SubsidyTiers) -> Self {
+    pub fn new(
+        token: CowProtocolToken,
+        vtoken: CowProtocolVirtualToken,
+        subsidy_tiers: SubsidyTiers,
+    ) -> Self {
         // NOTE: A long caching time might bite us should we ever start advertising that people can
         // buy COW to reduce their fees. `CACHE_LIFESPAN` would have to pass after buying COW to
         // qualify for the subsidy.
@@ -99,17 +108,39 @@ impl CowSubsidyImpl {
             false,
         );
 
+        // Create buffered transport to do the two calls we make per user in one batch.
+        let transport = token.raw_instance().web3().transport().clone();
+        let buffered = Buffered::with_config(
+            transport,
+            Configuration {
+                max_concurrent_requests: None,
+                max_batch_len: 2,
+                batch_delay: Duration::from_secs(1),
+            },
+        );
+        let web3 = Web3::new(buffered);
+        let token = CowProtocolToken::at(&web3, token.address());
+        let vtoken = CowProtocolVirtualToken::at(&web3, vtoken.address());
+
         Self {
-            cow_token,
+            token,
+            vtoken,
             subsidy_tiers,
             cache: Mutex::new(cache),
         }
     }
 
     async fn subsidy_factor_uncached(&self, user: H160) -> Result<f64> {
-        let balance = self.cow_token.balance_of(user).call().await?;
-        let tier = self.subsidy_tiers.0.range(..=balance).rev().next();
-        Ok(tier.map(|tier| *tier.1).unwrap_or(1.0))
+        let (balance, vbalance) = futures::future::try_join(
+            self.token.balance_of(user).call(),
+            self.vtoken.balance_of(user).call(),
+        )
+        .await?;
+        let combined = balance.saturating_add(vbalance);
+        let tier = self.subsidy_tiers.0.range(..=combined).rev().next();
+        let factor = tier.map(|tier| *tier.1).unwrap_or(1.0);
+        tracing::debug!(?user, ?balance, ?vbalance, ?combined, ?factor);
+        Ok(factor)
     }
 }
 
@@ -122,16 +153,23 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn mainnet() {
+        shared::tracing::initialize_for_tests("orderbook=debug");
         let transport = shared::transport::create_env_test_transport();
         let web3 = Web3::new(transport);
-        let token = H160(hex!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"));
-        let token = ERC20::at(&web3, token);
+        let token = CowProtocolToken::deployed(&web3).await.unwrap();
+        let vtoken = CowProtocolVirtualToken::deployed(&web3).await.unwrap();
         let subsidy = CowSubsidyImpl::new(
             token,
+            vtoken,
             SubsidyTiers([(U256::from_f64_lossy(1e18), 0.5)].into_iter().collect()),
         );
-        for i in 0..2 {
-            let user = H160::from_low_u64_be(i);
+        //
+        for user in [
+            hex!("0000000000000000000000000000000000000000"),
+            hex!("ca07eaa4253638d286cad71cbceec11803f2709a"),
+            hex!("de1c59bc25d806ad9ddcbe246c4b5e5505645718"),
+        ] {
+            let user = H160(user);
             let result = subsidy.cow_subsidy_factor(user).await;
             println!("{:?} {:?}", user, result);
         }
