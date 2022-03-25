@@ -522,7 +522,7 @@ async fn main() {
     )
     .expect("failure creating solvers");
 
-    let zeroex_liquidity = if chain_id == 1 {
+    let zeroex_liquidity = if baseline_sources.contains(&BaselineSource::ZeroEx) {
         Some(ZeroExLiquidity {
             api: zeroex_api,
             zeroex: contracts::IZeroEx::deployed(&web3).await.unwrap(),
@@ -694,6 +694,7 @@ async fn build_amm_artifacts(
                 .expect("couldn't load deployed Swapr router")
                 .address(),
             BaselineSource::BalancerV2 => continue,
+            BaselineSource::ZeroEx => continue,
         };
         res.push(UniswapLikeLiquidity::new(
             IUniswapLikeRouter::at(&web3, router_address),
