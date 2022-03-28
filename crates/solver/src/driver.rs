@@ -14,7 +14,7 @@ use crate::{
     settlement_submission::SolutionSubmitter,
     solver::{Auction, SettlementWithError, SettlementWithSolver, Solver, Solvers},
 };
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result};
 use contracts::GPv2Settlement;
 use futures::future::join_all;
 use gas_estimation::{EstimatedGasPrice, GasPriceEstimating};
@@ -220,12 +220,13 @@ impl Driver {
     }
 
     async fn metric_access_list_gas_saved(&self, transaction_hash: H256) -> Result<()> {
-        ensure!(self.tenderly.is_some(), "tenderly disabled");
-        let web3 = &self.web3;
-        let tenderly = self.tenderly.as_ref().unwrap();
-        let network_id = self.network_id.clone();
-        let gas_saved =
-            simulate_before_after_access_list(web3, tenderly, network_id, transaction_hash).await?;
+        let gas_saved = simulate_before_after_access_list(
+            &self.web3,
+            self.tenderly.as_ref().context("tenderly disabled")?,
+            self.network_id.clone(),
+            transaction_hash,
+        )
+        .await?;
         self.metrics.settlement_access_list_saved_gas(gas_saved);
         Ok(())
     }
