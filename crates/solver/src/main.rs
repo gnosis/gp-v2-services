@@ -618,14 +618,10 @@ async fn main() {
         liquidity_order_owners: args.shared.liquidity_order_owners.into_iter().collect(),
         fee_objective_scaling_factor: args.fee_objective_scaling_factor,
     };
-    let tenderly = {
-        if let Some(tenderly_url) = args.tenderly_url {
-            if let Some(tenderly_api_key) = args.tenderly_api_key.as_ref() {
-                TenderlyApi::new(tenderly_url, client.clone(), tenderly_api_key).ok();
-            }
-        }
-        None
-    };
+    let tenderly = args
+        .tenderly_url
+        .zip(args.tenderly_api_key)
+        .and_then(|(url, api_key)| TenderlyApi::new(url, client.clone(), &api_key).ok());
 
     let mut driver = Driver::new(
         settlement_contract,
