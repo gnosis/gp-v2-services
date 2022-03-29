@@ -156,9 +156,10 @@ impl SettledBatchAuctionModel {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Default)]
 pub struct MetadataModel {
     pub environment: Option<String>,
+    pub auction_id: Option<u64>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -386,6 +387,7 @@ mod tests {
             },
             metadata: Some(MetadataModel {
                 environment: Some(String::from("Such Meta")),
+                auction_id: None,
             }),
         };
 
