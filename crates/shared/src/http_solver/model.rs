@@ -485,6 +485,7 @@ mod tests {
           },
           "metadata": {
             "environment": "Such Meta",
+            "auction_id": null,
           },
         });
         assert_eq!(result, expected);
