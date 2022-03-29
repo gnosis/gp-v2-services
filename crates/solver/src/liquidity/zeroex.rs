@@ -43,7 +43,6 @@ impl ZeroExLiquidity {
             partially_fillable: true,
             unscaled_subsidized_fee: U256::zero(),
             scaled_unsubsidized_fee: U256::zero(),
-            actual_fee_amount: U256::zero(),
             is_liquidity_order: true,
             settlement_handling: Arc::new(OrderSettlementHandler {
                 order: record.order,
