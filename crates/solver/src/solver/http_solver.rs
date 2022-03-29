@@ -176,7 +176,7 @@ fn map_tokens_for_solver(orders: &[LimitOrder], liquidity: &[Liquidity]) -> Vec<
 
 fn order_fee(order: &LimitOrder) -> FeeModel {
     let amount = match order.is_liquidity_order {
-        true => U256::zero(),
+        true => order.actual_fee_amount,
         false => order.scaled_unsubsidized_fee,
     };
     FeeModel {

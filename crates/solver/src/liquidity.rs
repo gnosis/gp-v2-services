@@ -91,6 +91,7 @@ pub struct LimitOrder {
     /// factor to make matching orders more valuable from an objective value
     /// perspective.
     pub scaled_unsubsidized_fee: U256,
+    pub actual_fee_amount: U256,
     pub is_liquidity_order: bool,
     #[cfg_attr(test, derivative(PartialEq = "ignore"))]
     pub settlement_handling: Arc<dyn SettlementHandling<Self>>,
@@ -142,6 +143,7 @@ impl Default for LimitOrder {
             partially_fillable: Default::default(),
             unscaled_subsidized_fee: Default::default(),
             scaled_unsubsidized_fee: Default::default(),
+            actual_fee_amount: Default::default(),
             settlement_handling: tests::CapturingSettlementHandler::arc(),
             is_liquidity_order: false,
             id: Default::default(),

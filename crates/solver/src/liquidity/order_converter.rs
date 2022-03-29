@@ -52,6 +52,7 @@ impl OrderConverter {
             unscaled_subsidized_fee: remaining.fee_amount,
             scaled_unsubsidized_fee: scaled_fee_amount,
             is_liquidity_order,
+            actual_fee_amount: remaining.fee_amount,
             settlement_handling: Arc::new(OrderSettlementHandler {
                 order,
                 native_token,
