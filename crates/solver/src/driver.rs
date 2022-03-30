@@ -472,10 +472,10 @@ impl Driver {
 
             for settlement in &settlements {
                 tracing::debug!(
-                    "solver {} found solution:\n{:?} for auction id: {:}",
+                    "for auction id {} solver {} found solution:\n{:?} ",
+                    auction_id,
                     name,
-                    settlement,
-                    auction_id
+                    settlement
                 );
             }
 
@@ -537,7 +537,7 @@ impl Driver {
             .rate_settlements(solver_settlements, &external_prices, gas_price)
             .await?;
         tracing::info!(
-            "{} settlements passed simulation and {} failed for auction id: {}",
+            "{} settlements passed simulation and {} failed for auction id {}",
             rated_settlements.len(),
             errors.len(),
             auction_id
