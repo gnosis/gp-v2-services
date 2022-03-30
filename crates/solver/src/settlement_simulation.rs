@@ -1,5 +1,5 @@
 use crate::{encoding::EncodedSettlement, settlement::Settlement};
-use anyhow::{anyhow, Error, Result};
+use anyhow::{anyhow, Context, Error, Result};
 use contracts::GPv2Settlement;
 use ethcontract::{
     batch::CallBatch,
@@ -144,7 +144,7 @@ pub async fn simulate_before_after_access_list(
         .eth()
         .transaction(transaction_hash.into())
         .await?
-        .ok_or_else(|| anyhow!("no transaction found"))?;
+        .context("no transaction found")?;
 
     if transaction.access_list.is_none() {
         return Err(anyhow!(
@@ -155,15 +155,13 @@ pub async fn simulate_before_after_access_list(
     let (block_number, from, to, transaction_index) = (
         transaction
             .block_number
-            .ok_or_else(|| anyhow!("no block number field exist"))?
+            .context("no block number field exist")?
             .as_u64(),
-        transaction
-            .from
-            .ok_or_else(|| anyhow!("no from field exist"))?,
-        transaction.to.ok_or_else(|| anyhow!("no to field exist"))?,
+        transaction.from.context("no from field exist")?,
+        transaction.to.context("no to field exist")?,
         transaction
             .transaction_index
-            .ok_or_else(|| anyhow!("no transaction_index field exist"))?
+            .context("no transaction_index field exist")?
             .as_u64(),
     );
 
