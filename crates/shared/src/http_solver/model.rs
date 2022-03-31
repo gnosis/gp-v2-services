@@ -160,6 +160,7 @@ impl SettledBatchAuctionModel {
 pub struct MetadataModel {
     pub environment: Option<String>,
     pub auction_id: Option<u64>,
+    pub gas_price: Option<f64>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -388,6 +389,7 @@ mod tests {
             metadata: Some(MetadataModel {
                 environment: Some(String::from("Such Meta")),
                 auction_id: None,
+                gas_price: None,
             }),
         };
 
