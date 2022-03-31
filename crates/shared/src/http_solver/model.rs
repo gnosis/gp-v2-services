@@ -488,6 +488,7 @@ mod tests {
           "metadata": {
             "environment": "Such Meta",
             "auction_id": null,
+            "gas_price": null,
           },
         });
         assert_eq!(result, expected);
