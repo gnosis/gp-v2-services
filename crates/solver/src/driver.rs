@@ -463,7 +463,7 @@ impl Driver {
                                 auction_id,
                                 solver.name(),
                                 &external_prices,
-                                &max_settlement_price_deviation,
+                                max_settlement_price_deviation,
                                 &self.token_list_for_price_checks,
                             )
                         });
