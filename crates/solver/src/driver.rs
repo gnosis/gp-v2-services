@@ -85,7 +85,6 @@ impl Driver {
         weth_unwrap_factor: f64,
         simulation_gas_limit: u128,
         fee_objective_scaling_factor: f64,
-
         max_settlement_price_deviation: Option<u64>,
         token_list_for_price_checks: Option<Vec<H160>>,
     ) -> Self {

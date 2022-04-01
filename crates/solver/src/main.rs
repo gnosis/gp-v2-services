@@ -282,7 +282,7 @@ struct Arguments {
     simulation_gas_limit: u128,
 
     /// In order to protect against malicious solvers, the driver will check that settlements prices do not
-    /// exceed a max price deviation compared to the external prices of the driver, if this optional0 value is set.
+    /// exceed a max price deviation compared to the external prices of the driver, if this optional value is set.
     /// The max deviation value should be provided as a percentage value. E.g. for a max price deviation
     /// of 3%, one should set it to 3u64
     #[clap(long, env)]
