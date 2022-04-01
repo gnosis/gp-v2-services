@@ -298,7 +298,7 @@ struct Arguments {
     /// prices and external prices is executed. If the value is not set, then all tokens included
     /// in the settlement are checked for price deviation.
     #[clap(long, env)]
-    token_list_for_price_checks: Option<Vec<H160>>,
+    token_list_restriction_for_price_checks: Option<Vec<H160>>,
 }
 
 #[derive(Copy, Clone, Debug, clap::ArgEnum)]
@@ -671,7 +671,8 @@ async fn main() {
         args.fee_objective_scaling_factor,
         args.max_settlement_price_deviation
             .map(|max_price_deviation| Ratio::from_float(max_price_deviation).unwrap()),
-        args.token_list_for_price_checks.map(HashSet::from_iter),
+        args.token_list_restriction_for_price_checks
+            .map(HashSet::from_iter),
     );
 
     let maintainer = ServiceMaintenance {

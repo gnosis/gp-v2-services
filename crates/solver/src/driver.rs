@@ -60,7 +60,7 @@ pub struct Driver {
     simulation_gas_limit: u128,
     fee_objective_scaling_factor: BigRational,
     max_settlement_price_deviation: Option<Ratio<BigInt>>,
-    token_list_for_price_checks: Option<HashSet<H160>>,
+    token_list_restriction_for_price_checks: Option<HashSet<H160>>,
 }
 impl Driver {
     #[allow(clippy::too_many_arguments)]
@@ -87,7 +87,7 @@ impl Driver {
         simulation_gas_limit: u128,
         fee_objective_scaling_factor: f64,
         max_settlement_price_deviation: Option<Ratio<BigInt>>,
-        token_list_for_price_checks: Option<HashSet<H160>>,
+        token_list_restriction_for_price_checks: Option<HashSet<H160>>,
     ) -> Self {
         let post_processing_pipeline = PostProcessingPipeline::new(
             native_token,
@@ -122,7 +122,7 @@ impl Driver {
             fee_objective_scaling_factor: BigRational::from_float(fee_objective_scaling_factor)
                 .unwrap(),
             max_settlement_price_deviation,
-            token_list_for_price_checks,
+            token_list_restriction_for_price_checks,
         }
     }
 
@@ -464,7 +464,7 @@ impl Driver {
                                 solver.name(),
                                 &external_prices,
                                 max_settlement_price_deviation,
-                                &self.token_list_for_price_checks,
+                                &self.token_list_restriction_for_price_checks,
                             )
                         });
                     }
