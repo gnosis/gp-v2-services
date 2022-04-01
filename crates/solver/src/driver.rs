@@ -458,20 +458,13 @@ impl Driver {
                         self.max_settlement_price_deviation
                     {
                         settlement.retain(|settlement| {
-                            let satisfies_price_check = settlement.satisfies_price_checks(
+                            settlement.satisfies_price_checks(
+                                auction_id,
+                                solver.name(),
                                 &external_prices,
                                 max_settlement_price_deviation,
                                 &self.token_list_for_price_checks,
-                            );
-                            if !satisfies_price_check {
-                                tracing::debug!(
-                                    "For auction id {} there is a price violation from solver {:} for the settlement: {:?}",
-                                    auction_id,
-                                    solver.name(),
-                                    settlement
-                                );
-                            }
-                            satisfies_price_check
+                            )
                         });
                     }
                     if settlement.is_empty() {

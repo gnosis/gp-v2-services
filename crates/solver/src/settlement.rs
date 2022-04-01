@@ -303,6 +303,8 @@ impl Settlement {
     // Checks whether the settlement prices do not deviate more than max_settlement_price_deviation from the auction prices on certain pairs.
     pub fn satisfies_price_checks(
         &self,
+        auction_id: u64,
+        solver_name: &str,
         external_prices: &ExternalPrices,
         max_settlement_price_deviation: u64,
         tokens_to_satisfy_price_test: &Option<Vec<H160>>,
@@ -349,7 +351,7 @@ impl Settlement {
                 // This is equal to: |clearing_price_sell_token*external_price_buy_token-external_price_sell_token*clearing_price_buy_token|>
                 // max_settlement_price_deviation/100*clearing_price_buy_token*external_price_buy_token *clearing_price_sell_token
 
-                clearing_price_sell_token
+                let price_check_result = clearing_price_sell_token
                     .clone()
                     .mul(external_price_buy_token)
                     .sub(&external_price_sell_token.mul(&clearing_price_buy_token)).abs()
@@ -357,7 +359,17 @@ impl Settlement {
                         BigInt::from(max_settlement_price_deviation),
                         BigInt::from(100u64),
                     )
-                    .mul(&external_price_buy_token.mul(&clearing_price_sell_token)))
+                    .mul(&external_price_buy_token.mul(&clearing_price_sell_token)));
+                if !price_check_result {
+                    tracing::debug!(
+                        "For auction id {:?} there is a price violation on the token-pair {:?} from solver {:?} for the settlement: {:?}",
+                        auction_id,
+                        format!("{}-{}", sell_token, buy_token),
+                        solver_name,
+                        self
+                    );
+                }
+                price_check_result
             })
     }
 
@@ -491,64 +503,6 @@ pub mod tests {
     use num::FromPrimitive;
     use shared::addr;
 
-    #[test]
-    pub fn satisfies_price_checks_sorts_out_invalid_prices() {
-        let token0 = H160::from_low_u64_be(0);
-        let token1 = H160::from_low_u64_be(1);
-        let token2 = H160::from_low_u64_be(2);
-        let clearing_prices =
-            hashmap! {token0 => 50i32.into(), token1 => 100i32.into(), token2 => 103i32.into()};
-        let settlement = test_settlement(clearing_prices, vec![], vec![]);
-       
-        let external_prices = ExternalPrices(
-            hashmap! {token0 => BigInt::from(50i32).into(), token1 => BigInt::from(100i32).into(), token2 => BigInt::from(100i32).into()},
-        );
-        // Tolerance exceed on token2
-        assert!(!settlement.satisfies_price_checks(&external_prices, 2u64, &None));
-        // No tolerance exceeded on token0 and token1
-        assert!(settlement.satisfies_price_checks(
-            &external_prices,
-            2u64,
-            &Some(vec![token0, token1])
-        ));
-        // Tolerance exceeded on token2
-        assert!(!settlement.satisfies_price_checks(
-            &external_prices,
-            2u64,
-            &Some(vec![token1, token2])
-        ));
-
-        let external_prices = ExternalPrices(
-            hashmap! {token0 => BigInt::from(100i32).into(), token1 => BigInt::from(200i32).into(), token2 => BigInt::from(205i32).into()},
-        );
-        // No tolerance exceeded
-        assert!(settlement.satisfies_price_checks(&external_prices, 2u64, &None));
-
-        let external_prices = ExternalPrices(hashmap! {token0 => BigInt::from(200i32).into()});
-        // If only 1 token should be checked: trivially satisfies equation
-        assert!(settlement.satisfies_price_checks(&external_prices, 2u64, &None));
-        
-        let external_prices = ExternalPrices(
-            hashmap! {token0 => BigInt::from(200i32).into(), token1 => BigInt::from(300i32).into()},
-        );
-        // Can deal with missing token1, tolerance exceeded on token1
-        assert!(!settlement.satisfies_price_checks(
-            &external_prices,
-            2u64,
-            &Some(vec![token0, token1, token2])
-        ));
-
-        let external_prices = ExternalPrices(
-            hashmap! {token0 => BigInt::from(100i32).into(), token2 => BigInt::from(205i32).into()},
-        );
-        // Can deal with missing token1, tolerance not exceeded
-        assert!(settlement.satisfies_price_checks(
-            &external_prices,
-            2u64,
-            &Some(vec![token0, token1, token2])
-        ));
-    }
-
     pub fn assert_settlement_encoded_with<L, S>(
         prices: HashMap<H160, U256>,
         handler: S,
@@ -587,6 +541,64 @@ pub mod tests {
         Settlement {
             encoder: SettlementEncoder::with_trades(prices, trades, liquidity_order_trades),
         }
+    }
+
+    #[test]
+    pub fn satisfies_price_checks_sorts_out_invalid_prices() {
+        let token0 = H160::from_low_u64_be(0);
+        let token1 = H160::from_low_u64_be(1);
+        let token2 = H160::from_low_u64_be(2);
+        let clearing_prices =
+            hashmap! {token0 => 50i32.into(), token1 => 100i32.into(), token2 => 103i32.into()};
+        let settlement = test_settlement(clearing_prices, vec![], vec![]);
+       
+        let external_prices = ExternalPrices(
+            hashmap! {token0 => BigInt::from(50i32).into(), token1 => BigInt::from(100i32).into(), token2 => BigInt::from(100i32).into()},
+        );
+        // Tolerance exceed on token2
+        assert!(!settlement.satisfies_price_checks(0u64, "test_solver", &external_prices, 2u64, &None));
+        // No tolerance exceeded on token0 and token1
+        assert!(settlement.satisfies_price_checks(0u64, "test_solver",
+            &external_prices,
+            2u64,
+            &Some(vec![token0, token1])
+        ));
+        // Tolerance exceeded on token2
+        assert!(!settlement.satisfies_price_checks(0u64, "test_solver",
+            &external_prices,
+            2u64,
+            &Some(vec![token1, token2])
+        ));
+
+        let external_prices = ExternalPrices(
+            hashmap! {token0 => BigInt::from(100i32).into(), token1 => BigInt::from(200i32).into(), token2 => BigInt::from(205i32).into()},
+        );
+        // No tolerance exceeded
+        assert!(settlement.satisfies_price_checks(0u64, "test_solver",&external_prices, 2u64, &None));
+
+        let external_prices = ExternalPrices(hashmap! {token0 => BigInt::from(200i32).into()});
+        // If only 1 token should be checked: trivially satisfies equation
+        assert!(settlement.satisfies_price_checks(0u64, "test_solver",&external_prices, 2u64, &None));
+        
+        let external_prices = ExternalPrices(
+            hashmap! {token0 => BigInt::from(200i32).into(), token1 => BigInt::from(300i32).into()},
+        );
+        // Can deal with missing token1, tolerance exceeded on token1
+        assert!(!settlement.satisfies_price_checks(0u64, "test_solver",
+            &external_prices,
+            2u64,
+            &Some(vec![token0, token1, token2])
+        ));
+
+        let external_prices = ExternalPrices(
+            hashmap! {token0 => BigInt::from(100i32).into(), token2 => BigInt::from(205i32).into()},
+        );
+        // Can deal with missing token1, tolerance not exceeded
+        assert!(settlement.satisfies_price_checks(0u64, "test_solver",
+            &external_prices,
+            2u64,
+            &Some(vec![token0, token1, token2])
+        ));
     }
 
     #[test]
