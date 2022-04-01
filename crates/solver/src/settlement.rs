@@ -321,11 +321,11 @@ impl Settlement {
         // Since the checks would heavily depend on this scaling factor, and its
         // derivation is non-trivial, we decided to go for the implementation with quadratic run time. Settlements
         // will not have enough tokens, such that the run-time is important.
-        !self
+        self
             .clearing_prices()
             .iter()
             .combinations(2)
-            .any(|clearing_price_vector_combination| {
+            .all(|clearing_price_vector_combination| {
                 let (sell_token, sell_price) = clearing_price_vector_combination[0];
                 let clearing_price_sell_token = sell_price.to_big_rational();
                 let (buy_token, buy_price) = clearing_price_vector_combination[1];
@@ -333,15 +333,15 @@ impl Settlement {
 
                 if matches!(tokens_to_satisfy_price_test, Some(token_list) if (!token_list.contains(sell_token)) || !token_list.contains(buy_token))
                 {
-                    return false;
+                    return true;
                 }
                 let external_price_sell_token = match external_prices.price(sell_token) {
                     Some(price) => price,
-                    None => return false,
+                    None => return true,
                 };
                 let external_price_buy_token = match external_prices.price(buy_token) {
                     Some(price) => price,
-                    None => return false,
+                    None => return true,
                 };
                 // Condition to check: Deviation of clearing prices is bigger than max_settlement_price deviation
                 //
@@ -358,7 +358,7 @@ impl Settlement {
                     .clone()
                     .mul(external_price_buy_token)
                     .sub(&external_price_sell_token.mul(&clearing_price_buy_token)).abs()
-                    .gt(&max_settlement_price_deviation
+                    .lt(&max_settlement_price_deviation
                     .mul(&external_price_buy_token.mul(&clearing_price_sell_token)));
                 if !price_check_result {
                     tracing::debug!(
