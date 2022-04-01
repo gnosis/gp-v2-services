@@ -40,12 +40,7 @@ use solver::{
     },
     solver::SolverType,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    str::FromStr,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashMap, str::FromStr, sync::Arc, time::Duration};
 
 #[derive(Debug, Parser)]
 struct Arguments {
@@ -671,8 +666,7 @@ async fn main() {
         args.fee_objective_scaling_factor,
         args.max_settlement_price_deviation
             .map(|max_price_deviation| Ratio::from_float(max_price_deviation).unwrap()),
-        args.token_list_restriction_for_price_checks
-            .map(HashSet::from_iter),
+        args.token_list_restriction_for_price_checks.into(),
     );
 
     let maintainer = ServiceMaintenance {

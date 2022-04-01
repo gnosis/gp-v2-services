@@ -8,7 +8,7 @@ use crate::{
     liquidity_collector::LiquidityCollector,
     metrics::{SolverMetrics, SolverRunOutcome},
     orderbook::OrderBookApi,
-    settlement::{external_prices::ExternalPrices, Settlement},
+    settlement::{external_prices::ExternalPrices, Settlement, TokensForPriceCheck},
     settlement_post_processing::PostProcessingPipeline,
     settlement_simulation::{self, settle_method},
     settlement_submission::SolutionSubmitter,
@@ -29,7 +29,6 @@ use shared::{
     Web3,
 };
 use std::{
-    collections::HashSet,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -60,7 +59,7 @@ pub struct Driver {
     simulation_gas_limit: u128,
     fee_objective_scaling_factor: BigRational,
     max_settlement_price_deviation: Option<Ratio<BigInt>>,
-    token_list_restriction_for_price_checks: Option<HashSet<H160>>,
+    token_list_restriction_for_price_checks: TokensForPriceCheck,
 }
 impl Driver {
     #[allow(clippy::too_many_arguments)]
@@ -87,7 +86,7 @@ impl Driver {
         simulation_gas_limit: u128,
         fee_objective_scaling_factor: f64,
         max_settlement_price_deviation: Option<Ratio<BigInt>>,
-        token_list_restriction_for_price_checks: Option<HashSet<H160>>,
+        token_list_restriction_for_price_checks: TokensForPriceCheck,
     ) -> Self {
         let post_processing_pipeline = PostProcessingPipeline::new(
             native_token,

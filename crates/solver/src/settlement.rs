@@ -205,6 +205,21 @@ pub enum Revertable {
     HighRisk,
 }
 
+pub enum TokensForPriceCheck {
+    All,
+    Tokens(HashSet<H160>),
+}
+
+impl From<Option<Vec<H160>>> for TokensForPriceCheck {
+    fn from(token_list: Option<Vec<H160>>) -> Self {
+        if let Some(tokens) = token_list {
+            TokensForPriceCheck::Tokens(HashSet::from_iter(tokens.into_iter()))
+        } else {
+            TokensForPriceCheck::All
+        }
+    }
+}
+
 impl Settlement {
     /// Creates a new settlement builder for the specified clearing prices.
     pub fn new(clearing_prices: HashMap<H160, U256>) -> Self {
@@ -310,9 +325,10 @@ impl Settlement {
         solver_name: &str,
         external_prices: &ExternalPrices,
         max_settlement_price_deviation: &Ratio<BigInt>,
-        tokens_to_satisfy_price_test: &Option<HashSet<H160>>,
+        tokens_to_satisfy_price_test: &TokensForPriceCheck,
     ) -> bool {
-        if matches!(tokens_to_satisfy_price_test, Some(token_list) if token_list.is_empty()) {
+        if matches!(tokens_to_satisfy_price_test, TokensForPriceCheck::Tokens(token_list) if token_list.is_empty())
+        {
             return true;
         }
         // The following check is quadratic in run-time, although a similar check with linear run-time would also be possible.
@@ -331,7 +347,7 @@ impl Settlement {
                 let (buy_token, buy_price) = clearing_price_vector_combination[1];
                 let clearing_price_buy_token = buy_price.to_big_rational();
 
-                if matches!(tokens_to_satisfy_price_test, Some(token_list) if (!token_list.contains(sell_token)) || !token_list.contains(buy_token))
+                if matches!(tokens_to_satisfy_price_test, TokensForPriceCheck::Tokens(token_list) if (!token_list.contains(sell_token)) || !token_list.contains(buy_token))
                 {
                     return true;
                 }
@@ -498,7 +514,7 @@ fn surplus_ratio(
 pub mod tests {
     use super::*;
     use crate::{liquidity::SettlementHandling, settlement::external_prices::externalprices};
-    use maplit::{hashmap, hashset};
+    use maplit::hashmap;
     use model::order::{OrderCreation, OrderKind};
     use num::FromPrimitive;
     use shared::addr;
@@ -565,7 +581,7 @@ pub mod tests {
             "test_solver",
             &external_prices,
             &max_price_deviation,
-            &None
+            &None.into()
         ));
         // No tolerance exceeded on token0 and token1
         assert!(settlement.satisfies_price_checks(
@@ -573,7 +589,7 @@ pub mod tests {
             "test_solver",
             &external_prices,
             &max_price_deviation,
-            &Some(hashset!(token0, token1))
+            &Some(vec!(token0, token1)).into()
         ));
         // Tolerance exceeded on token2
         assert!(!settlement.satisfies_price_checks(
@@ -581,7 +597,7 @@ pub mod tests {
             "test_solver",
             &external_prices,
             &max_price_deviation,
-            &Some(hashset!(token1, token2))
+            &Some(vec!(token1, token2)).into()
         ));
 
         let external_prices = ExternalPrices::new(
@@ -594,7 +610,7 @@ pub mod tests {
             "test_solver",
             &external_prices,
             &max_price_deviation,
-            &None
+            &None.into()
         ));
 
         let external_prices = ExternalPrices::new(
@@ -608,7 +624,7 @@ pub mod tests {
             "test_solver",
             &external_prices,
             &max_price_deviation,
-            &None
+            &None.into()
         ));
 
         let external_prices = ExternalPrices::new(
@@ -622,7 +638,7 @@ pub mod tests {
             "test_solver",
             &external_prices,
             &max_price_deviation,
-            &Some(hashset!(token0, token1, token2))
+            &Some(vec!(token0, token1, token2)).into()
         ));
 
         let external_prices = ExternalPrices::new(
@@ -636,7 +652,7 @@ pub mod tests {
             "test_solver",
             &external_prices,
             &max_price_deviation,
-            &Some(hashset!(token0, token1, token2))
+            &Some(vec!(token0, token1, token2)).into()
         ));
 
         let external_prices = ExternalPrices::new(
@@ -650,7 +666,7 @@ pub mod tests {
             "test_solver",
             &external_prices,
             &max_price_deviation,
-            &Some(hashset!(token0, token1, token2, token3))
+            &Some(vec!(token0, token1, token2, token3)).into()
         ));
         // If no tokens are in the check_list settlements always satisfy the check
         assert!(settlement.satisfies_price_checks(
@@ -658,7 +674,7 @@ pub mod tests {
             "test_solver",
             &external_prices,
             &max_price_deviation,
-            &Some(hashset!())
+            &Some(vec!()).into()
         ));
     }
 
