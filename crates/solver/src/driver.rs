@@ -19,7 +19,7 @@ use contracts::GPv2Settlement;
 use futures::future::join_all;
 use gas_estimation::{EstimatedGasPrice, GasPriceEstimating};
 use itertools::{Either, Itertools};
-use num::{BigRational, ToPrimitive};
+use num::{rational::Ratio, BigInt, BigRational, ToPrimitive};
 use primitive_types::H160;
 use rand::prelude::SliceRandom;
 use shared::{
@@ -29,6 +29,7 @@ use shared::{
     Web3,
 };
 use std::{
+    collections::HashSet,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -58,8 +59,8 @@ pub struct Driver {
     post_processing_pipeline: PostProcessingPipeline,
     simulation_gas_limit: u128,
     fee_objective_scaling_factor: BigRational,
-    max_settlement_price_deviation: Option<u64>,
-    token_list_for_price_checks: Option<Vec<H160>>,
+    max_settlement_price_deviation: Option<Ratio<BigInt>>,
+    token_list_for_price_checks: Option<HashSet<H160>>,
 }
 impl Driver {
     #[allow(clippy::too_many_arguments)]
@@ -85,8 +86,8 @@ impl Driver {
         weth_unwrap_factor: f64,
         simulation_gas_limit: u128,
         fee_objective_scaling_factor: f64,
-        max_settlement_price_deviation: Option<u64>,
-        token_list_for_price_checks: Option<Vec<H160>>,
+        max_settlement_price_deviation: Option<Ratio<BigInt>>,
+        token_list_for_price_checks: Option<HashSet<H160>>,
     ) -> Self {
         let post_processing_pipeline = PostProcessingPipeline::new(
             native_token,
@@ -455,14 +456,14 @@ impl Driver {
                     // Do not continue with settlements that are empty or only liquidity orders.
                     settlement.retain(solver_settlements::has_user_order);
                     if let Some(max_settlement_price_deviation) =
-                        self.max_settlement_price_deviation
+                        &self.max_settlement_price_deviation
                     {
                         settlement.retain(|settlement| {
                             settlement.satisfies_price_checks(
                                 auction_id,
                                 solver.name(),
                                 &external_prices,
-                                max_settlement_price_deviation,
+                                &max_settlement_price_deviation,
                                 &self.token_list_for_price_checks,
                             )
                         });

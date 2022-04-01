@@ -2,6 +2,7 @@ use anyhow::anyhow;
 use clap::{ArgEnum, Parser};
 use contracts::{BalancerV2Vault, IUniswapLikeRouter, WETH9};
 use ethcontract::{Account, PrivateKey, H160};
+use num::rational::Ratio;
 use reqwest::Url;
 use shared::{
     baseline_solver::BaseTokens,
@@ -39,7 +40,12 @@ use solver::{
     },
     solver::SolverType,
 };
-use std::{collections::HashMap, str::FromStr, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    str::FromStr,
+    sync::Arc,
+    time::Duration,
+};
 
 #[derive(Debug, Parser)]
 struct Arguments {
@@ -283,13 +289,13 @@ struct Arguments {
 
     /// In order to protect against malicious solvers, the driver will check that settlements prices do not
     /// exceed a max price deviation compared to the external prices of the driver, if this optional value is set.
-    /// The max deviation value should be provided as a percentage value. E.g. for a max price deviation
-    /// of 3%, one should set it to 3u64
+    /// The max deviation value should be provided as a float percentage value. E.g. for a max price deviation
+    /// of 3%, one should set it to 0.03f64
     #[clap(long, env)]
-    max_settlement_price_deviation: Option<u64>,
+    max_settlement_price_deviation: Option<f64>,
 
     /// This variable allows to restrict the set of tokens for which a price deviation check of settlement
-    /// prices and external prices is executed. If the value is set to none, then all tokens included
+    /// prices and external prices is executed. If the value is not set, then all tokens included
     /// in the settlement are checked for price deviation.
     #[clap(long, env)]
     token_list_for_price_checks: Option<Vec<H160>>,
@@ -662,8 +668,9 @@ async fn main() {
         args.weth_unwrap_factor,
         args.simulation_gas_limit,
         args.fee_objective_scaling_factor,
-        args.max_settlement_price_deviation,
-        args.token_list_for_price_checks,
+        args.max_settlement_price_deviation
+            .map(|max_price_deviation| Ratio::from_float(max_price_deviation).unwrap()),
+        args.token_list_for_price_checks.map(HashSet::from_iter),
     );
 
     let maintainer = ServiceMaintenance {

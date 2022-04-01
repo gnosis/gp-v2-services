@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 /// A collection of external prices used for converting token amounts to native
 /// assets.
 #[derive(Clone, Debug)]
-pub struct ExternalPrices(pub HashMap<H160, BigRational>);
+pub struct ExternalPrices(HashMap<H160, BigRational>);
 
 impl ExternalPrices {
     /// Creates a new set of external prices for the specified exchange rates.
@@ -53,6 +53,14 @@ impl ExternalPrices {
                 .map(|(token, price)| (token, to_native_xrate(price)))
                 .collect(),
         )
+    }
+
+    /// Returns the price of a token relative to the native token.
+    /// I.e., the price of the native token is 1 and
+    /// the price of a token T is represented as how much native token
+    // is needed in order to buy 1 atom of the token T
+    pub fn price(&self, token: &H160) -> Option<&BigRational> {
+        self.0.get(token)
     }
 
     /// Converts a token amount into its native asset equivalent.
