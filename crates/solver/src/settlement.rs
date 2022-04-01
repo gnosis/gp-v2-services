@@ -326,12 +326,10 @@ impl Settlement {
             .iter()
             .combinations(2)
             .any(|clearing_price_vector_combination| {
-                let sell_token_info = clearing_price_vector_combination.get(0).unwrap();
-                let sell_token = sell_token_info.0;
-                let clearing_price_sell_token = sell_token_info.1.to_big_rational();
-                let buy_token_info = clearing_price_vector_combination.get(1).unwrap();
-                let buy_token = buy_token_info.0;
-                let clearing_price_buy_token = buy_token_info.1.to_big_rational();
+                let (sell_token, sell_price) = clearing_price_vector_combination[0];
+                let clearing_price_sell_token = sell_price.to_big_rational();
+                let (buy_token, buy_price) = clearing_price_vector_combination[1];
+                let clearing_price_buy_token = buy_price.to_big_rational();
 
                 if matches!(tokens_to_satisfy_price_test, Some(token_list) if (!token_list.contains(sell_token)) || !token_list.contains(buy_token))
                 {
@@ -551,6 +549,7 @@ pub mod tests {
         let token0 = H160::from_low_u64_be(1);
         let token1 = H160::from_low_u64_be(2);
         let token2 = H160::from_low_u64_be(3);
+        let token3 = H160::from_low_u64_be(4);
         let max_price_deviation = Ratio::from_float(0.02f64).unwrap();
         let clearing_prices =
             hashmap! {token0 => 50i32.into(), token1 => 100i32.into(), token2 => 103i32.into()};
@@ -638,6 +637,28 @@ pub mod tests {
             &external_prices,
             &max_price_deviation,
             &Some(hashset!(token0, token1, token2))
+        ));
+
+        let external_prices = ExternalPrices::new(
+            native_token,
+            hashmap! {token3 => BigInt::from(100000i32).into()},
+        )
+        .unwrap();
+        // Token3 from external price is not in settlement, hence, it should accept any price
+        assert!(settlement.satisfies_price_checks(
+            0u64,
+            "test_solver",
+            &external_prices,
+            &max_price_deviation,
+            &Some(hashset!(token0, token1, token2, token3))
+        ));
+        // If no tokens are in the check_list settlements always satisfy the check
+        assert!(settlement.satisfies_price_checks(
+            0u64,
+            "test_solver",
+            &external_prices,
+            &max_price_deviation,
+            &Some(hashset!())
         ));
     }
 
