@@ -58,6 +58,8 @@ pub struct Driver {
     post_processing_pipeline: PostProcessingPipeline,
     simulation_gas_limit: u128,
     fee_objective_scaling_factor: BigRational,
+    max_settlement_price_deviation: Option<u64>,
+    token_list_for_price_checks: Option<Vec<H160>>,
 }
 impl Driver {
     #[allow(clippy::too_many_arguments)]
@@ -83,6 +85,9 @@ impl Driver {
         weth_unwrap_factor: f64,
         simulation_gas_limit: u128,
         fee_objective_scaling_factor: f64,
+
+        max_settlement_price_deviation: Option<u64>,
+        token_list_for_price_checks: Option<Vec<H160>>,
     ) -> Self {
         let post_processing_pipeline = PostProcessingPipeline::new(
             native_token,
@@ -116,6 +121,8 @@ impl Driver {
             simulation_gas_limit,
             fee_objective_scaling_factor: BigRational::from_float(fee_objective_scaling_factor)
                 .unwrap(),
+            max_settlement_price_deviation,
+            token_list_for_price_checks,
         }
     }
 
@@ -448,6 +455,26 @@ impl Driver {
                 Ok(mut settlement) => {
                     // Do not continue with settlements that are empty or only liquidity orders.
                     settlement.retain(solver_settlements::has_user_order);
+                    if let Some(max_settlement_price_deviation) =
+                        self.max_settlement_price_deviation
+                    {
+                        settlement.retain(|settlement| {
+                            let satisfies_price_check = settlement.satisfies_price_checks(
+                                &external_prices,
+                                max_settlement_price_deviation,
+                                &self.token_list_for_price_checks,
+                            );
+                            if !satisfies_price_check {
+                                tracing::debug!(
+                                    "For auction id {} there is a price violation from solver {:} for the settlement: {:?}",
+                                    auction_id,
+                                    solver.name(),
+                                    settlement
+                                );
+                            }
+                            satisfies_price_check
+                        });
+                    }
                     if settlement.is_empty() {
                         self.metrics.solver_run(SolverRunOutcome::Empty, name);
                         continue;

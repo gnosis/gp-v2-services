@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 /// A collection of external prices used for converting token amounts to native
 /// assets.
 #[derive(Clone, Debug)]
-pub struct ExternalPrices(HashMap<H160, BigRational>);
+pub struct ExternalPrices(pub HashMap<H160, BigRational>);
 
 impl ExternalPrices {
     /// Creates a new set of external prices for the specified exchange rates.

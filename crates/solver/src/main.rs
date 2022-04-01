@@ -280,6 +280,19 @@ struct Arguments {
     /// but at the same time we don't restrict solutions sizes too much
     #[clap(long, env, default_value = "15000000")]
     simulation_gas_limit: u128,
+
+    /// In order to protect against malicious solvers, the driver will check that settlements prices do not
+    /// exceed a max price deviation compared to the external prices of the driver, if this optional0 value is set.
+    /// The max deviation value should be provided as a percentage value. E.g. for a max price deviation
+    /// of 3%, one should set it to 3u64
+    #[clap(long, env)]
+    max_settlement_price_deviation: Option<u64>,
+
+    /// This variable allows to restrict the set of tokens for which a price deviation check of settlement
+    /// prices and external prices is executed. If the value is set to none, then all tokens included
+    /// in the settlement are checked for price deviation.
+    #[clap(long, env)]
+    token_list_for_price_checks: Option<Vec<H160>>,
 }
 
 #[derive(Copy, Clone, Debug, clap::ArgEnum)]
@@ -649,6 +662,8 @@ async fn main() {
         args.weth_unwrap_factor,
         args.simulation_gas_limit,
         args.fee_objective_scaling_factor,
+        args.max_settlement_price_deviation,
+        args.token_list_for_price_checks,
     );
 
     let maintainer = ServiceMaintenance {

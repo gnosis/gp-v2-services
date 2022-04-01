@@ -7,12 +7,13 @@ use crate::{
     encoding::{self, EncodedInteraction, EncodedSettlement, EncodedTrade},
     liquidity::Settleable,
 };
+use itertools::Itertools;
 use anyhow::Result;
 use model::order::{Order, OrderKind};
-use num::{BigRational, One, Signed, Zero};
+use num::{rational::Ratio, BigInt, BigRational, One, Signed, Zero};
 use primitive_types::{H160, U256};
 use shared::conversions::U256Ext as _;
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::{Mul, Sub}};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Trade {
@@ -299,6 +300,67 @@ impl Settlement {
         }
     }
 
+    // Checks whether the settlement prices do not deviate more than max_settlement_price_deviation from the auction prices on certain pairs.
+    pub fn satisfies_price_checks(
+        &self,
+        external_prices: &ExternalPrices,
+        max_settlement_price_deviation: u64,
+        tokens_to_satisfy_price_test: &Option<Vec<H160>>,
+    ) -> bool {
+        // The following check is quadratic in run-time, although a similar check with linear run-time would also be possible.
+        // For the linear implementation, one would have to find a unique scaling factor that scales the external prices into
+        // the settlement prices. Though, this scaling factor is not easy to define, if reference tokens like ETH are missing.
+        // Since the checks would heavily depend on this scaling factor, and its
+        // derivation is non-trivial, we decided to go for the implementation with quadratic run time. Settlements 
+        // will not have enough tokens, such that the run-time is important.
+        !self
+            .clearing_prices()
+            .iter()
+            .combinations(2)
+            .any(|clearing_price_vector_combination| {
+                let sell_token_info = clearing_price_vector_combination.get(0).unwrap();
+                let sell_token = sell_token_info.0;
+                let clearing_price_sell_token = sell_token_info.1.to_big_rational();
+                let buy_token_info = clearing_price_vector_combination.get(1).unwrap();
+                let buy_token = buy_token_info.0;
+                let clearing_price_buy_token = buy_token_info.1.to_big_rational();
+
+                if matches!(tokens_to_satisfy_price_test, Some(token_list) if (!token_list.contains(sell_token)) || !token_list.contains(buy_token))
+                {
+                    return false;
+                }
+                let external_price_sell_token = match external_prices.0.get(sell_token) {
+                    Some(price) => price,
+                    None => return false,
+                };
+                let external_price_buy_token = match external_prices.0.get(buy_token) {
+                    Some(price) => price,
+                    None => return false,
+                };
+  
+                // Condition to check: Deviation of clearing prices is bigger than max_settlement_price deviation
+                //
+                // |clearing_price_sell_token / clearing_price_buy_token - external_price_sell_token/external_price_buy_token)|
+                // |----------------------------------------------------------------------------------------------------------|
+                // |                     clearing_price_sell_token / clearing_price_buy_token                                  |
+                // is bigger than:
+                // max_settlement_price_deviation/100
+                //
+                // This is equal to: |clearing_price_sell_token*external_price_buy_token-external_price_sell_token*clearing_price_buy_token|>
+                // max_settlement_price_deviation/100*clearing_price_buy_token*external_price_buy_token *clearing_price_sell_token
+
+                clearing_price_sell_token
+                    .clone()
+                    .mul(external_price_buy_token)
+                    .sub(&external_price_sell_token.mul(&clearing_price_buy_token)).abs()
+                    .gt(&Ratio::new_raw(
+                        BigInt::from(max_settlement_price_deviation),
+                        BigInt::from(100u64),
+                    )
+                    .mul(&external_price_buy_token.mul(&clearing_price_sell_token)))
+            })
+    }
+
     // Computes the total scaled unsubsidized fee of all protocol trades (in wei ETH).
     pub fn total_scaled_unsubsidized_fees(&self, external_prices: &ExternalPrices) -> BigRational {
         self.encoder
@@ -428,6 +490,64 @@ pub mod tests {
     use model::order::{OrderCreation, OrderKind};
     use num::FromPrimitive;
     use shared::addr;
+
+    #[test]
+    pub fn satisfies_price_checks_sorts_out_invalid_prices() {
+        let token0 = H160::from_low_u64_be(0);
+        let token1 = H160::from_low_u64_be(1);
+        let token2 = H160::from_low_u64_be(2);
+        let clearing_prices =
+            hashmap! {token0 => 50i32.into(), token1 => 100i32.into(), token2 => 103i32.into()};
+        let settlement = test_settlement(clearing_prices, vec![], vec![]);
+       
+        let external_prices = ExternalPrices(
+            hashmap! {token0 => BigInt::from(50i32).into(), token1 => BigInt::from(100i32).into(), token2 => BigInt::from(100i32).into()},
+        );
+        // Tolerance exceed on token2
+        assert!(!settlement.satisfies_price_checks(&external_prices, 2u64, &None));
+        // No tolerance exceeded on token0 and token1
+        assert!(settlement.satisfies_price_checks(
+            &external_prices,
+            2u64,
+            &Some(vec![token0, token1])
+        ));
+        // Tolerance exceeded on token2
+        assert!(!settlement.satisfies_price_checks(
+            &external_prices,
+            2u64,
+            &Some(vec![token1, token2])
+        ));
+
+        let external_prices = ExternalPrices(
+            hashmap! {token0 => BigInt::from(100i32).into(), token1 => BigInt::from(200i32).into(), token2 => BigInt::from(205i32).into()},
+        );
+        // No tolerance exceeded
+        assert!(settlement.satisfies_price_checks(&external_prices, 2u64, &None));
+
+        let external_prices = ExternalPrices(hashmap! {token0 => BigInt::from(200i32).into()});
+        // If only 1 token should be checked: trivially satisfies equation
+        assert!(settlement.satisfies_price_checks(&external_prices, 2u64, &None));
+        
+        let external_prices = ExternalPrices(
+            hashmap! {token0 => BigInt::from(200i32).into(), token1 => BigInt::from(300i32).into()},
+        );
+        // Can deal with missing token1, tolerance exceeded on token1
+        assert!(!settlement.satisfies_price_checks(
+            &external_prices,
+            2u64,
+            &Some(vec![token0, token1, token2])
+        ));
+
+        let external_prices = ExternalPrices(
+            hashmap! {token0 => BigInt::from(100i32).into(), token2 => BigInt::from(205i32).into()},
+        );
+        // Can deal with missing token1, tolerance not exceeded
+        assert!(settlement.satisfies_price_checks(
+            &external_prices,
+            2u64,
+            &Some(vec![token0, token1, token2])
+        ));
+    }
 
     pub fn assert_settlement_encoded_with<L, S>(
         prices: HashMap<H160, U256>,
