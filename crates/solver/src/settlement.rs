@@ -342,7 +342,6 @@ impl Settlement {
                     Some(price) => price,
                     None => return false,
                 };
-  
                 // Condition to check: Deviation of clearing prices is bigger than max_settlement_price deviation
                 //
                 // |clearing_price_sell_token / clearing_price_buy_token - external_price_sell_token/external_price_buy_token)|
