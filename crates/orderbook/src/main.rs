@@ -180,10 +180,11 @@ struct Arguments {
     )]
     partner_additional_fee_factors: HashMap<AppId, f64>,
 
-    /// Used to configure how much of the regular fee a user should pay based on their COW balance.
+    /// Used to configure how much of the regular fee a user should pay based on their
+    /// COW + VCOW balance in base units on the current network.
     ///
-    /// The expected format is "10.2:0.75,150:0.5" for 2 subsidy tiers.
-    /// A balance of [10.2,150) COW will cause you to pay 75% of the regular fee and a balance of
+    /// The expected format is "10:0.75,150:0.5" for 2 subsidy tiers.
+    /// A balance of [10,150) COW will cause you to pay 75% of the regular fee and a balance of
     /// [150, inf) COW will cause you to pay 50% of the regular fee.
     #[clap(long, env)]
     cow_fee_factors: Option<SubsidyTiers>,
@@ -652,6 +653,7 @@ async fn main() {
     let solvable_orders_cache = SolvableOrdersCache::new(
         args.min_order_validity_period,
         database.clone(),
+        args.banned_users.iter().copied().collect(),
         balance_fetcher.clone(),
         bad_token_detector.clone(),
         current_block_stream.clone(),
@@ -666,7 +668,7 @@ async fn main() {
     let order_validator = Arc::new(OrderValidator::new(
         Box::new(web3.clone()),
         native_token.clone(),
-        args.banned_users.into_iter().collect(),
+        args.banned_users.iter().copied().collect(),
         args.shared.liquidity_order_owners.into_iter().collect(),
         args.min_order_validity_period,
         fee_calculator.clone(),

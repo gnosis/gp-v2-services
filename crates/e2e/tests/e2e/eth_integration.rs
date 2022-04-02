@@ -198,6 +198,7 @@ async fn eth_integration(web3: Web3) {
     let liquidity_collector = LiquidityCollector {
         uniswap_like_liquidity: vec![uniswap_liquidity],
         balancer_v2_liquidity: None,
+        zeroex_liquidity: None,
     };
     let network_id = web3.net().version().await.unwrap();
     let mut driver = solver::driver::Driver::new(
@@ -249,6 +250,8 @@ async fn eth_integration(web3: Web3) {
         0.0,
         15000000u128,
         1.0,
+        None,
+        None.into(),
         None,
     );
     driver.single_run().await.unwrap();

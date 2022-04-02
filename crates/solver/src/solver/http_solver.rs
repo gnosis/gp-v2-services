@@ -3,7 +3,8 @@ pub mod settlement;
 
 use self::settlement::SettlementContext;
 use crate::{
-    liquidity::{LimitOrder, Liquidity},
+    interactions::allowances::AllowanceManaging,
+    liquidity::{Exchange, LimitOrder, Liquidity},
     settlement::{external_prices::ExternalPrices, Settlement},
     solver::{Auction, Solver},
 };
@@ -57,6 +58,7 @@ pub struct HttpSolver {
     native_token: H160,
     token_info_fetcher: Arc<dyn TokenInfoFetching>,
     buffer_retriever: Arc<dyn BufferRetrieving>,
+    allowance_manager: Arc<dyn AllowanceManaging>,
     instance_cache: InstanceCache,
 }
 
@@ -68,6 +70,7 @@ impl HttpSolver {
         native_token: H160,
         token_info_fetcher: Arc<dyn TokenInfoFetching>,
         buffer_retriever: Arc<dyn BufferRetrieving>,
+        allowance_manager: Arc<dyn AllowanceManaging>,
         instance_cache: InstanceCache,
     ) -> Self {
         Self {
@@ -76,12 +79,14 @@ impl HttpSolver {
             native_token,
             token_info_fetcher,
             buffer_retriever,
+            allowance_manager,
             instance_cache,
         }
     }
 
     async fn prepare_model(
         &self,
+        auction_id: u64,
         orders: Vec<LimitOrder>,
         liquidity: Vec<Liquidity>,
         gas_price: f64,
@@ -145,6 +150,9 @@ impl HttpSolver {
             amms: amm_models,
             metadata: Some(MetadataModel {
                 environment: Some(self.solver.network_name.clone()),
+                auction_id: Some(auction_id),
+                gas_price: Some(gas_price),
+                native_token: Some(self.native_token),
             }),
         };
         Ok((model, SettlementContext { orders, liquidity }))
@@ -163,6 +171,7 @@ fn map_tokens_for_solver(orders: &[LimitOrder], liquidity: &[Liquidity]) -> Vec<
             Liquidity::ConstantProduct(amm) => token_set.extend(amm.tokens),
             Liquidity::BalancerWeighted(amm) => token_set.extend(amm.reserves.keys()),
             Liquidity::BalancerStable(amm) => token_set.extend(amm.reserves.keys()),
+            Liquidity::LimitOrder(order) => token_set.extend([order.sell_token, order.buy_token]),
         }
     }
 
@@ -170,8 +179,12 @@ fn map_tokens_for_solver(orders: &[LimitOrder], liquidity: &[Liquidity]) -> Vec<
 }
 
 fn order_fee(order: &LimitOrder) -> FeeModel {
+    let amount = match order.is_liquidity_order {
+        true => order.unscaled_subsidized_fee,
+        false => order.scaled_unsubsidized_fee,
+    };
     FeeModel {
-        amount: order.scaled_unsubsidized_fee,
+        amount,
         token: order.sell_token,
     }
 }
@@ -223,6 +236,11 @@ fn order_models(
                 return None;
             }
 
+            let cost = match order.exchange {
+                Exchange::GnosisProtocol => gas_model.gp_order_cost(),
+                Exchange::ZeroEx => gas_model.zeroex_order_cost(),
+            };
+
             Some((
                 index,
                 OrderModel {
@@ -233,9 +251,10 @@ fn order_models(
                     allow_partial_fill: order.partially_fillable,
                     is_sell_order: matches!(order.kind, OrderKind::Sell),
                     fee: order_fee(order),
-                    cost: gas_model.order_cost(),
+                    cost,
                     is_liquidity_order: order.is_liquidity_order,
                     mandatory: false,
+                    has_atomic_execution: !matches!(order.exchange, Exchange::GnosisProtocol),
                 },
             ))
         })
@@ -245,6 +264,7 @@ fn order_models(
 fn amm_models(liquidity: &[Liquidity], gas_model: &GasModel) -> BTreeMap<usize, AmmModel> {
     liquidity
         .iter()
+        .filter(|liquidity| !matches!(liquidity, Liquidity::LimitOrder(_)))
         .map(|liquidity| -> Result<_> {
             Ok(match liquidity {
                 Liquidity::ConstantProduct(amm) => AmmModel {
@@ -304,6 +324,7 @@ fn amm_models(liquidity: &[Liquidity], gas_model: &GasModel) -> BTreeMap<usize, 
                     cost: gas_model.balancer_cost(),
                     mandatory: false,
                 },
+                Liquidity::LimitOrder(_) => unreachable!("filtered out before"),
             })
         })
         .enumerate()
@@ -355,7 +376,7 @@ impl Solver for HttpSolver {
         &self,
         Auction {
             id,
-            orders,
+            mut orders,
             liquidity,
             gas_price,
             deadline,
@@ -365,13 +386,18 @@ impl Solver for HttpSolver {
         if orders.is_empty() {
             return Ok(Vec::new());
         };
+        orders.extend(liquidity.iter().filter_map(|liquidity| match liquidity {
+            Liquidity::LimitOrder(order) => Some(order.clone()),
+            _ => None,
+        }));
+
         let (model, context) = {
             let mut guard = self.instance_cache.lock().await;
             match guard.as_mut() {
                 Some(data) if data.solve_id == id => (data.model.clone(), data.context.clone()),
                 _ => {
                     let (model, context) = self
-                        .prepare_model(orders, liquidity, gas_price, external_prices)
+                        .prepare_model(id, orders, liquidity, gas_price, external_prices)
                         .await?;
                     *guard = Some(InstanceData {
                         solve_id: id,
@@ -390,7 +416,9 @@ impl Solver for HttpSolver {
         if !settled.has_execution_plan() {
             return Ok(Vec::new());
         }
-        settlement::convert_settlement(settled, context).map(|settlement| vec![settlement])
+        settlement::convert_settlement(settled, context, self.allowance_manager.clone())
+            .await
+            .map(|settlement| vec![settlement])
     }
 
     fn account(&self) -> &Account {
@@ -405,6 +433,7 @@ impl Solver for HttpSolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::interactions::allowances::MockAllowanceManaging;
     use crate::liquidity::{tests::CapturingSettlementHandler, ConstantProductOrder, LimitOrder};
     use crate::solver::http_solver::buffers::MockBufferRetrieving;
     use ::model::TokenPair;
@@ -441,7 +470,6 @@ mod tests {
                     sell_token => TokenInfo { decimals: Some(18), symbol: Some("CAT".to_string()) },
                 }
             });
-        let mock_token_info_fetcher: Arc<dyn TokenInfoFetching> = Arc::new(mock_token_info_fetcher);
 
         let mut mock_buffer_retriever = MockBufferRetrieving::new();
         mock_buffer_retriever
@@ -452,7 +480,6 @@ mod tests {
                     sell_token => Ok(U256::from(1337)),
                 }
             });
-        let mock_buffer_retriever: Arc<dyn BufferRetrieving> = Arc::new(mock_buffer_retriever);
 
         let gas_price = 100.;
 
@@ -472,8 +499,9 @@ mod tests {
             },
             Account::Local(Address::default(), None),
             H160::zero(),
-            mock_token_info_fetcher,
-            mock_buffer_retriever,
+            Arc::new(mock_token_info_fetcher),
+            Arc::new(mock_buffer_retriever),
+            Arc::new(MockAllowanceManaging::new()),
             Default::default(),
         );
         let base = |x: u128| x * 10u128.pow(18);
@@ -493,7 +521,7 @@ mod tests {
             settlement_handling: CapturingSettlementHandler::arc(),
         })];
         let (model, _context) = solver
-            .prepare_model(limit_orders, liquidity, gas_price, Default::default())
+            .prepare_model(0u64, limit_orders, liquidity, gas_price, Default::default())
             .await
             .unwrap();
         let settled = solver

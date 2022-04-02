@@ -3,7 +3,9 @@ use std::{sync::Mutex, time::Duration};
 use anyhow::{Context, Result};
 use cached::{Cached, TimedSizedCache};
 use contracts::{CowProtocolToken, CowProtocolVirtualToken};
+use ethcontract::Web3;
 use primitive_types::{H160, U256};
+use shared::transport::buffered::{Buffered, Configuration};
 use std::collections::BTreeMap;
 
 const CACHE_SIZE: usize = 10_000;
@@ -47,10 +49,12 @@ impl std::str::FromStr for SubsidyTiers {
                 .split_once(':')
                 .with_context(|| format!("too few arguments for subsidy tier in \"{}\"", tier))?;
 
-            let threshold: f64 = threshold
+            let threshold: u64 = threshold
                 .parse()
-                .with_context(|| format!("can not parse threshold \"{}\" as f64", threshold))?;
-            let threshold = U256::from_f64_lossy(threshold * 1e18);
+                .with_context(|| format!("can not parse threshold \"{}\" as u64", threshold))?;
+            let threshold = U256::from(threshold)
+                .checked_mul(U256::exp10(18))
+                .with_context(|| format!("threshold {threshold} would overflow U256"))?;
 
             let fee_factor: f64 = fee_factor
                 .parse()
@@ -104,6 +108,20 @@ impl CowSubsidyImpl {
             false,
         );
 
+        // Create buffered transport to do the two calls we make per user in one batch.
+        let transport = token.raw_instance().web3().transport().clone();
+        let buffered = Buffered::with_config(
+            transport,
+            Configuration {
+                max_concurrent_requests: None,
+                max_batch_len: 2,
+                batch_delay: Duration::from_secs(1),
+            },
+        );
+        let web3 = Web3::new(buffered);
+        let token = CowProtocolToken::at(&web3, token.address());
+        let vtoken = CowProtocolVirtualToken::at(&web3, vtoken.address());
+
         Self {
             token,
             vtoken,
@@ -113,8 +131,11 @@ impl CowSubsidyImpl {
     }
 
     async fn subsidy_factor_uncached(&self, user: H160) -> Result<f64> {
-        let balance = self.token.balance_of(user).call().await?;
-        let vbalance = self.vtoken.balance_of(user).call().await?;
+        let (balance, vbalance) = futures::future::try_join(
+            self.token.balance_of(user).call(),
+            self.vtoken.balance_of(user).call(),
+        )
+        .await?;
         let combined = balance.saturating_add(vbalance);
         let tier = self.subsidy_tiers.0.range(..=combined).rev().next();
         let factor = tier.map(|tier| *tier.1).unwrap_or(1.0);

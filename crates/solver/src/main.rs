@@ -2,6 +2,7 @@ use anyhow::anyhow;
 use clap::{ArgEnum, Parser};
 use contracts::{BalancerV2Vault, IUniswapLikeRouter, WETH9};
 use ethcontract::{Account, PrivateKey, H160};
+use num::rational::Ratio;
 use reqwest::Url;
 use shared::{
     baseline_solver::BaseTokens,
@@ -25,7 +26,7 @@ use solver::{
     driver::Driver,
     liquidity::{
         balancer_v2::BalancerV2Liquidity, order_converter::OrderConverter,
-        uniswap_v2::UniswapLikeLiquidity,
+        uniswap_v2::UniswapLikeLiquidity, zeroex::ZeroExLiquidity,
     },
     liquidity_collector::LiquidityCollector,
     metrics::Metrics,
@@ -281,6 +282,19 @@ struct Arguments {
     /// but at the same time we don't restrict solutions sizes too much
     #[clap(long, env, default_value = "15000000")]
     simulation_gas_limit: u128,
+
+    /// In order to protect against malicious solvers, the driver will check that settlements prices do not
+    /// exceed a max price deviation compared to the external prices of the driver, if this optional value is set.
+    /// The max deviation value should be provided as a float percentage value. E.g. for a max price deviation
+    /// of 3%, one should set it to 0.03f64
+    #[clap(long, env)]
+    max_settlement_price_deviation: Option<f64>,
+
+    /// This variable allows to restrict the set of tokens for which a price deviation check of settlement
+    /// prices and external prices is executed. If the value is not set, then all tokens included
+    /// in the settlement are checked for price deviation.
+    #[clap(long, env, use_value_delimiter = true)]
+    token_list_restriction_for_price_checks: Option<Vec<H160>>,
 }
 
 #[derive(Copy, Clone, Debug, clap::ArgEnum)]
@@ -498,7 +512,7 @@ async fn main() {
     let solver = solver::solver::create(
         web3.clone(),
         solvers,
-        base_tokens,
+        base_tokens.clone(),
         native_token_contract.address(),
         args.mip_solver_url,
         args.cow_dex_ag_solver_url,
@@ -515,16 +529,28 @@ async fn main() {
         args.shared.paraswap_partner,
         client.clone(),
         metrics.clone(),
-        zeroex_api,
+        zeroex_api.clone(),
         args.zeroex_slippage_bps,
         args.shared.quasimodo_uses_internal_buffers,
         args.shared.mip_uses_internal_buffers,
         args.shared.one_inch_url,
     )
     .expect("failure creating solvers");
+
+    let zeroex_liquidity = if baseline_sources.contains(&BaselineSource::ZeroEx) {
+        Some(ZeroExLiquidity {
+            api: zeroex_api,
+            zeroex: contracts::IZeroEx::deployed(&web3).await.unwrap(),
+            base_tokens,
+        })
+    } else {
+        None
+    };
+
     let liquidity_collector = LiquidityCollector {
         uniswap_like_liquidity,
         balancer_v2_liquidity,
+        zeroex_liquidity,
     };
     let market_makable_token_list =
         TokenList::from_url(&args.market_makable_token_list, chain_id, client.clone())
@@ -645,6 +671,9 @@ async fn main() {
         args.weth_unwrap_factor,
         args.simulation_gas_limit,
         args.fee_objective_scaling_factor,
+        args.max_settlement_price_deviation
+            .map(|max_price_deviation| Ratio::from_float(max_price_deviation).unwrap()),
+        args.token_list_restriction_for_price_checks.into(),
         tenderly,
     );
 
@@ -691,6 +720,7 @@ async fn build_amm_artifacts(
                 .expect("couldn't load deployed Swapr router")
                 .address(),
             BaselineSource::BalancerV2 => continue,
+            BaselineSource::ZeroEx => continue,
         };
         res.push(UniswapLikeLiquidity::new(
             IUniswapLikeRouter::at(&web3, router_address),

@@ -32,6 +32,11 @@ pub struct OrderModel {
     pub is_liquidity_order: bool,
     #[serde(default)]
     pub mandatory: bool,
+    /// Signals if the order will be executed as an atomic unit. In that case the order's
+    /// preconditions have to be met for it to be executed successfully. This is different from the
+    /// usual user provided orders because those can be batched together and it's only relevant if
+    /// the pre- and post conditions are met after the complete batch got executed.
+    pub has_atomic_execution: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -109,6 +114,14 @@ pub struct FeeModel {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct ApprovalModel {
+    pub token: H160,
+    pub spender: H160,
+    #[serde(with = "u256_decimal")]
+    pub amount: U256,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct InteractionData {
     pub target: H160,
     pub value: U256,
@@ -126,6 +139,8 @@ pub struct SettledBatchAuctionModel {
     #[serde_as(as = "HashMap<_, DecimalU256>")]
     pub prices: HashMap<H160, U256>,
     #[serde(default)]
+    pub approvals: Vec<ApprovalModel>,
+    #[serde(default)]
     pub interaction_data: Vec<InteractionData>,
     pub metadata: Option<SettledBatchAuctionMetadataModel>,
 }
@@ -141,9 +156,12 @@ impl SettledBatchAuctionModel {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Default)]
 pub struct MetadataModel {
     pub environment: Option<String>,
+    pub auction_id: Option<u64>,
+    pub gas_price: Option<f64>,
+    pub native_token: Option<H160>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -160,6 +178,8 @@ pub struct ExecutedOrderModel {
     pub exec_buy_amount: U256,
     pub cost: Option<CostModel>,
     pub fee: Option<FeeModel>,
+    // Orders which need to be executed in a specific order have an `exec_plan` (e.g. 0x limit orders)
+    pub exec_plan: Option<ExecutionPlanCoordinatesModel>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -289,6 +309,7 @@ mod tests {
             },
             is_liquidity_order: false,
             mandatory: false,
+            has_atomic_execution: false,
         };
         let constant_product_pool_model = AmmModel {
             parameters: AmmParameters::ConstantProduct(ConstantProductPoolParameters {
@@ -368,6 +389,9 @@ mod tests {
             },
             metadata: Some(MetadataModel {
                 environment: Some(String::from("Such Meta")),
+                auction_id: None,
+                gas_price: None,
+                native_token: None,
             }),
         };
 
@@ -408,6 +432,7 @@ mod tests {
                 "token": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
               },
               "mandatory": false,
+              "has_atomic_execution": false
             },
           },
           "amms": {
@@ -464,9 +489,31 @@ mod tests {
           },
           "metadata": {
             "environment": "Such Meta",
+            "auction_id": null,
+            "gas_price": null,
+            "native_token": null,
           },
         });
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn deserialize_approval_model() {
+        let approval = r#"
+            {
+                "token": "0x7777777777777777777777777777777777777777",
+                "spender": "0x5555555555555555555555555555555555555555",
+                "amount": "1337"
+            }
+        "#;
+        assert_eq!(
+            serde_json::from_str::<ApprovalModel>(approval).unwrap(),
+            ApprovalModel {
+                token: addr!("7777777777777777777777777777777777777777"),
+                spender: addr!("5555555555555555555555555555555555555555"),
+                amount: 1337.into(),
+            }
+        );
     }
 
     #[test]

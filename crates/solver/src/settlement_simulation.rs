@@ -312,7 +312,7 @@ impl TenderlyApi {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::interactions::allowances::Allowances;
+    use crate::interactions::allowances::{Allowances, MockAllowanceManaging};
     use crate::liquidity::{
         balancer_v2::SettlementHandler, order_converter::OrderConverter, uniswap_v2::Inner,
         ConstantProductOrder, Liquidity, StablePoolOrder,
@@ -718,9 +718,14 @@ mod tests {
         "#;
         let parsed_response = serde_json::from_str::<SettledBatchAuctionModel>(quasimodo_response);
 
-        let settlements = convert_settlement(parsed_response.unwrap(), settlement_context)
-            .map(|settlement| vec![settlement])
-            .unwrap();
+        let settlements = convert_settlement(
+            parsed_response.unwrap(),
+            settlement_context,
+            Arc::new(MockAllowanceManaging::new()),
+        )
+        .await
+        .map(|settlement| vec![settlement])
+        .unwrap();
         let settlement = settlements.get(0).unwrap();
         let settlement_encoded = settlement.encoder.clone().finish();
         println!("Settlement_encoded: {:?}", settlement_encoded);

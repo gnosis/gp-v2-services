@@ -8,7 +8,7 @@ use crate::{
     liquidity_collector::LiquidityCollector,
     metrics::{SolverMetrics, SolverRunOutcome},
     orderbook::OrderBookApi,
-    settlement::{external_prices::ExternalPrices, Settlement},
+    settlement::{external_prices::ExternalPrices, PriceCheckTokens, Settlement},
     settlement_post_processing::PostProcessingPipeline,
     settlement_simulation::{self, settle_method, simulate_before_after_access_list, TenderlyApi},
     settlement_submission::SolutionSubmitter,
@@ -19,7 +19,7 @@ use contracts::GPv2Settlement;
 use futures::future::join_all;
 use gas_estimation::{EstimatedGasPrice, GasPriceEstimating};
 use itertools::{Either, Itertools};
-use num::{BigRational, ToPrimitive};
+use num::{rational::Ratio, BigInt, BigRational, ToPrimitive};
 use primitive_types::{H160, H256};
 use rand::prelude::SliceRandom;
 use shared::{
@@ -58,6 +58,8 @@ pub struct Driver {
     post_processing_pipeline: PostProcessingPipeline,
     simulation_gas_limit: u128,
     fee_objective_scaling_factor: BigRational,
+    max_settlement_price_deviation: Option<Ratio<BigInt>>,
+    token_list_restriction_for_price_checks: PriceCheckTokens,
     tenderly: Option<TenderlyApi>,
 }
 impl Driver {
@@ -84,6 +86,8 @@ impl Driver {
         weth_unwrap_factor: f64,
         simulation_gas_limit: u128,
         fee_objective_scaling_factor: f64,
+        max_settlement_price_deviation: Option<Ratio<BigInt>>,
+        token_list_restriction_for_price_checks: PriceCheckTokens,
         tenderly: Option<TenderlyApi>,
     ) -> Self {
         let post_processing_pipeline = PostProcessingPipeline::new(
@@ -118,6 +122,8 @@ impl Driver {
             simulation_gas_limit,
             fee_objective_scaling_factor: BigRational::from_float(fee_objective_scaling_factor)
                 .unwrap(),
+            max_settlement_price_deviation,
+            token_list_restriction_for_price_checks,
             tenderly,
         }
     }
@@ -159,6 +165,7 @@ impl Driver {
 
     async fn submit_settlement(
         &self,
+        auction_id: u64,
         solver: Arc<dyn Solver>,
         rated_settlement: RatedSettlement,
     ) -> Result<TransactionReceipt> {
@@ -180,8 +187,9 @@ impl Driver {
             Ok(receipt) => {
                 let name = solver.name();
                 tracing::info!(
-                    "Successfully submitted settlement id {} as tx hash {:?}",
+                    "Successfully submitted settlement id {} for the auction id {} with tx hash {:?}",
                     rated_settlement.id,
+                    auction_id,
                     receipt.transaction_hash
                 );
                 traded_orders
@@ -454,15 +462,16 @@ impl Driver {
 
         let mut solver_settlements = Vec::new();
 
+        let auction_id = self.next_auction_id();
         let auction = Auction {
-            id: self.next_auction_id(),
+            id: auction_id,
             orders: orders.clone(),
             liquidity,
             gas_price: gas_price.effective_gas_price(),
             deadline: Instant::now() + self.solver_time_limit,
             external_prices: external_prices.clone(),
         };
-        tracing::debug!("solving auction ID {}", auction.id);
+        tracing::debug!("solving auction id {}", auction.id);
         let run_solver_results = self.run_solvers(auction).await;
         for (solver, settlements) in run_solver_results {
             let name = solver.name();
@@ -471,6 +480,19 @@ impl Driver {
                 Ok(mut settlement) => {
                     // Do not continue with settlements that are empty or only liquidity orders.
                     settlement.retain(solver_settlements::has_user_order);
+                    if let Some(max_settlement_price_deviation) =
+                        &self.max_settlement_price_deviation
+                    {
+                        settlement.retain(|settlement| {
+                            settlement.satisfies_price_checks(
+                                auction_id,
+                                solver.name(),
+                                &external_prices,
+                                max_settlement_price_deviation,
+                                &self.token_list_restriction_for_price_checks,
+                            )
+                        });
+                    }
                     if settlement.is_empty() {
                         self.metrics.solver_run(SolverRunOutcome::Empty, name);
                         continue;
@@ -494,7 +516,12 @@ impl Driver {
             };
 
             for settlement in &settlements {
-                tracing::debug!("solver {} found solution:\n{:?}", name, settlement);
+                tracing::debug!(
+                    "for auction id {} solver {} found solution:\n{:?} ",
+                    auction_id,
+                    name,
+                    settlement
+                );
             }
 
             // Keep at most this many settlements. This is important in case where a solver produces
@@ -511,15 +538,16 @@ impl Driver {
                 &mut settlements,
             );
 
-            let mature_settlements =
-                solver_settlements::retain_mature_settlements(self.min_order_age, settlements);
+            solver_settlements.reserve(settlements.len());
 
-            solver_settlements.reserve(mature_settlements.len());
-
-            for settlement in mature_settlements {
+            for settlement in settlements {
                 solver_settlements.push((solver.clone(), settlement))
             }
         }
+
+        // filters out all non-mature settlements
+        let solver_settlements =
+            solver_settlements::retain_mature_settlements(self.min_order_age, solver_settlements);
 
         // append access lists
         let txs = solver_settlements
@@ -554,9 +582,10 @@ impl Driver {
             .rate_settlements(solver_settlements, &external_prices, gas_price)
             .await?;
         tracing::info!(
-            "{} settlements passed simulation and {} failed",
+            "{} settlements passed simulation and {} failed for auction id {}",
             rated_settlements.len(),
-            errors.len()
+            errors.len(),
+            auction_id
         );
         for (solver, _, _) in &rated_settlements {
             self.metrics.settlement_simulation_succeeded(solver.name());
@@ -603,7 +632,11 @@ impl Driver {
                 .complete_runloop_until_transaction(start.elapsed());
             let start = Instant::now();
             if let Ok(receipt) = self
-                .submit_settlement(winning_solver.clone(), winning_settlement.clone())
+                .submit_settlement(
+                    auction_id,
+                    winning_solver.clone(),
+                    winning_settlement.clone(),
+                )
                 .await
             {
                 let orders = winning_settlement
@@ -698,7 +731,10 @@ enum SolverRunError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settlement::{OrderTrade, Trade};
+    use crate::{
+        settlement::{OrderTrade, Trade},
+        solver::dummy_arc_solver,
+    };
     use maplit::hashmap;
     use model::order::{Order, OrderCreation};
     use shared::token_list::Token;
@@ -761,23 +797,9 @@ mod tests {
     #[test]
     #[ignore]
     fn print_settlements() {
-        struct S;
-        #[async_trait::async_trait]
-        impl Solver for S {
-            async fn solve(&self, _: Auction) -> Result<Vec<Settlement>> {
-                todo!()
-            }
-            fn account(&self) -> &ethcontract::Account {
-                todo!()
-            }
-            fn name(&self) -> &'static str {
-                "solvername"
-            }
-        }
-
         let a = [
             (
-                Arc::new(S) as Arc<dyn Solver>,
+                dummy_arc_solver(),
                 RatedSettlement {
                     id: 0,
                     settlement: Default::default(),
@@ -790,7 +812,7 @@ mod tests {
                 None,
             ),
             (
-                Arc::new(S) as Arc<dyn Solver>,
+                dummy_arc_solver(),
                 RatedSettlement {
                     id: 6,
                     settlement: Default::default(),
