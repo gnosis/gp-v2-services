@@ -367,8 +367,8 @@ impl Settlement {
                 // is bigger than:
                 // max_settlement_price_deviation
                 //
-                // This is equal to: |clearing_price_sell_token*external_price_buy_token-external_price_sell_token*clearing_price_buy_token|>
-                // max_settlement_price_deviation*clearing_price_buy_token*external_price_buy_token *clearing_price_sell_token
+                // This is equal to: |clearing_price_sell_token * external_price_buy_token - external_price_sell_token * clearing_price_buy_token|>
+                // max_settlement_price_deviation * clearing_price_buy_token * external_price_buy_token * clearing_price_sell_token
 
                 let price_check_result = clearing_price_sell_token
                     .clone()
