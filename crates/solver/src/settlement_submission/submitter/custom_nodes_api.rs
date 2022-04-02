@@ -17,7 +17,7 @@ use futures::FutureExt;
 use gas_estimation::{EstimatedGasPrice, GasPrice1559};
 use shared::Web3;
 
-const ALREADY_KNOWN_TRANSACTION: [&str] = [
+const ALREADY_KNOWN_TRANSACTION: [&str; 6] = [
     "Transaction gas price supplied is too low", //openethereum
     "Transaction nonce is too low",              //openethereum
     "already known",                             //infura
@@ -74,10 +74,11 @@ impl TransactionSubmitting for CustomNodesApi {
                 }
                 Err(err) => {
                     // error is not real error if transaction pool responded that received transaction is already in the pool
-                    let real_error = if let web3::Error::Rpc(rpc_error) = err {
-                        !ALREADY_KNOWN_TRANSACTION
+                    let real_error = match err.clone() {
+                        web3::Error::Rpc(rpc_error) => !ALREADY_KNOWN_TRANSACTION
                             .iter()
-                            .any(|message| rpc_error.message.starts_with(message))
+                            .any(|message| rpc_error.message.starts_with(message)),
+                        _ => true,
                     };
                     if real_error {
                         tracing::warn!(?err, ?lable, "single custom node tx failed");
