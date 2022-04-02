@@ -363,7 +363,7 @@ impl Settlement {
                 //
                 // |clearing_price_sell_token / clearing_price_buy_token - external_price_sell_token/external_price_buy_token)|
                 // |----------------------------------------------------------------------------------------------------------|
-                // |                     clearing_price_sell_token / clearing_price_buy_token                                  |
+                // |                     clearing_price_sell_token / clearing_price_buy_token                                 |
                 // is bigger than:
                 // max_settlement_price_deviation
                 //
