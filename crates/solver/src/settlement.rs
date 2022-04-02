@@ -205,17 +205,17 @@ pub enum Revertable {
     HighRisk,
 }
 
-pub enum TokensForPriceCheck {
+pub enum PriceCheckTokens {
     All,
     Tokens(HashSet<H160>),
 }
 
-impl From<Option<Vec<H160>>> for TokensForPriceCheck {
+impl From<Option<Vec<H160>>> for PriceCheckTokens {
     fn from(token_list: Option<Vec<H160>>) -> Self {
         if let Some(tokens) = token_list {
-            TokensForPriceCheck::Tokens(HashSet::from_iter(tokens.into_iter()))
+            PriceCheckTokens::Tokens(HashSet::from_iter(tokens.into_iter()))
         } else {
-            TokensForPriceCheck::All
+            PriceCheckTokens::All
         }
     }
 }
@@ -325,9 +325,9 @@ impl Settlement {
         solver_name: &str,
         external_prices: &ExternalPrices,
         max_settlement_price_deviation: &Ratio<BigInt>,
-        tokens_to_satisfy_price_test: &TokensForPriceCheck,
+        tokens_to_satisfy_price_test: &PriceCheckTokens,
     ) -> bool {
-        if matches!(tokens_to_satisfy_price_test, TokensForPriceCheck::Tokens(token_list) if token_list.is_empty())
+        if matches!(tokens_to_satisfy_price_test, PriceCheckTokens::Tokens(token_list) if token_list.is_empty())
         {
             return true;
         }
@@ -347,7 +347,7 @@ impl Settlement {
                 let (buy_token, buy_price) = clearing_price_vector_combination[1];
                 let clearing_price_buy_token = buy_price.to_big_rational();
 
-                if matches!(tokens_to_satisfy_price_test, TokensForPriceCheck::Tokens(token_list) if (!token_list.contains(sell_token)) || !token_list.contains(buy_token))
+                if matches!(tokens_to_satisfy_price_test, PriceCheckTokens::Tokens(token_list) if (!token_list.contains(sell_token)) || !token_list.contains(buy_token))
                 {
                     return true;
                 }
