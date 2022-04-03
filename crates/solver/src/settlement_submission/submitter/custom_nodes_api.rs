@@ -17,7 +17,7 @@ use futures::FutureExt;
 use gas_estimation::{EstimatedGasPrice, GasPrice1559};
 use shared::Web3;
 
-const ALREADY_KNOWN_TRANSACTION: [&str; 6] = [
+const ALREADY_KNOWN_TRANSACTION: &[&str] = &[
     "Transaction gas price supplied is too low", //openethereum
     "Transaction nonce is too low",              //openethereum
     "already known",                             //infura
