@@ -74,7 +74,7 @@ impl TransactionSubmitting for CustomNodesApi {
                 }
                 Err(err) => {
                     // error is not real error if transaction pool responded that received transaction is already in the pool
-                    let real_error = match err.clone() {
+                    let real_error = match &err {
                         web3::Error::Rpc(rpc_error) => !ALREADY_KNOWN_TRANSACTION
                             .iter()
                             .any(|message| rpc_error.message.starts_with(message)),
