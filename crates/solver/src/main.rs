@@ -2,6 +2,7 @@ use anyhow::anyhow;
 use clap::{ArgEnum, Parser};
 use contracts::{BalancerV2Vault, IUniswapLikeRouter, WETH9};
 use ethcontract::{Account, PrivateKey, H160};
+use num::rational::Ratio;
 use reqwest::Url;
 use shared::{
     baseline_solver::BaseTokens,
@@ -31,6 +32,7 @@ use solver::{
     metrics::Metrics,
     orderbook::OrderBookApi,
     settlement_access_list::AccessListEstimatorType,
+    settlement_simulation::TenderlyApi,
     settlement_submission::{
         submitter::{
             custom_nodes_api::CustomNodesApi, eden_api::EdenApi, flashbots_api::FlashbotsApi,
@@ -280,6 +282,19 @@ struct Arguments {
     /// but at the same time we don't restrict solutions sizes too much
     #[clap(long, env, default_value = "15000000")]
     simulation_gas_limit: u128,
+
+    /// In order to protect against malicious solvers, the driver will check that settlements prices do not
+    /// exceed a max price deviation compared to the external prices of the driver, if this optional value is set.
+    /// The max deviation value should be provided as a float percentage value. E.g. for a max price deviation
+    /// of 3%, one should set it to 0.03f64
+    #[clap(long, env)]
+    max_settlement_price_deviation: Option<f64>,
+
+    /// This variable allows to restrict the set of tokens for which a price deviation check of settlement
+    /// prices and external prices is executed. If the value is not set, then all tokens included
+    /// in the settlement are checked for price deviation.
+    #[clap(long, env, use_value_delimiter = true)]
+    token_list_restriction_for_price_checks: Option<Vec<H160>>,
 }
 
 #[derive(Copy, Clone, Debug, clap::ArgEnum)]
@@ -605,8 +620,9 @@ async fn main() {
             &client,
             &web3,
             args.access_list_estimators.as_slice(),
-            args.tenderly_url,
-            args.tenderly_api_key,
+            args.tenderly_url.clone(),
+            args.tenderly_api_key.clone(),
+            network_id.clone(),
         )
         .await
         .expect("failed to create access list estimator"),
@@ -628,6 +644,11 @@ async fn main() {
         liquidity_order_owners: args.shared.liquidity_order_owners.into_iter().collect(),
         fee_objective_scaling_factor: args.fee_objective_scaling_factor,
     };
+    let tenderly = args
+        .tenderly_url
+        .zip(args.tenderly_api_key)
+        .and_then(|(url, api_key)| TenderlyApi::new(url, client.clone(), &api_key).ok());
+
     let mut driver = Driver::new(
         settlement_contract,
         liquidity_collector,
@@ -650,6 +671,10 @@ async fn main() {
         args.weth_unwrap_factor,
         args.simulation_gas_limit,
         args.fee_objective_scaling_factor,
+        args.max_settlement_price_deviation
+            .map(|max_price_deviation| Ratio::from_float(max_price_deviation).unwrap()),
+        args.token_list_restriction_for_price_checks.into(),
+        tenderly,
     );
 
     let maintainer = ServiceMaintenance {
