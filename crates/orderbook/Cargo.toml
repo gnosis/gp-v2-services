@@ -19,7 +19,7 @@ anyhow = "1.0"
 assert_approx_eq = "1.1"
 async-trait = "0.1"
 bigdecimal = "0.2"
-cached = { version = "0.32", default-features = false }
+cached = { version = "0.34", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 const_format = "0.2"
 contracts = { path = "../contracts" }
@@ -49,7 +49,7 @@ warp = { version = "0.3", default-features = false }
 web3 = { version = "0.18", default-features = false }
 
 [dev-dependencies]
-secp256k1 = "0.21"
+secp256k1 = "0.22"
 mockall = "0.11"
 testlib = { path = "../testlib" }
 tokio = { version = "1.15", features = ["test-util"] }
